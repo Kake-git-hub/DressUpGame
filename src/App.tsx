@@ -2,7 +2,7 @@
  * 着せ替えゲーム メインアプリケーション
  * Kids 2D Dress-Up Game - Main Application
  */
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { AvatarCanvas, ClothingPalette } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ClothingItemData } from './types';
