@@ -16,6 +16,8 @@ interface DraggableClothingItemProps {
 // 服タイプに応じた色を返す
 const getColorByType = (type: ClothingItemData['type']): string => {
   const colors: Record<ClothingItemData['type'], string> = {
+    underwear_top: '#FFFFFF',
+    underwear_bottom: '#FFFFFF',
     top: '#6495ED',
     bottom: '#FF69B4',
     dress: '#9370DB',
@@ -28,6 +30,8 @@ const getColorByType = (type: ClothingItemData['type']): string => {
 // 服タイプに応じた絵文字を返す
 const getEmojiByType = (type: ClothingItemData['type']): string => {
   const emojis: Record<ClothingItemData['type'], string> = {
+    underwear_top: '🩱',
+    underwear_bottom: '🩲',
     top: '👕',
     bottom: '👖',
     dress: '👗',
@@ -40,6 +44,8 @@ const getEmojiByType = (type: ClothingItemData['type']): string => {
 // 服タイプに応じたラベルを返す
 const getLabelByType = (type: ClothingItemData['type']): string => {
   const labels: Record<ClothingItemData['type'], string> = {
+    underwear_top: 'したぎ(うえ)',
+    underwear_bottom: 'したぎ(した)',
     top: 'トップス',
     bottom: 'ボトムス',
     dress: 'ワンピース',

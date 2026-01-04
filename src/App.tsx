@@ -2,14 +2,35 @@
  * 着せ替えゲーム メインアプリケーション
  * Kids 2D Dress-Up Game - Main Application
  */
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { AvatarCanvas, ClothingPalette } from './components';
 import { useDressUp } from './hooks/useDressUp';
+import { AIFaceGenerator } from './components/AIFaceGenerator';
 import type { ClothingItemData } from './types';
 import './App.css';
 
 // E2Eテスト時はPixiJSを無効化するフラグ（URLパラメータで制御）
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
+
+// デフォルトの下着
+const defaultUnderwear: ClothingItemData[] = [
+  {
+    id: 'underwear-top-default',
+    name: '白いキャミソール',
+    type: 'underwear_top',
+    imageUrl: '/images/underwear-top.png',
+    position: { x: 0, y: -30 },
+    baseZIndex: 0,
+  },
+  {
+    id: 'underwear-bottom-default',
+    name: '白いショーツ',
+    type: 'underwear_bottom',
+    imageUrl: '/images/underwear-bottom.png',
+    position: { x: 0, y: 30 },
+    baseZIndex: 1,
+  },
+];
 
 // サンプルの服アイテムデータ
 const sampleClothingItems: ClothingItemData[] = [
@@ -19,7 +40,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'top',
     imageUrl: '/images/top-1.png',
     position: { x: 0, y: -30 },
-    zIndex: 2,
+    baseZIndex: 20,
   },
   {
     id: 'top-2',
@@ -27,7 +48,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'top',
     imageUrl: '/images/top-2.png',
     position: { x: 0, y: -30 },
-    zIndex: 2,
+    baseZIndex: 20,
   },
   {
     id: 'bottom-1',
@@ -35,7 +56,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'bottom',
     imageUrl: '/images/bottom-1.png',
     position: { x: 0, y: 30 },
-    zIndex: 3,
+    baseZIndex: 10,
   },
   {
     id: 'bottom-2',
@@ -43,7 +64,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'bottom',
     imageUrl: '/images/bottom-2.png',
     position: { x: 0, y: 30 },
-    zIndex: 3,
+    baseZIndex: 10,
   },
   {
     id: 'dress-1',
@@ -51,7 +72,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'dress',
     imageUrl: '/images/dress-1.png',
     position: { x: 0, y: 0 },
-    zIndex: 2,
+    baseZIndex: 15,
   },
   {
     id: 'shoes-1',
@@ -59,7 +80,7 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'shoes',
     imageUrl: '/images/shoes-1.png',
     position: { x: 0, y: 135 },
-    zIndex: 4,
+    baseZIndex: 5,
   },
   {
     id: 'accessory-1',
@@ -67,13 +88,19 @@ const sampleClothingItems: ClothingItemData[] = [
     type: 'accessory',
     imageUrl: '/images/accessory-1.png',
     position: { x: 0, y: -125 },
-    zIndex: 5,
+    baseZIndex: 30,
   },
 ];
 
 function App() {
-  // 着せ替え状態管理フック
-  const { equipItem, getEquippedItems, resetAll } = useDressUp(sampleClothingItems);
+  // 着せ替え状態管理フック（下着付き）
+  const { equipItem, getEquippedItems, resetAll } = useDressUp(sampleClothingItems, defaultUnderwear);
+
+  // AI顔生成モーダル表示状態
+  const [showAIGenerator, setShowAIGenerator] = useState(false);
+
+  // 生成した顔画像URL
+  const [generatedFaceUrl, setGeneratedFaceUrl] = useState<string | null>(null);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
@@ -90,6 +117,12 @@ function App() {
   const handleReset = useCallback(() => {
     resetAll();
   }, [resetAll]);
+
+  // AI顔生成完了時
+  const handleFaceGenerated = useCallback((imageUrl: string) => {
+    setGeneratedFaceUrl(imageUrl);
+    setShowAIGenerator(false);
+  }, []);
 
   return (
     <div className="app">
@@ -123,15 +156,28 @@ function App() {
               width={400}
               height={500}
               equippedItems={equippedItems}
+              customFaceUrl={generatedFaceUrl ?? undefined}
             />
           )}
 
-          {/* リセットボタン */}
-          {equippedItems.length > 0 && (
-            <button className="reset-button" onClick={handleReset}>
-              🔄 リセット
+          {/* ボタンエリア */}
+          <div className="button-area">
+            {/* AI顔生成ボタン */}
+            <button 
+              className="ai-button" 
+              onClick={() => setShowAIGenerator(true)}
+              data-testid="ai-face-button"
+            >
+              🎨 AIでかおをつくる
             </button>
-          )}
+
+            {/* リセットボタン */}
+            {equippedItems.length > 2 && (
+              <button className="reset-button" onClick={handleReset}>
+                🔄 リセット
+              </button>
+            )}
+          </div>
         </section>
 
         {/* 服選択パレット */}
@@ -147,6 +193,14 @@ function App() {
       <footer className="app-footer">
         <p>👆 ふくをドラッグしてドールにきせてね！</p>
       </footer>
+
+      {/* AI顔生成モーダル */}
+      {showAIGenerator && (
+        <AIFaceGenerator
+          onGenerate={handleFaceGenerated}
+          onClose={() => setShowAIGenerator(false)}
+        />
+      )}
     </div>
   );
 }

@@ -4,13 +4,14 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
-import type { ClothingItemData, DollConfig } from '../types';
+import type { DollConfig, EquippedItem } from '../types';
 
 interface AvatarCanvasProps {
   width?: number;
   height?: number;
   dollConfig?: DollConfig;
-  equippedItems: ClothingItemData[];
+  equippedItems: EquippedItem[];
+  customFaceUrl?: string;
   onCanvasReady?: () => void;
 }
 
@@ -19,6 +20,7 @@ export function AvatarCanvas({
   height = 500,
   dollConfig,
   equippedItems,
+  customFaceUrl,
   onCanvasReady,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +92,13 @@ export function AvatarCanvas({
       engineRef.current.drawClothing(equippedItems);
     }
   }, [equippedItems, isReady]);
+
+  // カスタム顔が変わったら更新
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.setCustomFace(customFaceUrl ?? null);
+    }
+  }, [customFaceUrl, isReady]);
 
   return (
     <canvas

@@ -95,11 +95,16 @@ export class MockAIGenerator implements AIImageGenerator {
  */
 export class StableDiffusionGenerator implements AIImageGenerator {
   private apiKey: string;
-  private apiUrl: string;
+  private _apiUrl: string;
 
   constructor(apiKey: string, apiUrl = 'https://api.stability.ai/v1/generation') {
     this.apiKey = apiKey;
-    this.apiUrl = apiUrl;
+    this._apiUrl = apiUrl;
+  }
+
+  // 将来のAPI実装用
+  get apiUrl(): string {
+    return this._apiUrl;
   }
 
   async generate(request: AIGenerationRequest): Promise<AIGenerationResult> {

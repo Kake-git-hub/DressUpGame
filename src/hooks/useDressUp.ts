@@ -3,19 +3,43 @@
  * Custom hook for managing dress-up state
  */
 import { useState, useCallback } from 'react';
-import type { ClothingItemData, ClothingType, DressUpState } from '../types';
+import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
+
+// 基本zIndex値（タイプごとのベース値）
+const BASE_Z_INDEX: Record<ClothingType, number> = {
+  underwear_top: 0,
+  underwear_bottom: 1,
+  bottom: 10,
+  top: 20,
+  dress: 15,
+  shoes: 5,
+  accessory: 30,
+};
 
 // 初期状態を作成
-const createInitialState = (availableItems: ClothingItemData[]): DressUpState => ({
-  equippedItems: new Map<ClothingType, ClothingItemData | null>([
-    ['top', null],
-    ['bottom', null],
-    ['dress', null],
-    ['accessory', null],
-    ['shoes', null],
-  ]),
-  availableItems,
-});
+const createInitialState = (
+  availableItems: ClothingItemData[],
+  defaultUnderwear?: ClothingItemData[]
+): DressUpState => {
+  const initialEquipped: EquippedItem[] = [];
+  let equipCounter = 0;
+
+  // デフォルトの下着を装備
+  if (defaultUnderwear) {
+    defaultUnderwear.forEach((item) => {
+      initialEquipped.push({
+        ...item,
+        equipOrder: equipCounter++,
+      });
+    });
+  }
+
+  return {
+    equippedItems: initialEquipped,
+    availableItems,
+    equipCounter,
+  };
+};
 
 export interface UseDressUpReturn {
   // 現在の状態
@@ -25,62 +49,94 @@ export interface UseDressUpReturn {
   // 服を脱がせる
   unequipItem: (type: ClothingType) => void;
   // 指定タイプの装備アイテムを取得
-  getEquippedItem: (type: ClothingType) => ClothingItemData | null;
-  // 装備中のアイテム一覧を取得
-  getEquippedItems: () => ClothingItemData[];
-  // 全ての服を脱がせる
+  getEquippedItem: (type: ClothingType) => EquippedItem | null;
+  // 装備中のアイテム一覧を取得（レンダリング順）
+  getEquippedItems: () => EquippedItem[];
+  // 全ての服を脱がせる（下着は残す）
   resetAll: () => void;
+  // 下着も含めて全て脱がせる
+  resetAllIncludingUnderwear: () => void;
 }
 
-export function useDressUp(initialItems: ClothingItemData[] = []): UseDressUpReturn {
-  const [state, setState] = useState<DressUpState>(() => createInitialState(initialItems));
+export function useDressUp(
+  initialItems: ClothingItemData[] = [],
+  defaultUnderwear: ClothingItemData[] = []
+): UseDressUpReturn {
+  const [state, setState] = useState<DressUpState>(() =>
+    createInitialState(initialItems, defaultUnderwear)
+  );
 
   // 服を着せる（同じタイプの服は置き換え）
   const equipItem = useCallback((item: ClothingItemData) => {
     setState((prev) => {
-      const newEquipped = new Map(prev.equippedItems);
-      newEquipped.set(item.type, item);
+      // 同じタイプのアイテムを除去
+      const filteredItems = prev.equippedItems.filter((e) => e.type !== item.type);
+
+      // 新しいアイテムを追加
+      const newEquippedItem: EquippedItem = {
+        ...item,
+        equipOrder: prev.equipCounter,
+      };
+
       return {
         ...prev,
-        equippedItems: newEquipped,
+        equippedItems: [...filteredItems, newEquippedItem],
+        equipCounter: prev.equipCounter + 1,
       };
     });
   }, []);
 
   // 服を脱がせる
   const unequipItem = useCallback((type: ClothingType) => {
-    setState((prev) => {
-      const newEquipped = new Map(prev.equippedItems);
-      newEquipped.set(type, null);
-      return {
-        ...prev,
-        equippedItems: newEquipped,
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      equippedItems: prev.equippedItems.filter((e) => e.type !== type),
+    }));
   }, []);
 
   // 指定タイプの装備アイテムを取得
   const getEquippedItem = useCallback(
-    (type: ClothingType): ClothingItemData | null => {
-      return state.equippedItems.get(type) ?? null;
+    (type: ClothingType): EquippedItem | null => {
+      return state.equippedItems.find((e) => e.type === type) ?? null;
     },
     [state.equippedItems]
   );
 
-  // 装備中のアイテム一覧を取得（zIndex順にソート）
-  const getEquippedItems = useCallback((): ClothingItemData[] => {
-    const items: ClothingItemData[] = [];
-    state.equippedItems.forEach((item) => {
-      if (item) {
-        items.push(item);
+  // 装備中のアイテム一覧を取得（レンダリング順にソート）
+  // 1. baseZIndex（タイプごとの基本重ね順）
+  // 2. equipOrder（後から着せたものが上）
+  const getEquippedItems = useCallback((): EquippedItem[] => {
+    return [...state.equippedItems].sort((a, b) => {
+      const baseA = BASE_Z_INDEX[a.type];
+      const baseB = BASE_Z_INDEX[b.type];
+
+      // まず基本zIndexで比較
+      if (baseA !== baseB) {
+        return baseA - baseB;
       }
+
+      // 同じカテゴリ内では着せた順番で（後が上）
+      return a.equipOrder - b.equipOrder;
     });
-    return items.sort((a, b) => a.zIndex - b.zIndex);
   }, [state.equippedItems]);
 
-  // 全ての服を脱がせる
+  // 全ての服を脱がせる（下着は残す）
   const resetAll = useCallback(() => {
-    setState((prev) => createInitialState(prev.availableItems));
+    setState((prev) => ({
+      ...prev,
+      equippedItems: prev.equippedItems.filter(
+        (e) => e.type === 'underwear_top' || e.type === 'underwear_bottom'
+      ),
+    }));
+  }, []);
+
+  // 下着も含めて全て脱がせる
+  const resetAllIncludingUnderwear = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      equippedItems: [],
+      equipCounter: 0,
+    }));
   }, []);
 
   return {
@@ -90,5 +146,6 @@ export function useDressUp(initialItems: ClothingItemData[] = []): UseDressUpRet
     getEquippedItem,
     getEquippedItems,
     resetAll,
+    resetAllIncludingUnderwear,
   };
 }

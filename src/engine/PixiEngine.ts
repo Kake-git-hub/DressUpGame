@@ -2,15 +2,17 @@
  * PixiJS描画エンジン
  * ドールと服のレンダリングを担当
  */
-import { Application, Container, Graphics } from 'pixi.js';
-import type { ClothingItemData, DollConfig } from '../types';
+import { Application, Container, Graphics, Sprite, Assets } from 'pixi.js';
+import type { ClothingItemData, DollConfig, EquippedItem } from '../types';
 
 export class PixiEngine {
   private app: Application | null = null;
   private dollContainer: Container | null = null;
   private clothingContainer: Container | null = null;
+  private faceContainer: Container | null = null;
   private initialized = false;
   private destroyed = false;
+  private customFaceUrl: string | null = null;
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -44,6 +46,11 @@ export class PixiEngine {
       this.dollContainer.label = 'dollContainer';
       this.app.stage.addChild(this.dollContainer);
 
+      // 顔用コンテナ（ドールの上、服の下）
+      this.faceContainer = new Container();
+      this.faceContainer.label = 'faceContainer';
+      this.app.stage.addChild(this.faceContainer);
+
       // 服用コンテナ（ドールの上に表示）
       this.clothingContainer = new Container();
       this.clothingContainer.label = 'clothingContainer';
@@ -61,6 +68,7 @@ export class PixiEngine {
     this.initialized = false;
     this.dollContainer = null;
     this.clothingContainer = null;
+    this.faceContainer = null;
     if (this.app) {
       try {
         this.app.destroy(true, { children: true });
@@ -86,9 +94,11 @@ export class PixiEngine {
     const centerX = this.app.screen.width / 2;
     const centerY = this.app.screen.height / 2;
 
-    // 頭（円）
-    doll.circle(centerX, centerY - 80, 40);
-    doll.fill(0xffe4c4); // 肌色
+    // 頭（円）- カスタム顔がない場合のみ描画
+    if (!this.customFaceUrl) {
+      doll.circle(centerX, centerY - 80, 40);
+      doll.fill(0xffe4c4); // 肌色
+    }
 
     // 体（楕円風の四角形）
     doll.roundRect(centerX - 35, centerY - 30, 70, 100, 10);
@@ -106,21 +116,74 @@ export class PixiEngine {
     doll.roundRect(centerX + 5, centerY + 70, 20, 70, 5);
     doll.fill(0xffe4c4);
 
-    // 顔（目）
-    doll.circle(centerX - 12, centerY - 85, 5);
-    doll.fill(0x333333);
-    doll.circle(centerX + 12, centerY - 85, 5);
-    doll.fill(0x333333);
+    // 顔（目）- カスタム顔がない場合のみ
+    if (!this.customFaceUrl) {
+      doll.circle(centerX - 12, centerY - 85, 5);
+      doll.fill(0x333333);
+      doll.circle(centerX + 12, centerY - 85, 5);
+      doll.fill(0x333333);
 
-    // 口（笑顔）
-    doll.arc(centerX, centerY - 70, 15, 0.1, Math.PI - 0.1);
-    doll.stroke({ width: 2, color: 0xff6b6b });
+      // 口（笑顔）
+      doll.arc(centerX, centerY - 70, 15, 0.1, Math.PI - 0.1);
+      doll.stroke({ width: 2, color: 0xff6b6b });
+    }
 
     this.dollContainer.addChild(doll);
   }
 
+  // カスタム顔を設定
+  async setCustomFace(imageUrl: string | null): Promise<void> {
+    if (!this.faceContainer || !this.app || !this.initialized || this.destroyed) {
+      return;
+    }
+
+    this.customFaceUrl = imageUrl;
+
+    // 既存の顔をクリア
+    this.faceContainer.removeChildren();
+
+    if (!imageUrl) {
+      // 顔をクリアしてドールを再描画
+      this.drawDoll({ width: 200, height: 300, imageUrl: '' });
+      return;
+    }
+
+    const centerX = this.app.screen.width / 2;
+    const centerY = this.app.screen.height / 2;
+
+    try {
+      // 画像をロード
+      const texture = await Assets.load(imageUrl);
+      const faceSprite = new Sprite(texture);
+
+      // 顔のサイズを調整（直径80px程度）
+      const faceSize = 80;
+      const scale = faceSize / Math.max(texture.width, texture.height);
+      faceSprite.scale.set(scale);
+
+      // 中心に配置
+      faceSprite.anchor.set(0.5);
+      faceSprite.x = centerX;
+      faceSprite.y = centerY - 80;
+
+      // 円形にマスクする
+      const mask = new Graphics();
+      mask.circle(centerX, centerY - 80, 40);
+      mask.fill(0xffffff);
+      faceSprite.mask = mask;
+      this.faceContainer.addChild(mask);
+
+      this.faceContainer.addChild(faceSprite);
+
+      // ドールを再描画（顔部分を除外）
+      this.drawDoll({ width: 200, height: 300, imageUrl: '' });
+    } catch (error) {
+      console.error('顔画像の読み込みエラー:', error);
+    }
+  }
+
   // 服を描画（プレースホルダー）
-  drawClothing(items: ClothingItemData[]): void {
+  drawClothing(items: (ClothingItemData | EquippedItem)[]): void {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -131,13 +194,32 @@ export class PixiEngine {
     const centerX = this.app.screen.width / 2;
     const centerY = this.app.screen.height / 2;
 
-    // zIndex順にソートして描画
-    const sortedItems = [...items].sort((a, b) => a.zIndex - b.zIndex);
-
-    sortedItems.forEach((item) => {
+    // 既にソートされていることを想定（useDressUpでソート済み）
+    items.forEach((item) => {
       const clothing = new Graphics();
 
       switch (item.type) {
+        case 'underwear_top':
+          // 白いキャミソール
+          clothing.roundRect(centerX - 30, centerY - 25, 60, 45, 5);
+          clothing.fill(0xffffff);
+          clothing.stroke({ width: 1, color: 0xdddddd });
+          // ストラップ
+          clothing.moveTo(centerX - 20, centerY - 25);
+          clothing.lineTo(centerX - 15, centerY - 40);
+          clothing.stroke({ width: 3, color: 0xffffff });
+          clothing.moveTo(centerX + 20, centerY - 25);
+          clothing.lineTo(centerX + 15, centerY - 40);
+          clothing.stroke({ width: 3, color: 0xffffff });
+          break;
+
+        case 'underwear_bottom':
+          // 白いショーツ
+          clothing.roundRect(centerX - 25, centerY + 30, 50, 30, 5);
+          clothing.fill(0xffffff);
+          clothing.stroke({ width: 1, color: 0xdddddd });
+          break;
+
         case 'top':
           // Tシャツ
           clothing.roundRect(centerX - 40, centerY - 30, 80, 60, 5);
@@ -200,6 +282,7 @@ export class PixiEngine {
 
     this.destroyed = true;
     this.initialized = false;
+    this.customFaceUrl = null;
 
     // コンテナをクリア
     if (this.dollContainer) {
@@ -209,6 +292,14 @@ export class PixiEngine {
         // 無視
       }
       this.dollContainer = null;
+    }
+    if (this.faceContainer) {
+      try {
+        this.faceContainer.removeChildren();
+      } catch {
+        // 無視
+      }
+      this.faceContainer = null;
     }
     if (this.clothingContainer) {
       try {

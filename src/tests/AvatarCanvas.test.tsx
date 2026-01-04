@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { AvatarCanvas } from '../components/AvatarCanvas';
-import type { ClothingItemData } from '../types';
+import type { EquippedItem } from '../types';
 
 describe('AvatarCanvas', () => {
   it('キャンバス要素がレンダリングされる', () => {
@@ -33,14 +33,15 @@ describe('AvatarCanvas', () => {
   });
 
   it('装備アイテムを受け取れる', () => {
-    const items: ClothingItemData[] = [
+    const items: EquippedItem[] = [
       {
         id: 'top-1',
         name: '青いTシャツ',
         type: 'top',
         imageUrl: '/images/top-1.png',
         position: { x: 0, y: 0 },
-        zIndex: 1,
+        baseZIndex: 20,
+        equipOrder: 0,
       },
     ];
 

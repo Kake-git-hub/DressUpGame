@@ -9,8 +9,8 @@ export interface Position {
   y: number;
 }
 
-// 服アイテムの種類
-export type ClothingType = 'top' | 'bottom' | 'dress' | 'accessory' | 'shoes';
+// 服アイテムの種類（下着を追加）
+export type ClothingType = 'underwear_top' | 'underwear_bottom' | 'top' | 'bottom' | 'dress' | 'accessory' | 'shoes';
 
 // 服アイテムの定義
 export interface ClothingItemData {
@@ -19,13 +19,19 @@ export interface ClothingItemData {
   type: ClothingType;
   imageUrl: string;
   position: Position; // ドール上での配置位置
-  zIndex: number; // 重ね順
+  baseZIndex: number; // 基本重ね順（タイプごとのベース値）
+}
+
+// 装備中のアイテム（動的zIndex付き）
+export interface EquippedItem extends ClothingItemData {
+  equipOrder: number; // 着せた順番
 }
 
 // 着せ替え状態
 export interface DressUpState {
-  equippedItems: Map<ClothingType, ClothingItemData | null>;
+  equippedItems: EquippedItem[];
   availableItems: ClothingItemData[];
+  equipCounter: number; // 着せた順番のカウンター
 }
 
 // ドラッグ状態

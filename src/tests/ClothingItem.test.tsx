@@ -12,7 +12,7 @@ const mockItem: ClothingItemData = {
   type: 'top',
   imageUrl: '/images/top-1.png',
   position: { x: 0, y: 0 },
-  zIndex: 1,
+  baseZIndex: 20,
 };
 
 describe('ClothingItem', () => {

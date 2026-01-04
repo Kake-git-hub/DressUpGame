@@ -92,6 +92,37 @@ body {
   max-width: 400px;
 }
 
+/* ボタンエリア */
+.button-area {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* AIボタン */
+.ai-button {
+  padding: 12px 24px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: white;
+  background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.ai-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(79, 195, 247, 0.5);
+}
+
+.ai-button:active {
+  transform: scale(0.98);
+}
+
 /* リセットボタン */
 .reset-button {
   padding: 12px 24px;
@@ -125,6 +156,7 @@ body {
 
 /* iPad対応 - タッチ領域を大きく */
 @media (pointer: coarse) {
+  .ai-button,
   .reset-button {
     padding: 16px 32px;
     font-size: 1.2rem;

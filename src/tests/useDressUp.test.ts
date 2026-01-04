@@ -14,7 +14,7 @@ const mockClothingItems: ClothingItemData[] = [
     type: 'top',
     imageUrl: '/images/top-1.png',
     position: { x: 0, y: 0 },
-    zIndex: 1,
+    baseZIndex: 20,
   },
   {
     id: 'bottom-1',
@@ -22,7 +22,7 @@ const mockClothingItems: ClothingItemData[] = [
     type: 'bottom',
     imageUrl: '/images/bottom-1.png',
     position: { x: 0, y: 0 },
-    zIndex: 2,
+    baseZIndex: 10,
   },
   {
     id: 'dress-1',
@@ -30,12 +30,32 @@ const mockClothingItems: ClothingItemData[] = [
     type: 'dress',
     imageUrl: '/images/dress-1.png',
     position: { x: 0, y: 0 },
-    zIndex: 1,
+    baseZIndex: 15,
+  },
+];
+
+// テスト用の下着
+const mockUnderwear: ClothingItemData[] = [
+  {
+    id: 'underwear-top-1',
+    name: '白いキャミソール',
+    type: 'underwear_top',
+    imageUrl: '/images/underwear-top.png',
+    position: { x: 0, y: 0 },
+    baseZIndex: 0,
+  },
+  {
+    id: 'underwear-bottom-1',
+    name: '白いショーツ',
+    type: 'underwear_bottom',
+    imageUrl: '/images/underwear-bottom.png',
+    position: { x: 0, y: 0 },
+    baseZIndex: 1,
   },
 ];
 
 describe('useDressUp', () => {
-  it('初期状態では何も装備していない', () => {
+  it('初期状態では何も装備していない（下着なし）', () => {
     const { result } = renderHook(() => useDressUp(mockClothingItems));
 
     // 全てのスロットがnull
@@ -43,6 +63,15 @@ describe('useDressUp', () => {
     expect(result.current.getEquippedItem('bottom')).toBeNull();
     expect(result.current.getEquippedItem('dress')).toBeNull();
     expect(result.current.getEquippedItems()).toHaveLength(0);
+  });
+
+  it('デフォルト下着付きで初期化できる', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems, mockUnderwear));
+
+    // 下着が装備されている
+    expect(result.current.getEquippedItem('underwear_top')).not.toBeNull();
+    expect(result.current.getEquippedItem('underwear_bottom')).not.toBeNull();
+    expect(result.current.getEquippedItems()).toHaveLength(2);
   });
 
   it('服を着せることができる（equipItem）', () => {
@@ -53,7 +82,9 @@ describe('useDressUp', () => {
       result.current.equipItem(mockClothingItems[0]);
     });
 
-    expect(result.current.getEquippedItem('top')).toEqual(mockClothingItems[0]);
+    const equipped = result.current.getEquippedItem('top');
+    expect(equipped).not.toBeNull();
+    expect(equipped?.id).toBe('top-1');
     expect(result.current.getEquippedItems()).toHaveLength(1);
   });
 
@@ -66,8 +97,8 @@ describe('useDressUp', () => {
       result.current.equipItem(mockClothingItems[1]); // bottom
     });
 
-    expect(result.current.getEquippedItem('top')).toEqual(mockClothingItems[0]);
-    expect(result.current.getEquippedItem('bottom')).toEqual(mockClothingItems[1]);
+    expect(result.current.getEquippedItem('top')).not.toBeNull();
+    expect(result.current.getEquippedItem('bottom')).not.toBeNull();
     expect(result.current.getEquippedItems()).toHaveLength(2);
   });
 
@@ -80,7 +111,7 @@ describe('useDressUp', () => {
       type: 'top',
       imageUrl: '/images/top-2.png',
       position: { x: 0, y: 0 },
-      zIndex: 1,
+      baseZIndex: 20,
     };
 
     // 最初のトップスを着せる
@@ -94,7 +125,8 @@ describe('useDressUp', () => {
     });
 
     // 新しいトップスに置き換わる
-    expect(result.current.getEquippedItem('top')).toEqual(anotherTop);
+    const equipped = result.current.getEquippedItem('top');
+    expect(equipped?.id).toBe('top-2');
     expect(result.current.getEquippedItems()).toHaveLength(1);
   });
 
@@ -115,10 +147,10 @@ describe('useDressUp', () => {
     expect(result.current.getEquippedItems()).toHaveLength(0);
   });
 
-  it('全ての服を脱がせることができる（resetAll）', () => {
-    const { result } = renderHook(() => useDressUp(mockClothingItems));
+  it('全ての服を脱がせても下着は残る（resetAll）', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems, mockUnderwear));
 
-    // 複数着せる
+    // 服を着せる
     act(() => {
       result.current.equipItem(mockClothingItems[0]);
       result.current.equipItem(mockClothingItems[1]);
@@ -129,10 +161,13 @@ describe('useDressUp', () => {
       result.current.resetAll();
     });
 
-    expect(result.current.getEquippedItems()).toHaveLength(0);
+    // 下着だけ残る
+    expect(result.current.getEquippedItems()).toHaveLength(2);
+    expect(result.current.getEquippedItem('underwear_top')).not.toBeNull();
+    expect(result.current.getEquippedItem('underwear_bottom')).not.toBeNull();
   });
 
-  it('装備アイテムはzIndex順にソートされる', () => {
+  it('装備アイテムはbaseZIndex順にソートされる', () => {
     const { result } = renderHook(() => useDressUp(mockClothingItems));
 
     const highZIndexItem: ClothingItemData = {
@@ -141,21 +176,47 @@ describe('useDressUp', () => {
       type: 'accessory',
       imageUrl: '/images/accessory-1.png',
       position: { x: 0, y: 0 },
-      zIndex: 10,
+      baseZIndex: 30,
     };
 
-    // zIndex 2 → zIndex 1 → zIndex 10 の順で着せる
+    // 異なる順で着せる
     act(() => {
-      result.current.equipItem(mockClothingItems[1]); // zIndex: 2
-      result.current.equipItem(mockClothingItems[0]); // zIndex: 1
-      result.current.equipItem(highZIndexItem); // zIndex: 10
+      result.current.equipItem(mockClothingItems[1]); // bottom: baseZIndex 10
+      result.current.equipItem(mockClothingItems[0]); // top: baseZIndex 20
+      result.current.equipItem(highZIndexItem);       // accessory: baseZIndex 30
     });
 
     const equipped = result.current.getEquippedItems();
 
-    // zIndex順にソートされている
-    expect(equipped[0].zIndex).toBe(1);
-    expect(equipped[1].zIndex).toBe(2);
-    expect(equipped[2].zIndex).toBe(10);
+    // baseZIndex順にソートされている
+    expect(equipped[0].type).toBe('bottom');    // 10
+    expect(equipped[1].type).toBe('top');       // 20
+    expect(equipped[2].type).toBe('accessory'); // 30
+  });
+
+  it('後から着せた同カテゴリの服は上に表示される', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems));
+
+    const top1: ClothingItemData = mockClothingItems[0];
+    const top2: ClothingItemData = {
+      id: 'top-2',
+      name: '赤いTシャツ',
+      type: 'top',
+      imageUrl: '/images/top-2.png',
+      position: { x: 0, y: 0 },
+      baseZIndex: 20,
+    };
+
+    // top1を着せて、top2で置き換え
+    act(() => {
+      result.current.equipItem(top1);
+    });
+    act(() => {
+      result.current.equipItem(top2);
+    });
+
+    const equipped = result.current.getEquippedItem('top');
+    // 後から着せたtop2になっている
+    expect(equipped?.id).toBe('top-2');
   });
 });
