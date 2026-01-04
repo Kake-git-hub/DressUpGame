@@ -79,8 +79,8 @@ export class PixiEngine {
     }
   }
 
-  // ドールを描画（プレースホルダー）
-  drawDoll(_config: DollConfig): void {
+  // ドールを描画（画像URLがあれば画像、なければプレースホルダー）
+  async drawDoll(config: DollConfig): Promise<void> {
     if (!this.dollContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -88,11 +88,35 @@ export class PixiEngine {
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
 
-    // プレースホルダーとしてシンプルな人形を描画
-    const doll = new Graphics();
-
     const centerX = this.app.screen.width / 2;
     const centerY = this.app.screen.height / 2;
+
+    // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
+    if (config.imageUrl) {
+      try {
+        const texture = await Assets.load(config.imageUrl);
+        const dollSprite = new Sprite(texture);
+
+        // キャンバスに収まるようにスケーリング（高さの90%に合わせる）
+        const maxHeight = this.app.screen.height * 0.9;
+        const scale = maxHeight / texture.height;
+        dollSprite.scale.set(scale);
+
+        // 中心に配置
+        dollSprite.anchor.set(0.5);
+        dollSprite.x = centerX;
+        dollSprite.y = centerY;
+
+        this.dollContainer.addChild(dollSprite);
+        return;
+      } catch (error) {
+        console.warn('ドール画像の読み込みに失敗、プレースホルダーを表示:', error);
+        // 画像読み込み失敗時はプレースホルダーを表示
+      }
+    }
+
+    // プレースホルダーとしてシンプルな人形を描画
+    const doll = new Graphics();
 
     // 頭（円）- カスタム顔がない場合のみ描画
     if (!this.customFaceUrl) {

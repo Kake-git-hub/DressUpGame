@@ -9,8 +9,73 @@ export interface Position {
   y: number;
 }
 
+// 関節ポイントの定義（将来のVtuber連携用）
+export interface JointPoint {
+  id: string;
+  name: string;
+  position: Position; // ドール画像内の相対位置（0-1の割合）
+  parentId?: string; // 親関節のID（階層構造用）
+}
+
+// 関節データ（Vtuber連携用ボーン構造）
+export interface JointData {
+  // 頭部
+  head: JointPoint;
+  // 首
+  neck: JointPoint;
+  // 肩
+  leftShoulder: JointPoint;
+  rightShoulder: JointPoint;
+  // 肘
+  leftElbow: JointPoint;
+  rightElbow: JointPoint;
+  // 手首
+  leftWrist: JointPoint;
+  rightWrist: JointPoint;
+  // 腰
+  hip: JointPoint;
+  // 膝
+  leftKnee: JointPoint;
+  rightKnee: JointPoint;
+  // 足首
+  leftAnkle: JointPoint;
+  rightAnkle: JointPoint;
+}
+
+// ドールサイズ情報（自動スケーリング用）
+export interface DollDimensions {
+  width: number;
+  height: number;
+  // アンカーポイント（スケーリングの基準点）
+  anchorPoints: {
+    headTop: Position; // 頭頂
+    neckCenter: Position; // 首の中心
+    torsoCenter: Position; // 胴体中心
+    hipCenter: Position; // 腰中心
+    footBottom: Position; // 足底
+  };
+}
+
 // 服アイテムの種類（下着を追加）
 export type ClothingType = 'underwear_top' | 'underwear_bottom' | 'top' | 'bottom' | 'dress' | 'accessory' | 'shoes';
+
+// カテゴリー表示情報
+export interface CategoryInfo {
+  type: ClothingType;
+  label: string;
+  emoji: string;
+}
+
+// 全カテゴリーの定義
+export const CLOTHING_CATEGORIES: CategoryInfo[] = [
+  { type: 'top', label: 'トップス', emoji: '👚' },
+  { type: 'bottom', label: 'ボトムス', emoji: '👖' },
+  { type: 'dress', label: 'ワンピース', emoji: '👗' },
+  { type: 'shoes', label: 'くつ', emoji: '👟' },
+  { type: 'accessory', label: 'アクセサリー', emoji: '🎀' },
+  { type: 'underwear_top', label: 'したぎ(うえ)', emoji: '🩱' },
+  { type: 'underwear_bottom', label: 'したぎ(した)', emoji: '🩲' },
+];
 
 // 服アイテムの定義
 export interface ClothingItemData {
@@ -18,12 +83,14 @@ export interface ClothingItemData {
   name: string;
   type: ClothingType;
   imageUrl: string;
-  position: Position; // ドール上での配置位置
+  position: Position; // ドール上での配置位置（基準サイズ200x300時）
   baseZIndex: number; // 基本重ね順（タイプごとのベース値）
   tags?: string[]; // 検索/フィルタ用タグ
   author?: string; // 作者名
   createdAt?: string; // 作成日
   isCustom?: boolean; // カスタムアイテムかどうか
+  // 自動スケーリング用のアンカー情報
+  anchorType?: 'head' | 'neck' | 'torso' | 'hip' | 'feet'; // どの部位に合わせるか
 }
 
 // 装備中のアイテム（動的zIndex付き）
@@ -31,7 +98,7 @@ export interface EquippedItem extends ClothingItemData {
   equipOrder: number; // 着せた順番
 }
 
-// ドールの定義
+// ドールの定義（関節情報付き）
 export interface DollData {
   id: string;
   name: string;
@@ -46,6 +113,10 @@ export interface DollData {
   author?: string;
   createdAt?: string;
   isCustom?: boolean;
+  // 画像サイズ情報（自動スケーリング用）
+  dimensions?: DollDimensions;
+  // 関節データ（Vtuber連携用）
+  joints?: JointData;
 }
 
 // 着せ替え状態

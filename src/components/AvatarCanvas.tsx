@@ -12,6 +12,7 @@ interface AvatarCanvasProps {
   dollConfig?: DollConfig;
   equippedItems: EquippedItem[];
   customFaceUrl?: string;
+  dollImageUrl?: string; // ドールベース画像のURL
   onCanvasReady?: () => void;
 }
 
@@ -21,6 +22,7 @@ export function AvatarCanvas({
   dollConfig,
   equippedItems,
   customFaceUrl,
+  dollImageUrl,
   onCanvasReady,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,12 +53,12 @@ export function AvatarCanvas({
         // 成功した場合のみrefに保存
         engineRef.current = engine;
 
-        // ドールを描画
-        engine.drawDoll(
+        // ドールを描画（画像URLまたはプレースホルダー）
+        await engine.drawDoll(
           dollConfig ?? {
             width: 200,
             height: 300,
-            imageUrl: '',
+            imageUrl: dollImageUrl || '',
           }
         );
 
@@ -84,7 +86,7 @@ export function AvatarCanvas({
       // まだ初期化中のエンジンも破棄
       engine.destroy();
     };
-  }, [width, height]);
+  }, [width, height, dollImageUrl]);
 
   // 装備アイテムが変わったら再描画
   useEffect(() => {

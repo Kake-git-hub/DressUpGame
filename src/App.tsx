@@ -1,17 +1,56 @@
 /**
  * 着せ替えゲーム メインアプリケーション
  * Kids 2D Dress-Up Game - Main Application
+ * 
+ * iPad 10.3横向き（2360x1640）最適化
  */
-import { useCallback, useState, useEffect } from 'react';
-import { AvatarCanvas, ClothingPalette, ItemImporter, ItemManager } from './components';
+import { useCallback, useState, useEffect, useMemo } from 'react';
+import { AvatarCanvas, CategorySelector } from './components';
 import { useDressUp } from './hooks/useDressUp';
-import { AIFaceGenerator } from './components/AIFaceGenerator';
 import { loadCustomItems } from './services/dataManager';
-import type { ClothingItemData } from './types';
+import type { ClothingItemData, DollData, DollDimensions } from './types';
 import './App.css';
 
-// E2Eテスト時はPixiJSを無効化するフラグ（URLパラメータで制御）
+// E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
+
+// デフォルトのドールベース情報
+const DEFAULT_DOLL: DollData = {
+  id: 'doll-base-001',
+  name: 'ベーシックドール',
+  bodyImageUrl: '/assets/dolls/doll-base.png',
+  skinTone: 'fair',
+  dimensions: {
+    width: 512, // 添付画像の実際の幅
+    height: 1024, // 添付画像の実際の高さ（推定）
+    anchorPoints: {
+      headTop: { x: 0.5, y: 0.05 },
+      neckCenter: { x: 0.5, y: 0.18 },
+      torsoCenter: { x: 0.5, y: 0.4 },
+      hipCenter: { x: 0.5, y: 0.55 },
+      footBottom: { x: 0.5, y: 0.98 },
+    },
+  },
+  // 将来のVtuber連携用関節データ
+  joints: {
+    head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.08 } },
+    neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.18 }, parentId: 'head' },
+    leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.22 }, parentId: 'neck' },
+    rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.22 }, parentId: 'neck' },
+    leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.35 }, parentId: 'leftShoulder' },
+    rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.35 }, parentId: 'rightShoulder' },
+    leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.48 }, parentId: 'leftElbow' },
+    rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.48 }, parentId: 'rightElbow' },
+    hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.55 }, parentId: 'neck' },
+    leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.4, y: 0.72 }, parentId: 'hip' },
+    rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.6, y: 0.72 }, parentId: 'hip' },
+    leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.4, y: 0.92 }, parentId: 'leftKnee' },
+    rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.6, y: 0.92 }, parentId: 'rightKnee' },
+  },
+};
+
+// 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
+const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
 
 // デフォルトの下着
 const defaultUnderwear: ClothingItemData[] = [
@@ -22,6 +61,7 @@ const defaultUnderwear: ClothingItemData[] = [
     imageUrl: '/images/underwear-top.png',
     position: { x: 0, y: -30 },
     baseZIndex: 0,
+    anchorType: 'torso',
   },
   {
     id: 'underwear-bottom-default',
@@ -30,6 +70,7 @@ const defaultUnderwear: ClothingItemData[] = [
     imageUrl: '/images/underwear-bottom.png',
     position: { x: 0, y: 30 },
     baseZIndex: 1,
+    anchorType: 'hip',
   },
 ];
 
@@ -42,6 +83,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/top-1.png',
     position: { x: 0, y: -30 },
     baseZIndex: 20,
+    anchorType: 'torso',
   },
   {
     id: 'top-2',
@@ -50,6 +92,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/top-2.png',
     position: { x: 0, y: -30 },
     baseZIndex: 20,
+    anchorType: 'torso',
   },
   {
     id: 'bottom-1',
@@ -58,6 +101,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/bottom-1.png',
     position: { x: 0, y: 30 },
     baseZIndex: 10,
+    anchorType: 'hip',
   },
   {
     id: 'bottom-2',
@@ -66,6 +110,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/bottom-2.png',
     position: { x: 0, y: 30 },
     baseZIndex: 10,
+    anchorType: 'hip',
   },
   {
     id: 'dress-1',
@@ -74,6 +119,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/dress-1.png',
     position: { x: 0, y: 0 },
     baseZIndex: 15,
+    anchorType: 'torso',
   },
   {
     id: 'shoes-1',
@@ -82,6 +128,7 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/shoes-1.png',
     position: { x: 0, y: 135 },
     baseZIndex: 5,
+    anchorType: 'feet',
   },
   {
     id: 'accessory-1',
@@ -90,12 +137,70 @@ const defaultClothingItems: ClothingItemData[] = [
     imageUrl: '/images/accessory-1.png',
     position: { x: 0, y: -125 },
     baseZIndex: 30,
+    anchorType: 'head',
   },
 ];
 
+// アイテムの位置をドールサイズに合わせてスケーリング
+function scaleItemPosition(
+  item: ClothingItemData,
+  _dollDimensions: DollDimensions | undefined,
+  canvasHeight: number
+): ClothingItemData {
+  // スケール係数を計算（キャンバスに収まるドールサイズ）
+  const dollDisplayHeight = canvasHeight * 0.9; // キャンバスの90%
+  const scale = dollDisplayHeight / REFERENCE_DOLL_SIZE.height;
+
+  return {
+    ...item,
+    position: {
+      x: item.position.x * scale,
+      y: item.position.y * scale,
+    },
+  };
+}
+
 function App() {
+  // 現在のドール
+  const [currentDoll] = useState<DollData>(DEFAULT_DOLL);
+
   // 全アイテム（デフォルト + カスタム）
   const [allItems, setAllItems] = useState<ClothingItemData[]>(defaultClothingItems);
+
+  // キャンバスサイズ（iPad横向き最適化）
+  const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
+
+  // 画面サイズに応じてキャンバスサイズを計算
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+
+      // iPad 10.3横向き: 2360x1640 (CSS px: 1180x820程度)
+      // ドールを最大表示するため、高さベースで計算
+      const maxHeight = vh - 120; // ヘッダー・フッター分を除く
+      const maxWidth = vw - 360; // パレット分を除く
+
+      // ドールの縦横比を維持（1:2程度）
+      const dollAspect = 0.5; // width / height
+      let height = maxHeight;
+      let width = height * dollAspect;
+
+      if (width > maxWidth) {
+        width = maxWidth;
+        height = width / dollAspect;
+      }
+
+      setCanvasSize({
+        width: Math.floor(width),
+        height: Math.floor(height),
+      });
+    };
+
+    updateCanvasSize();
+    window.addEventListener('resize', updateCanvasSize);
+    return () => window.removeEventListener('resize', updateCanvasSize);
+  }, []);
 
   // 初期化時にカスタムアイテムを読み込み
   useEffect(() => {
@@ -103,26 +208,34 @@ function App() {
     setAllItems([...defaultClothingItems, ...customItems]);
   }, []);
 
-  // 着せ替え状態管理フック（下着付き）
-  const { equipItem, getEquippedItems, resetAll } = useDressUp(allItems, defaultUnderwear);
+  // アイテムをスケーリング
+  const scaledItems = useMemo(() => {
+    return allItems.map(item =>
+      scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
+    );
+  }, [allItems, currentDoll.dimensions, canvasSize.height]);
 
-  // モーダル表示状態
-  const [showAIGenerator, setShowAIGenerator] = useState(false);
-  const [showItemImporter, setShowItemImporter] = useState(false);
-  const [showItemManager, setShowItemManager] = useState(false);
+  // スケーリングされた下着
+  const scaledUnderwear = useMemo(() => {
+    return defaultUnderwear.map(item =>
+      scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
+    );
+  }, [currentDoll.dimensions, canvasSize.height]);
 
-  // 生成した顔画像URL
-  const [generatedFaceUrl, setGeneratedFaceUrl] = useState<string | null>(null);
+  // 着せ替え状態管理フック
+  const { equipItem, getEquippedItems, resetAll } = useDressUp(scaledItems, scaledUnderwear);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
 
-  // 服を選択した時の処理
+  // 服を選択した時の処理（上書き可能）
   const handleItemSelect = useCallback(
     (item: ClothingItemData) => {
-      equipItem(item);
+      // スケーリングされたバージョンを見つける
+      const scaledItem = scaledItems.find(i => i.id === item.id) || item;
+      equipItem(scaledItem);
     },
-    [equipItem]
+    [equipItem, scaledItems]
   );
 
   // リセットボタン
@@ -130,51 +243,21 @@ function App() {
     resetAll();
   }, [resetAll]);
 
-  // AI顔生成完了時
-  const handleFaceGenerated = useCallback((imageUrl: string) => {
-    setGeneratedFaceUrl(imageUrl);
-    setShowAIGenerator(false);
-  }, []);
-
-  // アイテムインポート完了時
-  const handleItemImported = useCallback((item: ClothingItemData) => {
-    setAllItems(prev => {
-      // 同じIDがあれば更新、なければ追加
-      const existingIndex = prev.findIndex(i => i.id === item.id);
-      if (existingIndex >= 0) {
-        const newItems = [...prev];
-        newItems[existingIndex] = item;
-        return newItems;
-      }
-      return [...prev, item];
-    });
-    setShowItemImporter(false);
-  }, []);
-
-  // アイテム一覧更新時
-  const handleItemsChange = useCallback((items: ClothingItemData[]) => {
-    // デフォルトアイテム + 更新されたカスタムアイテム
-    const customItems = items.filter(i => i.isCustom);
-    setAllItems([...defaultClothingItems, ...customItems]);
-  }, []);
-
   return (
     <div className="app">
       <header className="app-header">
         <h1>🎀 きせかえゲーム 🎀</h1>
-        <p className="subtitle">すきなふくをえらんで、おにんぎょうにきせてね！</p>
       </header>
 
       <main className="app-main">
         {/* ドール表示エリア */}
         <section className="avatar-section">
           {isTestMode ? (
-            // テストモード時はシンプルなプレースホルダー
             <div
               data-testid="avatar-canvas"
               style={{
-                width: 400,
-                height: 500,
+                width: canvasSize.width,
+                height: canvasSize.height,
                 backgroundColor: '#fff5ee',
                 borderRadius: '12px',
                 display: 'flex',
@@ -187,45 +270,24 @@ function App() {
             </div>
           ) : (
             <AvatarCanvas
-              width={400}
-              height={500}
+              width={canvasSize.width}
+              height={canvasSize.height}
               equippedItems={equippedItems}
-              customFaceUrl={generatedFaceUrl ?? undefined}
+              dollImageUrl={currentDoll.bodyImageUrl}
             />
           )}
 
-          {/* ボタンエリア */}
-          <div className="button-area">
-            {/* アイテム管理ボタン */}
-            <button 
-              className="manage-button" 
-              onClick={() => setShowItemManager(true)}
-              data-testid="manage-items-button"
-            >
-              📦 アイテムかんり
+          {/* リセットボタン（下着以外を着ている時のみ表示） */}
+          {equippedItems.length > 2 && (
+            <button className="reset-button" onClick={handleReset}>
+              🔄 リセット
             </button>
-
-            {/* AI顔生成ボタン */}
-            <button 
-              className="ai-button" 
-              onClick={() => setShowAIGenerator(true)}
-              data-testid="ai-face-button"
-            >
-              🎨 かおをつくる
-            </button>
-
-            {/* リセットボタン */}
-            {equippedItems.length > 2 && (
-              <button className="reset-button" onClick={handleReset}>
-                🔄 リセット
-              </button>
-            )}
-          </div>
+          )}
         </section>
 
-        {/* 服選択パレット */}
+        {/* カテゴリー・アイテム選択パレット */}
         <section className="palette-section">
-          <ClothingPalette
+          <CategorySelector
             items={allItems}
             onItemSelect={handleItemSelect}
             equippedItems={equippedItems}
@@ -234,37 +296,8 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>👆 ふくをドラッグしてドールにきせてね！</p>
+        <p>カテゴリーをえらんで、すきなふくをきせてね！</p>
       </footer>
-
-      {/* AI顔生成モーダル */}
-      {showAIGenerator && (
-        <AIFaceGenerator
-          onGenerate={handleFaceGenerated}
-          onClose={() => setShowAIGenerator(false)}
-        />
-      )}
-
-      {/* アイテムインポートモーダル */}
-      {showItemImporter && (
-        <ItemImporter
-          onImport={handleItemImported}
-          onClose={() => setShowItemImporter(false)}
-        />
-      )}
-
-      {/* アイテム管理モーダル */}
-      {showItemManager && (
-        <ItemManager
-          items={allItems}
-          onItemsChange={handleItemsChange}
-          onAddItem={() => {
-            setShowItemManager(false);
-            setShowItemImporter(true);
-          }}
-          onClose={() => setShowItemManager(false)}
-        />
-      )}
     </div>
   );
 }

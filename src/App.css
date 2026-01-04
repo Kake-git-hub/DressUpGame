@@ -1,6 +1,7 @@
 /**
  * 着せ替えゲーム スタイルシート
  * Kids 2D Dress-Up Game - Stylesheet
+ * iPad 10.3横向き（2360x1640）最適化
  */
 
 /* ルート変数 */
@@ -26,6 +27,7 @@ body {
   background: linear-gradient(135deg, #fff5f5 0%, #ffe4f3 100%);
   min-height: 100vh;
   color: var(--text-color);
+  overflow: hidden; /* iPad横向きでスクロールを防ぐ */
 }
 
 #root {
@@ -36,125 +38,65 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  padding: 16px;
+  height: 100vh;
+  padding: 8px 16px;
 }
 
-/* ヘッダー */
+/* ヘッダー - コンパクトに */
 .app-header {
   text-align: center;
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: 8px;
+  flex-shrink: 0;
 }
 
 .app-header h1 {
-  font-size: 2rem;
+  font-size: 1.5rem;
   color: var(--primary-color);
   text-shadow: 2px 2px 4px rgba(255, 105, 180, 0.3);
-  margin-bottom: 8px;
 }
 
 .app-header .subtitle {
-  font-size: 1rem;
-  color: #666;
+  display: none; /* iPad横向きでは非表示 */
 }
 
-/* メインコンテンツ */
+/* メインコンテンツ - 横並び固定 */
 .app-main {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  justify-content: center;
   align-items: center;
   gap: 24px;
   flex: 1;
+  min-height: 0; /* flexで縮小を許可 */
 }
 
-/* デスクトップでは横並び */
-@media (min-width: 768px) {
-  .app-main {
-    flex-direction: row;
-    justify-content: center;
-    align-items: flex-start;
-    gap: 32px;
-  }
-}
-
-/* アバターセクション */
+/* アバターセクション - ドールを大きく */
 .avatar-section {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-}
-
-/* パレットセクション */
-.palette-section {
-  width: 100%;
-  max-width: 400px;
-}
-
-/* ボタンエリア */
-.button-area {
-  display: flex;
   gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex: 1;
+  max-width: calc(100vh - 200px); /* 縦方向を基準にサイズ制限 */
 }
 
-/* アイテム管理ボタン */
-.manage-button {
-  padding: 12px 24px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  color: white;
-  background: linear-gradient(135deg, #66bb6a 0%, #43a047 100%);
-  border: none;
-  border-radius: 25px;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(102, 187, 106, 0.4);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.manage-button:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(102, 187, 106, 0.5);
-}
-
-.manage-button:active {
-  transform: scale(0.98);
-}
-
-/* AIボタン */
-.ai-button {
-  padding: 12px 24px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  color: white;
-  background: linear-gradient(135deg, #4fc3f7 0%, #29b6f6 100%);
-  border: none;
-  border-radius: 25px;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(79, 195, 247, 0.4);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.ai-button:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(79, 195, 247, 0.5);
-}
-
-.ai-button:active {
-  transform: scale(0.98);
+/* パレットセクション - 固定幅 */
+.palette-section {
+  flex-shrink: 0;
+  width: 320px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
 }
 
 /* リセットボタン */
 .reset-button {
-  padding: 12px 24px;
-  font-size: 1.1rem;
+  padding: 10px 20px;
+  font-size: 1rem;
   font-weight: bold;
   color: white;
   background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
   border: none;
-  border-radius: 25px;
+  border-radius: 20px;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(255, 105, 180, 0.4);
   transition: transform 0.2s, box-shadow 0.2s;
@@ -169,20 +111,64 @@ body {
   transform: scale(0.98);
 }
 
-/* フッター */
+/* フッター - コンパクトに */
 .app-footer {
   text-align: center;
-  padding: 16px;
+  padding: 8px;
   color: #888;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
 }
 
-/* iPad対応 - タッチ領域を大きく */
+/* iPad横向き最適化 */
+@media (min-width: 1024px) and (orientation: landscape) {
+  .app {
+    padding: 4px 16px;
+  }
+
+  .app-header {
+    padding: 4px;
+  }
+
+  .app-header h1 {
+    font-size: 1.3rem;
+  }
+
+  .app-main {
+    gap: 32px;
+  }
+
+  .palette-section {
+    width: 340px;
+  }
+
+  .app-footer {
+    padding: 4px;
+  }
+}
+
+/* スマートフォン縦向き対応 */
+@media (max-width: 768px) and (orientation: portrait) {
+  .app-main {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .avatar-section {
+    max-width: 100%;
+  }
+
+  .palette-section {
+    width: 100%;
+    max-height: 40vh;
+  }
+}
+
+/* タッチデバイス対応 */
 @media (pointer: coarse) {
-  .ai-button,
   .reset-button {
-    padding: 16px 32px;
-    font-size: 1.2rem;
+    padding: 14px 28px;
+    font-size: 1.1rem;
     min-height: 48px;
   }
 }
@@ -203,3 +189,5 @@ body {
 .palette-section {
   animation: fadeIn 0.5s ease-out;
 }
+
+/* 不要になったボタンスタイルは削除 */
