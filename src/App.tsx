@@ -3,33 +3,32 @@
  * Kids 2D Dress-Up Game - Main Application
  * 
  * iPad 10.3横向き（2360x1640）最適化
- * Firebase Storageから画像を読み込み
+ * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { AvatarCanvas, DressUpMenu } from './components';
+import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
-import { loadCustomItems } from './services/dataManager';
+import {
+  loadCustomDolls,
+  loadCustomBackgrounds,
+  loadCustomClothing,
+} from './services/assetStorage';
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData } from './types';
 import './App.css';
+
+// Viteのbase pathを取得（GitHub Pages対応）
+const BASE_PATH = import.meta.env.BASE_URL;
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
 
-// Firebase Storage ベースURL（公開URL形式）
-const FIREBASE_STORAGE_BASE = 'https://firebasestorage.googleapis.com/v0/b/bboardgames-a5488.firebasestorage.app/o';
-
-// Firebase Storage URL生成ヘルパー
-function getFirebaseUrl(path: string): string {
-  const encodedPath = encodeURIComponent(path);
-  return `${FIREBASE_STORAGE_BASE}/${encodedPath}?alt=media`;
-}
-
-// 利用可能なドールリスト（Firebase Storageから読み込み）
-const AVAILABLE_DOLLS: DollData[] = [
+// デフォルトのドールリスト（GitHub Pages同梱）
+const DEFAULT_DOLLS: DollData[] = [
   {
     id: 'doll-base-001',
     name: 'ちびドール',
-    bodyImageUrl: getFirebaseUrl('dolls/doll-base.png'),
+    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-1.png`,
     skinTone: 'fair',
     dimensions: {
       width: 512,
@@ -61,7 +60,7 @@ const AVAILABLE_DOLLS: DollData[] = [
   {
     id: 'doll-base-002',
     name: 'スリムドール',
-    bodyImageUrl: getFirebaseUrl('dolls/doll-base-2.png'),
+    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-2.png`,
     skinTone: 'fair',
     dimensions: {
       width: 400,
@@ -92,116 +91,38 @@ const AVAILABLE_DOLLS: DollData[] = [
   },
 ];
 
-// 利用可能な背景リスト（Firebase Storageから読み込み）
-const AVAILABLE_BACKGROUNDS: BackgroundData[] = [
-  {
-    id: 'bg-room',
-    name: 'へや',
-    imageUrl: getFirebaseUrl('backgrounds/room.png'),
-  },
-  {
-    id: 'bg-park',
-    name: 'こうえん',
-    imageUrl: getFirebaseUrl('backgrounds/park.png'),
-  },
-  {
-    id: 'bg-beach',
-    name: 'うみ',
-    imageUrl: getFirebaseUrl('backgrounds/beach.png'),
-  },
-];
+// デフォルトの背景リスト（空 - ユーザーが追加）
+const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 
 // 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
 const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
 
-// デフォルトの下着
-const defaultUnderwear: ClothingItemData[] = [
-  {
-    id: 'underwear-top-default',
-    name: '白いキャミソール',
-    type: 'underwear_top',
-    imageUrl: getFirebaseUrl('clothing/underwear-top.png'),
-    position: { x: 0, y: -30 },
-    baseZIndex: 0,
-    anchorType: 'torso',
-  },
-  {
-    id: 'underwear-bottom-default',
-    name: '白いショーツ',
-    type: 'underwear_bottom',
-    imageUrl: getFirebaseUrl('clothing/underwear-bottom.png'),
-    position: { x: 0, y: 30 },
-    baseZIndex: 1,
-    anchorType: 'hip',
-  },
-];
+// デフォルトの下着（ユーザーが設定から追加）
+const DEFAULT_UNDERWEAR: ClothingItemData[] = [];
+// 注: デフォルト下着画像を使う場合は以下のようにpublic/assets/clothing/に配置
+// {
+//   id: 'underwear-top-default',
+//   name: '白いキャミソール',
+//   type: 'underwear_top',
+//   imageUrl: `${BASE_PATH}assets/clothing/underwear-top.png`,
+//   position: { x: 0, y: -30 },
+//   baseZIndex: 0,
+//   anchorType: 'torso',
+// },
 
-// デフォルトの服アイテムデータ
-const defaultClothingItems: ClothingItemData[] = [
-  {
-    id: 'top-1',
-    name: '青いTシャツ',
-    type: 'top',
-    imageUrl: getFirebaseUrl('clothing/top-1.png'),
-    position: { x: 0, y: -30 },
-    baseZIndex: 20,
-    anchorType: 'torso',
-  },
-  {
-    id: 'top-2',
-    name: '赤いTシャツ',
-    type: 'top',
-    imageUrl: getFirebaseUrl('clothing/top-2.png'),
-    position: { x: 0, y: -30 },
-    baseZIndex: 20,
-    anchorType: 'torso',
-  },
-  {
-    id: 'bottom-1',
-    name: 'ピンクのスカート',
-    type: 'bottom',
-    imageUrl: getFirebaseUrl('clothing/bottom-1.png'),
-    position: { x: 0, y: 30 },
-    baseZIndex: 10,
-    anchorType: 'hip',
-  },
-  {
-    id: 'bottom-2',
-    name: '青いパンツ',
-    type: 'bottom',
-    imageUrl: getFirebaseUrl('clothing/bottom-2.png'),
-    position: { x: 0, y: 30 },
-    baseZIndex: 10,
-    anchorType: 'hip',
-  },
-  {
-    id: 'dress-1',
-    name: '紫のワンピース',
-    type: 'dress',
-    imageUrl: getFirebaseUrl('clothing/dress-1.png'),
-    position: { x: 0, y: 0 },
-    baseZIndex: 15,
-    anchorType: 'torso',
-  },
-  {
-    id: 'shoes-1',
-    name: '茶色のくつ',
-    type: 'shoes',
-    imageUrl: getFirebaseUrl('clothing/shoes-1.png'),
-    position: { x: 0, y: 135 },
-    baseZIndex: 5,
-    anchorType: 'feet',
-  },
-  {
-    id: 'accessory-1',
-    name: 'ピンクのリボン',
-    type: 'accessory',
-    imageUrl: getFirebaseUrl('clothing/accessory-1.png'),
-    position: { x: 0, y: -125 },
-    baseZIndex: 30,
-    anchorType: 'head',
-  },
-];
+// デフォルトの服アイテムデータ（ユーザーが設定から追加）
+const DEFAULT_CLOTHING: ClothingItemData[] = [];
+// 注: デフォルト服画像を使う場合はpublic/assets/clothing/に配置して以下のように定義
+// 例:
+// {
+//   id: 'top-1',
+//   name: '青いTシャツ',
+//   type: 'top',
+//   imageUrl: `${BASE_PATH}assets/clothing/top-1.png`,
+//   position: { x: 0, y: -30 },
+//   baseZIndex: 20,
+//   anchorType: 'torso',
+// },
 
 // アイテムの位置をドールサイズに合わせてスケーリング
 function scaleItemPosition(
@@ -209,8 +130,7 @@ function scaleItemPosition(
   _dollDimensions: DollDimensions | undefined,
   canvasHeight: number
 ): ClothingItemData {
-  // スケール係数を計算（キャンバスに収まるドールサイズ）
-  const dollDisplayHeight = canvasHeight * 0.9; // キャンバスの90%
+  const dollDisplayHeight = canvasHeight * 0.9;
   const scale = dollDisplayHeight / REFERENCE_DOLL_SIZE.height;
 
   return {
@@ -223,17 +143,26 @@ function scaleItemPosition(
 }
 
 function App() {
+  // 設定画面の表示状態
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // ドール一覧（デフォルト + カスタム）
+  const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
+
+  // 背景一覧（デフォルト + カスタム）
+  const [allBackgrounds, setAllBackgrounds] = useState<BackgroundData[]>(DEFAULT_BACKGROUNDS);
+
+  // 服アイテム一覧（デフォルト + カスタム）
+  const [allClothing, setAllClothing] = useState<ClothingItemData[]>(DEFAULT_CLOTHING);
+
   // 現在のドールID
-  const [currentDollId, setCurrentDollId] = useState<string>(AVAILABLE_DOLLS[0].id);
+  const [currentDollId, setCurrentDollId] = useState<string>(DEFAULT_DOLLS[0].id);
 
   // 現在のドール
   const currentDoll = useMemo(() => 
-    AVAILABLE_DOLLS.find(d => d.id === currentDollId) || AVAILABLE_DOLLS[0],
-    [currentDollId]
+    allDolls.find(d => d.id === currentDollId) || allDolls[0],
+    [currentDollId, allDolls]
   );
-
-  // 全アイテム（デフォルト + カスタム）
-  const [allItems, setAllItems] = useState<ClothingItemData[]>(defaultClothingItems);
 
   // キャンバスサイズ（iPad横向き最適化）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
@@ -244,13 +173,10 @@ function App() {
       const vh = window.innerHeight;
       const vw = window.innerWidth;
 
-      // iPad 10.3横向き: 2360x1640 (CSS px: 1180x820程度)
-      // ドールを最大表示するため、高さベースで計算
-      const maxHeight = vh - 100; // ヘッダー・フッター分を除く
-      const maxWidth = vw - 340; // パレット分を除く
+      const maxHeight = vh - 60;
+      const maxWidth = vw - 340;
 
-      // ドールの縦横比を維持（1:2程度）
-      const dollAspect = 0.5; // width / height
+      const dollAspect = 0.5;
       let height = maxHeight;
       let width = height * dollAspect;
 
@@ -272,20 +198,25 @@ function App() {
 
   // 初期化時にカスタムアイテムを読み込み
   useEffect(() => {
-    const customItems = loadCustomItems();
-    setAllItems([...defaultClothingItems, ...customItems]);
+    const customDolls = loadCustomDolls();
+    const customBackgrounds = loadCustomBackgrounds();
+    const customClothing = loadCustomClothing();
+
+    setAllDolls([...DEFAULT_DOLLS, ...customDolls]);
+    setAllBackgrounds([...DEFAULT_BACKGROUNDS, ...customBackgrounds]);
+    setAllClothing([...DEFAULT_CLOTHING, ...customClothing]);
   }, []);
 
   // アイテムをスケーリング
   const scaledItems = useMemo(() => {
-    return allItems.map(item =>
+    return allClothing.map(item =>
       scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
     );
-  }, [allItems, currentDoll.dimensions, canvasSize.height]);
+  }, [allClothing, currentDoll.dimensions, canvasSize.height]);
 
   // スケーリングされた下着
   const scaledUnderwear = useMemo(() => {
-    return defaultUnderwear.map(item =>
+    return DEFAULT_UNDERWEAR.map(item =>
       scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
     );
   }, [currentDoll.dimensions, canvasSize.height]);
@@ -296,10 +227,9 @@ function App() {
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
 
-  // 服をドロップした時の処理（上書き可能）
+  // 服をドロップした時の処理
   const handleItemDrop = useCallback(
     (item: ClothingItemData) => {
-      // スケーリングされたバージョンを見つける
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
       equipItem(scaledItem);
     },
@@ -314,7 +244,7 @@ function App() {
   // ドール切り替え
   const handleDollChange = useCallback((dollId: string) => {
     setCurrentDollId(dollId);
-    resetAll(); // ドール変更時は服もリセット
+    resetAll();
   }, [resetAll]);
 
   // 背景ID
@@ -322,8 +252,8 @@ function App() {
 
   // 現在の背景
   const currentBackground = useMemo(() => 
-    currentBackgroundId ? AVAILABLE_BACKGROUNDS.find(bg => bg.id === currentBackgroundId) : null,
-    [currentBackgroundId]
+    currentBackgroundId ? allBackgrounds.find(bg => bg.id === currentBackgroundId) : null,
+    [currentBackgroundId, allBackgrounds]
   );
 
   // 背景切り替え
@@ -331,11 +261,34 @@ function App() {
     setCurrentBackgroundId(bgId);
   }, []);
 
+  // カスタムドール更新
+  const handleDollsChange = useCallback((dolls: DollData[]) => {
+    const customDolls = dolls.filter(d => d.isCustom);
+    setAllDolls([...DEFAULT_DOLLS, ...customDolls]);
+  }, []);
+
+  // カスタム背景更新
+  const handleBackgroundsChange = useCallback((backgrounds: BackgroundData[]) => {
+    const customBgs = backgrounds.filter(b => b.isCustom);
+    setAllBackgrounds([...DEFAULT_BACKGROUNDS, ...customBgs]);
+  }, []);
+
+  // カスタム服更新
+  const handleClothingChange = useCallback((items: ClothingItemData[]) => {
+    const customItems = items.filter(i => i.isCustom);
+    setAllClothing([...DEFAULT_CLOTHING, ...customItems]);
+  }, []);
+
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>🎀 きせかえゲーム 🎀</h1>
-      </header>
+      {/* 設定ボタン */}
+      <button
+        className="settings-button"
+        onClick={() => setIsSettingsOpen(true)}
+        title="せってい"
+      >
+        ⚙️
+      </button>
 
       <main className="app-main">
         {/* ドール表示エリア */}
@@ -371,15 +324,15 @@ function App() {
         {/* ドレスアップメニュー */}
         <section className="palette-section">
           <DressUpMenu
-            items={allItems}
+            items={allClothing}
             onItemDrop={handleItemDrop}
             equippedItems={equippedItems}
             onReset={handleReset}
-            dolls={AVAILABLE_DOLLS}
+            dolls={allDolls}
             currentDollId={currentDollId}
             onDollChange={handleDollChange}
             dropTargetId="avatar-canvas"
-            backgrounds={AVAILABLE_BACKGROUNDS}
+            backgrounds={allBackgrounds}
             currentBackgroundId={currentBackgroundId}
             onBackgroundChange={handleBackgroundChange}
           />
@@ -389,6 +342,18 @@ function App() {
       <footer className="app-footer">
         <p>ドラッグしてドールにきせてね！</p>
       </footer>
+
+      {/* 設定パネル */}
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        dolls={allDolls}
+        backgrounds={allBackgrounds}
+        clothingItems={allClothing}
+        onDollsChange={handleDollsChange}
+        onBackgroundsChange={handleBackgroundsChange}
+        onClothingChange={handleClothingChange}
+      />
     </div>
   );
 }
