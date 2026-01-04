@@ -88,7 +88,18 @@ export function AvatarCanvas({
       // まだ初期化中のエンジンも破棄
       engine.destroy();
     };
-  }, [width, height, dollImageUrl]);
+  }, [width, height]); // dollImageUrlを依存配列から除外（別のuseEffectで処理）
+
+  // ドール画像が変わったら更新（エンジン再初期化なし）
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.drawDoll({
+        width: 200,
+        height: 300,
+        imageUrl: dollImageUrl || '',
+      });
+    }
+  }, [dollImageUrl, isReady]);
 
   // 装備アイテムが変わったら再描画
   useEffect(() => {

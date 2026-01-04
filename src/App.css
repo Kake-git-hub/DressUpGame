@@ -190,6 +190,20 @@ body {
   animation: fadeIn 0.5s ease-out;
 }
 
+/* バージョンバッジ */
+.version-badge {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  font-size: 12px;
+  font-family: monospace;
+  border-radius: 4px;
+  z-index: 100;
+}
+
 /* 設定ボタン */
 .settings-button {
   position: fixed;

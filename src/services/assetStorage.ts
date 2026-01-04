@@ -486,3 +486,133 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     isCustom: true,
   };
 }
+
+// ========== 階層フォルダ一括取り込み ==========
+
+// フォルダ階層からカテゴリを判定
+function detectCategoryFromPath(path: string): {
+  type: 'dolls' | 'backgrounds' | 'clothing';
+  clothingType?: ClothingType;
+} | null {
+  const lowerPath = path.toLowerCase();
+  
+  // ドール
+  if (lowerPath.includes('/dolls/') || lowerPath.startsWith('dolls/')) {
+    return { type: 'dolls' };
+  }
+  
+  // 背景
+  if (lowerPath.includes('/backgrounds/') || lowerPath.startsWith('backgrounds/')) {
+    return { type: 'backgrounds' };
+  }
+  
+  // 服カテゴリ
+  const clothingTypes: { pattern: string; type: ClothingType }[] = [
+    { pattern: 'underwear_top', type: 'underwear_top' },
+    { pattern: 'underwear_bottom', type: 'underwear_bottom' },
+    { pattern: 'top', type: 'top' },
+    { pattern: 'bottom', type: 'bottom' },
+    { pattern: 'dress', type: 'dress' },
+    { pattern: 'shoes', type: 'shoes' },
+    { pattern: 'accessory', type: 'accessory' },
+  ];
+  
+  for (const { pattern, type } of clothingTypes) {
+    if (lowerPath.includes(`/clothing/${pattern}/`) || 
+        lowerPath.includes(`/clothing\\${pattern}\\`) ||
+        lowerPath.startsWith(`clothing/${pattern}/`) ||
+        lowerPath.startsWith(`clothing\\${pattern}\\`)) {
+      return { type: 'clothing', clothingType: type };
+    }
+  }
+  
+  return null;
+}
+
+// 階層構造対応の一括取り込み結果
+export interface HierarchicalImportResult {
+  dolls: { success: number; failed: number; items: DollData[] };
+  backgrounds: { success: number; failed: number; items: BackgroundData[] };
+  clothing: { success: number; failed: number; items: ClothingItemData[] };
+}
+
+// フォルダ階層から一括取り込み（複数カテゴリ対応）
+export async function bulkImportFromHierarchicalFolder(
+  files: FileList
+): Promise<HierarchicalImportResult> {
+  const result: HierarchicalImportResult = {
+    dolls: { success: 0, failed: 0, items: [] },
+    backgrounds: { success: 0, failed: 0, items: [] },
+    clothing: { success: 0, failed: 0, items: [] },
+  };
+  
+  const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!imageTypes.includes(file.type)) continue;
+    
+    // webkitRelativePathからカテゴリを判定
+    const path = file.webkitRelativePath || file.name;
+    const category = detectCategoryFromPath(path);
+    
+    if (!category) {
+      console.warn('カテゴリ不明:', path);
+      continue;
+    }
+    
+    try {
+      const base64 = await fileToBase64(file);
+      const id = `custom-${category.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const name = file.name.replace(/\.[^.]+$/, '');
+      
+      await saveImageToStorage(id, base64);
+      
+      switch (category.type) {
+        case 'dolls': {
+          const doll = createDollData(id, name, base64);
+          result.dolls.items.push(doll);
+          result.dolls.success++;
+          break;
+        }
+        case 'backgrounds': {
+          const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+          result.backgrounds.items.push(bg);
+          result.backgrounds.success++;
+          break;
+        }
+        case 'clothing': {
+          if (category.clothingType) {
+            const item = createClothingData(id, name, category.clothingType, base64);
+            result.clothing.items.push(item);
+            result.clothing.success++;
+          }
+          break;
+        }
+      }
+    } catch (e) {
+      console.error('Import failed:', path, e);
+      switch (category.type) {
+        case 'dolls': result.dolls.failed++; break;
+        case 'backgrounds': result.backgrounds.failed++; break;
+        case 'clothing': result.clothing.failed++; break;
+      }
+    }
+  }
+  
+  // 保存
+  if (result.dolls.items.length > 0) {
+    const existing = loadCustomDolls();
+    saveCustomDolls([...existing, ...result.dolls.items]);
+  }
+  if (result.backgrounds.items.length > 0) {
+    const existing = loadCustomBackgrounds();
+    saveCustomBackgrounds([...existing, ...result.backgrounds.items]);
+  }
+  if (result.clothing.items.length > 0) {
+    const existing = loadCustomClothing();
+    saveCustomClothing([...existing, ...result.clothing.items]);
+  }
+  
+  return result;
+}

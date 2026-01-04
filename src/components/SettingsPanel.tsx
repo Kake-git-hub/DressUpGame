@@ -14,6 +14,7 @@ import {
   deleteCustomClothing,
   bulkImportFromZip,
   bulkImportFromFolder,
+  bulkImportFromHierarchicalFolder,
 } from '../services/assetStorage';
 
 type TabType = 'dolls' | 'backgrounds' | 'clothing';
@@ -48,6 +49,7 @@ export function SettingsPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const hierarchicalFolderInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -164,6 +166,46 @@ export function SettingsPanel({
     } finally {
       setIsImporting(false);
       if (folderInputRef.current) folderInputRef.current.value = '';
+    }
+  };
+
+  // 階層フォルダ一括取り込み（プリセット形式）
+  const handleHierarchicalFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setIsImporting(true);
+    try {
+      const result = await bulkImportFromHierarchicalFolder(files);
+      
+      // 状態を更新
+      if (result.dolls.items.length > 0) {
+        onDollsChange([...dolls, ...result.dolls.items]);
+      }
+      if (result.backgrounds.items.length > 0) {
+        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
+      }
+      if (result.clothing.items.length > 0) {
+        onClothingChange([...clothingItems, ...result.clothing.items]);
+      }
+      
+      const totalSuccess = result.dolls.success + result.backgrounds.success + result.clothing.success;
+      const totalFailed = result.dolls.failed + result.backgrounds.failed + result.clothing.failed;
+      
+      alert(
+        `プリセット取り込み完了！\n` +
+        `ドール: ${result.dolls.success}件\n` +
+        `背景: ${result.backgrounds.success}件\n` +
+        `服: ${result.clothing.success}件\n` +
+        `---\n` +
+        `合計: ${totalSuccess}件成功, ${totalFailed}件失敗`
+      );
+    } catch (error) {
+      console.error('階層フォルダ取り込みエラー:', error);
+      alert('プリセットフォルダの取り込みに失敗しました');
+    } finally {
+      setIsImporting(false);
+      if (hierarchicalFolderInputRef.current) hierarchicalFolderInputRef.current.value = '';
     }
   };
 
@@ -284,7 +326,7 @@ export function SettingsPanel({
 
         {/* 一括取り込みセクション */}
         <div style={styles.bulkImportSection}>
-          <p style={styles.bulkTitle}>📦 一括取り込み</p>
+          <p style={styles.bulkTitle}>📦 一括取り込み（現在のタブ用）</p>
           {activeTab === 'clothing' && (
             <p style={styles.bulkNote}>
               ※「{CLOTHING_CATEGORIES.find(c => c.type === selectedType)?.label}」として取り込みます
@@ -322,6 +364,30 @@ export function SettingsPanel({
               />
             </label>
           </div>
+        </div>
+
+        {/* プリセット取り込みセクション */}
+        <div style={styles.presetImportSection}>
+          <p style={styles.bulkTitle}>📦 プリセット取り込み（全カテゴリ）</p>
+          <p style={styles.bulkNote}>
+            フォルダ構造: dolls/, backgrounds/, clothing/top/ など
+          </p>
+          <label style={{
+            ...styles.presetButton,
+            ...(isImporting ? styles.addButtonDisabled : {}),
+          }}>
+            🗂️ プリセットフォルダを選択
+            <input
+              ref={hierarchicalFolderInputRef}
+              type="file"
+              /* @ts-expect-error webkitdirectory is not standard */
+              webkitdirectory=""
+              multiple
+              onChange={handleHierarchicalFolderImport}
+              style={{ display: 'none' }}
+              disabled={isImporting}
+            />
+          </label>
           {isImporting && <p style={styles.importingText}>取り込み中...</p>}
         </div>
 
@@ -596,6 +662,23 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 'bold',
     color: 'white',
     background: 'linear-gradient(135deg, #28a745 0%, #218838 100%)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
+  presetImportSection: {
+    padding: '12px',
+    borderBottom: '1px solid #eee',
+    backgroundColor: '#fff3cd',
+  },
+  presetButton: {
+    display: 'block',
+    width: '100%',
+    padding: '12px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: 'white',
+    background: 'linear-gradient(135deg, #fd7e14 0%, #e65c00 100%)',
     borderRadius: '8px',
     cursor: 'pointer',
     textAlign: 'center',

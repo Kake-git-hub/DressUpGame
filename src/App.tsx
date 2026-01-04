@@ -17,6 +17,9 @@ import {
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData } from './types';
 import './App.css';
 
+// アプリバージョン
+const APP_VERSION = '0.1.0';
+
 // Viteのbase pathを取得（GitHub Pages対応）
 const BASE_PATH = import.meta.env.BASE_URL;
 
@@ -281,6 +284,9 @@ function App() {
 
   return (
     <div className="app">
+      {/* バージョン表示 */}
+      <div className="version-badge">v{APP_VERSION}</div>
+
       {/* 設定ボタン */}
       <button
         className="settings-button"
