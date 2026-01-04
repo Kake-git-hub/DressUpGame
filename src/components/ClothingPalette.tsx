@@ -2,16 +2,22 @@
  * ClothingPalette コンポーネント
  * 利用可能な服アイテムを一覧表示するパレット
  */
-import { ClothingItem } from './ClothingItem';
+import { DraggableClothingItem } from './DraggableClothingItem';
 import type { ClothingItemData } from '../types';
 
 interface ClothingPaletteProps {
   items: ClothingItemData[];
   onItemSelect: (item: ClothingItemData) => void;
   equippedItems: ClothingItemData[];
+  dropTargetId?: string;
 }
 
-export function ClothingPalette({ items, onItemSelect, equippedItems }: ClothingPaletteProps) {
+export function ClothingPalette({ 
+  items, 
+  onItemSelect, 
+  equippedItems,
+  dropTargetId = 'avatar-canvas',
+}: ClothingPaletteProps) {
   // 装備中のアイテムIDを取得
   const equippedIds = new Set(equippedItems.map((item) => item.id));
 
@@ -40,11 +46,23 @@ export function ClothingPalette({ items, onItemSelect, equippedItems }: Clothing
       >
         👚 きせかえアイテム
       </h3>
+      <p
+        style={{
+          width: '100%',
+          margin: '0 0 8px 0',
+          fontSize: '12px',
+          color: '#666',
+          textAlign: 'center',
+        }}
+      >
+        ドラッグしてドールに着せよう！
+      </p>
       {items.map((item) => (
-        <ClothingItem
+        <DraggableClothingItem
           key={item.id}
           item={item}
-          onDrop={onItemSelect}
+          onDropOnTarget={onItemSelect}
+          dropTargetId={dropTargetId}
           disabled={equippedIds.has(item.id)}
         />
       ))}

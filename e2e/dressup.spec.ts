@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test';
 
 // テストモードのURL（PixiJSを無効化）
-const TEST_URL = 'http://localhost:5173/?test=true';
+const TEST_URL = 'http://localhost:5173/DressUpGame/?test=true';
 
 test.describe('着せ替えゲーム', () => {
   test.beforeEach(async ({ page }) => {
@@ -35,20 +35,26 @@ test.describe('着せ替えゲーム', () => {
     await expect(clothingItems.first()).toBeVisible();
   });
 
-  test('服をクリックして着せることができる', async ({ page }) => {
-    // トップスをクリック
+  test('服をドラッグ＆ドロップで着せることができる', async ({ page }) => {
+    // トップスとキャンバスを取得
     const topItem = page.getByTestId('clothing-item-top-1');
+    const canvas = page.getByTestId('avatar-canvas');
+    
     await expect(topItem).toBeVisible();
-    await topItem.click();
+    await expect(canvas).toBeVisible();
+
+    // ドラッグ＆ドロップで着せる
+    await topItem.dragTo(canvas);
 
     // 装備リストに追加される（リセットボタンが表示される）
     await expect(page.getByRole('button', { name: /リセット/ })).toBeVisible();
   });
 
   test('リセットボタンで服を脱がせることができる', async ({ page }) => {
-    // 服を着せる
+    // 服をドラッグ＆ドロップで着せる
     const topItem = page.getByTestId('clothing-item-top-1');
-    await topItem.click();
+    const canvas = page.getByTestId('avatar-canvas');
+    await topItem.dragTo(canvas);
 
     // リセットボタンをクリック
     const resetButton = page.getByRole('button', { name: /リセット/ });
@@ -64,16 +70,19 @@ test.describe('着せ替えゲーム', () => {
 test.describe('iPadタッチ操作', () => {
   test.use({ hasTouch: true });
 
-  test('iPadでタッチ操作ができる', async ({ page }) => {
+  test('iPadでドラッグ＆ドロップ操作ができる', async ({ page }) => {
     await page.goto(TEST_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForSelector('.app', { timeout: 10000 });
 
-    // タッチデバイスでのテスト
+    // タッチデバイスでのドラッグ＆ドロップテスト
     const topItem = page.getByTestId('clothing-item-top-1');
+    const canvas = page.getByTestId('avatar-canvas');
+    
     await expect(topItem).toBeVisible();
+    await expect(canvas).toBeVisible();
 
-    // タップで着せる
-    await topItem.tap();
+    // タッチでドラッグ＆ドロップ
+    await topItem.dragTo(canvas);
 
     // リセットボタンが表示される
     await expect(page.getByRole('button', { name: /リセット/ })).toBeVisible();
