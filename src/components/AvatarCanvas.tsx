@@ -13,6 +13,7 @@ interface AvatarCanvasProps {
   equippedItems: EquippedItem[];
   customFaceUrl?: string;
   dollImageUrl?: string; // ドールベース画像のURL
+  backgroundImageUrl?: string; // 背景画像のURL
   onCanvasReady?: () => void;
 }
 
@@ -23,6 +24,7 @@ export function AvatarCanvas({
   equippedItems,
   customFaceUrl,
   dollImageUrl,
+  backgroundImageUrl,
   onCanvasReady,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -101,6 +103,13 @@ export function AvatarCanvas({
       engineRef.current.setCustomFace(customFaceUrl ?? null);
     }
   }, [customFaceUrl, isReady]);
+
+  // 背景が変わったら更新
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.setBackground(backgroundImageUrl ?? null);
+    }
+  }, [backgroundImageUrl, isReady]);
 
   return (
     <canvas

@@ -7,6 +7,7 @@ import type { ClothingItemData, DollConfig, EquippedItem } from '../types';
 
 export class PixiEngine {
   private app: Application | null = null;
+  private backgroundContainer: Container | null = null;
   private dollContainer: Container | null = null;
   private clothingContainer: Container | null = null;
   private faceContainer: Container | null = null;
@@ -41,6 +42,11 @@ export class PixiEngine {
         return;
       }
 
+      // 背景用コンテナ（最背面）
+      this.backgroundContainer = new Container();
+      this.backgroundContainer.label = 'backgroundContainer';
+      this.app.stage.addChild(this.backgroundContainer);
+
       // ドール用コンテナ
       this.dollContainer = new Container();
       this.dollContainer.label = 'dollContainer';
@@ -66,6 +72,7 @@ export class PixiEngine {
   // 内部クリーンアップ
   private cleanup(): void {
     this.initialized = false;
+    this.backgroundContainer = null;
     this.dollContainer = null;
     this.clothingContainer = null;
     this.faceContainer = null;
@@ -76,6 +83,40 @@ export class PixiEngine {
         // 無視
       }
       this.app = null;
+    }
+  }
+
+  // 背景を設定
+  async setBackground(imageUrl: string | null): Promise<void> {
+    if (!this.backgroundContainer || !this.app || !this.initialized || this.destroyed) {
+      return;
+    }
+
+    // 既存の背景をクリア
+    this.backgroundContainer.removeChildren();
+
+    if (!imageUrl) {
+      return;
+    }
+
+    try {
+      const texture = await Assets.load(imageUrl);
+      const bgSprite = new Sprite(texture);
+
+      // キャンバス全体をカバーするようにスケーリング
+      const scaleX = this.app.screen.width / texture.width;
+      const scaleY = this.app.screen.height / texture.height;
+      const scale = Math.max(scaleX, scaleY);
+      bgSprite.scale.set(scale);
+
+      // 中央に配置
+      bgSprite.anchor.set(0.5);
+      bgSprite.x = this.app.screen.width / 2;
+      bgSprite.y = this.app.screen.height / 2;
+
+      this.backgroundContainer.addChild(bgSprite);
+    } catch (error) {
+      console.warn('背景画像の読み込みに失敗:', error);
     }
   }
 

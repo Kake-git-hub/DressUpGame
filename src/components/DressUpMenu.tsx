@@ -1,11 +1,11 @@
 /**
  * DressUpMenu コンポーネント
  * カテゴリー選択 → ドラッグ&ドロップでアイテム着せ替え
- * リセットボタン・ドール切り替え機能付き
+ * リセットボタン・ドール切り替え・背景切り替え機能付き
  */
 import { useState, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { ClothingItemData, ClothingType, CategoryInfo, DollData } from '../types';
+import type { ClothingItemData, ClothingType, CategoryInfo, DollData, BackgroundData } from '../types';
 import { CLOTHING_CATEGORIES } from '../types';
 
 interface DressUpMenuProps {
@@ -17,6 +17,9 @@ interface DressUpMenuProps {
   currentDollId: string;
   onDollChange: (dollId: string) => void;
   dropTargetId: string;
+  backgrounds?: BackgroundData[];
+  currentBackgroundId?: string | null;
+  onBackgroundChange?: (backgroundId: string | null) => void;
 }
 
 export function DressUpMenu({
@@ -28,8 +31,12 @@ export function DressUpMenu({
   currentDollId,
   onDollChange,
   dropTargetId,
+  backgrounds = [],
+  currentBackgroundId = null,
+  onBackgroundChange,
 }: DressUpMenuProps) {
   const [selectedCategory, setSelectedCategory] = useState<ClothingType | null>(null);
+  const [showBackgrounds, setShowBackgrounds] = useState(false);
 
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
@@ -78,9 +85,14 @@ export function DressUpMenu({
     i => i.type !== 'underwear_top' && i.type !== 'underwear_bottom'
   ).length;
 
+  // 背景選択
+  const handleBackgroundSelect = (bgId: string | null) => {
+    onBackgroundChange?.(bgId);
+  };
+
   return (
     <div style={styles.container}>
-      {/* ヘッダー：ドール選択とリセット */}
+      {/* ヘッダー：ドール選択のみ */}
       <div style={styles.menuHeader}>
         <select
           style={styles.dollSelect}
@@ -93,14 +105,62 @@ export function DressUpMenu({
             </option>
           ))}
         </select>
-        {clothingCount > 0 && (
-          <button style={styles.resetButton} onClick={onReset}>
-            🔄 リセット
-          </button>
-        )}
       </div>
 
-      {!selectedCategory ? (
+      {showBackgrounds ? (
+        // 背景選択画面
+        <>
+          <div style={styles.header}>
+            <button style={styles.backButton} onClick={() => setShowBackgrounds(false)}>
+              ← もどる
+            </button>
+            <h3 style={styles.titleSmall}>🖼️ はいけい</h3>
+          </div>
+          
+          <div style={styles.backgroundGrid}>
+            {/* なし（背景なし）オプション */}
+            <button
+              style={{
+                ...styles.backgroundButton,
+                ...(currentBackgroundId === null ? styles.backgroundButtonSelected : {}),
+              }}
+              onClick={() => handleBackgroundSelect(null)}
+            >
+              <div style={styles.backgroundPreview}>
+                <span style={{ fontSize: '24px' }}>✕</span>
+              </div>
+              <span style={styles.backgroundName}>なし</span>
+            </button>
+            
+            {backgrounds.map(bg => (
+              <button
+                key={bg.id}
+                style={{
+                  ...styles.backgroundButton,
+                  ...(currentBackgroundId === bg.id ? styles.backgroundButtonSelected : {}),
+                }}
+                onClick={() => handleBackgroundSelect(bg.id)}
+              >
+                <div style={styles.backgroundPreview}>
+                  <img
+                    src={bg.thumbnailUrl || bg.imageUrl}
+                    alt={bg.name}
+                    style={styles.backgroundImage}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+                    }}
+                  />
+                </div>
+                <span style={styles.backgroundName}>{bg.name}</span>
+              </button>
+            ))}
+          </div>
+          
+          {backgrounds.length === 0 && (
+            <p style={styles.emptyMessage}>背景がまだありません</p>
+          )}
+        </>
+      ) : !selectedCategory ? (
         // カテゴリー選択画面
         <>
           <h3 style={styles.title}>👚 カテゴリーをえらんでね</h3>
@@ -122,6 +182,25 @@ export function DressUpMenu({
                 </span>
               </button>
             ))}
+          </div>
+          
+          {/* カテゴリーテーブル下部のアクションボタン */}
+          <div style={styles.actionButtons}>
+            {/* 背景選択ボタン */}
+            <button
+              style={styles.actionButton}
+              onClick={() => setShowBackgrounds(true)}
+            >
+              🖼️ はいけい
+              {currentBackgroundId && <span style={styles.activeDot}>●</span>}
+            </button>
+            
+            {/* リセットボタン */}
+            {clothingCount > 0 && (
+              <button style={styles.resetButtonLarge} onClick={onReset}>
+                🔄 リセット
+              </button>
+            )}
           </div>
         </>
       ) : (
@@ -287,8 +366,35 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     fontWeight: 'bold',
   },
-  resetButton: {
-    padding: '8px 12px',
+  actionButtons: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '8px',
+    paddingTop: '8px',
+    borderTop: '1px solid #e9ecef',
+  },
+  actionButton: {
+    flex: 1,
+    padding: '10px',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    color: '#333',
+    backgroundColor: '#e9ecef',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '4px',
+  },
+  activeDot: {
+    color: '#ff69b4',
+    fontSize: '10px',
+  },
+  resetButtonLarge: {
+    flex: 1,
+    padding: '10px',
     fontSize: '13px',
     fontWeight: 'bold',
     color: 'white',
@@ -296,7 +402,45 @@ const styles: Record<string, CSSProperties> = {
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
-    whiteSpace: 'nowrap',
+  },
+  backgroundGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '8px',
+  },
+  backgroundButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '6px',
+    backgroundColor: 'white',
+    border: '2px solid #e9ecef',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  backgroundButtonSelected: {
+    border: '2px solid #ff69b4',
+    backgroundColor: '#fff5f8',
+  },
+  backgroundPreview: {
+    width: '60px',
+    height: '45px',
+    borderRadius: '4px',
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  backgroundName: {
+    fontSize: '10px',
+    color: '#333',
+    marginTop: '4px',
   },
   title: {
     margin: '0',

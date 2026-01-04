@@ -98,6 +98,18 @@ export interface EquippedItem extends ClothingItemData {
   equipOrder: number; // 着せた順番
 }
 
+// 背景画像の定義
+export interface BackgroundData {
+  id: string;
+  name: string;
+  imageUrl: string; // 背景画像URL
+  thumbnailUrl?: string; // サムネイル画像URL（オプション）
+  tags?: string[];
+  author?: string;
+  createdAt?: string;
+  isCustom?: boolean;
+}
+
 // ドールの定義（関節情報付き）
 export interface DollData {
   id: string;

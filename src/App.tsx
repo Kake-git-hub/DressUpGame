@@ -3,26 +3,33 @@
  * Kids 2D Dress-Up Game - Main Application
  * 
  * iPad 10.3横向き（2360x1640）最適化
+ * Firebase Storageから画像を読み込み
  */
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { AvatarCanvas, DressUpMenu } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import { loadCustomItems } from './services/dataManager';
-import type { ClothingItemData, DollData, DollDimensions } from './types';
+import type { ClothingItemData, DollData, DollDimensions, BackgroundData } from './types';
 import './App.css';
-
-// Viteのbase pathを取得
-const BASE_PATH = import.meta.env.BASE_URL;
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
 
-// 利用可能なドールリスト
+// Firebase Storage ベースURL（公開URL形式）
+const FIREBASE_STORAGE_BASE = 'https://firebasestorage.googleapis.com/v0/b/bboardgames-a5488.firebasestorage.app/o';
+
+// Firebase Storage URL生成ヘルパー
+function getFirebaseUrl(path: string): string {
+  const encodedPath = encodeURIComponent(path);
+  return `${FIREBASE_STORAGE_BASE}/${encodedPath}?alt=media`;
+}
+
+// 利用可能なドールリスト（Firebase Storageから読み込み）
 const AVAILABLE_DOLLS: DollData[] = [
   {
     id: 'doll-base-001',
     name: 'ちびドール',
-    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base.png`,
+    bodyImageUrl: getFirebaseUrl('dolls/doll-base.png'),
     skinTone: 'fair',
     dimensions: {
       width: 512,
@@ -54,7 +61,7 @@ const AVAILABLE_DOLLS: DollData[] = [
   {
     id: 'doll-base-002',
     name: 'スリムドール',
-    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-2.png`,
+    bodyImageUrl: getFirebaseUrl('dolls/doll-base-2.png'),
     skinTone: 'fair',
     dimensions: {
       width: 400,
@@ -85,6 +92,25 @@ const AVAILABLE_DOLLS: DollData[] = [
   },
 ];
 
+// 利用可能な背景リスト（Firebase Storageから読み込み）
+const AVAILABLE_BACKGROUNDS: BackgroundData[] = [
+  {
+    id: 'bg-room',
+    name: 'へや',
+    imageUrl: getFirebaseUrl('backgrounds/room.png'),
+  },
+  {
+    id: 'bg-park',
+    name: 'こうえん',
+    imageUrl: getFirebaseUrl('backgrounds/park.png'),
+  },
+  {
+    id: 'bg-beach',
+    name: 'うみ',
+    imageUrl: getFirebaseUrl('backgrounds/beach.png'),
+  },
+];
+
 // 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
 const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
 
@@ -94,7 +120,7 @@ const defaultUnderwear: ClothingItemData[] = [
     id: 'underwear-top-default',
     name: '白いキャミソール',
     type: 'underwear_top',
-    imageUrl: `${BASE_PATH}images/underwear-top.png`,
+    imageUrl: getFirebaseUrl('clothing/underwear-top.png'),
     position: { x: 0, y: -30 },
     baseZIndex: 0,
     anchorType: 'torso',
@@ -103,7 +129,7 @@ const defaultUnderwear: ClothingItemData[] = [
     id: 'underwear-bottom-default',
     name: '白いショーツ',
     type: 'underwear_bottom',
-    imageUrl: `${BASE_PATH}images/underwear-bottom.png`,
+    imageUrl: getFirebaseUrl('clothing/underwear-bottom.png'),
     position: { x: 0, y: 30 },
     baseZIndex: 1,
     anchorType: 'hip',
@@ -116,7 +142,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'top-1',
     name: '青いTシャツ',
     type: 'top',
-    imageUrl: `${BASE_PATH}images/top-1.png`,
+    imageUrl: getFirebaseUrl('clothing/top-1.png'),
     position: { x: 0, y: -30 },
     baseZIndex: 20,
     anchorType: 'torso',
@@ -125,7 +151,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'top-2',
     name: '赤いTシャツ',
     type: 'top',
-    imageUrl: `${BASE_PATH}images/top-2.png`,
+    imageUrl: getFirebaseUrl('clothing/top-2.png'),
     position: { x: 0, y: -30 },
     baseZIndex: 20,
     anchorType: 'torso',
@@ -134,7 +160,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'bottom-1',
     name: 'ピンクのスカート',
     type: 'bottom',
-    imageUrl: `${BASE_PATH}images/bottom-1.png`,
+    imageUrl: getFirebaseUrl('clothing/bottom-1.png'),
     position: { x: 0, y: 30 },
     baseZIndex: 10,
     anchorType: 'hip',
@@ -143,7 +169,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'bottom-2',
     name: '青いパンツ',
     type: 'bottom',
-    imageUrl: `${BASE_PATH}images/bottom-2.png`,
+    imageUrl: getFirebaseUrl('clothing/bottom-2.png'),
     position: { x: 0, y: 30 },
     baseZIndex: 10,
     anchorType: 'hip',
@@ -152,7 +178,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'dress-1',
     name: '紫のワンピース',
     type: 'dress',
-    imageUrl: `${BASE_PATH}images/dress-1.png`,
+    imageUrl: getFirebaseUrl('clothing/dress-1.png'),
     position: { x: 0, y: 0 },
     baseZIndex: 15,
     anchorType: 'torso',
@@ -161,7 +187,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'shoes-1',
     name: '茶色のくつ',
     type: 'shoes',
-    imageUrl: `${BASE_PATH}images/shoes-1.png`,
+    imageUrl: getFirebaseUrl('clothing/shoes-1.png'),
     position: { x: 0, y: 135 },
     baseZIndex: 5,
     anchorType: 'feet',
@@ -170,7 +196,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'accessory-1',
     name: 'ピンクのリボン',
     type: 'accessory',
-    imageUrl: `${BASE_PATH}images/accessory-1.png`,
+    imageUrl: getFirebaseUrl('clothing/accessory-1.png'),
     position: { x: 0, y: -125 },
     baseZIndex: 30,
     anchorType: 'head',
@@ -291,6 +317,20 @@ function App() {
     resetAll(); // ドール変更時は服もリセット
   }, [resetAll]);
 
+  // 背景ID
+  const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(null);
+
+  // 現在の背景
+  const currentBackground = useMemo(() => 
+    currentBackgroundId ? AVAILABLE_BACKGROUNDS.find(bg => bg.id === currentBackgroundId) : null,
+    [currentBackgroundId]
+  );
+
+  // 背景切り替え
+  const handleBackgroundChange = useCallback((bgId: string | null) => {
+    setCurrentBackgroundId(bgId);
+  }, []);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -323,6 +363,7 @@ function App() {
               height={canvasSize.height}
               equippedItems={equippedItems}
               dollImageUrl={currentDoll.bodyImageUrl}
+              backgroundImageUrl={currentBackground?.imageUrl}
             />
           )}
         </section>
@@ -338,6 +379,9 @@ function App() {
             currentDollId={currentDollId}
             onDollChange={handleDollChange}
             dropTargetId="avatar-canvas"
+            backgrounds={AVAILABLE_BACKGROUNDS}
+            currentBackgroundId={currentBackgroundId}
+            onBackgroundChange={handleBackgroundChange}
           />
         </section>
       </main>
