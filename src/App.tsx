@@ -2,10 +2,11 @@
  * 着せ替えゲーム メインアプリケーション
  * Kids 2D Dress-Up Game - Main Application
  */
-import { useCallback, useState } from 'react';
-import { AvatarCanvas, ClothingPalette } from './components';
+import { useCallback, useState, useEffect } from 'react';
+import { AvatarCanvas, ClothingPalette, ItemImporter, ItemManager } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import { AIFaceGenerator } from './components/AIFaceGenerator';
+import { loadCustomItems } from './services/dataManager';
 import type { ClothingItemData } from './types';
 import './App.css';
 
@@ -32,8 +33,8 @@ const defaultUnderwear: ClothingItemData[] = [
   },
 ];
 
-// サンプルの服アイテムデータ
-const sampleClothingItems: ClothingItemData[] = [
+// デフォルトの服アイテムデータ
+const defaultClothingItems: ClothingItemData[] = [
   {
     id: 'top-1',
     name: '青いTシャツ',
@@ -93,11 +94,22 @@ const sampleClothingItems: ClothingItemData[] = [
 ];
 
 function App() {
-  // 着せ替え状態管理フック（下着付き）
-  const { equipItem, getEquippedItems, resetAll } = useDressUp(sampleClothingItems, defaultUnderwear);
+  // 全アイテム（デフォルト + カスタム）
+  const [allItems, setAllItems] = useState<ClothingItemData[]>(defaultClothingItems);
 
-  // AI顔生成モーダル表示状態
+  // 初期化時にカスタムアイテムを読み込み
+  useEffect(() => {
+    const customItems = loadCustomItems();
+    setAllItems([...defaultClothingItems, ...customItems]);
+  }, []);
+
+  // 着せ替え状態管理フック（下着付き）
+  const { equipItem, getEquippedItems, resetAll } = useDressUp(allItems, defaultUnderwear);
+
+  // モーダル表示状態
   const [showAIGenerator, setShowAIGenerator] = useState(false);
+  const [showItemImporter, setShowItemImporter] = useState(false);
+  const [showItemManager, setShowItemManager] = useState(false);
 
   // 生成した顔画像URL
   const [generatedFaceUrl, setGeneratedFaceUrl] = useState<string | null>(null);
@@ -122,6 +134,28 @@ function App() {
   const handleFaceGenerated = useCallback((imageUrl: string) => {
     setGeneratedFaceUrl(imageUrl);
     setShowAIGenerator(false);
+  }, []);
+
+  // アイテムインポート完了時
+  const handleItemImported = useCallback((item: ClothingItemData) => {
+    setAllItems(prev => {
+      // 同じIDがあれば更新、なければ追加
+      const existingIndex = prev.findIndex(i => i.id === item.id);
+      if (existingIndex >= 0) {
+        const newItems = [...prev];
+        newItems[existingIndex] = item;
+        return newItems;
+      }
+      return [...prev, item];
+    });
+    setShowItemImporter(false);
+  }, []);
+
+  // アイテム一覧更新時
+  const handleItemsChange = useCallback((items: ClothingItemData[]) => {
+    // デフォルトアイテム + 更新されたカスタムアイテム
+    const customItems = items.filter(i => i.isCustom);
+    setAllItems([...defaultClothingItems, ...customItems]);
   }, []);
 
   return (
@@ -162,13 +196,22 @@ function App() {
 
           {/* ボタンエリア */}
           <div className="button-area">
+            {/* アイテム管理ボタン */}
+            <button 
+              className="manage-button" 
+              onClick={() => setShowItemManager(true)}
+              data-testid="manage-items-button"
+            >
+              📦 アイテムかんり
+            </button>
+
             {/* AI顔生成ボタン */}
             <button 
               className="ai-button" 
               onClick={() => setShowAIGenerator(true)}
               data-testid="ai-face-button"
             >
-              🎨 AIでかおをつくる
+              🎨 かおをつくる
             </button>
 
             {/* リセットボタン */}
@@ -183,7 +226,7 @@ function App() {
         {/* 服選択パレット */}
         <section className="palette-section">
           <ClothingPalette
-            items={sampleClothingItems}
+            items={allItems}
             onItemSelect={handleItemSelect}
             equippedItems={equippedItems}
           />
@@ -199,6 +242,27 @@ function App() {
         <AIFaceGenerator
           onGenerate={handleFaceGenerated}
           onClose={() => setShowAIGenerator(false)}
+        />
+      )}
+
+      {/* アイテムインポートモーダル */}
+      {showItemImporter && (
+        <ItemImporter
+          onImport={handleItemImported}
+          onClose={() => setShowItemImporter(false)}
+        />
+      )}
+
+      {/* アイテム管理モーダル */}
+      {showItemManager && (
+        <ItemManager
+          items={allItems}
+          onItemsChange={handleItemsChange}
+          onAddItem={() => {
+            setShowItemManager(false);
+            setShowItemImporter(true);
+          }}
+          onClose={() => setShowItemManager(false)}
         />
       )}
     </div>
