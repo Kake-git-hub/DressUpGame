@@ -105,6 +105,7 @@ export function AvatarCanvas({
   return (
     <canvas
       ref={canvasRef}
+      id="avatar-canvas"
       data-testid="avatar-canvas"
       style={{
         borderRadius: '12px',

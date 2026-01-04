@@ -5,49 +5,85 @@
  * iPad 10.3横向き（2360x1640）最適化
  */
 import { useCallback, useState, useEffect, useMemo } from 'react';
-import { AvatarCanvas, CategorySelector } from './components';
+import { AvatarCanvas, DressUpMenu } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import { loadCustomItems } from './services/dataManager';
 import type { ClothingItemData, DollData, DollDimensions } from './types';
 import './App.css';
 
+// Viteのbase pathを取得
+const BASE_PATH = import.meta.env.BASE_URL;
+
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
 
-// デフォルトのドールベース情報
-const DEFAULT_DOLL: DollData = {
-  id: 'doll-base-001',
-  name: 'ベーシックドール',
-  bodyImageUrl: '/assets/dolls/doll-base.png',
-  skinTone: 'fair',
-  dimensions: {
-    width: 512, // 添付画像の実際の幅
-    height: 1024, // 添付画像の実際の高さ（推定）
-    anchorPoints: {
-      headTop: { x: 0.5, y: 0.05 },
-      neckCenter: { x: 0.5, y: 0.18 },
-      torsoCenter: { x: 0.5, y: 0.4 },
-      hipCenter: { x: 0.5, y: 0.55 },
-      footBottom: { x: 0.5, y: 0.98 },
+// 利用可能なドールリスト
+const AVAILABLE_DOLLS: DollData[] = [
+  {
+    id: 'doll-base-001',
+    name: 'ちびドール',
+    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base.png`,
+    skinTone: 'fair',
+    dimensions: {
+      width: 512,
+      height: 1024,
+      anchorPoints: {
+        headTop: { x: 0.5, y: 0.05 },
+        neckCenter: { x: 0.5, y: 0.18 },
+        torsoCenter: { x: 0.5, y: 0.4 },
+        hipCenter: { x: 0.5, y: 0.55 },
+        footBottom: { x: 0.5, y: 0.98 },
+      },
+    },
+    joints: {
+      head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.08 } },
+      neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.18 }, parentId: 'head' },
+      leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.22 }, parentId: 'neck' },
+      rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.22 }, parentId: 'neck' },
+      leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.35 }, parentId: 'leftShoulder' },
+      rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.35 }, parentId: 'rightShoulder' },
+      leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.48 }, parentId: 'leftElbow' },
+      rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.48 }, parentId: 'rightElbow' },
+      hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.55 }, parentId: 'neck' },
+      leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.4, y: 0.72 }, parentId: 'hip' },
+      rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.6, y: 0.72 }, parentId: 'hip' },
+      leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.4, y: 0.92 }, parentId: 'leftKnee' },
+      rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.6, y: 0.92 }, parentId: 'rightKnee' },
     },
   },
-  // 将来のVtuber連携用関節データ
-  joints: {
-    head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.08 } },
-    neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.18 }, parentId: 'head' },
-    leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.22 }, parentId: 'neck' },
-    rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.22 }, parentId: 'neck' },
-    leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.35 }, parentId: 'leftShoulder' },
-    rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.35 }, parentId: 'rightShoulder' },
-    leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.48 }, parentId: 'leftElbow' },
-    rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.48 }, parentId: 'rightElbow' },
-    hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.55 }, parentId: 'neck' },
-    leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.4, y: 0.72 }, parentId: 'hip' },
-    rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.6, y: 0.72 }, parentId: 'hip' },
-    leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.4, y: 0.92 }, parentId: 'leftKnee' },
-    rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.6, y: 0.92 }, parentId: 'rightKnee' },
+  {
+    id: 'doll-base-002',
+    name: 'スリムドール',
+    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-2.png`,
+    skinTone: 'fair',
+    dimensions: {
+      width: 400,
+      height: 800,
+      anchorPoints: {
+        headTop: { x: 0.5, y: 0.02 },
+        neckCenter: { x: 0.5, y: 0.12 },
+        torsoCenter: { x: 0.5, y: 0.35 },
+        hipCenter: { x: 0.5, y: 0.5 },
+        footBottom: { x: 0.5, y: 0.98 },
+      },
+    },
+    joints: {
+      head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.06 } },
+      neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.12 }, parentId: 'head' },
+      leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.16 }, parentId: 'neck' },
+      rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.16 }, parentId: 'neck' },
+      leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.28 }, parentId: 'leftShoulder' },
+      rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.28 }, parentId: 'rightShoulder' },
+      leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.4 }, parentId: 'leftElbow' },
+      rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.4 }, parentId: 'rightElbow' },
+      hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.5 }, parentId: 'neck' },
+      leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.42, y: 0.7 }, parentId: 'hip' },
+      rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.58, y: 0.7 }, parentId: 'hip' },
+      leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.42, y: 0.92 }, parentId: 'leftKnee' },
+      rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.58, y: 0.92 }, parentId: 'rightKnee' },
+    },
   },
-};
+];
 
 // 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
 const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
@@ -58,7 +94,7 @@ const defaultUnderwear: ClothingItemData[] = [
     id: 'underwear-top-default',
     name: '白いキャミソール',
     type: 'underwear_top',
-    imageUrl: '/images/underwear-top.png',
+    imageUrl: `${BASE_PATH}images/underwear-top.png`,
     position: { x: 0, y: -30 },
     baseZIndex: 0,
     anchorType: 'torso',
@@ -67,7 +103,7 @@ const defaultUnderwear: ClothingItemData[] = [
     id: 'underwear-bottom-default',
     name: '白いショーツ',
     type: 'underwear_bottom',
-    imageUrl: '/images/underwear-bottom.png',
+    imageUrl: `${BASE_PATH}images/underwear-bottom.png`,
     position: { x: 0, y: 30 },
     baseZIndex: 1,
     anchorType: 'hip',
@@ -80,7 +116,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'top-1',
     name: '青いTシャツ',
     type: 'top',
-    imageUrl: '/images/top-1.png',
+    imageUrl: `${BASE_PATH}images/top-1.png`,
     position: { x: 0, y: -30 },
     baseZIndex: 20,
     anchorType: 'torso',
@@ -89,7 +125,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'top-2',
     name: '赤いTシャツ',
     type: 'top',
-    imageUrl: '/images/top-2.png',
+    imageUrl: `${BASE_PATH}images/top-2.png`,
     position: { x: 0, y: -30 },
     baseZIndex: 20,
     anchorType: 'torso',
@@ -98,7 +134,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'bottom-1',
     name: 'ピンクのスカート',
     type: 'bottom',
-    imageUrl: '/images/bottom-1.png',
+    imageUrl: `${BASE_PATH}images/bottom-1.png`,
     position: { x: 0, y: 30 },
     baseZIndex: 10,
     anchorType: 'hip',
@@ -107,7 +143,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'bottom-2',
     name: '青いパンツ',
     type: 'bottom',
-    imageUrl: '/images/bottom-2.png',
+    imageUrl: `${BASE_PATH}images/bottom-2.png`,
     position: { x: 0, y: 30 },
     baseZIndex: 10,
     anchorType: 'hip',
@@ -116,7 +152,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'dress-1',
     name: '紫のワンピース',
     type: 'dress',
-    imageUrl: '/images/dress-1.png',
+    imageUrl: `${BASE_PATH}images/dress-1.png`,
     position: { x: 0, y: 0 },
     baseZIndex: 15,
     anchorType: 'torso',
@@ -125,7 +161,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'shoes-1',
     name: '茶色のくつ',
     type: 'shoes',
-    imageUrl: '/images/shoes-1.png',
+    imageUrl: `${BASE_PATH}images/shoes-1.png`,
     position: { x: 0, y: 135 },
     baseZIndex: 5,
     anchorType: 'feet',
@@ -134,7 +170,7 @@ const defaultClothingItems: ClothingItemData[] = [
     id: 'accessory-1',
     name: 'ピンクのリボン',
     type: 'accessory',
-    imageUrl: '/images/accessory-1.png',
+    imageUrl: `${BASE_PATH}images/accessory-1.png`,
     position: { x: 0, y: -125 },
     baseZIndex: 30,
     anchorType: 'head',
@@ -161,8 +197,14 @@ function scaleItemPosition(
 }
 
 function App() {
+  // 現在のドールID
+  const [currentDollId, setCurrentDollId] = useState<string>(AVAILABLE_DOLLS[0].id);
+
   // 現在のドール
-  const [currentDoll] = useState<DollData>(DEFAULT_DOLL);
+  const currentDoll = useMemo(() => 
+    AVAILABLE_DOLLS.find(d => d.id === currentDollId) || AVAILABLE_DOLLS[0],
+    [currentDollId]
+  );
 
   // 全アイテム（デフォルト + カスタム）
   const [allItems, setAllItems] = useState<ClothingItemData[]>(defaultClothingItems);
@@ -178,8 +220,8 @@ function App() {
 
       // iPad 10.3横向き: 2360x1640 (CSS px: 1180x820程度)
       // ドールを最大表示するため、高さベースで計算
-      const maxHeight = vh - 120; // ヘッダー・フッター分を除く
-      const maxWidth = vw - 360; // パレット分を除く
+      const maxHeight = vh - 100; // ヘッダー・フッター分を除く
+      const maxWidth = vw - 340; // パレット分を除く
 
       // ドールの縦横比を維持（1:2程度）
       const dollAspect = 0.5; // width / height
@@ -228,8 +270,8 @@ function App() {
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
 
-  // 服を選択した時の処理（上書き可能）
-  const handleItemSelect = useCallback(
+  // 服をドロップした時の処理（上書き可能）
+  const handleItemDrop = useCallback(
     (item: ClothingItemData) => {
       // スケーリングされたバージョンを見つける
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
@@ -238,9 +280,15 @@ function App() {
     [equipItem, scaledItems]
   );
 
-  // リセットボタン
+  // リセット
   const handleReset = useCallback(() => {
     resetAll();
+  }, [resetAll]);
+
+  // ドール切り替え
+  const handleDollChange = useCallback((dollId: string) => {
+    setCurrentDollId(dollId);
+    resetAll(); // ドール変更時は服もリセット
   }, [resetAll]);
 
   return (
@@ -254,6 +302,7 @@ function App() {
         <section className="avatar-section">
           {isTestMode ? (
             <div
+              id="avatar-canvas"
               data-testid="avatar-canvas"
               style={{
                 width: canvasSize.width,
@@ -276,27 +325,25 @@ function App() {
               dollImageUrl={currentDoll.bodyImageUrl}
             />
           )}
-
-          {/* リセットボタン（下着以外を着ている時のみ表示） */}
-          {equippedItems.length > 2 && (
-            <button className="reset-button" onClick={handleReset}>
-              🔄 リセット
-            </button>
-          )}
         </section>
 
-        {/* カテゴリー・アイテム選択パレット */}
+        {/* ドレスアップメニュー */}
         <section className="palette-section">
-          <CategorySelector
+          <DressUpMenu
             items={allItems}
-            onItemSelect={handleItemSelect}
+            onItemDrop={handleItemDrop}
             equippedItems={equippedItems}
+            onReset={handleReset}
+            dolls={AVAILABLE_DOLLS}
+            currentDollId={currentDollId}
+            onDollChange={handleDollChange}
+            dropTargetId="avatar-canvas"
           />
         </section>
       </main>
 
       <footer className="app-footer">
-        <p>カテゴリーをえらんで、すきなふくをきせてね！</p>
+        <p>ドラッグしてドールにきせてね！</p>
       </footer>
     </div>
   );
