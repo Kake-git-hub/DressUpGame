@@ -1,0 +1,108 @@
+/**
+ * AvatarCanvas コンポーネント
+ * PixiJSでドールと着せた服を表示するキャンバス
+ */
+import { useEffect, useRef, useState } from 'react';
+import { PixiEngine } from '../engine/PixiEngine';
+import type { ClothingItemData, DollConfig } from '../types';
+
+interface AvatarCanvasProps {
+  width?: number;
+  height?: number;
+  dollConfig?: DollConfig;
+  equippedItems: ClothingItemData[];
+  onCanvasReady?: () => void;
+}
+
+export function AvatarCanvas({
+  width = 400,
+  height = 500,
+  dollConfig,
+  equippedItems,
+  onCanvasReady,
+}: AvatarCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<PixiEngine | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  // PixiJS初期化
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // キャンセルフラグ（StrictModeでのクリーンアップ用）
+    let cancelled = false;
+
+    // 新しいエンジンインスタンスを作成
+    const engine = new PixiEngine();
+
+    const initEngine = async () => {
+      try {
+        console.log('[AvatarCanvas] Starting engine init');
+        await engine.init(canvas, width, height);
+
+        // キャンセルされていたら処理を中止
+        if (cancelled) {
+          console.log('[AvatarCanvas] Cancelled, destroying engine');
+          engine.destroy();
+          return;
+        }
+
+        // 成功した場合のみrefに保存
+        engineRef.current = engine;
+
+        // ドールを描画
+        engine.drawDoll(
+          dollConfig ?? {
+            width: 200,
+            height: 300,
+            imageUrl: '',
+          }
+        );
+
+        setIsReady(true);
+        console.log('[AvatarCanvas] Ready');
+
+        // コールバック呼び出し
+        onCanvasReady?.();
+      } catch (error) {
+        console.error('PixiJS初期化エラー:', error);
+        engine.destroy();
+      }
+    };
+
+    initEngine();
+
+    // クリーンアップ
+    return () => {
+      console.log('[AvatarCanvas] Cleanup');
+      cancelled = true;
+      setIsReady(false);
+      // engineRefに保存されているエンジンを破棄
+      if (engineRef.current) {
+        engineRef.current.destroy();
+        engineRef.current = null;
+      }
+      // まだ初期化中のエンジンも破棄
+      engine.destroy();
+    };
+  }, [width, height]);
+
+  // 装備アイテムが変わったら再描画
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.drawClothing(equippedItems);
+    }
+  }, [equippedItems, isReady]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      data-testid="avatar-canvas"
+      style={{
+        borderRadius: '12px',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+      }}
+    />
+  );
+}

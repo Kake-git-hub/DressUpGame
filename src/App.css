@@ -1,0 +1,150 @@
+/**
+ * 着せ替えゲーム スタイルシート
+ * Kids 2D Dress-Up Game - Stylesheet
+ */
+
+/* ルート変数 */
+:root {
+  --primary-color: #ff69b4;
+  --secondary-color: #9370db;
+  --background-color: #fff5f5;
+  --text-color: #333;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+}
+
+/* リセット */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ベース */
+html,
+body {
+  font-family: 'Rounded Mplus 1c', 'Hiragino Maru Gothic Pro', 'メイリオ', sans-serif;
+  background: linear-gradient(135deg, #fff5f5 0%, #ffe4f3 100%);
+  min-height: 100vh;
+  color: var(--text-color);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* アプリコンテナ */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+/* ヘッダー */
+.app-header {
+  text-align: center;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.app-header h1 {
+  font-size: 2rem;
+  color: var(--primary-color);
+  text-shadow: 2px 2px 4px rgba(255, 105, 180, 0.3);
+  margin-bottom: 8px;
+}
+
+.app-header .subtitle {
+  font-size: 1rem;
+  color: #666;
+}
+
+/* メインコンテンツ */
+.app-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  flex: 1;
+}
+
+/* デスクトップでは横並び */
+@media (min-width: 768px) {
+  .app-main {
+    flex-direction: row;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 32px;
+  }
+}
+
+/* アバターセクション */
+.avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+/* パレットセクション */
+.palette-section {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* リセットボタン */
+.reset-button {
+  padding: 12px 24px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: white;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 105, 180, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.reset-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(255, 105, 180, 0.5);
+}
+
+.reset-button:active {
+  transform: scale(0.98);
+}
+
+/* フッター */
+.app-footer {
+  text-align: center;
+  padding: 16px;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+/* iPad対応 - タッチ領域を大きく */
+@media (pointer: coarse) {
+  .reset-button {
+    padding: 16px 32px;
+    font-size: 1.2rem;
+    min-height: 48px;
+  }
+}
+
+/* アニメーション */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.avatar-section,
+.palette-section {
+  animation: fadeIn 0.5s ease-out;
+}
