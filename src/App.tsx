@@ -81,7 +81,6 @@ function App() {
   // 服を選択した時の処理
   const handleItemSelect = useCallback(
     (item: ClothingItemData) => {
-      console.log('[App] Item selected:', item.id, item.name);
       equipItem(item);
     },
     [equipItem]

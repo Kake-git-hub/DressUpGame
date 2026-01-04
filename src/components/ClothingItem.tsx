@@ -72,7 +72,6 @@ export function ClothingItem({ item, onDrop, disabled = false }: ClothingItemPro
     setPosition({ x: 0, y: 0 });
 
     // ドロップ成功として処理
-    console.log('[ClothingItem] Dropping item:', item.id, item.name);
     onDrop(item);
   }, [isDragging, item, onDrop]);
 

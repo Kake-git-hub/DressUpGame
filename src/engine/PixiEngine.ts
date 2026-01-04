@@ -15,12 +15,10 @@ export class PixiEngine {
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
     if (this.initialized || this.destroyed) {
-      console.log('[PixiEngine] Already initialized or destroyed, skipping init');
       return;
     }
 
     try {
-      console.log('[PixiEngine] Starting initialization...');
       this.app = new Application();
       await this.app.init({
         canvas,
@@ -29,11 +27,9 @@ export class PixiEngine {
         backgroundColor: 0xfff5ee, // 薄いピンクベージュの背景
         antialias: true,
       });
-      console.log('[PixiEngine] Application initialized');
 
       // 既に破棄されていたら処理を中止
       if (this.destroyed) {
-        console.log('[PixiEngine] Destroyed during init, cleaning up');
         try {
           this.app.destroy(true, { children: true });
         } catch {
@@ -54,7 +50,6 @@ export class PixiEngine {
       this.app.stage.addChild(this.clothingContainer);
 
       this.initialized = true;
-      console.log('[PixiEngine] Initialization complete');
     } catch (error) {
       console.error('PixiJS初期化エラー:', error);
       this.cleanup();
@@ -79,16 +74,8 @@ export class PixiEngine {
   // ドールを描画（プレースホルダー）
   drawDoll(_config: DollConfig): void {
     if (!this.dollContainer || !this.app || !this.initialized || this.destroyed) {
-      console.log('[PixiEngine] drawDoll: Not ready', {
-        dollContainer: !!this.dollContainer,
-        app: !!this.app,
-        initialized: this.initialized,
-        destroyed: this.destroyed
-      });
       return;
     }
-
-    console.log('[PixiEngine] Drawing doll...');
 
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
@@ -130,17 +117,13 @@ export class PixiEngine {
     doll.stroke({ width: 2, color: 0xff6b6b });
 
     this.dollContainer.addChild(doll);
-    console.log('[PixiEngine] Doll drawn successfully');
   }
 
   // 服を描画（プレースホルダー）
   drawClothing(items: ClothingItemData[]): void {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
-      console.log('[PixiEngine] drawClothing: Not ready');
       return;
     }
-
-    console.log('[PixiEngine] Drawing clothing:', items.length, 'items');
 
     // 既存の服をクリア
     this.clothingContainer.removeChildren();
@@ -212,11 +195,9 @@ export class PixiEngine {
   // クリーンアップ
   destroy(): void {
     if (this.destroyed) {
-      console.log('[PixiEngine] Already destroyed, skipping');
       return;
     }
 
-    console.log('[PixiEngine] Destroying...');
     this.destroyed = true;
     this.initialized = false;
 
@@ -245,12 +226,11 @@ export class PixiEngine {
         if (this.app.stage) {
           this.app.destroy(true, { children: true, texture: true });
         }
-      } catch (e) {
-        console.log('[PixiEngine] Error during destroy (ignored):', e);
+      } catch {
+        // 無視
       }
       this.app = null;
     }
-    console.log('[PixiEngine] Destroyed');
   }
 
   // 初期化済みかどうか

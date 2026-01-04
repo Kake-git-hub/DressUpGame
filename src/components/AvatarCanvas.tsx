@@ -38,12 +38,10 @@ export function AvatarCanvas({
 
     const initEngine = async () => {
       try {
-        console.log('[AvatarCanvas] Starting engine init');
         await engine.init(canvas, width, height);
 
         // キャンセルされていたら処理を中止
         if (cancelled) {
-          console.log('[AvatarCanvas] Cancelled, destroying engine');
           engine.destroy();
           return;
         }
@@ -61,7 +59,6 @@ export function AvatarCanvas({
         );
 
         setIsReady(true);
-        console.log('[AvatarCanvas] Ready');
 
         // コールバック呼び出し
         onCanvasReady?.();
@@ -75,7 +72,6 @@ export function AvatarCanvas({
 
     // クリーンアップ
     return () => {
-      console.log('[AvatarCanvas] Cleanup');
       cancelled = true;
       setIsReady(false);
       // engineRefに保存されているエンジンを破棄
