@@ -12,6 +12,8 @@ import {
   deleteCustomDoll,
   deleteCustomBackground,
   deleteCustomClothing,
+  bulkImportFromZip,
+  bulkImportFromFolder,
 } from '../services/assetStorage';
 
 type TabType = 'dolls' | 'backgrounds' | 'clothing';
@@ -42,7 +44,10 @@ export function SettingsPanel({
   const [selectedType, setSelectedType] = useState<ClothingType>('top');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -95,6 +100,70 @@ export function SettingsPanel({
       alert('追加に失敗しました');
     } finally {
       setIsAdding(false);
+    }
+  };
+
+  // ZIP一括取り込み
+  const handleZipImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsImporting(true);
+    try {
+      const result = await bulkImportFromZip(
+        file,
+        activeTab,
+        activeTab === 'clothing' ? selectedType : undefined
+      );
+      
+      // 状態を更新
+      if (activeTab === 'dolls') {
+        onDollsChange([...dolls, ...(result.items as DollData[])]);
+      } else if (activeTab === 'backgrounds') {
+        onBackgroundsChange([...backgrounds, ...(result.items as BackgroundData[])]);
+      } else {
+        onClothingChange([...clothingItems, ...(result.items as ClothingItemData[])]);
+      }
+      
+      alert(`取り込み完了！\n成功: ${result.success}件\n失敗: ${result.failed}件`);
+    } catch (error) {
+      console.error('ZIP取り込みエラー:', error);
+      alert('ZIPの取り込みに失敗しました');
+    } finally {
+      setIsImporting(false);
+      if (zipInputRef.current) zipInputRef.current.value = '';
+    }
+  };
+
+  // フォルダ一括取り込み
+  const handleFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setIsImporting(true);
+    try {
+      const result = await bulkImportFromFolder(
+        files,
+        activeTab,
+        activeTab === 'clothing' ? selectedType : undefined
+      );
+      
+      // 状態を更新
+      if (activeTab === 'dolls') {
+        onDollsChange([...dolls, ...(result.items as DollData[])]);
+      } else if (activeTab === 'backgrounds') {
+        onBackgroundsChange([...backgrounds, ...(result.items as BackgroundData[])]);
+      } else {
+        onClothingChange([...clothingItems, ...(result.items as ClothingItemData[])]);
+      }
+      
+      alert(`取り込み完了！\n成功: ${result.success}件\n失敗: ${result.failed}件`);
+    } catch (error) {
+      console.error('フォルダ取り込みエラー:', error);
+      alert('フォルダの取り込みに失敗しました');
+    } finally {
+      setIsImporting(false);
+      if (folderInputRef.current) folderInputRef.current.value = '';
     }
   };
 
@@ -211,6 +280,49 @@ export function SettingsPanel({
           >
             {isAdding ? '追加中...' : '➕ 追加'}
           </button>
+        </div>
+
+        {/* 一括取り込みセクション */}
+        <div style={styles.bulkImportSection}>
+          <p style={styles.bulkTitle}>📦 一括取り込み</p>
+          {activeTab === 'clothing' && (
+            <p style={styles.bulkNote}>
+              ※「{CLOTHING_CATEGORIES.find(c => c.type === selectedType)?.label}」として取り込みます
+            </p>
+          )}
+          <div style={styles.bulkButtons}>
+            <label style={{
+              ...styles.bulkButton,
+              ...(isImporting ? styles.addButtonDisabled : {}),
+            }}>
+              📁 ZIPファイル
+              <input
+                ref={zipInputRef}
+                type="file"
+                accept=".zip"
+                onChange={handleZipImport}
+                style={{ display: 'none' }}
+                disabled={isImporting}
+              />
+            </label>
+            <label style={{
+              ...styles.bulkButton,
+              ...(isImporting ? styles.addButtonDisabled : {}),
+            }}>
+              📂 フォルダ
+              <input
+                ref={folderInputRef}
+                type="file"
+                /* @ts-expect-error webkitdirectory is not standard */
+                webkitdirectory=""
+                multiple
+                onChange={handleFolderImport}
+                style={{ display: 'none' }}
+                disabled={isImporting}
+              />
+            </label>
+          </div>
+          {isImporting && <p style={styles.importingText}>取り込み中...</p>}
         </div>
 
         {/* アイテム一覧 */}
@@ -456,5 +568,42 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '18px',
     cursor: 'pointer',
     padding: '4px 8px',
+  },
+  bulkImportSection: {
+    padding: '12px',
+    borderBottom: '1px solid #eee',
+    backgroundColor: '#f8f9fa',
+  },
+  bulkTitle: {
+    margin: '0 0 8px 0',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  bulkNote: {
+    margin: '0 0 8px 0',
+    fontSize: '12px',
+    color: '#888',
+  },
+  bulkButtons: {
+    display: 'flex',
+    gap: '8px',
+  },
+  bulkButton: {
+    flex: 1,
+    padding: '10px 12px',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    color: 'white',
+    background: 'linear-gradient(135deg, #28a745 0%, #218838 100%)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
+  importingText: {
+    marginTop: '8px',
+    fontSize: '13px',
+    color: '#28a745',
+    textAlign: 'center',
   },
 };
