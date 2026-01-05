@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.7';
+const APP_VERSION = '0.4.8';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -116,7 +116,7 @@ function App() {
   }, [currentDollId, allDolls]);
 
   // メニュー幅
-  const MENU_WIDTH = 340;
+  const MENU_WIDTH = 300;
 
   // キャンバスサイズ（iPad横向き最適化）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
