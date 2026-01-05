@@ -112,6 +112,7 @@ export interface ClothingItemData {
   author?: string; // 作者名
   createdAt?: string; // 作成日
   isCustom?: boolean; // カスタムアイテムかどうか
+  dollId?: string; // 紐付けられたドールID（プリセット取り込み時に設定）
   // 自動スケーリング用のアンカー情報
   anchorType?: 'head' | 'neck' | 'torso' | 'hip' | 'feet'; // どの部位に合わせるか
 }

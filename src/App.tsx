@@ -18,7 +18,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.3.0';
 
 // Viteのbase pathを取得（GitHub Pages対応）
 const BASE_PATH = import.meta.env.BASE_URL;
@@ -214,12 +214,22 @@ function App() {
     setAllClothing([...DEFAULT_CLOTHING, ...customClothing]);
   }, []);
 
+  // 現在のドールに紐付けられたアイテムのみフィルタ
+  const filteredClothing = useMemo(() => {
+    return allClothing.filter(item => {
+      // dollIdがない（デフォルト）アイテムは全ドールで表示
+      if (!item.dollId) return true;
+      // dollIdがある場合は現在のドールのみ
+      return item.dollId === currentDollId;
+    });
+  }, [allClothing, currentDollId]);
+
   // アイテムをスケーリング
   const scaledItems = useMemo(() => {
-    return allClothing.map(item =>
+    return filteredClothing.map(item =>
       scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
     );
-  }, [allClothing, currentDoll.dimensions, canvasSize.height]);
+  }, [filteredClothing, currentDoll.dimensions, canvasSize.height]);
 
   // スケーリングされた下着
   const scaledUnderwear = useMemo(() => {
@@ -371,7 +381,7 @@ function App() {
         {/* ドレスアップメニュー */}
         <section className="palette-section">
           <DressUpMenu
-            items={allClothing}
+            items={filteredClothing}
             onItemDrop={handleItemDrop}
             equippedItems={equippedItems}
             onReset={handleReset}

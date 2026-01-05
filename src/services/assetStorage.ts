@@ -269,6 +269,31 @@ export async function deleteCustomClothing(id: string): Promise<void> {
   saveCustomClothing(items);
 }
 
+/**
+ * すべてのカスタムデータを削除
+ */
+export async function clearAllCustomData(): Promise<void> {
+  // IndexedDBの全画像を削除
+  const dolls = loadCustomDolls();
+  const backgrounds = loadCustomBackgrounds();
+  const clothing = loadCustomClothing();
+  
+  for (const doll of dolls) {
+    await deleteImageFromStorage(doll.id);
+  }
+  for (const bg of backgrounds) {
+    await deleteImageFromStorage(bg.id);
+  }
+  for (const item of clothing) {
+    await deleteImageFromStorage(item.id);
+  }
+  
+  // LocalStorageをクリア
+  localStorage.removeItem(STORAGE_KEYS.CUSTOM_DOLLS);
+  localStorage.removeItem(STORAGE_KEYS.CUSTOM_BACKGROUNDS);
+  localStorage.removeItem(STORAGE_KEYS.CUSTOM_CLOTHING);
+}
+
 // ========== 一括取り込み機能 ==========
 
 // ZIPファイルから画像を抽出（JSZipなしの簡易実装）
@@ -788,8 +813,8 @@ export async function importPresetFromFolder(
           await saveImageToStorage(id, base64);
           
           const item = createClothingData(id, name, category, base64);
-          // プリセットIDを関連付け
-          (item as any).presetId = presetId;
+          // ドールIDを関連付け
+          item.dollId = dollId;
           clothingItems.push(item);
         }
       }
@@ -941,7 +966,8 @@ export async function importPresetFromZip(
           await saveImageToStorage(id, base64);
           
           const item = createClothingData(id, name, category, base64);
-          (item as any).presetId = presetId;
+          // ドールIDを関連付け
+          item.dollId = dollId;
           clothingItems.push(item);
         }
       }
