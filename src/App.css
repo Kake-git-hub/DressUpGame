@@ -111,6 +111,7 @@ textarea {
   max-height: calc(100vh - 100px);
   overflow-y: auto;
   z-index: 10;
+  padding-top: 64px;
 }
 
 /* リセットボタン */

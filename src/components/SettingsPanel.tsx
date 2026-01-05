@@ -12,6 +12,9 @@ import {
   deleteCustomClothing,
   importPresetFromFolder,
   importPresetFromZip,
+  restoreDollImages,
+  restoreBackgroundImages,
+  restoreClothingImages,
   clearAllCustomData,
 } from '../services/assetStorage';
 
@@ -60,10 +63,15 @@ export function SettingsPanel({
       const defaultDolls = dolls.filter(d => !d.isCustom);
       const defaultClothing = clothingItems.filter(i => !i.isCustom);
       const defaultBackgrounds = backgrounds.filter(b => !b.isCustom);
+
+      // 画像URLをIndexedDBから確実に復元（空の場合に備える）
+      const restoredDolls = await restoreDollImages(newDolls);
+      const restoredClothing = await restoreClothingImages(newClothing);
+      const restoredBackgrounds = await restoreBackgroundImages(result.backgrounds.items);
       
-      onDollsChange([...defaultDolls, ...newDolls]);
-      onClothingChange([...defaultClothing, ...newClothing]);
-      onBackgroundsChange([...defaultBackgrounds, ...result.backgrounds.items]);
+      onDollsChange([...defaultDolls, ...restoredDolls]);
+      onClothingChange([...defaultClothing, ...restoredClothing]);
+      onBackgroundsChange([...defaultBackgrounds, ...restoredBackgrounds]);
       
       const presetCount = result.presets.success;
       const bgCount = result.backgrounds.success;
@@ -103,12 +111,16 @@ export function SettingsPanel({
         const newClothing = result.presets.items.flatMap(p => p.clothingItems);
         const defaultDolls = dolls.filter(d => !d.isCustom);
         const defaultClothing = clothingItems.filter(c => !c.isCustom);
-        onDollsChange([...defaultDolls, ...newDolls]);
-        onClothingChange([...defaultClothing, ...newClothing]);
+
+        const restoredDolls = await restoreDollImages(newDolls);
+        const restoredClothing = await restoreClothingImages(newClothing);
+        onDollsChange([...defaultDolls, ...restoredDolls]);
+        onClothingChange([...defaultClothing, ...restoredClothing]);
       }
       if (result.backgrounds.items.length > 0) {
         const defaultBackgrounds = backgrounds.filter(b => !b.isCustom);
-        onBackgroundsChange([...defaultBackgrounds, ...result.backgrounds.items]);
+        const restoredBackgrounds = await restoreBackgroundImages(result.backgrounds.items);
+        onBackgroundsChange([...defaultBackgrounds, ...restoredBackgrounds]);
       }
       
       const presetCount = result.presets.success;
