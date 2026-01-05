@@ -36,8 +36,8 @@ export function DollControlPanel({
 
   // 位置を制限（背景領域外にもはみ出せるように広めに）
   const clampPosition = (x: number, y: number) => ({
-    x: Math.max(-20, Math.min(120, x)),
-    y: Math.max(-20, Math.min(120, y)),
+    x: Math.max(-50, Math.min(150, x)),
+    y: Math.max(-50, Math.min(150, y)),
   });
 
   // マウス/タッチ開始
@@ -56,11 +56,12 @@ export function DollControlPanel({
     const deltaX = e.clientX - startPos.current.x;
     const deltaY = e.clientY - startPos.current.y;
 
-    // ピクセルをパーセンテージに変換（オーバーレイ全体のサイズ基準）
+    // ピクセルをパーセンテージに変換（画面の短辺を基準にして1:1の移動量を確保）
     const rect = overlayRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const percentX = (deltaX / rect.width) * 100;
-    const percentY = (deltaY / rect.height) * 100;
+    const baseSize = Math.min(rect.width, rect.height);
+    const percentX = (deltaX / baseSize) * 100;
+    const percentY = (deltaY / baseSize) * 100;
 
     const newPos = clampPosition(
       startTransform.current.x + percentX,

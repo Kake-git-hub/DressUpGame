@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.5.3';
+const APP_VERSION = '0.5.4';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -398,8 +398,6 @@ function App() {
                 equippedItems={equippedItems}
                 dollImageUrl={currentDollSafe.bodyImageUrl}
                 dollTransform={dollTransform}
-                draggingPreview={draggingPreview}
-                avatarSectionRef={avatarSectionRef}
               />
             )}
 
@@ -413,6 +411,31 @@ function App() {
                 canvasHeight={canvasSize.height}
               />
             )}
+
+            {/* movableアイテムドラッグ中のプレビュー */}
+            {draggingPreview && avatarSectionRef.current && (() => {
+              const rect = avatarSectionRef.current.getBoundingClientRect();
+              const left = draggingPreview.position.x - rect.left;
+              const top = draggingPreview.position.y - rect.top;
+              return (
+                <img
+                  src={draggingPreview.item.imageUrl}
+                  alt={draggingPreview.item.name}
+                  style={{
+                    position: 'absolute',
+                    left: left,
+                    top: top,
+                    transform: 'translate(-50%, -50%)',
+                    maxWidth: '120px',
+                    maxHeight: '120px',
+                    opacity: 0.8,
+                    pointerEvents: 'none',
+                    filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.4))',
+                    zIndex: 100,
+                  }}
+                />
+              );
+            })()}
           </section>
         )}
 

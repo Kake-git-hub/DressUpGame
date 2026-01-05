@@ -95,7 +95,7 @@ textarea {
 /* アバターセクション - 背景と同じ全画面領域 */
 .avatar-section {
   position: absolute;
-  left: 200px; /* メニュー幅(180px) + マージン(20px) */
+  left: 160px; /* メニュー幅(140px) + マージン(20px) */
   right: 0;
   top: 0;
   bottom: 0;
@@ -103,13 +103,14 @@ textarea {
   justify-content: center;
   align-items: center;
   overflow: visible; /* ドールがはみ出せるように */
+  z-index: 1; /* 背景より上、メニューより下 */
 }
 
 /* パレットセクション - 左端に固定 */
 .palette-section {
   flex-shrink: 0;
-  width: 180px;
-  max-height: calc(100vh - 80px);
+  width: 140px;
+  height: calc(100vh - 60px);
   overflow-y: auto;
   z-index: 10;
   padding-top: 56px;
@@ -162,11 +163,11 @@ textarea {
   }
 
   .palette-section {
-    width: 180px;
+    width: 140px;
   }
 
   .avatar-section {
-    left: 200px; /* メニュー幅(180px) + マージン(20px) */
+    left: 160px; /* メニュー幅(140px) + マージン(20px) */
   }
 
   .app-footer {
@@ -299,7 +300,7 @@ textarea {
 /* 背景レイヤー（ドールエリア全域） */
 .background-layer {
   position: absolute;
-  left: 300px; /* メニュー幅(280px) + マージン(20px) */
+  left: 160px; /* メニュー幅(140px) + マージン(20px) */
   right: 0;
   top: 0;
   bottom: 0;
