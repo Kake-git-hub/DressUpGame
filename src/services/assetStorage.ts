@@ -996,10 +996,10 @@ export async function importPresetFromZip(
   
   // ファイルをプリセット別に分類
   const presetMap = new Map<string, {
-    dolls: { name: string; blob: Blob }[];
-    clothing: Map<string, { name: string; blob: Blob }[]>;
+    dolls: { name: string; blob: Blob; fileNameWithExt: string }[];
+    clothing: Map<string, { name: string; blob: Blob; fileNameWithExt: string }[]>;
   }>();
-  const backgroundFiles: { name: string; blob: Blob }[] = [];
+  const backgroundFiles: { name: string; blob: Blob; fileNameWithExt: string }[] = [];
   
   console.log('=== ZIP取り込み開始 ===');
   console.log(`ZIP内ファイル数: ${Object.keys(zip.files).length}`);
@@ -1022,7 +1022,7 @@ export async function importPresetFromZip(
     // 背景フォルダ
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
-      backgroundFiles.push({ name: fileName, blob });
+      backgroundFiles.push({ name: fileName, blob, fileNameWithExt });
       console.log(`  → 背景として追加: ${fileName}`);
       continue;
     }
@@ -1047,7 +1047,7 @@ export async function importPresetFromZip(
     // dolls フォルダ内
     const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
     if (dollsIndex !== -1) {
-      preset.dolls.push({ name: fileName, blob });
+      preset.dolls.push({ name: fileName, blob, fileNameWithExt });
       console.log(`  → ドールとして追加: ${presetId} / ${fileName}`);
       continue;
     }
@@ -1059,7 +1059,7 @@ export async function importPresetFromZip(
       if (!preset.clothing.has(category)) {
         preset.clothing.set(category, []);
       }
-      preset.clothing.get(category)!.push({ name: fileName, blob });
+      preset.clothing.get(category)!.push({ name: fileName, blob, fileNameWithExt });
       console.log(`  → 服として追加: ${presetId} / ${category} / ${fileName}`);
     }
   }
@@ -1071,9 +1071,9 @@ export async function importPresetFromZip(
   }
   
   // 背景を取り込み
-  for (const { name, blob } of backgroundFiles) {
+  for (const { name, blob, fileNameWithExt } of backgroundFiles) {
     try {
-      const base64 = await blobToBase64(blob, name);
+      const base64 = await blobToBase64(blob, fileNameWithExt);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
@@ -1096,7 +1096,7 @@ export async function importPresetFromZip(
       }
       
       const dollFile = data.dolls[0];
-      const dollBase64 = await blobToBase64(dollFile.blob, dollFile.name);
+      const dollBase64 = await blobToBase64(dollFile.blob, dollFile.fileNameWithExt);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
       
@@ -1108,8 +1108,8 @@ export async function importPresetFromZip(
       for (const [category, clothingFiles] of data.clothing) {
         categories.push(getCategoryInfo(category));
         
-        for (const { name, blob } of clothingFiles) {
-          const base64 = await blobToBase64(blob, name);
+        for (const { name, blob, fileNameWithExt: clothingFileExt } of clothingFiles) {
+          const base64 = await blobToBase64(blob, clothingFileExt);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           

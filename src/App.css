@@ -80,23 +80,23 @@ textarea {
   display: none; /* iPad横向きでは非表示 */
 }
 
-/* メインコンテンツ - 横並び固定、ドールエリア中央・メニュー右端 */
+/* メインコンテンツ - 横並び固定、メニュー左端・ドールエリア右 */
 .app-main {
   display: flex;
   flex-direction: row;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   gap: 0;
   flex: 1;
   min-height: 0; /* flexで縮小を許可 */
-  padding-right: 16px;
+  padding-left: 16px;
 }
 
-/* アバターセクション - メニューを除いた中央に配置 */
+/* アバターセクション - メニューを除いた右側に配置 */
 .avatar-section {
   position: absolute;
-  left: 0;
-  right: 300px; /* メニュー幅(280px) + マージン(20px) */
+  left: 300px; /* メニュー幅(280px) + マージン(20px) */
+  right: 0;
   top: 0;
   bottom: 0;
   display: flex;
@@ -165,7 +165,7 @@ textarea {
   }
 
   .avatar-section {
-    right: 300px; /* メニュー幅(280px) + マージン(20px) */
+    left: 300px; /* メニュー幅(280px) + マージン(20px) */
   }
 
   .app-footer {
@@ -239,7 +239,7 @@ textarea {
 .settings-button {
   position: fixed;
   top: 16px;
-  right: 16px;
+  left: 16px;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -269,7 +269,7 @@ textarea {
 .doll-control-button {
   position: fixed;
   top: 16px;
-  right: 72px;
+  left: 72px;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -303,8 +303,8 @@ textarea {
 /* 背景レイヤー（ドールエリア全域） */
 .background-layer {
   position: absolute;
-  left: 0;
-  right: 300px; /* メニュー幅(280px) + マージン(20px) */
+  left: 300px; /* メニュー幅(280px) + マージン(20px) */
+  right: 0;
   top: 0;
   bottom: 0;
   z-index: 0;

@@ -35,10 +35,10 @@ export function DollControlPanel({
     return Math.sqrt(dx * dx + dy * dy);
   };
 
-  // 位置を制限
+  // 位置を制限（背景全域に移動可能）
   const clampPosition = (x: number, y: number) => ({
-    x: Math.max(10, Math.min(90, x)),
-    y: Math.max(20, Math.min(80, y)),
+    x: Math.max(0, Math.min(100, x)),
+    y: Math.max(0, Math.min(100, y)),
   });
 
   // マウス/タッチ開始
@@ -125,10 +125,6 @@ export function DollControlPanel({
 
   if (!isVisible) return null;
 
-  // ドール位置のマーカー（タッチ領域の中心を視覚的に表示）
-  const markerX = (canvasWidth * transform.x) / 100;
-  const markerY = (canvasHeight * transform.y) / 100;
-
   return (
     <div
       ref={overlayRef}
@@ -146,42 +142,6 @@ export function DollControlPanel({
       <div style={styles.guideTop}>
         <span style={styles.guideText}>ドラッグで移動 / ピンチでサイズ変更</span>
       </div>
-
-      {/* ドール位置マーカー（十字線） */}
-      <div
-        style={{
-          position: 'absolute',
-          left: markerX - 30,
-          top: markerY - 30,
-          width: 60,
-          height: 60,
-          border: '3px dashed #ff69b4',
-          borderRadius: '50%',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          left: markerX - 1,
-          top: markerY - 40,
-          width: 2,
-          height: 80,
-          backgroundColor: '#ff69b4',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          left: markerX - 40,
-          top: markerY - 1,
-          width: 80,
-          height: 2,
-          backgroundColor: '#ff69b4',
-          pointerEvents: 'none',
-        }}
-      />
     </div>
   );
 }
