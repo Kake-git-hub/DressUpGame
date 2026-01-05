@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.5';
+const APP_VERSION = '0.4.6';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -264,32 +264,20 @@ function App() {
 
   // カスタムドール更新（SettingsPanelから呼ばれる）
   const handleDollsChange = useCallback((newDolls: DollData[]) => {
-    // 新規追加されたドール（既存にないもの）をマージ
-    setAllDolls(prev => {
-      const existingIds = new Set(prev.map(d => d.id));
-      const uniqueNew = newDolls.filter(d => !existingIds.has(d.id));
-      return [...prev, ...uniqueNew];
-    });
+    // プリセット取り込みは「全上書き」なので、そのまま置き換える
+    setAllDolls(newDolls);
   }, []);
 
   // カスタム背景更新（SettingsPanelから呼ばれる）
   const handleBackgroundsChange = useCallback((newBgs: BackgroundData[]) => {
-    // 新規追加された背景（既存にないもの）をマージ
-    setAllBackgrounds(prev => {
-      const existingIds = new Set(prev.map(b => b.id));
-      const uniqueNew = newBgs.filter(b => !existingIds.has(b.id));
-      return [...prev, ...uniqueNew];
-    });
+    // プリセット取り込みは「全上書き」なので、そのまま置き換える
+    setAllBackgrounds(newBgs);
   }, []);
 
   // カスタム服更新（SettingsPanelから呼ばれる）
   const handleClothingChange = useCallback((newItems: ClothingItemData[]) => {
-    // 新規追加された服（既存にないもの）をマージ
-    setAllClothing(prev => {
-      const existingIds = new Set(prev.map(i => i.id));
-      const uniqueNew = newItems.filter(i => !existingIds.has(i.id));
-      return [...prev, ...uniqueNew];
-    });
+    // プリセット取り込みは「全上書き」なので、そのまま置き換える
+    setAllClothing(newItems);
   }, []);
 
   return (

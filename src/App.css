@@ -238,7 +238,7 @@ textarea {
 .settings-button {
   position: fixed;
   top: 16px;
-  right: 340px; /* メニュー幅 + 余白 */
+  right: 16px;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -268,7 +268,7 @@ textarea {
 .doll-control-button {
   position: fixed;
   top: 16px;
-  right: 400px; /* 設定ボタンの左 */
+  right: 72px;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -303,7 +303,7 @@ textarea {
 .background-layer {
   position: absolute;
   left: 0;
-  right: 340px; /* メニュー幅 */
+  right: 360px; /* メニュー幅 + マージン */
   top: 0;
   bottom: 0;
   z-index: 0;
