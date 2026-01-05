@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.2';
+const APP_VERSION = '0.4.3';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -307,7 +307,6 @@ function App() {
       </button>
 
       <main className="app-main">
-        {/* ドール表示エリア */}
         {/* 背景をドールエリア全体に表示 */}
         {currentBackground && (
           <div
@@ -320,45 +319,48 @@ function App() {
           />
         )}
 
-        <section className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}>
-          {isTestMode ? (
-            <div
-              id="avatar-canvas"
-              data-testid="avatar-canvas"
-              style={{
-                width: canvasSize.width,
-                height: canvasSize.height,
-                backgroundColor: '#fff5ee',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '24px',
-              }}
-            >
-              🎀 ドール表示エリア
-            </div>
-          ) : (
-            <AvatarCanvas
-              width={canvasSize.width}
-              height={canvasSize.height}
-              equippedItems={equippedItems}
-              dollImageUrl={currentDoll.bodyImageUrl}
-              dollTransform={dollTransform}
-            />
-          )}
+        {/* ドールが存在する場合のみ表示 */}
+        {allDolls.length > 0 && (
+          <section className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}>
+            {isTestMode ? (
+              <div
+                id="avatar-canvas"
+                data-testid="avatar-canvas"
+                style={{
+                  width: canvasSize.width,
+                  height: canvasSize.height,
+                  backgroundColor: '#fff5ee',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '24px',
+                }}
+              >
+                🎀 ドール表示エリア
+              </div>
+            ) : (
+              <AvatarCanvas
+                width={canvasSize.width}
+                height={canvasSize.height}
+                equippedItems={equippedItems}
+                dollImageUrl={currentDoll.bodyImageUrl}
+                dollTransform={dollTransform}
+              />
+            )}
 
-          {/* ドール調整パネル（キャンバス上に表示） */}
-          {showDollControls && (
-            <DollControlPanel
-              transform={dollTransform}
-              onChange={setDollTransform}
-              isVisible={showDollControls}
-              canvasWidth={canvasSize.width}
-              canvasHeight={canvasSize.height}
-            />
-          )}
-        </section>
+            {/* ドール調整パネル（キャンバス上に表示） */}
+            {showDollControls && (
+              <DollControlPanel
+                transform={dollTransform}
+                onChange={setDollTransform}
+                isVisible={showDollControls}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
+              />
+            )}
+          </section>
+        )}
 
         {/* ドレスアップメニュー - 位置調整中は非表示 */}
         {!showDollControls && (
