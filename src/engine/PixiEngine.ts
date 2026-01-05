@@ -3,7 +3,7 @@
  * ドールと服のレンダリングを担当
  */
 import { Application, Container, Graphics, Sprite, Assets } from 'pixi.js';
-import type { ClothingItemData, DollConfig, EquippedItem } from '../types';
+import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 
 export class PixiEngine {
   private app: Application | null = null;
@@ -14,6 +14,7 @@ export class PixiEngine {
   private initialized = false;
   private destroyed = false;
   private customFaceUrl: string | null = null;
+  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -129,8 +130,10 @@ export class PixiEngine {
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
 
-    const centerX = this.app.screen.width / 2;
-    const centerY = this.app.screen.height / 2;
+    // 位置をパーセントからピクセルに変換
+    const centerX = (this.app.screen.width * this.dollTransform.x) / 100;
+    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
+    const dollScale = this.dollTransform.scale;
 
     // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
     if (config.imageUrl) {
@@ -138,12 +141,12 @@ export class PixiEngine {
         const texture = await Assets.load(config.imageUrl);
         const dollSprite = new Sprite(texture);
 
-        // キャンバスに収まるようにスケーリング（高さの90%に合わせる）
+        // キャンバスに収まるようにスケーリング（高さの90%に合わせてから、ドールスケールを適用）
         const maxHeight = this.app.screen.height * 0.9;
-        const scale = maxHeight / texture.height;
-        dollSprite.scale.set(scale);
+        const baseScale = maxHeight / texture.height;
+        dollSprite.scale.set(baseScale * dollScale);
 
-        // 中心に配置
+        // 位置を設定
         dollSprite.anchor.set(0.5);
         dollSprite.x = centerX;
         dollSprite.y = centerY;
@@ -159,41 +162,54 @@ export class PixiEngine {
     // プレースホルダーとしてシンプルな人形を描画
     const doll = new Graphics();
 
+    // スケールを適用したサイズ計算
+    const s = dollScale;
+
     // 頭（円）- カスタム顔がない場合のみ描画
     if (!this.customFaceUrl) {
-      doll.circle(centerX, centerY - 80, 40);
+      doll.circle(centerX, centerY - 80 * s, 40 * s);
       doll.fill(0xffe4c4); // 肌色
     }
 
     // 体（楕円風の四角形）
-    doll.roundRect(centerX - 35, centerY - 30, 70, 100, 10);
+    doll.roundRect(centerX - 35 * s, centerY - 30 * s, 70 * s, 100 * s, 10 * s);
     doll.fill(0xffe4c4);
 
     // 腕
-    doll.roundRect(centerX - 55, centerY - 20, 20, 60, 5);
+    doll.roundRect(centerX - 55 * s, centerY - 20 * s, 20 * s, 60 * s, 5 * s);
     doll.fill(0xffe4c4);
-    doll.roundRect(centerX + 35, centerY - 20, 20, 60, 5);
+    doll.roundRect(centerX + 35 * s, centerY - 20 * s, 20 * s, 60 * s, 5 * s);
     doll.fill(0xffe4c4);
 
     // 脚
-    doll.roundRect(centerX - 25, centerY + 70, 20, 70, 5);
+    doll.roundRect(centerX - 25 * s, centerY + 70 * s, 20 * s, 70 * s, 5 * s);
     doll.fill(0xffe4c4);
-    doll.roundRect(centerX + 5, centerY + 70, 20, 70, 5);
+    doll.roundRect(centerX + 5 * s, centerY + 70 * s, 20 * s, 70 * s, 5 * s);
     doll.fill(0xffe4c4);
 
     // 顔（目）- カスタム顔がない場合のみ
     if (!this.customFaceUrl) {
-      doll.circle(centerX - 12, centerY - 85, 5);
+      doll.circle(centerX - 12 * s, centerY - 85 * s, 5 * s);
       doll.fill(0x333333);
-      doll.circle(centerX + 12, centerY - 85, 5);
+      doll.circle(centerX + 12 * s, centerY - 85 * s, 5 * s);
       doll.fill(0x333333);
 
       // 口（笑顔）
-      doll.arc(centerX, centerY - 70, 15, 0.1, Math.PI - 0.1);
+      doll.arc(centerX, centerY - 70 * s, 15 * s, 0.1, Math.PI - 0.1);
       doll.stroke({ width: 2, color: 0xff6b6b });
     }
 
     this.dollContainer.addChild(doll);
+  }
+
+  // ドールの位置・スケールを設定
+  setDollTransform(transform: DollTransform): void {
+    this.dollTransform = transform;
+  }
+
+  // 現在のドール位置・スケールを取得
+  getDollTransform(): DollTransform {
+    return { ...this.dollTransform };
   }
 
   // カスタム顔を設定
@@ -256,8 +272,10 @@ export class PixiEngine {
     // 既存の服をクリア
     this.clothingContainer.removeChildren();
 
-    const centerX = this.app.screen.width / 2;
-    const centerY = this.app.screen.height / 2;
+    // 位置をパーセントからピクセルに変換
+    const centerX = (this.app.screen.width * this.dollTransform.x) / 100;
+    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
+    const s = this.dollTransform.scale; // スケール
 
     // 既にソートされていることを想定（useDressUpでソート済み）
     items.forEach((item) => {
@@ -266,64 +284,64 @@ export class PixiEngine {
       switch (item.type) {
         case 'underwear_top':
           // 白いキャミソール
-          clothing.roundRect(centerX - 30, centerY - 25, 60, 45, 5);
+          clothing.roundRect(centerX - 30 * s, centerY - 25 * s, 60 * s, 45 * s, 5 * s);
           clothing.fill(0xffffff);
           clothing.stroke({ width: 1, color: 0xdddddd });
           // ストラップ
-          clothing.moveTo(centerX - 20, centerY - 25);
-          clothing.lineTo(centerX - 15, centerY - 40);
+          clothing.moveTo(centerX - 20 * s, centerY - 25 * s);
+          clothing.lineTo(centerX - 15 * s, centerY - 40 * s);
           clothing.stroke({ width: 3, color: 0xffffff });
-          clothing.moveTo(centerX + 20, centerY - 25);
-          clothing.lineTo(centerX + 15, centerY - 40);
+          clothing.moveTo(centerX + 20 * s, centerY - 25 * s);
+          clothing.lineTo(centerX + 15 * s, centerY - 40 * s);
           clothing.stroke({ width: 3, color: 0xffffff });
           break;
 
         case 'underwear_bottom':
           // 白いショーツ
-          clothing.roundRect(centerX - 25, centerY + 30, 50, 30, 5);
+          clothing.roundRect(centerX - 25 * s, centerY + 30 * s, 50 * s, 30 * s, 5 * s);
           clothing.fill(0xffffff);
           clothing.stroke({ width: 1, color: 0xdddddd });
           break;
 
         case 'top':
           // Tシャツ
-          clothing.roundRect(centerX - 40, centerY - 30, 80, 60, 5);
+          clothing.roundRect(centerX - 40 * s, centerY - 30 * s, 80 * s, 60 * s, 5 * s);
           clothing.fill(0x6495ed); // 青
           // 袖
-          clothing.roundRect(centerX - 55, centerY - 25, 20, 40, 3);
+          clothing.roundRect(centerX - 55 * s, centerY - 25 * s, 20 * s, 40 * s, 3 * s);
           clothing.fill(0x6495ed);
-          clothing.roundRect(centerX + 35, centerY - 25, 20, 40, 3);
+          clothing.roundRect(centerX + 35 * s, centerY - 25 * s, 20 * s, 40 * s, 3 * s);
           clothing.fill(0x6495ed);
           break;
 
         case 'bottom':
           // スカート/パンツ
-          clothing.roundRect(centerX - 35, centerY + 30, 70, 50, 3);
+          clothing.roundRect(centerX - 35 * s, centerY + 30 * s, 70 * s, 50 * s, 3 * s);
           clothing.fill(0xff69b4); // ピンク
           break;
 
         case 'dress':
           // ワンピース
-          clothing.roundRect(centerX - 40, centerY - 30, 80, 110, 5);
+          clothing.roundRect(centerX - 40 * s, centerY - 30 * s, 80 * s, 110 * s, 5 * s);
           clothing.fill(0x9370db); // 紫
           // 袖
-          clothing.roundRect(centerX - 55, centerY - 25, 20, 40, 3);
+          clothing.roundRect(centerX - 55 * s, centerY - 25 * s, 20 * s, 40 * s, 3 * s);
           clothing.fill(0x9370db);
-          clothing.roundRect(centerX + 35, centerY - 25, 20, 40, 3);
+          clothing.roundRect(centerX + 35 * s, centerY - 25 * s, 20 * s, 40 * s, 3 * s);
           clothing.fill(0x9370db);
           break;
 
         case 'shoes':
           // 靴
-          clothing.roundRect(centerX - 28, centerY + 135, 25, 12, 3);
+          clothing.roundRect(centerX - 28 * s, centerY + 135 * s, 25 * s, 12 * s, 3 * s);
           clothing.fill(0x8b4513); // 茶色
-          clothing.roundRect(centerX + 3, centerY + 135, 25, 12, 3);
+          clothing.roundRect(centerX + 3 * s, centerY + 135 * s, 25 * s, 12 * s, 3 * s);
           clothing.fill(0x8b4513);
           break;
 
         case 'accessory':
           // リボン（頭）
-          clothing.star(centerX, centerY - 125, 5, 15, 8);
+          clothing.star(centerX, centerY - 125 * s, 5 * s, 15 * s, 8);
           clothing.fill(0xff1493); // ピンク
           break;
       }

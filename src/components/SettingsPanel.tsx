@@ -1,10 +1,11 @@
 /**
  * SettingsPanel コンポーネント
- * iPadから背景・ドール・服の素材を追加・削除できる設定画面
+ * プリセット取り込み（ZIP/フォルダ）と素材管理
+ * 一括取り込みは廃止、プリセット取り込みのみ対応
  */
 import { useState, useRef, type CSSProperties } from 'react';
 import type { ClothingItemData, DollData, BackgroundData, ClothingType } from '../types';
-import { CLOTHING_CATEGORIES } from '../types';
+import { CLOTHING_CATEGORIES, getCategoryInfo } from '../types';
 import {
   addCustomDoll,
   addCustomBackground,
@@ -12,12 +13,11 @@ import {
   deleteCustomDoll,
   deleteCustomBackground,
   deleteCustomClothing,
-  bulkImportFromZip,
-  bulkImportFromFolder,
-  bulkImportFromHierarchicalFolder,
+  importPresetFromFolder,
+  importPresetFromZip,
 } from '../services/assetStorage';
 
-type TabType = 'dolls' | 'backgrounds' | 'clothing';
+type TabType = 'preset' | 'dolls' | 'backgrounds' | 'clothing';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -40,16 +40,15 @@ export function SettingsPanel({
   onBackgroundsChange,
   onClothingChange,
 }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('dolls');
+  const [activeTab, setActiveTab] = useState<TabType>('preset');
   const [newItemName, setNewItemName] = useState('');
   const [selectedType, setSelectedType] = useState<ClothingType>('top');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const zipInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  const hierarchicalFolderInputRef = useRef<HTMLInputElement>(null);
+  const presetFolderInputRef = useRef<HTMLInputElement>(null);
+  const presetZipInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -61,7 +60,7 @@ export function SettingsPanel({
     }
   };
 
-  // 追加ボタン押下時
+  // 追加ボタン押下時（個別追加用）
   const handleAdd = async () => {
     if (!selectedFile) {
       alert('画像をえらんでね');
@@ -105,111 +104,87 @@ export function SettingsPanel({
     }
   };
 
-  // ZIP一括取り込み
-  const handleZipImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // プリセットフォルダ取り込み（新形式: doll-{id}/clothing/{category}/）
+  const handlePresetFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setIsImporting(true);
+    try {
+      const result = await importPresetFromFolder(files);
+      
+      // 状態を更新
+      if (result.presets.items.length > 0) {
+        const newDolls = result.presets.items.map(p => p.doll);
+        const newClothing = result.presets.items.flatMap(p => p.clothingItems);
+        onDollsChange([...dolls, ...newDolls]);
+        onClothingChange([...clothingItems, ...newClothing]);
+      }
+      if (result.backgrounds.items.length > 0) {
+        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
+      }
+      
+      const presetCount = result.presets.success;
+      const bgCount = result.backgrounds.success;
+      const clothingCount = result.presets.items.reduce((sum, p) => sum + p.clothingItems.length, 0);
+      
+      alert(
+        `プリセット取り込み完了！\n` +
+        `ドール: ${presetCount}体\n` +
+        `背景: ${bgCount}枚\n` +
+        `服: ${clothingCount}着\n` +
+        (result.presets.failed > 0 ? `\n失敗: ${result.presets.failed}件` : '')
+      );
+    } catch (error) {
+      console.error('プリセット取り込みエラー:', error);
+      alert('プリセットの取り込みに失敗しました');
+    } finally {
+      setIsImporting(false);
+      if (presetFolderInputRef.current) presetFolderInputRef.current.value = '';
+    }
+  };
+
+  // プリセットZIP取り込み
+  const handlePresetZipImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
     setIsImporting(true);
     try {
-      const result = await bulkImportFromZip(
-        file,
-        activeTab,
-        activeTab === 'clothing' ? selectedType : undefined
-      );
+      const result = await importPresetFromZip(file);
       
       // 状態を更新
-      if (activeTab === 'dolls') {
-        onDollsChange([...dolls, ...(result.items as DollData[])]);
-      } else if (activeTab === 'backgrounds') {
-        onBackgroundsChange([...backgrounds, ...(result.items as BackgroundData[])]);
-      } else {
-        onClothingChange([...clothingItems, ...(result.items as ClothingItemData[])]);
+      if (result.presets.items.length > 0) {
+        const newDolls = result.presets.items.map(p => p.doll);
+        const newClothing = result.presets.items.flatMap(p => p.clothingItems);
+        onDollsChange([...dolls, ...newDolls]);
+        onClothingChange([...clothingItems, ...newClothing]);
+      }
+      if (result.backgrounds.items.length > 0) {
+        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
       }
       
-      alert(`取り込み完了！\n成功: ${result.success}件\n失敗: ${result.failed}件`);
+      const presetCount = result.presets.success;
+      const bgCount = result.backgrounds.success;
+      const clothingCount = result.presets.items.reduce((sum, p) => sum + p.clothingItems.length, 0);
+      
+      alert(
+        `ZIP取り込み完了！\n` +
+        `ドール: ${presetCount}体\n` +
+        `背景: ${bgCount}枚\n` +
+        `服: ${clothingCount}着\n` +
+        (result.presets.failed > 0 ? `\n失敗: ${result.presets.failed}件` : '')
+      );
     } catch (error) {
       console.error('ZIP取り込みエラー:', error);
       alert('ZIPの取り込みに失敗しました');
     } finally {
       setIsImporting(false);
-      if (zipInputRef.current) zipInputRef.current.value = '';
+      if (presetZipInputRef.current) presetZipInputRef.current.value = '';
     }
   };
 
-  // フォルダ一括取り込み
-  const handleFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    setIsImporting(true);
-    try {
-      const result = await bulkImportFromFolder(
-        files,
-        activeTab,
-        activeTab === 'clothing' ? selectedType : undefined
-      );
-      
-      // 状態を更新
-      if (activeTab === 'dolls') {
-        onDollsChange([...dolls, ...(result.items as DollData[])]);
-      } else if (activeTab === 'backgrounds') {
-        onBackgroundsChange([...backgrounds, ...(result.items as BackgroundData[])]);
-      } else {
-        onClothingChange([...clothingItems, ...(result.items as ClothingItemData[])]);
-      }
-      
-      alert(`取り込み完了！\n成功: ${result.success}件\n失敗: ${result.failed}件`);
-    } catch (error) {
-      console.error('フォルダ取り込みエラー:', error);
-      alert('フォルダの取り込みに失敗しました');
-    } finally {
-      setIsImporting(false);
-      if (folderInputRef.current) folderInputRef.current.value = '';
-    }
-  };
-
-  // 階層フォルダ一括取り込み（プリセット形式）
-  const handleHierarchicalFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    setIsImporting(true);
-    try {
-      const result = await bulkImportFromHierarchicalFolder(files);
-      
-      // 状態を更新
-      if (result.dolls.items.length > 0) {
-        onDollsChange([...dolls, ...result.dolls.items]);
-      }
-      if (result.backgrounds.items.length > 0) {
-        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
-      }
-      if (result.clothing.items.length > 0) {
-        onClothingChange([...clothingItems, ...result.clothing.items]);
-      }
-      
-      const totalSuccess = result.dolls.success + result.backgrounds.success + result.clothing.success;
-      const totalFailed = result.dolls.failed + result.backgrounds.failed + result.clothing.failed;
-      
-      alert(
-        `プリセット取り込み完了！\n` +
-        `ドール: ${result.dolls.success}件\n` +
-        `背景: ${result.backgrounds.success}件\n` +
-        `服: ${result.clothing.success}件\n` +
-        `---\n` +
-        `合計: ${totalSuccess}件成功, ${totalFailed}件失敗`
-      );
-    } catch (error) {
-      console.error('階層フォルダ取り込みエラー:', error);
-      alert('プリセットフォルダの取り込みに失敗しました');
-    } finally {
-      setIsImporting(false);
-      if (hierarchicalFolderInputRef.current) hierarchicalFolderInputRef.current.value = '';
-    }
-  };
-
-  const handleDelete = async (id: string, type: TabType) => {
+  const handleDelete = async (id: string, type: 'dolls' | 'backgrounds' | 'clothing') => {
     if (!confirm('削除しますか？')) return;
 
     try {
@@ -237,6 +212,9 @@ export function SettingsPanel({
   const customBackgrounds = backgrounds.filter(b => b.isCustom);
   const customClothing = clothingItems.filter(i => i.isCustom);
 
+  // 動的カテゴリ（使用中のカテゴリを抽出）
+  const usedCategories = [...new Set(customClothing.map(c => c.type))];
+
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.panel} onClick={e => e.stopPropagation()}>
@@ -247,6 +225,15 @@ export function SettingsPanel({
 
         {/* タブ */}
         <div style={styles.tabs}>
+          <button
+            style={{
+              ...styles.tab,
+              ...(activeTab === 'preset' ? styles.tabActive : {}),
+            }}
+            onClick={() => setActiveTab('preset')}
+          >
+            📦 プリセット
+          </button>
           <button
             style={{
               ...styles.tab,
@@ -276,120 +263,148 @@ export function SettingsPanel({
           </button>
         </div>
 
-        {/* 追加フォーム */}
-        <div style={styles.addForm}>
-          <input
-            type="text"
-            placeholder="なまえ"
-            value={newItemName}
-            onChange={e => setNewItemName(e.target.value)}
-            style={styles.nameInput}
-          />
-          
-          {activeTab === 'clothing' && (
-            <select
-              value={selectedType}
-              onChange={e => setSelectedType(e.target.value as ClothingType)}
-              style={styles.typeSelect}
-            >
-              {CLOTHING_CATEGORIES.map(cat => (
-                <option key={cat.type} value={cat.type}>
-                  {cat.emoji} {cat.label}
-                </option>
-              ))}
-            </select>
-          )}
-          
-          <label style={styles.fileButton}>
-            📁 {selectedFile ? selectedFile.name.slice(0, 10) + '...' : '画像をえらぶ'}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              style={{ display: 'none' }}
-              disabled={isAdding}
-            />
-          </label>
-          
-          <button
-            style={{
-              ...styles.addButton,
-              ...(isAdding || !selectedFile || !newItemName.trim() ? styles.addButtonDisabled : {}),
-            }}
-            onClick={handleAdd}
-            disabled={isAdding || !selectedFile || !newItemName.trim()}
-          >
-            {isAdding ? '追加中...' : '➕ 追加'}
-          </button>
-        </div>
-
-        {/* 一括取り込みセクション */}
-        <div style={styles.bulkImportSection}>
-          <p style={styles.bulkTitle}>📦 一括取り込み（現在のタブ用）</p>
-          {activeTab === 'clothing' && (
-            <p style={styles.bulkNote}>
-              ※「{CLOTHING_CATEGORIES.find(c => c.type === selectedType)?.label}」として取り込みます
-            </p>
-          )}
-          <div style={styles.bulkButtons}>
-            <label style={{
-              ...styles.bulkButton,
-              ...(isImporting ? styles.addButtonDisabled : {}),
-            }}>
-              📁 ZIPファイル
-              <input
-                ref={zipInputRef}
-                type="file"
-                accept=".zip"
-                onChange={handleZipImport}
-                style={{ display: 'none' }}
-                disabled={isImporting}
-              />
-            </label>
-            <label style={{
-              ...styles.bulkButton,
-              ...(isImporting ? styles.addButtonDisabled : {}),
-            }}>
-              📂 フォルダ
-              <input
-                ref={folderInputRef}
-                type="file"
-                /* @ts-expect-error webkitdirectory is not standard */
-                webkitdirectory=""
-                multiple
-                onChange={handleFolderImport}
-                style={{ display: 'none' }}
-                disabled={isImporting}
-              />
-            </label>
+        {/* プリセット取り込みタブ */}
+        {activeTab === 'preset' && (
+          <div style={styles.presetContent}>
+            <div style={styles.presetSection}>
+              <h3 style={styles.sectionTitle}>📁 プリセット取り込み</h3>
+              <p style={styles.helpText}>
+                フォルダ構造:<br/>
+                <code style={styles.code}>
+                  preset/<br/>
+                  ├── backgrounds/  ← 背景<br/>
+                  └── doll-xxx/     ← ドール名<br/>
+                  &nbsp;&nbsp;&nbsp;&nbsp;├── dolls/      ← ドール画像<br/>
+                  &nbsp;&nbsp;&nbsp;&nbsp;└── clothing/   ← 服<br/>
+                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── top/<br/>
+                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── bottom/<br/>
+                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── {'{カテゴリ}'}/
+                </code>
+              </p>
+              
+              <div style={styles.importButtons}>
+                <label style={{
+                  ...styles.importButton,
+                  ...(isImporting ? styles.buttonDisabled : {}),
+                }}>
+                  📂 フォルダを選択
+                  <input
+                    ref={presetFolderInputRef}
+                    type="file"
+                    /* @ts-expect-error webkitdirectory is not standard */
+                    webkitdirectory=""
+                    multiple
+                    onChange={handlePresetFolderImport}
+                    style={{ display: 'none' }}
+                    disabled={isImporting}
+                  />
+                </label>
+                
+                <label style={{
+                  ...styles.importButton,
+                  ...styles.importButtonZip,
+                  ...(isImporting ? styles.buttonDisabled : {}),
+                }}>
+                  🗜️ ZIPファイル
+                  <input
+                    ref={presetZipInputRef}
+                    type="file"
+                    accept=".zip"
+                    onChange={handlePresetZipImport}
+                    style={{ display: 'none' }}
+                    disabled={isImporting}
+                  />
+                </label>
+              </div>
+              
+              {isImporting && <p style={styles.importingText}>📥 取り込み中...</p>}
+            </div>
+            
+            <div style={styles.statsSection}>
+              <h3 style={styles.sectionTitle}>📊 現在の素材</h3>
+              <div style={styles.stats}>
+                <div style={styles.statItem}>
+                  <span style={styles.statEmoji}>👤</span>
+                  <span style={styles.statLabel}>ドール</span>
+                  <span style={styles.statValue}>{customDolls.length}</span>
+                </div>
+                <div style={styles.statItem}>
+                  <span style={styles.statEmoji}>🖼️</span>
+                  <span style={styles.statLabel}>背景</span>
+                  <span style={styles.statValue}>{customBackgrounds.length}</span>
+                </div>
+                <div style={styles.statItem}>
+                  <span style={styles.statEmoji}>👚</span>
+                  <span style={styles.statLabel}>服</span>
+                  <span style={styles.statValue}>{customClothing.length}</span>
+                </div>
+              </div>
+              {usedCategories.length > 0 && (
+                <div style={styles.categoryList}>
+                  <span style={styles.categoryLabel}>服カテゴリ: </span>
+                  {usedCategories.map(cat => {
+                    const info = getCategoryInfo(cat);
+                    return (
+                      <span key={cat} style={styles.categoryTag}>
+                        {info.emoji} {info.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* プリセット取り込みセクション */}
-        <div style={styles.presetImportSection}>
-          <p style={styles.bulkTitle}>📦 プリセット取り込み（全カテゴリ）</p>
-          <p style={styles.bulkNote}>
-            フォルダ構造: dolls/, backgrounds/, clothing/top/ など
-          </p>
-          <label style={{
-            ...styles.presetButton,
-            ...(isImporting ? styles.addButtonDisabled : {}),
-          }}>
-            🗂️ プリセットフォルダを選択
+        {/* 個別追加フォーム（ドール/背景/服タブ共通） */}
+        {activeTab !== 'preset' && (
+          <div style={styles.addForm}>
             <input
-              ref={hierarchicalFolderInputRef}
-              type="file"
-              /* @ts-expect-error webkitdirectory is not standard */
-              webkitdirectory=""
-              multiple
-              onChange={handleHierarchicalFolderImport}
-              style={{ display: 'none' }}
-              disabled={isImporting}
+              type="text"
+              placeholder="なまえ"
+              value={newItemName}
+              onChange={e => setNewItemName(e.target.value)}
+              style={styles.nameInput}
             />
-          </label>
-          {isImporting && <p style={styles.importingText}>取り込み中...</p>}
-        </div>
+            
+            {activeTab === 'clothing' && (
+              <select
+                value={selectedType}
+                onChange={e => setSelectedType(e.target.value as ClothingType)}
+                style={styles.typeSelect}
+              >
+                {CLOTHING_CATEGORIES.map(cat => (
+                  <option key={cat.type} value={cat.type}>
+                    {cat.emoji} {cat.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            
+            <label style={styles.fileButton}>
+              📁 {selectedFile ? selectedFile.name.slice(0, 10) + '...' : '画像をえらぶ'}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+                disabled={isAdding}
+              />
+            </label>
+            
+            <button
+              style={{
+                ...styles.addButton,
+                ...(isAdding || !selectedFile || !newItemName.trim() ? styles.buttonDisabled : {}),
+              }}
+              onClick={handleAdd}
+              disabled={isAdding || !selectedFile || !newItemName.trim()}
+            >
+              {isAdding ? '追加中...' : '➕ 追加'}
+            </button>
+          </div>
+        )}
 
         {/* アイテム一覧 */}
         <div style={styles.itemList}>
@@ -443,23 +458,26 @@ export function SettingsPanel({
               {customClothing.length === 0 ? (
                 <p style={styles.emptyText}>まだ追加していません</p>
               ) : (
-                customClothing.map(item => (
-                  <div key={item.id} style={styles.listItem}>
-                    <img src={item.imageUrl} alt={item.name} style={styles.thumbnail} />
-                    <span style={styles.itemName}>
-                      {item.name}
-                      <span style={styles.itemType}>
-                        ({CLOTHING_CATEGORIES.find(c => c.type === item.type)?.label})
+                customClothing.map(item => {
+                  const catInfo = getCategoryInfo(item.type);
+                  return (
+                    <div key={item.id} style={styles.listItem}>
+                      <img src={item.imageUrl} alt={item.name} style={styles.thumbnail} />
+                      <span style={styles.itemName}>
+                        {item.name}
+                        <span style={styles.itemType}>
+                          ({catInfo.emoji} {catInfo.label})
+                        </span>
                       </span>
-                    </span>
-                    <button
-                      style={styles.deleteButton}
-                      onClick={() => handleDelete(item.id, 'clothing')}
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))
+                      <button
+                        style={styles.deleteButton}
+                        onClick={() => handleDelete(item.id, 'clothing')}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </>
           )}
@@ -517,17 +535,121 @@ const styles: Record<string, CSSProperties> = {
   },
   tab: {
     flex: 1,
-    padding: '12px',
+    padding: '10px 4px',
     border: 'none',
     background: 'none',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '12px',
     fontWeight: 'bold',
     color: '#666',
   },
   tabActive: {
     color: '#ff69b4',
     borderBottom: '2px solid #ff69b4',
+  },
+  presetContent: {
+    padding: '16px',
+    borderBottom: '1px solid #eee',
+  },
+  presetSection: {
+    marginBottom: '16px',
+  },
+  sectionTitle: {
+    margin: '0 0 8px 0',
+    fontSize: '14px',
+    color: '#333',
+  },
+  helpText: {
+    margin: '0 0 12px 0',
+    fontSize: '11px',
+    color: '#666',
+    lineHeight: 1.4,
+  },
+  code: {
+    display: 'block',
+    backgroundColor: '#f5f5f5',
+    padding: '8px',
+    borderRadius: '4px',
+    fontFamily: 'monospace',
+    fontSize: '10px',
+    marginTop: '4px',
+  },
+  importButtons: {
+    display: 'flex',
+    gap: '8px',
+  },
+  importButton: {
+    flex: 1,
+    padding: '12px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: 'white',
+    background: 'linear-gradient(135deg, #ff69b4 0%, #9370db 100%)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
+  importButtonZip: {
+    background: 'linear-gradient(135deg, #28a745 0%, #218838 100%)',
+  },
+  buttonDisabled: {
+    background: '#ccc',
+    cursor: 'not-allowed',
+  },
+  importingText: {
+    marginTop: '12px',
+    fontSize: '14px',
+    color: '#ff69b4',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  statsSection: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: '8px',
+    padding: '12px',
+  },
+  stats: {
+    display: 'flex',
+    justifyContent: 'space-around',
+    marginBottom: '8px',
+  },
+  statItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  statEmoji: {
+    fontSize: '24px',
+  },
+  statLabel: {
+    fontSize: '10px',
+    color: '#666',
+  },
+  statValue: {
+    fontSize: '18px',
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  categoryList: {
+    marginTop: '8px',
+    paddingTop: '8px',
+    borderTop: '1px solid #ddd',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  categoryLabel: {
+    fontSize: '11px',
+    color: '#666',
+  },
+  categoryTag: {
+    fontSize: '10px',
+    backgroundColor: '#e0e0e0',
+    padding: '2px 6px',
+    borderRadius: '10px',
+    color: '#333',
   },
   addForm: {
     padding: '12px',
@@ -538,7 +660,7 @@ const styles: Record<string, CSSProperties> = {
   },
   nameInput: {
     flex: 1,
-    minWidth: '120px',
+    minWidth: '100px',
     padding: '10px 12px',
     fontSize: '14px',
     border: '2px solid #ddd',
@@ -549,24 +671,24 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '14px',
     border: '2px solid #ddd',
     borderRadius: '8px',
-    minWidth: '130px',
+    minWidth: '110px',
   },
   fileButton: {
-    padding: '10px 16px',
-    fontSize: '14px',
+    padding: '10px 12px',
+    fontSize: '13px',
     fontWeight: 'bold',
     color: 'white',
     background: 'linear-gradient(135deg, #6c757d 0%, #495057 100%)',
     borderRadius: '8px',
     cursor: 'pointer',
     textAlign: 'center',
-    maxWidth: '140px',
+    maxWidth: '120px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   addButton: {
-    padding: '10px 20px',
+    padding: '10px 16px',
     fontSize: '14px',
     fontWeight: 'bold',
     color: 'white',
@@ -574,10 +696,6 @@ const styles: Record<string, CSSProperties> = {
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
-  },
-  addButtonDisabled: {
-    background: '#ccc',
-    cursor: 'not-allowed',
   },
   itemList: {
     flex: 1,
@@ -624,7 +742,7 @@ const styles: Record<string, CSSProperties> = {
     color: '#333',
   },
   itemType: {
-    fontSize: '12px',
+    fontSize: '11px',
     color: '#999',
     marginLeft: '4px',
   },
@@ -634,59 +752,5 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '18px',
     cursor: 'pointer',
     padding: '4px 8px',
-  },
-  bulkImportSection: {
-    padding: '12px',
-    borderBottom: '1px solid #eee',
-    backgroundColor: '#f8f9fa',
-  },
-  bulkTitle: {
-    margin: '0 0 8px 0',
-    fontSize: '14px',
-    fontWeight: 'bold',
-    color: '#555',
-  },
-  bulkNote: {
-    margin: '0 0 8px 0',
-    fontSize: '12px',
-    color: '#888',
-  },
-  bulkButtons: {
-    display: 'flex',
-    gap: '8px',
-  },
-  bulkButton: {
-    flex: 1,
-    padding: '10px 12px',
-    fontSize: '13px',
-    fontWeight: 'bold',
-    color: 'white',
-    background: 'linear-gradient(135deg, #28a745 0%, #218838 100%)',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    textAlign: 'center',
-  },
-  presetImportSection: {
-    padding: '12px',
-    borderBottom: '1px solid #eee',
-    backgroundColor: '#fff3cd',
-  },
-  presetButton: {
-    display: 'block',
-    width: '100%',
-    padding: '12px',
-    fontSize: '14px',
-    fontWeight: 'bold',
-    color: 'white',
-    background: 'linear-gradient(135deg, #fd7e14 0%, #e65c00 100%)',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    textAlign: 'center',
-  },
-  importingText: {
-    marginTop: '8px',
-    fontSize: '13px',
-    color: '#28a745',
-    textAlign: 'center',
   },
 };

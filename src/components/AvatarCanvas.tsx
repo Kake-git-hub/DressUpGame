@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
-import type { DollConfig, EquippedItem } from '../types';
+import type { DollConfig, EquippedItem, DollTransform } from '../types';
 
 interface AvatarCanvasProps {
   width?: number;
@@ -14,6 +14,7 @@ interface AvatarCanvasProps {
   customFaceUrl?: string;
   dollImageUrl?: string; // ドールベース画像のURL
   backgroundImageUrl?: string; // 背景画像のURL
+  dollTransform?: DollTransform; // ドールの位置・スケール
   onCanvasReady?: () => void;
 }
 
@@ -25,6 +26,7 @@ export function AvatarCanvas({
   customFaceUrl,
   dollImageUrl,
   backgroundImageUrl,
+  dollTransform,
   onCanvasReady,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -121,6 +123,20 @@ export function AvatarCanvas({
       engineRef.current.setBackground(backgroundImageUrl ?? null);
     }
   }, [backgroundImageUrl, isReady]);
+
+  // ドールの位置・スケールが変わったら更新
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized() && dollTransform) {
+      engineRef.current.setDollTransform(dollTransform);
+      // ドールと服を再描画
+      engineRef.current.drawDoll({
+        width: 200,
+        height: 300,
+        imageUrl: dollImageUrl || '',
+      });
+      engineRef.current.drawClothing(equippedItems);
+    }
+  }, [dollTransform, isReady]);
 
   return (
     <canvas

@@ -27,3 +27,15 @@ dist-ssr
 playwright-report/
 test-results/
 coverage/
+
+# Local preset artifacts (do not commit)
+preset-template.zip
+
+# User-generated sample assets under preset-template (keep only template structure/docs)
+preset-template/backgrounds/*.png
+preset-template/backgrounds/*.jpg
+preset-template/backgrounds/*.jpeg
+preset-template/backgrounds/*.webp
+preset-template/doll-*/
+preset-template/doll-chibi/
+preset-template/doll-kawaii/

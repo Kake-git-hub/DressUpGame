@@ -11,3 +11,4 @@ export { AIFaceGenerator } from './AIFaceGenerator';
 export { ItemImporter } from './ItemImporter';
 export { ItemManager } from './ItemManager';
 export { SettingsPanel } from './SettingsPanel';
+export { DollControlPanel } from './DollControlPanel';

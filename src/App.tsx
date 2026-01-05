@@ -6,7 +6,7 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo } from 'react';
-import { AvatarCanvas, DressUpMenu } from './components';
+import { AvatarCanvas, DressUpMenu, DollControlPanel } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
 import {
@@ -14,7 +14,7 @@ import {
   loadCustomBackgrounds,
   loadCustomClothing,
 } from './services/assetStorage';
-import type { ClothingItemData, DollData, DollDimensions, BackgroundData } from './types';
+import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform } from './types';
 import './App.css';
 
 // アプリバージョン
@@ -167,24 +167,28 @@ function App() {
     [currentDollId, allDolls]
   );
 
+  // メニュー幅
+  const MENU_WIDTH = 340;
+
   // キャンバスサイズ（iPad横向き最適化）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
 
-  // 画面サイズに応じてキャンバスサイズを計算
+  // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた中央エリア）
   useEffect(() => {
     const updateCanvasSize = () => {
       const vh = window.innerHeight;
       const vw = window.innerWidth;
 
-      const maxHeight = vh - 60;
-      const maxWidth = vw - 340;
+      // メニューを除いたエリアの中央に配置
+      const availableWidth = vw - MENU_WIDTH - 40; // 左右マージン
+      const maxHeight = vh - 80;
 
       const dollAspect = 0.5;
       let height = maxHeight;
       let width = height * dollAspect;
 
-      if (width > maxWidth) {
-        width = maxWidth;
+      if (width > availableWidth) {
+        width = availableWidth;
         height = width / dollAspect;
       }
 
@@ -253,6 +257,10 @@ function App() {
   // 背景ID
   const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(null);
 
+  // ドール位置・スケール調整
+  const [dollTransform, setDollTransform] = useState<DollTransform>({ x: 50, y: 50, scale: 1.0 });
+  const [showDollControls, setShowDollControls] = useState(false);
+
   // 現在の背景
   const currentBackground = useMemo(() => 
     currentBackgroundId ? allBackgrounds.find(bg => bg.id === currentBackgroundId) : null,
@@ -264,22 +272,34 @@ function App() {
     setCurrentBackgroundId(bgId);
   }, []);
 
-  // カスタムドール更新
-  const handleDollsChange = useCallback((dolls: DollData[]) => {
-    const customDolls = dolls.filter(d => d.isCustom);
-    setAllDolls([...DEFAULT_DOLLS, ...customDolls]);
+  // カスタムドール更新（SettingsPanelから呼ばれる）
+  const handleDollsChange = useCallback((newDolls: DollData[]) => {
+    // 新規追加されたドール（既存にないもの）をマージ
+    setAllDolls(prev => {
+      const existingIds = new Set(prev.map(d => d.id));
+      const uniqueNew = newDolls.filter(d => !existingIds.has(d.id));
+      return [...prev, ...uniqueNew];
+    });
   }, []);
 
-  // カスタム背景更新
-  const handleBackgroundsChange = useCallback((backgrounds: BackgroundData[]) => {
-    const customBgs = backgrounds.filter(b => b.isCustom);
-    setAllBackgrounds([...DEFAULT_BACKGROUNDS, ...customBgs]);
+  // カスタム背景更新（SettingsPanelから呼ばれる）
+  const handleBackgroundsChange = useCallback((newBgs: BackgroundData[]) => {
+    // 新規追加された背景（既存にないもの）をマージ
+    setAllBackgrounds(prev => {
+      const existingIds = new Set(prev.map(b => b.id));
+      const uniqueNew = newBgs.filter(b => !existingIds.has(b.id));
+      return [...prev, ...uniqueNew];
+    });
   }, []);
 
-  // カスタム服更新
-  const handleClothingChange = useCallback((items: ClothingItemData[]) => {
-    const customItems = items.filter(i => i.isCustom);
-    setAllClothing([...DEFAULT_CLOTHING, ...customItems]);
+  // カスタム服更新（SettingsPanelから呼ばれる）
+  const handleClothingChange = useCallback((newItems: ClothingItemData[]) => {
+    // 新規追加された服（既存にないもの）をマージ
+    setAllClothing(prev => {
+      const existingIds = new Set(prev.map(i => i.id));
+      const uniqueNew = newItems.filter(i => !existingIds.has(i.id));
+      return [...prev, ...uniqueNew];
+    });
   }, []);
 
   return (
@@ -294,6 +314,15 @@ function App() {
         title="せってい"
       >
         ⚙️
+      </button>
+
+      {/* ドール調整ボタン */}
+      <button
+        className="doll-control-button"
+        onClick={() => setShowDollControls(!showDollControls)}
+        title="ドール調整"
+      >
+        📐
       </button>
 
       <main className="app-main">
@@ -323,6 +352,18 @@ function App() {
               equippedItems={equippedItems}
               dollImageUrl={currentDoll.bodyImageUrl}
               backgroundImageUrl={currentBackground?.imageUrl}
+              dollTransform={dollTransform}
+            />
+          )}
+
+          {/* ドール調整パネル（キャンバス上に表示） */}
+          {showDollControls && (
+            <DollControlPanel
+              transform={dollTransform}
+              onChange={setDollTransform}
+              isVisible={showDollControls}
+              canvasWidth={canvasSize.width}
+              canvasHeight={canvasSize.height}
             />
           )}
         </section>

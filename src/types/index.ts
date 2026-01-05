@@ -56,8 +56,8 @@ export interface DollDimensions {
   };
 }
 
-// 服アイテムの種類（下着を追加）
-export type ClothingType = 'underwear_top' | 'underwear_bottom' | 'top' | 'bottom' | 'dress' | 'accessory' | 'shoes';
+// 服アイテムの種類（動的に拡張可能なstring型）
+export type ClothingType = string;
 
 // カテゴリー表示情報
 export interface CategoryInfo {
@@ -66,15 +66,38 @@ export interface CategoryInfo {
   emoji: string;
 }
 
-// 全カテゴリーの定義
+// デフォルトカテゴリの定義（フォルダ名からのマッピング用）
+export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string; zIndex: number; position: { x: number; y: number }; anchorType: string }> = {
+  'top': { label: 'トップス', emoji: '👚', zIndex: 20, position: { x: 0, y: -30 }, anchorType: 'torso' },
+  'bottom': { label: 'ボトムス', emoji: '👖', zIndex: 10, position: { x: 0, y: 30 }, anchorType: 'hip' },
+  'dress': { label: 'ワンピース', emoji: '👗', zIndex: 15, position: { x: 0, y: 0 }, anchorType: 'torso' },
+  'shoes': { label: 'くつ', emoji: '👟', zIndex: 5, position: { x: 0, y: 135 }, anchorType: 'feet' },
+  'accessory': { label: 'アクセサリー', emoji: '🎀', zIndex: 30, position: { x: 0, y: -125 }, anchorType: 'head' },
+  'hat': { label: 'ぼうし', emoji: '🎩', zIndex: 32, position: { x: 0, y: -140 }, anchorType: 'head' },
+  'socks': { label: 'くつした', emoji: '🧦', zIndex: 4, position: { x: 0, y: 100 }, anchorType: 'feet' },
+  'bag': { label: 'かばん', emoji: '👜', zIndex: 35, position: { x: 60, y: 0 }, anchorType: 'torso' },
+  'underwear_top': { label: 'したぎ(うえ)', emoji: '🩱', zIndex: 0, position: { x: 0, y: -30 }, anchorType: 'torso' },
+  'underwear_bottom': { label: 'したぎ(した)', emoji: '🩲', zIndex: 1, position: { x: 0, y: 30 }, anchorType: 'hip' },
+};
+
+// フォルダ名からカテゴリ情報を取得（なければデフォルト作成）
+export function getCategoryInfo(folderName: string): CategoryInfo {
+  const lower = folderName.toLowerCase();
+  const mapping = DEFAULT_CATEGORY_MAP[lower];
+  if (mapping) {
+    return { type: lower, label: mapping.label, emoji: mapping.emoji };
+  }
+  // 未知のカテゴリはフォルダ名をそのまま使用
+  return { type: lower, label: folderName, emoji: '📁' };
+}
+
+// レガシー互換: 静的カテゴリリスト
 export const CLOTHING_CATEGORIES: CategoryInfo[] = [
   { type: 'top', label: 'トップス', emoji: '👚' },
   { type: 'bottom', label: 'ボトムス', emoji: '👖' },
   { type: 'dress', label: 'ワンピース', emoji: '👗' },
   { type: 'shoes', label: 'くつ', emoji: '👟' },
   { type: 'accessory', label: 'アクセサリー', emoji: '🎀' },
-  { type: 'underwear_top', label: 'したぎ(うえ)', emoji: '🩱' },
-  { type: 'underwear_bottom', label: 'したぎ(した)', emoji: '🩲' },
 ];
 
 // 服アイテムの定義
@@ -198,4 +221,30 @@ export interface GameData {
   dolls: DollData[];
   items: ClothingItemData[];
   selectedDollId: string | null;
+}
+
+// ========== プリセット関連の型 ==========
+
+// ドール専用プリセット（ドールと専用服をセットで管理）
+export interface DollPreset {
+  id: string;                     // プリセットID（フォルダ名: doll-chibi等）
+  name: string;                   // 表示名
+  doll: DollData;                 // ドールデータ
+  clothingItems: ClothingItemData[];  // このドール専用の服
+  categories: CategoryInfo[];     // 使用可能なカテゴリ（フォルダから動的に検出）
+}
+
+// ドールの位置・サイズ調整用
+export interface DollTransform {
+  x: number;      // X位置（%）
+  y: number;      // Y位置（%）
+  scale: number;  // スケール（1.0 = 100%）
+}
+
+// ゲーム状態
+export interface GameState {
+  phase: 'doll-select' | 'background-select' | 'dress-up' | 'complete';
+  selectedPresetId: string | null;
+  selectedBackgroundId: string | null;
+  dollTransform: DollTransform;
 }

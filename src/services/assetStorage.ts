@@ -4,12 +4,14 @@
  * iPadでも動作可能
  */
 
-import type { ClothingItemData, DollData, BackgroundData, ClothingType } from '../types';
+import type { ClothingItemData, DollData, BackgroundData, ClothingType, DollPreset, CategoryInfo } from '../types';
+import { DEFAULT_CATEGORY_MAP, getCategoryInfo } from '../types';
 
 const STORAGE_KEYS = {
   CUSTOM_DOLLS: 'dressup_custom_dolls',
   CUSTOM_BACKGROUNDS: 'dressup_custom_backgrounds',
   CUSTOM_CLOTHING: 'dressup_custom_clothing',
+  DOLL_PRESETS: 'dressup_doll_presets',
 };
 
 // IndexedDB名
@@ -213,7 +215,7 @@ export async function addCustomBackground(
   return bg;
 }
 
-// 新しいカスタム服を追加
+// 新しいカスタム服を追加（動的カテゴリ対応）
 export async function addCustomClothing(
   name: string,
   type: ClothingType,
@@ -223,18 +225,13 @@ export async function addCustomClothing(
   const base64 = await fileToBase64(imageFile);
   await saveImageToStorage(id, base64);
   
-  // タイプに応じたデフォルト位置とzIndex
-  const typeDefaults: Record<ClothingType, { position: { x: number; y: number }; baseZIndex: number; anchorType: string }> = {
-    underwear_top: { position: { x: 0, y: -30 }, baseZIndex: 0, anchorType: 'torso' },
-    underwear_bottom: { position: { x: 0, y: 30 }, baseZIndex: 1, anchorType: 'hip' },
-    top: { position: { x: 0, y: -30 }, baseZIndex: 20, anchorType: 'torso' },
-    bottom: { position: { x: 0, y: 30 }, baseZIndex: 10, anchorType: 'hip' },
-    dress: { position: { x: 0, y: 0 }, baseZIndex: 15, anchorType: 'torso' },
-    shoes: { position: { x: 0, y: 135 }, baseZIndex: 5, anchorType: 'feet' },
-    accessory: { position: { x: 0, y: -125 }, baseZIndex: 30, anchorType: 'head' },
+  // DEFAULT_CATEGORY_MAPからデフォルト値を取得
+  const mapping = DEFAULT_CATEGORY_MAP[type.toLowerCase()];
+  const defaults = mapping || {
+    position: { x: 0, y: 0 },
+    zIndex: 25,
+    anchorType: 'torso',
   };
-  
-  const defaults = typeDefaults[type];
   
   const item: ClothingItemData = {
     id,
@@ -242,7 +239,7 @@ export async function addCustomClothing(
     type,
     imageUrl: base64,
     position: defaults.position,
-    baseZIndex: defaults.baseZIndex,
+    baseZIndex: mapping?.zIndex || 25,
     anchorType: defaults.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet',
     isCustom: true,
   };
@@ -461,19 +458,15 @@ function createDollData(id: string, name: string, base64: string): DollData {
   };
 }
 
-// 服データを作成するヘルパー
+// 服データを作成するヘルパー（動的カテゴリ対応）
 function createClothingData(id: string, name: string, type: ClothingType, base64: string): ClothingItemData {
-  const typeDefaults: Record<ClothingType, { position: { x: number; y: number }; baseZIndex: number; anchorType: string }> = {
-    underwear_top: { position: { x: 0, y: -30 }, baseZIndex: 0, anchorType: 'torso' },
-    underwear_bottom: { position: { x: 0, y: 30 }, baseZIndex: 1, anchorType: 'hip' },
-    top: { position: { x: 0, y: -30 }, baseZIndex: 20, anchorType: 'torso' },
-    bottom: { position: { x: 0, y: 30 }, baseZIndex: 10, anchorType: 'hip' },
-    dress: { position: { x: 0, y: 0 }, baseZIndex: 15, anchorType: 'torso' },
-    shoes: { position: { x: 0, y: 135 }, baseZIndex: 5, anchorType: 'feet' },
-    accessory: { position: { x: 0, y: -125 }, baseZIndex: 30, anchorType: 'head' },
+  // DEFAULT_CATEGORY_MAPからデフォルト値を取得、なければ汎用値
+  const mapping = DEFAULT_CATEGORY_MAP[type.toLowerCase()];
+  const defaults = mapping || {
+    position: { x: 0, y: 0 },
+    zIndex: 25,
+    anchorType: 'torso',
   };
-  
-  const defaults = typeDefaults[type];
   
   return {
     id,
@@ -481,7 +474,7 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     type,
     imageUrl: base64,
     position: defaults.position,
-    baseZIndex: defaults.baseZIndex,
+    baseZIndex: mapping?.zIndex || 25,
     anchorType: defaults.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet',
     isCustom: true,
   };
@@ -489,7 +482,7 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
 
 // ========== 階層フォルダ一括取り込み ==========
 
-// フォルダ階層からカテゴリを判定
+// フォルダ階層からカテゴリを判定（レガシー互換）
 function detectCategoryFromPath(path: string): {
   type: 'dolls' | 'backgrounds' | 'clothing';
   clothingType?: ClothingType;
@@ -506,24 +499,10 @@ function detectCategoryFromPath(path: string): {
     return { type: 'backgrounds' };
   }
   
-  // 服カテゴリ
-  const clothingTypes: { pattern: string; type: ClothingType }[] = [
-    { pattern: 'underwear_top', type: 'underwear_top' },
-    { pattern: 'underwear_bottom', type: 'underwear_bottom' },
-    { pattern: 'top', type: 'top' },
-    { pattern: 'bottom', type: 'bottom' },
-    { pattern: 'dress', type: 'dress' },
-    { pattern: 'shoes', type: 'shoes' },
-    { pattern: 'accessory', type: 'accessory' },
-  ];
-  
-  for (const { pattern, type } of clothingTypes) {
-    if (lowerPath.includes(`/clothing/${pattern}/`) || 
-        lowerPath.includes(`/clothing\\${pattern}\\`) ||
-        lowerPath.startsWith(`clothing/${pattern}/`) ||
-        lowerPath.startsWith(`clothing\\${pattern}\\`)) {
-      return { type: 'clothing', clothingType: type };
-    }
+  // 服カテゴリ（動的検出）
+  const clothingMatch = lowerPath.match(/[/\\]clothing[/\\]([^/\\]+)[/\\]/);
+  if (clothingMatch) {
+    return { type: 'clothing', clothingType: clothingMatch[1] };
   }
   
   return null;
@@ -536,7 +515,7 @@ export interface HierarchicalImportResult {
   clothing: { success: number; failed: number; items: ClothingItemData[] };
 }
 
-// フォルダ階層から一括取り込み（複数カテゴリ対応）
+// フォルダ階層から一括取り込み（複数カテゴリ対応）- レガシー互換
 export async function bulkImportFromHierarchicalFolder(
   files: FileList
 ): Promise<HierarchicalImportResult> {
@@ -612,6 +591,392 @@ export async function bulkImportFromHierarchicalFolder(
   if (result.clothing.items.length > 0) {
     const existing = loadCustomClothing();
     saveCustomClothing([...existing, ...result.clothing.items]);
+  }
+  
+  return result;
+}
+
+// ========== 新プリセット形式（ドール専用） ==========
+
+// プリセット取り込み結果
+export interface PresetImportResult {
+  presets: { success: number; failed: number; items: DollPreset[] };
+  backgrounds: { success: number; failed: number; items: BackgroundData[] };
+}
+
+// ドールプリセットを保存
+export function saveDollPresets(presets: DollPreset[]): void {
+  // メタデータのみ保存（画像はIndexedDB）
+  const metaData = presets.map(p => ({
+    id: p.id,
+    name: p.name,
+    dollId: p.doll.id,
+    dollName: p.doll.name,
+    dollBodyImageUrl: p.doll.bodyImageUrl,
+    clothingIds: p.clothingItems.map(c => c.id),
+    categories: p.categories,
+  }));
+  localStorage.setItem(STORAGE_KEYS.DOLL_PRESETS, JSON.stringify(metaData));
+}
+
+// ドールプリセットを読み込み
+export function loadDollPresets(): DollPreset[] {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.DOLL_PRESETS);
+    if (!data) return [];
+    
+    const metaList = JSON.parse(data);
+    const allDolls = loadCustomDolls();
+    const allClothing = loadCustomClothing();
+    
+    return metaList.map((meta: any) => {
+      const doll = allDolls.find(d => d.id === meta.dollId) || {
+        id: meta.dollId,
+        name: meta.dollName,
+        bodyImageUrl: meta.dollBodyImageUrl,
+        isCustom: true,
+      };
+      const clothingItems = meta.clothingIds
+        .map((id: string) => allClothing.find(c => c.id === id))
+        .filter(Boolean);
+      
+      return {
+        id: meta.id,
+        name: meta.name,
+        doll,
+        clothingItems,
+        categories: meta.categories || [],
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+// プリセットフォルダから取り込み（新形式: doll-{id}/clothing/{category}/）
+export async function importPresetFromFolder(
+  files: FileList
+): Promise<PresetImportResult> {
+  const result: PresetImportResult = {
+    presets: { success: 0, failed: 0, items: [] },
+    backgrounds: { success: 0, failed: 0, items: [] },
+  };
+  
+  const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  
+  // ファイルをプリセット別に分類
+  const presetMap = new Map<string, {
+    dolls: { name: string; file: File }[];
+    clothing: Map<string, { name: string; file: File }[]>;
+  }>();
+  const backgroundFiles: { name: string; file: File }[] = [];
+  
+  console.log('=== プリセット取り込み開始 ===');
+  console.log(`ファイル数: ${files.length}`);
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    
+    // 画像ファイルかチェック（MIMEタイプまたは拡張子で判定）
+    const ext = file.name.toLowerCase().split('.').pop();
+    const isImage = imageTypes.includes(file.type) || 
+                    ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '');
+    if (!isImage) {
+      console.log(`スキップ（非画像）: ${file.name}, type=${file.type}`);
+      continue;
+    }
+    
+    const path = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+    const parts = path.split('/');
+    const fileName = file.name.replace(/\.[^.]+$/, '');
+    
+    console.log(`処理中: ${path}`);
+    
+    // 背景フォルダ
+    if (parts.some(p => p.toLowerCase() === 'backgrounds')) {
+      backgroundFiles.push({ name: fileName, file });
+      console.log(`  → 背景として追加`);
+      continue;
+    }
+    
+    // doll-{id} フォルダを探す
+    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
+    if (dollFolderIndex === -1) {
+      console.log(`  → スキップ（doll-フォルダなし）`);
+      continue;
+    }
+    
+    const presetId = parts[dollFolderIndex].toLowerCase();
+    
+    if (!presetMap.has(presetId)) {
+      presetMap.set(presetId, { dolls: [], clothing: new Map() });
+    }
+    const preset = presetMap.get(presetId)!;
+    
+    // dolls フォルダ内
+    if (parts.some(p => p.toLowerCase() === 'dolls')) {
+      preset.dolls.push({ name: fileName, file });
+      console.log(`  → ドールとして追加: ${presetId}`);
+      continue;
+    }
+    
+    // clothing/{category} フォルダ内
+    const clothingIndex = parts.findIndex(p => p.toLowerCase() === 'clothing');
+    if (clothingIndex !== -1 && clothingIndex + 1 < parts.length) {
+      const category = parts[clothingIndex + 1].toLowerCase();
+      // カテゴリがファイル名でないことを確認
+      if (category && !category.includes('.')) {
+        if (!preset.clothing.has(category)) {
+          preset.clothing.set(category, []);
+        }
+        preset.clothing.get(category)!.push({ name: fileName, file });
+        console.log(`  → 服として追加: ${presetId} / ${category}`);
+      }
+    }
+  }
+  
+  console.log(`背景ファイル: ${backgroundFiles.length}`);
+  console.log(`プリセット数: ${presetMap.size}`);
+  for (const [id, data] of presetMap) {
+    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種`);
+  }
+  
+  // 背景を取り込み
+  for (const { name, file } of backgroundFiles) {
+    try {
+      const base64 = await fileToBase64(file);
+      const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await saveImageToStorage(id, base64);
+      
+      const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+      result.backgrounds.items.push(bg);
+      result.backgrounds.success++;
+    } catch (e) {
+      console.error('Background import failed:', name, e);
+      result.backgrounds.failed++;
+    }
+  }
+  
+  // 各プリセットを取り込み
+  for (const [presetId, data] of presetMap) {
+    try {
+      // ドールがなければスキップ
+      if (data.dolls.length === 0) {
+        console.warn(`プリセット ${presetId} にドールがありません`);
+        result.presets.failed++;
+        continue;
+      }
+      
+      // 最初のドールを使用
+      const dollFile = data.dolls[0];
+      const dollBase64 = await fileToBase64(dollFile.file);
+      const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await saveImageToStorage(dollId, dollBase64);
+      
+      const doll = createDollData(dollId, dollFile.name, dollBase64);
+      
+      // 服を取り込み
+      const clothingItems: ClothingItemData[] = [];
+      const categories: CategoryInfo[] = [];
+      
+      for (const [category, clothingFiles] of data.clothing) {
+        categories.push(getCategoryInfo(category));
+        
+        for (const { name, file } of clothingFiles) {
+          const base64 = await fileToBase64(file);
+          const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          await saveImageToStorage(id, base64);
+          
+          const item = createClothingData(id, name, category, base64);
+          // プリセットIDを関連付け
+          (item as any).presetId = presetId;
+          clothingItems.push(item);
+        }
+      }
+      
+      const preset: DollPreset = {
+        id: presetId,
+        name: dollFile.name,
+        doll,
+        clothingItems,
+        categories,
+      };
+      
+      result.presets.items.push(preset);
+      result.presets.success++;
+      
+      // ドールと服を個別にも保存（互換性維持）
+      const existingDolls = loadCustomDolls();
+      saveCustomDolls([...existingDolls, doll]);
+      
+      const existingClothing = loadCustomClothing();
+      saveCustomClothing([...existingClothing, ...clothingItems]);
+      
+    } catch (e) {
+      console.error(`Preset ${presetId} import failed:`, e);
+      result.presets.failed++;
+    }
+  }
+  
+  // 背景を保存
+  if (result.backgrounds.items.length > 0) {
+    const existing = loadCustomBackgrounds();
+    saveCustomBackgrounds([...existing, ...result.backgrounds.items]);
+  }
+  
+  // プリセットを保存
+  if (result.presets.items.length > 0) {
+    const existing = loadDollPresets();
+    saveDollPresets([...existing, ...result.presets.items]);
+  }
+  
+  return result;
+}
+
+// ZIPからプリセット取り込み
+export async function importPresetFromZip(
+  zipFile: File
+): Promise<PresetImportResult> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(zipFile);
+  
+  const result: PresetImportResult = {
+    presets: { success: 0, failed: 0, items: [] },
+    backgrounds: { success: 0, failed: 0, items: [] },
+  };
+  
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+  
+  // ファイルをプリセット別に分類
+  const presetMap = new Map<string, {
+    dolls: { name: string; blob: Blob }[];
+    clothing: Map<string, { name: string; blob: Blob }[]>;
+  }>();
+  const backgroundFiles: { name: string; blob: Blob }[] = [];
+  
+  for (const [path, file] of Object.entries(zip.files)) {
+    if (file.dir) continue;
+    const lowerPath = path.toLowerCase();
+    if (!imageExtensions.some(ext => lowerPath.endsWith(ext))) continue;
+    
+    const parts = path.replace(/\\/g, '/').split('/');
+    const fileName = (parts.pop() || path).replace(/\.[^.]+$/, '');
+    const blob = await file.async('blob');
+    
+    // 背景フォルダ
+    if (parts.some(p => p.toLowerCase() === 'backgrounds')) {
+      backgroundFiles.push({ name: fileName, blob });
+      continue;
+    }
+    
+    // doll-{id} フォルダを探す
+    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
+    if (dollFolderIndex === -1) continue;
+    
+    const presetId = parts[dollFolderIndex].toLowerCase();
+    
+    if (!presetMap.has(presetId)) {
+      presetMap.set(presetId, { dolls: [], clothing: new Map() });
+    }
+    const preset = presetMap.get(presetId)!;
+    
+    // dolls フォルダ内
+    if (parts.some(p => p.toLowerCase() === 'dolls')) {
+      preset.dolls.push({ name: fileName, blob });
+      continue;
+    }
+    
+    // clothing/{category} フォルダ内
+    const clothingIndex = parts.findIndex(p => p.toLowerCase() === 'clothing');
+    if (clothingIndex !== -1 && clothingIndex + 1 < parts.length) {
+      const category = parts[clothingIndex + 1].toLowerCase();
+      if (!preset.clothing.has(category)) {
+        preset.clothing.set(category, []);
+      }
+      preset.clothing.get(category)!.push({ name: fileName, blob });
+    }
+  }
+  
+  // 背景を取り込み
+  for (const { name, blob } of backgroundFiles) {
+    try {
+      const base64 = await blobToBase64(blob);
+      const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await saveImageToStorage(id, base64);
+      
+      const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+      result.backgrounds.items.push(bg);
+      result.backgrounds.success++;
+    } catch (e) {
+      console.error('Background import failed:', name, e);
+      result.backgrounds.failed++;
+    }
+  }
+  
+  // 各プリセットを取り込み
+  for (const [presetId, data] of presetMap) {
+    try {
+      if (data.dolls.length === 0) {
+        console.warn(`プリセット ${presetId} にドールがありません`);
+        result.presets.failed++;
+        continue;
+      }
+      
+      const dollFile = data.dolls[0];
+      const dollBase64 = await blobToBase64(dollFile.blob);
+      const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await saveImageToStorage(dollId, dollBase64);
+      
+      const doll = createDollData(dollId, dollFile.name, dollBase64);
+      
+      const clothingItems: ClothingItemData[] = [];
+      const categories: CategoryInfo[] = [];
+      
+      for (const [category, clothingFiles] of data.clothing) {
+        categories.push(getCategoryInfo(category));
+        
+        for (const { name, blob } of clothingFiles) {
+          const base64 = await blobToBase64(blob);
+          const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          await saveImageToStorage(id, base64);
+          
+          const item = createClothingData(id, name, category, base64);
+          (item as any).presetId = presetId;
+          clothingItems.push(item);
+        }
+      }
+      
+      const preset: DollPreset = {
+        id: presetId,
+        name: dollFile.name,
+        doll,
+        clothingItems,
+        categories,
+      };
+      
+      result.presets.items.push(preset);
+      result.presets.success++;
+      
+      const existingDolls = loadCustomDolls();
+      saveCustomDolls([...existingDolls, doll]);
+      
+      const existingClothing = loadCustomClothing();
+      saveCustomClothing([...existingClothing, ...clothingItems]);
+      
+    } catch (e) {
+      console.error(`Preset ${presetId} import failed:`, e);
+      result.presets.failed++;
+    }
+  }
+  
+  if (result.backgrounds.items.length > 0) {
+    const existing = loadCustomBackgrounds();
+    saveCustomBackgrounds([...existing, ...result.backgrounds.items]);
+  }
+  
+  if (result.presets.items.length > 0) {
+    const existing = loadDollPresets();
+    saveDollPresets([...existing, ...result.presets.items]);
   }
   
   return result;

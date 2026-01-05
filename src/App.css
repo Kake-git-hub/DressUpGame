@@ -59,33 +59,37 @@ body {
   display: none; /* iPad横向きでは非表示 */
 }
 
-/* メインコンテンツ - 横並び固定 */
+/* メインコンテンツ - 横並び固定、ドールエリア中央・メニュー右端 */
 .app-main {
   display: flex;
   flex-direction: row;
-  justify-content: center;
+  justify-content: flex-end;
   align-items: center;
-  gap: 24px;
+  gap: 0;
   flex: 1;
   min-height: 0; /* flexで縮小を許可 */
+  padding-right: 16px;
 }
 
-/* アバターセクション - ドールを大きく */
+/* アバターセクション - メニューを除いた中央に配置 */
 .avatar-section {
+  position: absolute;
+  left: 0;
+  right: 340px; /* メニュー幅分を除外 */
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 12px;
-  flex: 1;
-  max-width: calc(100vh - 200px); /* 縦方向を基準にサイズ制限 */
 }
 
-/* パレットセクション - 固定幅 */
+/* パレットセクション - 右端に固定 */
 .palette-section {
   flex-shrink: 0;
   width: 320px;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 100px);
   overflow-y: auto;
+  z-index: 10;
 }
 
 /* リセットボタン */
@@ -134,12 +138,12 @@ body {
     font-size: 1.3rem;
   }
 
-  .app-main {
-    gap: 32px;
-  }
-
   .palette-section {
     width: 340px;
+  }
+
+  .avatar-section {
+    right: 360px; /* メニュー幅 + マージン */
   }
 
   .app-footer {
@@ -151,11 +155,16 @@ body {
 @media (max-width: 768px) and (orientation: portrait) {
   .app-main {
     flex-direction: column;
-    gap: 16px;
+    justify-content: flex-start;
+    padding-right: 0;
   }
 
   .avatar-section {
-    max-width: 100%;
+    position: relative;
+    right: 0;
+    top: 0;
+    transform: none;
+    width: 100%;
   }
 
   .palette-section {
@@ -231,5 +240,35 @@ body {
 }
 
 .settings-button:active {
+  transform: scale(0.95);
+}
+
+/* ドール調整ボタン */
+.doll-control-button {
+  position: fixed;
+  top: 16px;
+  right: 72px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 105, 180, 0.4);
+  z-index: 100;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doll-control-button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(255, 105, 180, 0.5);
+}
+
+.doll-control-button:active {
   transform: scale(0.95);
 }
