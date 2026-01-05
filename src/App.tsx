@@ -13,12 +13,15 @@ import {
   loadCustomDolls,
   loadCustomBackgrounds,
   loadCustomClothing,
+  restoreDollImages,
+  restoreBackgroundImages,
+  restoreClothingImages,
 } from './services/assetStorage';
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 
 // Viteのbase pathを取得（GitHub Pages対応）
 const BASE_PATH = import.meta.env.BASE_URL;
@@ -203,15 +206,29 @@ function App() {
     return () => window.removeEventListener('resize', updateCanvasSize);
   }, []);
 
-  // 初期化時にカスタムアイテムを読み込み
+  // 初期化時にカスタムアイテムを読み込み（IndexedDBから画像を復元）
   useEffect(() => {
-    const customDolls = loadCustomDolls();
-    const customBackgrounds = loadCustomBackgrounds();
-    const customClothing = loadCustomClothing();
+    const loadCustomData = async () => {
+      try {
+        // LocalStorageからメタデータを読み込み
+        const customDolls = loadCustomDolls();
+        const customBackgrounds = loadCustomBackgrounds();
+        const customClothing = loadCustomClothing();
 
-    setAllDolls([...DEFAULT_DOLLS, ...customDolls]);
-    setAllBackgrounds([...DEFAULT_BACKGROUNDS, ...customBackgrounds]);
-    setAllClothing([...DEFAULT_CLOTHING, ...customClothing]);
+        // IndexedDBから画像を復元
+        const restoredDolls = await restoreDollImages(customDolls);
+        const restoredBackgrounds = await restoreBackgroundImages(customBackgrounds);
+        const restoredClothing = await restoreClothingImages(customClothing);
+
+        setAllDolls([...DEFAULT_DOLLS, ...restoredDolls]);
+        setAllBackgrounds([...DEFAULT_BACKGROUNDS, ...restoredBackgrounds]);
+        setAllClothing([...DEFAULT_CLOTHING, ...restoredClothing]);
+      } catch (error) {
+        console.error('カスタムデータ読み込みエラー:', error);
+      }
+    };
+
+    loadCustomData();
   }, []);
 
   // 現在のドールに紐付けられたアイテムのみフィルタ

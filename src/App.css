@@ -74,10 +74,10 @@ body {
 /* アバターセクション - メニューを除いた中央に配置 */
 .avatar-section {
   position: absolute;
-  left: 16px;
+  left: 0;
   right: 360px; /* メニュー幅 + マージン */
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -282,7 +282,7 @@ body {
 .background-layer {
   position: absolute;
   left: 0;
-  right: 360px; /* メニュー幅 + マージン */
+  right: 340px; /* メニュー幅 */
   top: 0;
   bottom: 0;
   z-index: 0;

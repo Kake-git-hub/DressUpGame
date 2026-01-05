@@ -87,11 +87,16 @@ export async function deleteImageFromStorage(id: string): Promise<void> {
   });
 }
 
-// カスタムドールを保存
+// カスタムドールを保存（imageUrlはIndexedDBから復元するためIDのみ保存）
 export function saveCustomDolls(dolls: DollData[]): void {
   const data = dolls.map(d => ({
-    ...d,
+    id: d.id,
+    name: d.name,
+    skinTone: d.skinTone,
+    dimensions: d.dimensions,
+    joints: d.joints,
     isCustom: true,
+    // bodyImageUrlは保存しない（IndexedDBから復元）
   }));
   localStorage.setItem(STORAGE_KEYS.CUSTOM_DOLLS, JSON.stringify(data));
 }
@@ -106,11 +111,14 @@ export function loadCustomDolls(): DollData[] {
   }
 }
 
-// カスタム背景を保存
+// カスタム背景を保存（imageUrlはIndexedDBから復元するためIDのみ保存）
 export function saveCustomBackgrounds(backgrounds: BackgroundData[]): void {
   const data = backgrounds.map(b => ({
-    ...b,
+    id: b.id,
+    name: b.name,
+    thumbnailUrl: b.thumbnailUrl,
     isCustom: true,
+    // imageUrlは保存しない（IndexedDBから復元）
   }));
   localStorage.setItem(STORAGE_KEYS.CUSTOM_BACKGROUNDS, JSON.stringify(data));
 }
@@ -125,11 +133,18 @@ export function loadCustomBackgrounds(): BackgroundData[] {
   }
 }
 
-// カスタム服を保存
+// カスタム服を保存（imageUrlはIndexedDBから復元するためIDのみ保存）
 export function saveCustomClothing(items: ClothingItemData[]): void {
   const data = items.map(i => ({
-    ...i,
+    id: i.id,
+    name: i.name,
+    type: i.type,
+    baseZIndex: i.baseZIndex,
+    position: i.position,
+    anchorType: i.anchorType,
+    dollId: i.dollId,
     isCustom: true,
+    // imageUrlは保存しない（IndexedDBから復元）
   }));
   localStorage.setItem(STORAGE_KEYS.CUSTOM_CLOTHING, JSON.stringify(data));
 }
@@ -142,6 +157,62 @@ export function loadCustomClothing(): ClothingItemData[] {
   } catch {
     return [];
   }
+}
+
+// ========== 画像復元関数（IndexedDBから） ==========
+
+// カスタムドールの画像を復元
+export async function restoreDollImages(dolls: DollData[]): Promise<DollData[]> {
+  const restored: DollData[] = [];
+  for (const doll of dolls) {
+    if (doll.isCustom && !doll.bodyImageUrl) {
+      const imageData = await getImageFromStorage(doll.id);
+      if (imageData) {
+        restored.push({ ...doll, bodyImageUrl: imageData });
+      } else {
+        console.warn(`ドール画像が見つかりません: ${doll.id}`);
+      }
+    } else {
+      restored.push(doll);
+    }
+  }
+  return restored;
+}
+
+// カスタム背景の画像を復元
+export async function restoreBackgroundImages(backgrounds: BackgroundData[]): Promise<BackgroundData[]> {
+  const restored: BackgroundData[] = [];
+  for (const bg of backgrounds) {
+    if (bg.isCustom && !bg.imageUrl) {
+      const imageData = await getImageFromStorage(bg.id);
+      if (imageData) {
+        restored.push({ ...bg, imageUrl: imageData });
+      } else {
+        console.warn(`背景画像が見つかりません: ${bg.id}`);
+      }
+    } else {
+      restored.push(bg);
+    }
+  }
+  return restored;
+}
+
+// カスタム服の画像を復元
+export async function restoreClothingImages(items: ClothingItemData[]): Promise<ClothingItemData[]> {
+  const restored: ClothingItemData[] = [];
+  for (const item of items) {
+    if (item.isCustom && !item.imageUrl) {
+      const imageData = await getImageFromStorage(item.id);
+      if (imageData) {
+        restored.push({ ...item, imageUrl: imageData });
+      } else {
+        console.warn(`服画像が見つかりません: ${item.id}`);
+      }
+    } else {
+      restored.push(item);
+    }
+  }
+  return restored;
 }
 
 // 新しいカスタムドールを追加
