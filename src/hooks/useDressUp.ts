@@ -5,17 +5,6 @@
 import { useState, useCallback } from 'react';
 import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
 
-// 基本zIndex値（タイプごとのベース値）
-const BASE_Z_INDEX: Record<ClothingType, number> = {
-  underwear_top: 0,
-  underwear_bottom: 1,
-  bottom: 10,
-  top: 20,
-  dress: 15,
-  shoes: 5,
-  accessory: 30,
-};
-
 // 初期状態を作成
 const createInitialState = (
   availableItems: ClothingItemData[],
@@ -103,19 +92,10 @@ export function useDressUp(
   );
 
   // 装備中のアイテム一覧を取得（レンダリング順にソート）
-  // 1. baseZIndex（タイプごとの基本重ね順）
-  // 2. equipOrder（後から着せたものが上）
+  // equipOrder（後から着せたものが上）を最優先、baseZIndexは補助的に使用
   const getEquippedItems = useCallback((): EquippedItem[] => {
     return [...state.equippedItems].sort((a, b) => {
-      const baseA = BASE_Z_INDEX[a.type];
-      const baseB = BASE_Z_INDEX[b.type];
-
-      // まず基本zIndexで比較
-      if (baseA !== baseB) {
-        return baseA - baseB;
-      }
-
-      // 同じカテゴリ内では着せた順番で（後が上）
+      // 着せた順番で並べる（後が上）
       return a.equipOrder - b.equipOrder;
     });
   }, [state.equippedItems]);

@@ -67,28 +67,42 @@ export interface CategoryInfo {
 }
 
 // デフォルトカテゴリの定義（フォルダ名からのマッピング用）
-export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string; zIndex: number; position: { x: number; y: number }; anchorType: string }> = {
+export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string; zIndex: number; position: { x: number; y: number }; anchorType: string; movable?: boolean }> = {
   'top': { label: 'トップス', emoji: '👚', zIndex: 20, position: { x: 0, y: -30 }, anchorType: 'torso' },
   'bottom': { label: 'ボトムス', emoji: '👖', zIndex: 10, position: { x: 0, y: 30 }, anchorType: 'hip' },
   'dress': { label: 'ワンピース', emoji: '👗', zIndex: 15, position: { x: 0, y: 0 }, anchorType: 'torso' },
   'shoes': { label: 'くつ', emoji: '👟', zIndex: 5, position: { x: 0, y: 135 }, anchorType: 'feet' },
-  'accessory': { label: 'アクセサリー', emoji: '🎀', zIndex: 30, position: { x: 0, y: -125 }, anchorType: 'head' },
+  'accessory': { label: 'アクセサリー', emoji: '🎀', zIndex: 30, position: { x: 0, y: -125 }, anchorType: 'head', movable: true },
   'hat': { label: 'ぼうし', emoji: '🎩', zIndex: 32, position: { x: 0, y: -140 }, anchorType: 'head' },
   'socks': { label: 'くつした', emoji: '🧦', zIndex: 4, position: { x: 0, y: 100 }, anchorType: 'feet' },
-  'bag': { label: 'かばん', emoji: '👜', zIndex: 35, position: { x: 60, y: 0 }, anchorType: 'torso' },
+  'bag': { label: 'かばん', emoji: '👜', zIndex: 35, position: { x: 60, y: 0 }, anchorType: 'torso', movable: true },
   'underwear_top': { label: 'したぎ(うえ)', emoji: '🩱', zIndex: 0, position: { x: 0, y: -30 }, anchorType: 'torso' },
   'underwear_bottom': { label: 'したぎ(した)', emoji: '🩲', zIndex: 1, position: { x: 0, y: 30 }, anchorType: 'hip' },
+  'face': { label: '顔パーツ', emoji: '😊', zIndex: 40, position: { x: 0, y: -80 }, anchorType: 'head', movable: true },
 };
 
 // フォルダ名からカテゴリ情報を取得（なければデフォルト作成）
+// フォルダ名に _movable が含まれる場合は自由配置可能
 export function getCategoryInfo(folderName: string): CategoryInfo {
-  const lower = folderName.toLowerCase();
-  const mapping = DEFAULT_CATEGORY_MAP[lower];
+  // _movable サフィックスを除去してベース名を取得
+  const baseName = folderName.replace(/_movable/gi, '').toLowerCase();
+  
+  const mapping = DEFAULT_CATEGORY_MAP[baseName];
   if (mapping) {
-    return { type: lower, label: mapping.label, emoji: mapping.emoji };
+    return { type: baseName, label: mapping.label, emoji: mapping.emoji };
   }
   // 未知のカテゴリはフォルダ名をそのまま使用
-  return { type: lower, label: folderName, emoji: '📁' };
+  return { type: baseName, label: folderName.replace(/_movable/gi, ''), emoji: '📁' };
+}
+
+// フォルダ名から movable フラグを判定
+export function isMovableCategory(folderName: string): boolean {
+  const lower = folderName.toLowerCase();
+  // _movable サフィックスがある場合
+  if (lower.includes('_movable')) return true;
+  // デフォルトで movable なカテゴリ
+  const baseName = lower.replace(/_movable/gi, '');
+  return DEFAULT_CATEGORY_MAP[baseName]?.movable ?? false;
 }
 
 // レガシー互換: 静的カテゴリリスト
@@ -115,11 +129,19 @@ export interface ClothingItemData {
   dollId?: string; // 紐付けられたドールID（プリセット取り込み時に設定）
   // 自動スケーリング用のアンカー情報
   anchorType?: 'head' | 'neck' | 'torso' | 'hip' | 'feet'; // どの部位に合わせるか
+  // 自由配置可能フラグ（フォルダ名に_movableがあると有効）
+  movable?: boolean;
+  // 自由配置時のオフセット（装着後に移動した分）
+  offsetX?: number;
+  offsetY?: number;
 }
 
 // 装備中のアイテム（動的zIndex付き）
 export interface EquippedItem extends ClothingItemData {
   equipOrder: number; // 着せた順番
+  // 自由配置時のオフセット（装着後に移動した分）
+  currentOffsetX?: number;
+  currentOffsetY?: number;
 }
 
 // 背景画像の定義

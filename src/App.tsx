@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.5.2';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -213,7 +213,7 @@ function App() {
   }, [activeDimensions, canvasSize.height, currentDoll]);
 
   // 着せ替え状態管理フック
-  const { equipItem, getEquippedItems, resetAll } = useDressUp(scaledItems, scaledUnderwear);
+  const { equipItem, unequipItem, getEquippedItems, resetAll } = useDressUp(scaledItems, scaledUnderwear);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
@@ -226,6 +226,14 @@ function App() {
       equipItem(scaledItem);
     },
     [equipItem, scaledItems, currentDoll]
+  );
+
+  // 服を脱がせる処理（「なし」選択時）
+  const handleItemRemove = useCallback(
+    (type: string) => {
+      unequipItem(type);
+    },
+    [unequipItem]
   );
 
   // リセット
@@ -364,6 +372,7 @@ function App() {
             <DressUpMenu
               items={filteredClothing}
               onItemDrop={handleItemDrop}
+              onItemRemove={handleItemRemove}
               equippedItems={equippedItems}
               onReset={handleReset}
               dolls={allDolls}

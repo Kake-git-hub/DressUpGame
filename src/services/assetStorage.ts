@@ -593,7 +593,8 @@ function createDollData(id: string, name: string, base64: string): DollData {
 }
 
 // 服データを作成するヘルパー（動的カテゴリ対応）
-function createClothingData(id: string, name: string, type: ClothingType, base64: string): ClothingItemData {
+// categoryRaw: 元のフォルダ名（_movable サフィックス含む可能性あり）
+function createClothingData(id: string, name: string, type: ClothingType, base64: string, categoryRaw?: string): ClothingItemData {
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得、なければ汎用値
   const mapping = DEFAULT_CATEGORY_MAP[type.toLowerCase()];
   const defaults = mapping || {
@@ -601,6 +602,12 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     zIndex: 25,
     anchorType: 'torso',
   };
+  
+  // movable判定: categoryRawに_movableがあるか、デフォルトでmovableなカテゴリか
+  const rawLower = (categoryRaw || type).toLowerCase();
+  const hasMovableSuffix = rawLower.includes('_movable');
+  const isDefaultMovable = mapping?.movable ?? false;
+  const movable = hasMovableSuffix || isDefaultMovable;
   
   return {
     id,
@@ -611,6 +618,7 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     baseZIndex: mapping?.zIndex || 25,
     anchorType: defaults.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet',
     isCustom: true,
+    movable,
   };
 }
 
@@ -924,15 +932,17 @@ export async function importPresetFromFolder(
       const clothingItems: ClothingItemData[] = [];
       const categories: CategoryInfo[] = [];
       
-      for (const [category, clothingFiles] of data.clothing) {
-        categories.push(getCategoryInfo(category));
+      for (const [categoryRaw, clothingFiles] of data.clothing) {
+        // _movable サフィックスを除去したカテゴリ名を使用
+        const categoryClean = categoryRaw.replace(/_movable/gi, '').toLowerCase();
+        categories.push(getCategoryInfo(categoryRaw));
         
         for (const { name, file } of clothingFiles) {
           const base64 = await fileToBase64(file, file.name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          const item = createClothingData(id, name, category, base64);
+          const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
@@ -1105,15 +1115,17 @@ export async function importPresetFromZip(
       const clothingItems: ClothingItemData[] = [];
       const categories: CategoryInfo[] = [];
       
-      for (const [category, clothingFiles] of data.clothing) {
-        categories.push(getCategoryInfo(category));
+      for (const [categoryRaw, clothingFiles] of data.clothing) {
+        // _movable サフィックスを除去したカテゴリ名を使用
+        const categoryClean = categoryRaw.replace(/_movable/gi, '').toLowerCase();
+        categories.push(getCategoryInfo(categoryRaw));
         
         for (const { name, blob, fileNameWithExt: clothingFileExt } of clothingFiles) {
           const base64 = await blobToBase64(blob, clothingFileExt);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          const item = createClothingData(id, name, category, base64);
+          const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);

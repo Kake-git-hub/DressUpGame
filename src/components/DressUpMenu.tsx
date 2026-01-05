@@ -11,6 +11,7 @@ import { CLOTHING_CATEGORIES } from '../types';
 interface DressUpMenuProps {
   items: ClothingItemData[];
   onItemDrop: (item: ClothingItemData) => void;
+  onItemRemove?: (type: ClothingType) => void; // 「なし」選択時の脱がせる処理
   equippedItems: ClothingItemData[];
   onReset: () => void;
   dolls: DollData[];
@@ -25,6 +26,7 @@ interface DressUpMenuProps {
 export function DressUpMenu({
   items,
   onItemDrop,
+  onItemRemove,
   equippedItems,
   onReset,
   dolls,
@@ -41,21 +43,45 @@ export function DressUpMenu({
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
 
-  // 各カテゴリーのアイテム数をカウント
+  // 動的にカテゴリをカウント（itemsから自動検出）
   const categoryCounts = useMemo(() => {
-    const counts: Record<ClothingType, number> = {
-      underwear_top: 0,
-      underwear_bottom: 0,
-      top: 0,
-      bottom: 0,
-      dress: 0,
-      accessory: 0,
-      shoes: 0,
-    };
+    const counts: Record<string, number> = {};
     items.forEach(item => {
-      counts[item.type]++;
+      counts[item.type] = (counts[item.type] || 0) + 1;
     });
     return counts;
+  }, [items]);
+
+  // 動的カテゴリリスト（アイテムから検出）
+  const dynamicCategories = useMemo(() => {
+    const categoryMap = new Map<string, CategoryInfo>();
+    items.forEach(item => {
+      if (!categoryMap.has(item.type)) {
+        // デフォルトカテゴリかどうかチェック
+        const defaultCat = CLOTHING_CATEGORIES.find(c => c.type === item.type);
+        if (defaultCat) {
+          categoryMap.set(item.type, defaultCat);
+        } else {
+          // 動的カテゴリ
+          categoryMap.set(item.type, {
+            type: item.type,
+            label: item.type,
+            emoji: '📁',
+          });
+        }
+      }
+    });
+    // デフォルトカテゴリの順序を優先
+    const result: CategoryInfo[] = [];
+    CLOTHING_CATEGORIES.forEach(cat => {
+      if (categoryMap.has(cat.type)) {
+        result.push(categoryMap.get(cat.type)!);
+        categoryMap.delete(cat.type);
+      }
+    });
+    // 残りの動的カテゴリを追加
+    categoryMap.forEach(cat => result.push(cat));
+    return result;
   }, [items]);
 
   // 選択中カテゴリーのアイテム
@@ -175,20 +201,20 @@ export function DressUpMenu({
             </button>
           )}
           <div style={styles.categoryGrid}>
-            {CLOTHING_CATEGORIES.map(category => (
+            {dynamicCategories.map(category => (
               <button
                 key={category.type}
                 style={{
                   ...styles.categoryButton,
-                  opacity: categoryCounts[category.type] === 0 ? 0.5 : 1,
+                  opacity: (categoryCounts[category.type] || 0) === 0 ? 0.5 : 1,
                 }}
                 onClick={() => handleCategorySelect(category)}
-                disabled={categoryCounts[category.type] === 0}
+                disabled={(categoryCounts[category.type] || 0) === 0}
               >
                 <span style={styles.categoryEmoji}>{category.emoji}</span>
                 <span style={styles.categoryLabel}>{category.label}</span>
                 <span style={styles.categoryCount}>
-                  {categoryCounts[category.type]}こ
+                  {categoryCounts[category.type] || 0}こ
                 </span>
               </button>
             ))}
@@ -213,8 +239,8 @@ export function DressUpMenu({
               ← もどる
             </button>
             <h3 style={styles.titleSmall}>
-              {CLOTHING_CATEGORIES.find(c => c.type === selectedCategory)?.emoji}{' '}
-              {CLOTHING_CATEGORIES.find(c => c.type === selectedCategory)?.label}
+              {dynamicCategories.find(c => c.type === selectedCategory)?.emoji || '📁'}{' '}
+              {dynamicCategories.find(c => c.type === selectedCategory)?.label || selectedCategory}
             </h3>
           </div>
           
@@ -227,6 +253,24 @@ export function DressUpMenu({
           <p style={styles.hint}>👆 ドラッグしてドールにきせてね！</p>
 
           <div style={styles.itemGrid}>
+            {/* 「なし」ボタン - 脱がせる */}
+            {equippedInCategory && onItemRemove && (
+              <button
+                style={{
+                  ...styles.itemButton,
+                  ...styles.noneButton,
+                }}
+                onClick={() => {
+                  onItemRemove(selectedCategory!);
+                  handleBack();
+                }}
+              >
+                <div style={styles.itemImageContainer}>
+                  <span style={{ fontSize: '28px' }}>✕</span>
+                </div>
+                <span style={styles.itemName}>なし</span>
+              </button>
+            )}
             {filteredItems.map(item => (
               <DraggableItem
                 key={item.id}
@@ -343,13 +387,13 @@ const styles: Record<string, CSSProperties> = {
   container: {
     backgroundColor: '#f8f9fa',
     borderRadius: '16px',
-    padding: '12px',
+    padding: '10px',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-    minWidth: '280px',
-    maxWidth: '320px',
+    minWidth: '200px',
+    maxWidth: '220px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
+    gap: '6px',
   },
   menuHeader: {
     display: 'flex',
@@ -586,6 +630,11 @@ const styles: Record<string, CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  noneButton: {
+    backgroundColor: '#f8f8f8',
+    border: '2px dashed #ccc',
+    cursor: 'pointer',
   },
   emptyMessage: {
     textAlign: 'center',

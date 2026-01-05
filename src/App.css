@@ -95,7 +95,7 @@ textarea {
 /* アバターセクション - メニューを除いた右側に配置 */
 .avatar-section {
   position: absolute;
-  left: 300px; /* メニュー幅(280px) + マージン(20px) */
+  left: 240px; /* メニュー幅(220px) + マージン(20px) */
   right: 0;
   top: 0;
   bottom: 0;
@@ -107,7 +107,7 @@ textarea {
 /* パレットセクション - 右端に固定 */
 .palette-section {
   flex-shrink: 0;
-  width: 280px;
+  width: 220px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
   z-index: 10;
@@ -161,11 +161,11 @@ textarea {
   }
 
   .palette-section {
-    width: 280px;
+    width: 220px;
   }
 
   .avatar-section {
-    left: 300px; /* メニュー幅(280px) + マージン(20px) */
+    left: 240px; /* メニュー幅(220px) + マージン(20px) */
   }
 
   .app-footer {
