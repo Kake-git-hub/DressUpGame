@@ -18,7 +18,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 
 // Viteのbase pathを取得（GitHub Pages対応）
 const BASE_PATH = import.meta.env.BASE_URL;
@@ -317,27 +317,41 @@ function App() {
       {/* バージョン表示 */}
       <div className="version-badge">v{APP_VERSION}</div>
 
-      {/* 設定ボタン */}
-      <button
-        className="settings-button"
-        onClick={() => setIsSettingsOpen(true)}
-        title="せってい"
-      >
-        ⚙️
-      </button>
+      {/* 設定ボタン - 位置調整中は非表示 */}
+      {!showDollControls && (
+        <button
+          className="settings-button"
+          onClick={() => setIsSettingsOpen(true)}
+          title="せってい"
+        >
+          ⚙️
+        </button>
+      )}
 
       {/* ドール調整ボタン */}
       <button
-        className="doll-control-button"
+        className={`doll-control-button ${showDollControls ? 'active' : ''}`}
         onClick={() => setShowDollControls(!showDollControls)}
-        title="ドール調整"
+        title={showDollControls ? '調整を終了' : 'ドール調整'}
       >
-        📐
+        {showDollControls ? '✓' : '📐'}
       </button>
 
       <main className="app-main">
         {/* ドール表示エリア */}
-        <section className="avatar-section">
+        {/* 背景をドールエリア全体に表示 */}
+        {currentBackground && (
+          <div
+            className="background-layer"
+            style={{
+              backgroundImage: `url(${currentBackground.imageUrl})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          />
+        )}
+
+        <section className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}>
           {isTestMode ? (
             <div
               id="avatar-canvas"
@@ -361,7 +375,6 @@ function App() {
               height={canvasSize.height}
               equippedItems={equippedItems}
               dollImageUrl={currentDoll.bodyImageUrl}
-              backgroundImageUrl={currentBackground?.imageUrl}
               dollTransform={dollTransform}
             />
           )}
@@ -378,22 +391,24 @@ function App() {
           )}
         </section>
 
-        {/* ドレスアップメニュー */}
-        <section className="palette-section">
-          <DressUpMenu
-            items={filteredClothing}
-            onItemDrop={handleItemDrop}
-            equippedItems={equippedItems}
-            onReset={handleReset}
-            dolls={allDolls}
-            currentDollId={currentDollId}
-            onDollChange={handleDollChange}
-            dropTargetId="avatar-canvas"
-            backgrounds={allBackgrounds}
-            currentBackgroundId={currentBackgroundId}
-            onBackgroundChange={handleBackgroundChange}
-          />
-        </section>
+        {/* ドレスアップメニュー - 位置調整中は非表示 */}
+        {!showDollControls && (
+          <section className="palette-section">
+            <DressUpMenu
+              items={filteredClothing}
+              onItemDrop={handleItemDrop}
+              equippedItems={equippedItems}
+              onReset={handleReset}
+              dolls={allDolls}
+              currentDollId={currentDollId}
+              onDollChange={handleDollChange}
+              dropTargetId="avatar-canvas"
+              backgrounds={allBackgrounds}
+              currentBackgroundId={currentBackgroundId}
+              onBackgroundChange={handleBackgroundChange}
+            />
+          </section>
+        )}
       </main>
 
       <footer className="app-footer">

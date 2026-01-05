@@ -272,3 +272,23 @@ body {
 .doll-control-button:active {
   transform: scale(0.95);
 }
+
+.doll-control-button.active {
+  background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+}
+
+/* 背景レイヤー（ドールエリア全域） */
+.background-layer {
+  position: absolute;
+  left: 0;
+  right: 360px; /* メニュー幅 + マージン */
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+}
+
+/* 位置調整中のavatar-section */
+.avatar-section.adjusting {
+  z-index: 50;
+}

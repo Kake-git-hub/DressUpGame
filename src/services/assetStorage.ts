@@ -687,7 +687,7 @@ export async function importPresetFromFolder(
     backgrounds: { success: 0, failed: 0, items: [] },
   };
   
-  const imageTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
   
   // ファイルをプリセット別に分類
   const presetMap = new Map<string, {
@@ -699,56 +699,70 @@ export async function importPresetFromFolder(
   console.log('=== プリセット取り込み開始 ===');
   console.log(`ファイル数: ${files.length}`);
   
+  // 全ファイルのパスをログ出力
+  for (let i = 0; i < Math.min(files.length, 20); i++) {
+    console.log(`[${i}] ${files[i].webkitRelativePath || files[i].name}`);
+  }
+  if (files.length > 20) {
+    console.log(`... 他 ${files.length - 20} ファイル`);
+  }
+  
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     
-    // 画像ファイルかチェック（MIMEタイプまたは拡張子で判定）
-    const ext = file.name.toLowerCase().split('.').pop();
-    const isImage = imageTypes.includes(file.type) || 
-                    ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '');
+    // 画像ファイルかチェック（拡張子で判定）
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const isImage = imageExtensions.includes(ext);
     if (!isImage) {
-      console.log(`スキップ（非画像）: ${file.name}, type=${file.type}`);
-      continue;
+      continue; // 非画像はスキップ（ログ出力しない）
     }
     
-    const path = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
-    const parts = path.split('/');
+    // パスを取得（webkitRelativePathを優先）
+    const fullPath = file.webkitRelativePath || file.name;
+    const path = fullPath.replace(/\\/g, '/');
+    const parts = path.split('/').filter(p => p.length > 0);
     const fileName = file.name.replace(/\.[^.]+$/, '');
     
-    console.log(`処理中: ${path}`);
+    console.log(`処理中: ${path} (parts: ${parts.join(' > ')})`);
     
-    // 背景フォルダ
-    if (parts.some(p => p.toLowerCase() === 'backgrounds')) {
+    // 背景フォルダ（パス内にbackgroundsがあれば背景）
+    const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
+    if (bgIndex !== -1) {
       backgroundFiles.push({ name: fileName, file });
-      console.log(`  → 背景として追加`);
+      console.log(`  → 背景として追加: ${fileName}`);
       continue;
     }
     
-    // doll-{id} フォルダを探す
+    // doll-{id} フォルダを探す（どの階層でもOK）
     const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
     if (dollFolderIndex === -1) {
       console.log(`  → スキップ（doll-フォルダなし）`);
       continue;
     }
     
-    const presetId = parts[dollFolderIndex].toLowerCase();
+    const dollFolderName = parts[dollFolderIndex];
+    const presetId = dollFolderName.toLowerCase();
     
     if (!presetMap.has(presetId)) {
       presetMap.set(presetId, { dolls: [], clothing: new Map() });
     }
     const preset = presetMap.get(presetId)!;
     
-    // dolls フォルダ内
-    if (parts.some(p => p.toLowerCase() === 'dolls')) {
+    // dollFolderIndex以降のパーツを解析
+    const subParts = parts.slice(dollFolderIndex + 1);
+    
+    // dolls フォルダ内の画像
+    const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
+    if (dollsIndex !== -1) {
       preset.dolls.push({ name: fileName, file });
-      console.log(`  → ドールとして追加: ${presetId}`);
+      console.log(`  → ドールとして追加: ${presetId} / ${fileName}`);
       continue;
     }
     
-    // clothing/{category} フォルダ内
-    const clothingIndex = parts.findIndex(p => p.toLowerCase() === 'clothing');
-    if (clothingIndex !== -1 && clothingIndex + 1 < parts.length) {
-      const category = parts[clothingIndex + 1].toLowerCase();
+    // clothing/{category} フォルダ内の画像
+    const clothingIndex = subParts.findIndex(p => p.toLowerCase() === 'clothing');
+    if (clothingIndex !== -1 && clothingIndex + 1 < subParts.length) {
+      const category = subParts[clothingIndex + 1].toLowerCase();
       // カテゴリがファイル名でないことを確認
       if (category && !category.includes('.')) {
         if (!preset.clothing.has(category)) {
@@ -879,24 +893,38 @@ export async function importPresetFromZip(
   }>();
   const backgroundFiles: { name: string; blob: Blob }[] = [];
   
+  console.log('=== ZIP取り込み開始 ===');
+  console.log(`ZIP内ファイル数: ${Object.keys(zip.files).length}`);
+  
   for (const [path, file] of Object.entries(zip.files)) {
     if (file.dir) continue;
     const lowerPath = path.toLowerCase();
     if (!imageExtensions.some(ext => lowerPath.endsWith(ext))) continue;
     
-    const parts = path.replace(/\\/g, '/').split('/');
-    const fileName = (parts.pop() || path).replace(/\.[^.]+$/, '');
+    // パスをパース（最後の要素はファイル名）
+    const pathParts = path.replace(/\\/g, '/').split('/').filter(p => p.length > 0);
+    const fileNameWithExt = pathParts.pop() || '';
+    const fileName = fileNameWithExt.replace(/\.[^.]+$/, '');
+    const parts = pathParts; // ディレクトリ部分のみ
+    
+    console.log(`処理中: ${path} (dirs: ${parts.join(' > ')})`);
+    
     const blob = await file.async('blob');
     
     // 背景フォルダ
-    if (parts.some(p => p.toLowerCase() === 'backgrounds')) {
+    const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
+    if (bgIndex !== -1) {
       backgroundFiles.push({ name: fileName, blob });
+      console.log(`  → 背景として追加: ${fileName}`);
       continue;
     }
     
     // doll-{id} フォルダを探す
     const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
-    if (dollFolderIndex === -1) continue;
+    if (dollFolderIndex === -1) {
+      console.log(`  → スキップ（doll-フォルダなし）`);
+      continue;
+    }
     
     const presetId = parts[dollFolderIndex].toLowerCase();
     
@@ -905,21 +933,33 @@ export async function importPresetFromZip(
     }
     const preset = presetMap.get(presetId)!;
     
+    // dollFolderIndex以降のパーツを解析
+    const subParts = parts.slice(dollFolderIndex + 1);
+    
     // dolls フォルダ内
-    if (parts.some(p => p.toLowerCase() === 'dolls')) {
+    const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
+    if (dollsIndex !== -1) {
       preset.dolls.push({ name: fileName, blob });
+      console.log(`  → ドールとして追加: ${presetId} / ${fileName}`);
       continue;
     }
     
     // clothing/{category} フォルダ内
-    const clothingIndex = parts.findIndex(p => p.toLowerCase() === 'clothing');
-    if (clothingIndex !== -1 && clothingIndex + 1 < parts.length) {
-      const category = parts[clothingIndex + 1].toLowerCase();
+    const clothingIndex = subParts.findIndex(p => p.toLowerCase() === 'clothing');
+    if (clothingIndex !== -1 && clothingIndex + 1 < subParts.length) {
+      const category = subParts[clothingIndex + 1].toLowerCase();
       if (!preset.clothing.has(category)) {
         preset.clothing.set(category, []);
       }
       preset.clothing.get(category)!.push({ name: fileName, blob });
+      console.log(`  → 服として追加: ${presetId} / ${category} / ${fileName}`);
     }
+  }
+  
+  console.log(`背景ファイル: ${backgroundFiles.length}`);
+  console.log(`プリセット数: ${presetMap.size}`);
+  for (const [id, data] of presetMap) {
+    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種`);
   }
   
   // 背景を取り込み
