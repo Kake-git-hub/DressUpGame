@@ -217,7 +217,7 @@ body {
 .settings-button {
   position: fixed;
   top: 16px;
-  right: 16px;
+  right: 340px; /* メニュー幅 + 余白 */
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -247,7 +247,7 @@ body {
 .doll-control-button {
   position: fixed;
   top: 16px;
-  right: 72px;
+  right: 400px; /* 設定ボタンの左 */
   width: 48px;
   height: 48px;
   border-radius: 50%;

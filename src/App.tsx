@@ -21,24 +21,21 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.1';
-
-// Viteのbase pathを取得（GitHub Pages対応）
-const BASE_PATH = import.meta.env.BASE_URL;
+const APP_VERSION = '0.4.2';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
 
-// デフォルトのドールリスト（GitHub Pages同梱）
+// デフォルトのドールリスト（サンプル1体のみ）
 const DEFAULT_DOLLS: DollData[] = [
   {
-    id: 'doll-base-001',
-    name: 'ちびドール',
-    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-1.png`,
+    id: 'doll-sample-001',
+    name: 'サンプルドール',
+    bodyImageUrl: '', // 画像なし（プリセット推奨）
     skinTone: 'fair',
     dimensions: {
-      width: 512,
-      height: 1024,
+      width: 400,
+      height: 800,
       anchorPoints: {
         headTop: { x: 0.5, y: 0.05 },
         neckCenter: { x: 0.5, y: 0.18 },
@@ -47,53 +44,8 @@ const DEFAULT_DOLLS: DollData[] = [
         footBottom: { x: 0.5, y: 0.98 },
       },
     },
-    joints: {
-      head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.08 } },
-      neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.18 }, parentId: 'head' },
-      leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.22 }, parentId: 'neck' },
-      rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.22 }, parentId: 'neck' },
-      leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.35 }, parentId: 'leftShoulder' },
-      rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.35 }, parentId: 'rightShoulder' },
-      leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.48 }, parentId: 'leftElbow' },
-      rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.48 }, parentId: 'rightElbow' },
-      hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.55 }, parentId: 'neck' },
-      leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.4, y: 0.72 }, parentId: 'hip' },
-      rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.6, y: 0.72 }, parentId: 'hip' },
-      leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.4, y: 0.92 }, parentId: 'leftKnee' },
-      rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.6, y: 0.92 }, parentId: 'rightKnee' },
-    },
-  },
-  {
-    id: 'doll-base-002',
-    name: 'スリムドール',
-    bodyImageUrl: `${BASE_PATH}assets/dolls/doll-base-2.png`,
-    skinTone: 'fair',
-    dimensions: {
-      width: 400,
-      height: 800,
-      anchorPoints: {
-        headTop: { x: 0.5, y: 0.02 },
-        neckCenter: { x: 0.5, y: 0.12 },
-        torsoCenter: { x: 0.5, y: 0.35 },
-        hipCenter: { x: 0.5, y: 0.5 },
-        footBottom: { x: 0.5, y: 0.98 },
-      },
-    },
-    joints: {
-      head: { id: 'head', name: '頭', position: { x: 0.5, y: 0.06 } },
-      neck: { id: 'neck', name: '首', position: { x: 0.5, y: 0.12 }, parentId: 'head' },
-      leftShoulder: { id: 'leftShoulder', name: '左肩', position: { x: 0.3, y: 0.16 }, parentId: 'neck' },
-      rightShoulder: { id: 'rightShoulder', name: '右肩', position: { x: 0.7, y: 0.16 }, parentId: 'neck' },
-      leftElbow: { id: 'leftElbow', name: '左肘', position: { x: 0.2, y: 0.28 }, parentId: 'leftShoulder' },
-      rightElbow: { id: 'rightElbow', name: '右肘', position: { x: 0.8, y: 0.28 }, parentId: 'rightShoulder' },
-      leftWrist: { id: 'leftWrist', name: '左手首', position: { x: 0.15, y: 0.4 }, parentId: 'leftElbow' },
-      rightWrist: { id: 'rightWrist', name: '右手首', position: { x: 0.85, y: 0.4 }, parentId: 'rightElbow' },
-      hip: { id: 'hip', name: '腰', position: { x: 0.5, y: 0.5 }, parentId: 'neck' },
-      leftKnee: { id: 'leftKnee', name: '左膝', position: { x: 0.42, y: 0.7 }, parentId: 'hip' },
-      rightKnee: { id: 'rightKnee', name: '右膝', position: { x: 0.58, y: 0.7 }, parentId: 'hip' },
-      leftAnkle: { id: 'leftAnkle', name: '左足首', position: { x: 0.42, y: 0.92 }, parentId: 'leftKnee' },
-      rightAnkle: { id: 'rightAnkle', name: '右足首', position: { x: 0.58, y: 0.92 }, parentId: 'rightKnee' },
-    },
+    joints: {},
+    isCustom: false,
   },
 ];
 

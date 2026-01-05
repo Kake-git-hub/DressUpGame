@@ -28,7 +28,7 @@ export class PixiEngine {
         canvas,
         width,
         height,
-        backgroundColor: 0xfff5ee, // 薄いピンクベージュの背景
+        backgroundAlpha: 0, // 透明背景
         antialias: true,
       });
 
@@ -263,8 +263,8 @@ export class PixiEngine {
     }
   }
 
-  // 服を描画（プレースホルダー）
-  drawClothing(items: (ClothingItemData | EquippedItem)[]): void {
+  // 服を描画（imageUrlがあれば画像、なければプレースホルダー）
+  async drawClothing(items: (ClothingItemData | EquippedItem)[]): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -278,8 +278,48 @@ export class PixiEngine {
     const s = this.dollTransform.scale; // スケール
 
     // 既にソートされていることを想定（useDressUpでソート済み）
-    items.forEach((item) => {
-      const clothing = new Graphics();
+    for (const item of items) {
+      // imageUrlがある場合は画像を読み込み
+      if (item.imageUrl) {
+        try {
+          const texture = await Assets.load(item.imageUrl);
+          const clothingSprite = new Sprite(texture);
+
+          // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）
+          const maxHeight = this.app.screen.height * 0.9;
+          const baseScale = maxHeight / texture.height;
+          clothingSprite.scale.set(baseScale * s);
+
+          // アンカーを中央に
+          clothingSprite.anchor.set(0.5);
+
+          // 位置を設定（ドールと同じ中央位置）
+          clothingSprite.x = centerX;
+          clothingSprite.y = centerY;
+
+          this.clothingContainer!.addChild(clothingSprite);
+        } catch (error) {
+          console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
+          // 画像読み込み失敗時はプレースホルダーを表示
+          this.drawClothingPlaceholder(item, centerX, centerY, s);
+        }
+      } else {
+        // imageUrlがない場合はプレースホルダー
+        this.drawClothingPlaceholder(item, centerX, centerY, s);
+      }
+    }
+  }
+
+  // 服のプレースホルダーを描画
+  private drawClothingPlaceholder(
+    item: ClothingItemData | EquippedItem,
+    centerX: number,
+    centerY: number,
+    s: number
+  ): void {
+    if (!this.clothingContainer) return;
+    
+    const clothing = new Graphics();
 
       switch (item.type) {
         case 'underwear_top':
@@ -346,8 +386,7 @@ export class PixiEngine {
           break;
       }
 
-      this.clothingContainer!.addChild(clothing);
-    });
+      this.clothingContainer.addChild(clothing);
   }
 
   // リサイズ

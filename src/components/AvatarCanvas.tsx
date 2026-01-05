@@ -57,6 +57,11 @@ export function AvatarCanvas({
         // 成功した場合のみrefに保存
         engineRef.current = engine;
 
+        // ドールの初期位置・スケールを設定
+        if (dollTransform) {
+          engine.setDollTransform(dollTransform);
+        }
+
         // ドールを描画（画像URLまたはプレースホルダー）
         await engine.drawDoll(
           dollConfig ?? {

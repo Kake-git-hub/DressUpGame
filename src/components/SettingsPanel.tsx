@@ -42,7 +42,7 @@ export function SettingsPanel({
 
   if (!isOpen) return null;
 
-  // プリセットフォルダ取り込み
+  // プリセットフォルダ取り込み（全データ上書き）
   const handlePresetFolderImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -54,16 +54,16 @@ export function SettingsPanel({
       
       const result = await importPresetFromFolder(files);
       
-      // 状態を更新
-      if (result.presets.items.length > 0) {
-        const newDolls = result.presets.items.map(p => p.doll);
-        const newClothing = result.presets.items.flatMap(p => p.clothingItems);
-        onDollsChange([...dolls, ...newDolls]);
-        onClothingChange([...clothingItems, ...newClothing]);
-      }
-      if (result.backgrounds.items.length > 0) {
-        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
-      }
+      // 状態を全置換（デフォルト + 新規取り込み分）
+      const newDolls = result.presets.items.map(p => p.doll);
+      const newClothing = result.presets.items.flatMap(p => p.clothingItems);
+      const defaultDolls = dolls.filter(d => !d.isCustom);
+      const defaultClothing = clothingItems.filter(i => !i.isCustom);
+      const defaultBackgrounds = backgrounds.filter(b => !b.isCustom);
+      
+      onDollsChange([...defaultDolls, ...newDolls]);
+      onClothingChange([...defaultClothing, ...newClothing]);
+      onBackgroundsChange([...defaultBackgrounds, ...result.backgrounds.items]);
       
       const presetCount = result.presets.success;
       const bgCount = result.backgrounds.success;
@@ -97,15 +97,18 @@ export function SettingsPanel({
     try {
       const result = await importPresetFromZip(file);
       
-      // 状態を更新
+      // 状態を全て上書き（デフォルト + 新規インポート）
       if (result.presets.items.length > 0) {
         const newDolls = result.presets.items.map(p => p.doll);
         const newClothing = result.presets.items.flatMap(p => p.clothingItems);
-        onDollsChange([...dolls, ...newDolls]);
-        onClothingChange([...clothingItems, ...newClothing]);
+        const defaultDolls = dolls.filter(d => !d.isCustom);
+        const defaultClothing = clothingItems.filter(c => !c.isCustom);
+        onDollsChange([...defaultDolls, ...newDolls]);
+        onClothingChange([...defaultClothing, ...newClothing]);
       }
       if (result.backgrounds.items.length > 0) {
-        onBackgroundsChange([...backgrounds, ...result.backgrounds.items]);
+        const defaultBackgrounds = backgrounds.filter(b => !b.isCustom);
+        onBackgroundsChange([...defaultBackgrounds, ...result.backgrounds.items]);
       }
       
       const presetCount = result.presets.success;

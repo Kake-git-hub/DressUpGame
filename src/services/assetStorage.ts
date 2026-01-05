@@ -700,15 +700,12 @@ export interface PresetImportResult {
   backgrounds: { success: number; failed: number; items: BackgroundData[] };
 }
 
-// ドールプリセットを保存
+// ドールプリセットを保存（メタデータのみ、画像はIndexedDB）
 export function saveDollPresets(presets: DollPreset[]): void {
-  // メタデータのみ保存（画像はIndexedDB）
   const metaData = presets.map(p => ({
     id: p.id,
     name: p.name,
     dollId: p.doll.id,
-    dollName: p.doll.name,
-    dollBodyImageUrl: p.doll.bodyImageUrl,
     clothingIds: p.clothingItems.map(c => c.id),
     categories: p.categories,
   }));
@@ -915,29 +912,31 @@ export async function importPresetFromFolder(
       result.presets.items.push(preset);
       result.presets.success++;
       
-      // ドールと服を個別にも保存（互換性維持）
-      const existingDolls = loadCustomDolls();
-      saveCustomDolls([...existingDolls, doll]);
-      
-      const existingClothing = loadCustomClothing();
-      saveCustomClothing([...existingClothing, ...clothingItems]);
-      
     } catch (e) {
       console.error(`Preset ${presetId} import failed:`, e);
       result.presets.failed++;
     }
   }
   
-  // 背景を保存
-  if (result.backgrounds.items.length > 0) {
-    const existing = loadCustomBackgrounds();
-    saveCustomBackgrounds([...existing, ...result.backgrounds.items]);
+  // すべてのドールと服を一括保存（全上書き）
+  const allDolls = result.presets.items.map(p => p.doll);
+  const allClothing = result.presets.items.flatMap(p => p.clothingItems);
+  
+  if (allDolls.length > 0) {
+    saveCustomDolls(allDolls);
+  }
+  if (allClothing.length > 0) {
+    saveCustomClothing(allClothing);
   }
   
-  // プリセットを保存
+  // 背景を保存（全上書き）
+  if (result.backgrounds.items.length > 0) {
+    saveCustomBackgrounds(result.backgrounds.items);
+  }
+  
+  // プリセットを保存（全上書き）
   if (result.presets.items.length > 0) {
-    const existing = loadDollPresets();
-    saveDollPresets([...existing, ...result.presets.items]);
+    saveDollPresets(result.presets.items);
   }
   
   return result;
@@ -1094,26 +1093,31 @@ export async function importPresetFromZip(
       result.presets.items.push(preset);
       result.presets.success++;
       
-      const existingDolls = loadCustomDolls();
-      saveCustomDolls([...existingDolls, doll]);
-      
-      const existingClothing = loadCustomClothing();
-      saveCustomClothing([...existingClothing, ...clothingItems]);
-      
     } catch (e) {
       console.error(`Preset ${presetId} import failed:`, e);
       result.presets.failed++;
     }
   }
   
-  if (result.backgrounds.items.length > 0) {
-    const existing = loadCustomBackgrounds();
-    saveCustomBackgrounds([...existing, ...result.backgrounds.items]);
+  // すべてのドールと服を一括保存（全上書き）
+  const allDolls = result.presets.items.map(p => p.doll);
+  const allClothing = result.presets.items.flatMap(p => p.clothingItems);
+  
+  if (allDolls.length > 0) {
+    saveCustomDolls(allDolls);
+  }
+  if (allClothing.length > 0) {
+    saveCustomClothing(allClothing);
   }
   
+  // 背景を保存（全上書き）
+  if (result.backgrounds.items.length > 0) {
+    saveCustomBackgrounds(result.backgrounds.items);
+  }
+  
+  // プリセットを保存（全上書き）
   if (result.presets.items.length > 0) {
-    const existing = loadDollPresets();
-    saveDollPresets([...existing, ...result.presets.items]);
+    saveDollPresets(result.presets.items);
   }
   
   return result;

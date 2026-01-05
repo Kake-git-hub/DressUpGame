@@ -163,7 +163,12 @@ export function DressUpMenu({
       ) : !selectedCategory ? (
         // カテゴリー選択画面
         <>
-          <h3 style={styles.title}>👚 カテゴリーをえらんでね</h3>
+          {/* リセットボタン（服を着ている場合のみ表示） */}
+          {clothingCount > 0 && (
+            <button style={styles.resetButtonTop} onClick={onReset}>
+              🔄 リセット
+            </button>
+          )}
           <div style={styles.categoryGrid}>
             {CLOTHING_CATEGORIES.map(category => (
               <button
@@ -184,9 +189,8 @@ export function DressUpMenu({
             ))}
           </div>
           
-          {/* カテゴリーテーブル下部のアクションボタン */}
+          {/* 背景選択ボタン */}
           <div style={styles.actionButtons}>
-            {/* 背景選択ボタン */}
             <button
               style={styles.actionButton}
               onClick={() => setShowBackgrounds(true)}
@@ -194,13 +198,6 @@ export function DressUpMenu({
               🖼️ はいけい
               {currentBackgroundId && <span style={styles.activeDot}>●</span>}
             </button>
-            
-            {/* リセットボタン */}
-            {clothingCount > 0 && (
-              <button style={styles.resetButtonLarge} onClick={onReset}>
-                🔄 リセット
-              </button>
-            )}
           </div>
         </>
       ) : (
@@ -391,6 +388,18 @@ const styles: Record<string, CSSProperties> = {
   activeDot: {
     color: '#ff69b4',
     fontSize: '10px',
+  },
+  resetButtonTop: {
+    width: '100%',
+    padding: '10px',
+    marginBottom: '10px',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    color: 'white',
+    background: 'linear-gradient(135deg, #ff69b4 0%, #9370db 100%)',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
   },
   resetButtonLarge: {
     flex: 1,
