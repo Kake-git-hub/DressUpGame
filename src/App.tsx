@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.4';
+const APP_VERSION = '0.4.5';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -31,6 +31,19 @@ const DEFAULT_DOLLS: DollData[] = [];
 
 // デフォルトの背景リスト（空 - ユーザーが追加）
 const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
+
+// ドールが未登録でも落ちないためのフォールバック寸法
+const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
+  width: 400,
+  height: 800,
+  anchorPoints: {
+    headTop: { x: 0.5, y: 0.05 },
+    neckCenter: { x: 0.5, y: 0.18 },
+    torsoCenter: { x: 0.5, y: 0.4 },
+    hipCenter: { x: 0.5, y: 0.55 },
+    footBottom: { x: 0.5, y: 0.98 },
+  },
+};
 
 // 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
 const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
@@ -93,14 +106,14 @@ function App() {
   // 服アイテム一覧（デフォルト + カスタム）
   const [allClothing, setAllClothing] = useState<ClothingItemData[]>(DEFAULT_CLOTHING);
 
-  // 現在のドールID
-  const [currentDollId, setCurrentDollId] = useState<string>(DEFAULT_DOLLS[0].id);
+  // 現在のドールID（ドール0件を許容）
+  const [currentDollId, setCurrentDollId] = useState<string>(DEFAULT_DOLLS[0]?.id ?? '');
 
-  // 現在のドール
-  const currentDoll = useMemo(() => 
-    allDolls.find(d => d.id === currentDollId) || allDolls[0],
-    [currentDollId, allDolls]
-  );
+  // 現在のドール（0件ならnull）
+  const currentDoll = useMemo(() => {
+    if (allDolls.length === 0) return null;
+    return allDolls.find(d => d.id === currentDollId) ?? allDolls[0];
+  }, [currentDollId, allDolls]);
 
   // メニュー幅
   const MENU_WIDTH = 340;
@@ -163,6 +176,18 @@ function App() {
     loadCustomData();
   }, []);
 
+  // ドールが読み込まれたら、先頭を初期ドールとして選択
+  useEffect(() => {
+    if (allDolls.length === 0) {
+      if (currentDollId !== '') setCurrentDollId('');
+      return;
+    }
+    const exists = allDolls.some(d => d.id === currentDollId);
+    if (!exists) {
+      setCurrentDollId(allDolls[0].id);
+    }
+  }, [allDolls, currentDollId]);
+
   // 現在のドールに紐付けられたアイテムのみフィルタ
   const filteredClothing = useMemo(() => {
     return allClothing.filter(item => {
@@ -174,18 +199,18 @@ function App() {
   }, [allClothing, currentDollId]);
 
   // アイテムをスケーリング
+  const activeDimensions = currentDoll?.dimensions ?? FALLBACK_DOLL_DIMENSIONS;
+
   const scaledItems = useMemo(() => {
-    return filteredClothing.map(item =>
-      scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
-    );
-  }, [filteredClothing, currentDoll.dimensions, canvasSize.height]);
+    if (!currentDoll) return [];
+    return filteredClothing.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
+  }, [filteredClothing, activeDimensions, canvasSize.height, currentDoll]);
 
   // スケーリングされた下着
   const scaledUnderwear = useMemo(() => {
-    return DEFAULT_UNDERWEAR.map(item =>
-      scaleItemPosition(item, currentDoll.dimensions, canvasSize.height)
-    );
-  }, [currentDoll.dimensions, canvasSize.height]);
+    if (!currentDoll) return [];
+    return DEFAULT_UNDERWEAR.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
+  }, [activeDimensions, canvasSize.height, currentDoll]);
 
   // 着せ替え状態管理フック
   const { equipItem, getEquippedItems, resetAll } = useDressUp(scaledItems, scaledUnderwear);
@@ -196,10 +221,11 @@ function App() {
   // 服をドロップした時の処理
   const handleItemDrop = useCallback(
     (item: ClothingItemData) => {
+      if (!currentDoll) return;
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
       equipItem(scaledItem);
     },
-    [equipItem, scaledItems]
+    [equipItem, scaledItems, currentDoll]
   );
 
   // リセット
@@ -208,16 +234,21 @@ function App() {
   }, [resetAll]);
 
   // ドール切り替え
-  const handleDollChange = useCallback((dollId: string) => {
-    setCurrentDollId(dollId);
-    resetAll();
-  }, [resetAll]);
+  const handleDollChange = useCallback(
+    (dollId: string) => {
+      setCurrentDollId(dollId);
+      resetAll();
+    },
+    [resetAll]
+  );
 
   // 背景ID
   const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(null);
 
   // ドール位置・スケール調整
   const [dollTransform, setDollTransform] = useState<DollTransform>({ x: 50, y: 50, scale: 1.0 });
+
+  const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
   const [showDollControls, setShowDollControls] = useState(false);
 
   // 現在の背景
@@ -300,7 +331,7 @@ function App() {
         )}
 
         {/* ドールが存在する場合のみ表示 */}
-        {allDolls.length > 0 && (
+        {currentDollSafe && (
           <section className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}>
             {isTestMode ? (
               <div
@@ -324,7 +355,7 @@ function App() {
                 width={canvasSize.width}
                 height={canvasSize.height}
                 equippedItems={equippedItems}
-                dollImageUrl={currentDoll.bodyImageUrl}
+                dollImageUrl={currentDollSafe.bodyImageUrl}
                 dollTransform={dollTransform}
               />
             )}

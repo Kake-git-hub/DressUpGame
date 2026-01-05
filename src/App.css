@@ -18,10 +18,6 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  /* iPad長押し選択を防ぐ */
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 /* ベース */
@@ -34,6 +30,25 @@ body {
   overflow: hidden; /* iPad横向きでスクロールを防ぐ */
   /* iPad長押しハイライトを防ぐ */
   -webkit-tap-highlight-color: transparent;
+}
+
+/* iPad: 長押しで選択状態にならないように（UI部分のみ） */
+.app,
+button,
+[role='button'],
+img,
+canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* フォーム操作は通常通り */
+select,
+input,
+textarea {
+  -webkit-user-select: auto;
+  user-select: auto;
 }
 
 #root {

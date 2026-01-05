@@ -98,12 +98,17 @@ export function DressUpMenu({
           style={styles.dollSelect}
           value={currentDollId}
           onChange={(e) => onDollChange(e.target.value)}
+          disabled={dolls.length === 0}
         >
-          {dolls.map(doll => (
-            <option key={doll.id} value={doll.id}>
-              {doll.name}
-            </option>
-          ))}
+          {dolls.length === 0 ? (
+            <option value="">ドールなし</option>
+          ) : (
+            dolls.map(doll => (
+              <option key={doll.id} value={doll.id}>
+                {doll.name}
+              </option>
+            ))
+          )}
         </select>
       </div>
 
