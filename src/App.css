@@ -18,6 +18,10 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  /* iPad長押し選択を防ぐ */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ベース */
@@ -28,6 +32,8 @@ body {
   min-height: 100vh;
   color: var(--text-color);
   overflow: hidden; /* iPad横向きでスクロールを防ぐ */
+  /* iPad長押しハイライトを防ぐ */
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {

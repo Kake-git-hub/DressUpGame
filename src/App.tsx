@@ -21,33 +21,13 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.3';
+const APP_VERSION = '0.4.4';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
 
-// デフォルトのドールリスト（サンプル1体のみ）
-const DEFAULT_DOLLS: DollData[] = [
-  {
-    id: 'doll-sample-001',
-    name: 'サンプルドール',
-    bodyImageUrl: '', // 画像なし（プリセット推奨）
-    skinTone: 'fair',
-    dimensions: {
-      width: 400,
-      height: 800,
-      anchorPoints: {
-        headTop: { x: 0.5, y: 0.05 },
-        neckCenter: { x: 0.5, y: 0.18 },
-        torsoCenter: { x: 0.5, y: 0.4 },
-        hipCenter: { x: 0.5, y: 0.55 },
-        footBottom: { x: 0.5, y: 0.98 },
-      },
-    },
-    joints: {},
-    isCustom: false,
-  },
-];
+// デフォルトのドールリスト（空 - プリセットからインポート）
+const DEFAULT_DOLLS: DollData[] = [];
 
 // デフォルトの背景リスト（空 - ユーザーが追加）
 const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
