@@ -92,26 +92,27 @@ textarea {
   padding-left: 16px;
 }
 
-/* アバターセクション - メニューを除いた右側に配置 */
+/* アバターセクション - 背景と同じ全画面領域 */
 .avatar-section {
   position: absolute;
-  left: 240px; /* メニュー幅(220px) + マージン(20px) */
+  left: 200px; /* メニュー幅(180px) + マージン(20px) */
   right: 0;
   top: 0;
   bottom: 0;
   display: flex;
   justify-content: center;
   align-items: center;
+  overflow: visible; /* ドールがはみ出せるように */
 }
 
-/* パレットセクション - 右端に固定 */
+/* パレットセクション - 左端に固定 */
 .palette-section {
   flex-shrink: 0;
-  width: 220px;
-  max-height: calc(100vh - 100px);
+  width: 180px;
+  max-height: calc(100vh - 80px);
   overflow-y: auto;
   z-index: 10;
-  padding-top: 64px;
+  padding-top: 56px;
 }
 
 /* リセットボタン */
@@ -161,11 +162,11 @@ textarea {
   }
 
   .palette-section {
-    width: 220px;
+    width: 180px;
   }
 
   .avatar-section {
-    left: 240px; /* メニュー幅(220px) + マージン(20px) */
+    left: 200px; /* メニュー幅(180px) + マージン(20px) */
   }
 
   .app-footer {

@@ -5,7 +5,7 @@
  * iPad 10.3横向き（2360x1640）最適化
  * GitHub Pages（無料）で画像配信
  */
-import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { AvatarCanvas, DressUpMenu, DollControlPanel } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
@@ -17,11 +17,11 @@ import {
   restoreBackgroundImages,
   restoreClothingImages,
 } from './services/assetStorage';
-import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform } from './types';
+import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform, Position } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.5.2';
+const APP_VERSION = '0.5.3';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -220,13 +220,51 @@ function App() {
 
   // 服をドロップした時の処理
   const handleItemDrop = useCallback(
-    (item: ClothingItemData) => {
+    (item: ClothingItemData, dropPosition?: Position) => {
       if (!currentDoll) return;
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
-      equipItem(scaledItem);
+      
+      // movableアイテムの場合、ドロップ位置を保存
+      if (scaledItem.movable && dropPosition && avatarSectionRef.current) {
+        const rect = avatarSectionRef.current.getBoundingClientRect();
+        // ドロップ位置をパーセンテージに変換
+        const percentX = ((dropPosition.x - rect.left) / rect.width) * 100;
+        const percentY = ((dropPosition.y - rect.top) / rect.height) * 100;
+        
+        const itemWithOffset = {
+          ...scaledItem,
+          offsetX: percentX - 50, // 中央からのオフセット
+          offsetY: percentY - 50,
+        };
+        equipItem(itemWithOffset);
+      } else {
+        equipItem(scaledItem);
+      }
+      setDraggingPreview(null);
     },
     [equipItem, scaledItems, currentDoll]
   );
+
+  // movableアイテムドラッグ中のコールバック
+  const handleDragMove = useCallback((item: ClothingItemData, position: Position) => {
+    if (!avatarSectionRef.current) return;
+    const rect = avatarSectionRef.current.getBoundingClientRect();
+    // ドラッグ位置がavatar-section内かチェック
+    if (
+      position.x >= rect.left &&
+      position.x <= rect.right &&
+      position.y >= rect.top &&
+      position.y <= rect.bottom
+    ) {
+      setDraggingPreview({ item, position });
+    } else {
+      setDraggingPreview(null);
+    }
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggingPreview(null);
+  }, []);
 
   // 服を脱がせる処理（「なし」選択時）
   const handleItemRemove = useCallback(
@@ -258,6 +296,13 @@ function App() {
 
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
   const [showDollControls, setShowDollControls] = useState(false);
+
+  // movableアイテムのドラッグ中プレビュー用
+  const [draggingPreview, setDraggingPreview] = useState<{
+    item: ClothingItemData;
+    position: Position;
+  } | null>(null);
+  const avatarSectionRef = useRef<HTMLElement>(null);
 
   // 現在の背景
   const currentBackground = useMemo(() => 
@@ -325,7 +370,10 @@ function App() {
 
         {/* ドールが存在する場合のみ表示 */}
         {currentDollSafe && (
-          <section className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}>
+          <section 
+            ref={avatarSectionRef}
+            className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}
+          >
             {isTestMode ? (
               <div
                 id="avatar-canvas"
@@ -350,6 +398,8 @@ function App() {
                 equippedItems={equippedItems}
                 dollImageUrl={currentDollSafe.bodyImageUrl}
                 dollTransform={dollTransform}
+                draggingPreview={draggingPreview}
+                avatarSectionRef={avatarSectionRef}
               />
             )}
 
@@ -382,6 +432,8 @@ function App() {
               backgrounds={allBackgrounds}
               currentBackgroundId={currentBackgroundId}
               onBackgroundChange={handleBackgroundChange}
+              onDragMove={handleDragMove}
+              onDragEnd={handleDragEnd}
             />
           </section>
         )}

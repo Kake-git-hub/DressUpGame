@@ -5,12 +5,12 @@
  */
 import { useState, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { ClothingItemData, ClothingType, CategoryInfo, DollData, BackgroundData } from '../types';
+import type { ClothingItemData, ClothingType, CategoryInfo, DollData, BackgroundData, Position } from '../types';
 import { CLOTHING_CATEGORIES } from '../types';
 
 interface DressUpMenuProps {
   items: ClothingItemData[];
-  onItemDrop: (item: ClothingItemData) => void;
+  onItemDrop: (item: ClothingItemData, dropPosition?: Position) => void;
   onItemRemove?: (type: ClothingType) => void; // 「なし」選択時の脱がせる処理
   equippedItems: ClothingItemData[];
   onReset: () => void;
@@ -21,6 +21,9 @@ interface DressUpMenuProps {
   backgrounds?: BackgroundData[];
   currentBackgroundId?: string | null;
   onBackgroundChange?: (backgroundId: string | null) => void;
+  // movableアイテムドラッグ中のコールバック
+  onDragMove?: (item: ClothingItemData, position: Position) => void;
+  onDragEnd?: () => void;
 }
 
 export function DressUpMenu({
@@ -36,6 +39,8 @@ export function DressUpMenu({
   backgrounds = [],
   currentBackgroundId = null,
   onBackgroundChange,
+  onDragMove,
+  onDragEnd,
 }: DressUpMenuProps) {
   const [selectedCategory, setSelectedCategory] = useState<ClothingType | null>(null);
   const [showBackgrounds, setShowBackgrounds] = useState(false);
@@ -243,14 +248,6 @@ export function DressUpMenu({
               {dynamicCategories.find(c => c.type === selectedCategory)?.label || selectedCategory}
             </h3>
           </div>
-          
-          {equippedInCategory && (
-            <div style={styles.equippedInfo}>
-              いま着ているもの: <strong>{equippedInCategory.name}</strong>
-            </div>
-          )}
-
-          <p style={styles.hint}>👆 ドラッグしてドールにきせてね！</p>
 
           <div style={styles.itemGrid}>
             {/* 「なし」ボタン - 脱がせる */}
@@ -266,7 +263,7 @@ export function DressUpMenu({
                 }}
               >
                 <div style={styles.itemImageContainer}>
-                  <span style={{ fontSize: '28px' }}>✕</span>
+                  <span style={{ fontSize: '24px' }}>✕</span>
                 </div>
                 <span style={styles.itemName}>なし</span>
               </button>
@@ -278,6 +275,8 @@ export function DressUpMenu({
                 isEquipped={equippedIds.has(item.id)}
                 onDrop={onItemDrop}
                 dropTargetId={dropTargetId}
+                onDragMove={item.movable ? onDragMove : undefined}
+                onDragEnd={item.movable ? onDragEnd : undefined}
               />
             ))}
           </div>
@@ -297,11 +296,13 @@ export function DressUpMenu({
 interface DraggableItemProps {
   item: ClothingItemData;
   isEquipped: boolean;
-  onDrop: (item: ClothingItemData) => void;
+  onDrop: (item: ClothingItemData, dropPosition?: Position) => void;
   dropTargetId: string;
+  onDragMove?: (item: ClothingItemData, position: Position) => void;
+  onDragEnd?: () => void;
 }
 
-function DraggableItem({ item, isEquipped, onDrop, dropTargetId }: DraggableItemProps) {
+function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd }: DraggableItemProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
@@ -332,18 +333,28 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId }: DraggableItem
       x: e.clientX - startPos.current.x,
       y: e.clientY - startPos.current.y,
     });
-  }, [isDragging]);
+    // movableアイテムの場合、親にドラッグ位置を通知
+    if (onDragMove) {
+      onDragMove(item, { x: e.clientX, y: e.clientY });
+    }
+  }, [isDragging, item, onDragMove]);
 
   // ポインターアップ
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!isDragging) return;
     setIsDragging(false);
     setDragPos({ x: 0, y: 0 });
+    onDragEnd?.();
     
     if (checkIsOverTarget(e.clientX, e.clientY)) {
-      onDrop(item);
+      // movableアイテムの場合、ドロップ位置を渡す
+      if (item.movable) {
+        onDrop(item, { x: e.clientX, y: e.clientY });
+      } else {
+        onDrop(item);
+      }
     }
-  }, [isDragging, checkIsOverTarget, onDrop, item]);
+  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd]);
 
   return (
     <div
@@ -362,6 +373,7 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId }: DraggableItem
       onPointerCancel={() => {
         setIsDragging(false);
         setDragPos({ x: 0, y: 0 });
+        onDragEnd?.();
       }}
     >
       <div style={styles.itemImageContainer}>
@@ -386,27 +398,29 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId }: DraggableItem
 const styles: Record<string, CSSProperties> = {
   container: {
     backgroundColor: '#f8f9fa',
-    borderRadius: '16px',
-    padding: '10px',
+    borderRadius: '12px',
+    padding: '8px',
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-    minWidth: '200px',
-    maxWidth: '220px',
+    minWidth: '180px',
+    maxWidth: '200px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
+    gap: '4px',
+    maxHeight: 'calc(100vh - 80px)',
+    overflow: 'hidden',
   },
   menuHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    paddingBottom: '8px',
+    gap: '6px',
+    paddingBottom: '6px',
     borderBottom: '1px solid #e9ecef',
   },
   dollSelect: {
     flex: 1,
-    padding: '8px 12px',
-    fontSize: '14px',
-    borderRadius: '8px',
+    padding: '6px 8px',
+    fontSize: '12px',
+    borderRadius: '6px',
     border: '2px solid #e9ecef',
     backgroundColor: 'white',
     cursor: 'pointer',
@@ -414,20 +428,20 @@ const styles: Record<string, CSSProperties> = {
   },
   actionButtons: {
     display: 'flex',
-    gap: '8px',
-    marginTop: '8px',
-    paddingTop: '8px',
+    gap: '6px',
+    marginTop: '4px',
+    paddingTop: '6px',
     borderTop: '1px solid #e9ecef',
   },
   actionButton: {
     flex: 1,
-    padding: '10px',
-    fontSize: '13px',
+    padding: '8px',
+    fontSize: '11px',
     fontWeight: 'bold',
     color: '#333',
     backgroundColor: '#e9ecef',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
@@ -440,14 +454,14 @@ const styles: Record<string, CSSProperties> = {
   },
   resetButtonTop: {
     width: '100%',
-    padding: '10px',
-    marginBottom: '10px',
-    fontSize: '13px',
+    padding: '8px',
+    marginBottom: '6px',
+    fontSize: '11px',
     fontWeight: 'bold',
     color: 'white',
     background: 'linear-gradient(135deg, #ff69b4 0%, #9370db 100%)',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
   },
   resetButtonLarge: {
@@ -464,16 +478,18 @@ const styles: Record<string, CSSProperties> = {
   backgroundGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: '8px',
+    gap: '4px',
+    overflowY: 'auto',
+    flex: 1,
   },
   backgroundButton: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '6px',
+    padding: '4px',
     backgroundColor: 'white',
     border: '2px solid #e9ecef',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
   },
   backgroundButtonSelected: {
@@ -481,8 +497,8 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: '#fff5f8',
   },
   backgroundPreview: {
-    width: '60px',
-    height: '45px',
+    width: '48px',
+    height: '36px',
     borderRadius: '4px',
     overflow: 'hidden',
     backgroundColor: '#f0f0f0',
@@ -496,92 +512,87 @@ const styles: Record<string, CSSProperties> = {
     objectFit: 'cover',
   },
   backgroundName: {
-    fontSize: '10px',
+    fontSize: '9px',
     color: '#333',
-    marginTop: '4px',
+    marginTop: '2px',
+    maxWidth: '50px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   title: {
     margin: '0',
-    fontSize: '16px',
+    fontSize: '14px',
     color: '#333',
     textAlign: 'center',
   },
   titleSmall: {
     margin: '0',
-    fontSize: '14px',
+    fontSize: '12px',
     color: '#333',
     flex: 1,
   },
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '6px',
   },
   backButton: {
-    padding: '6px 10px',
-    fontSize: '13px',
+    padding: '4px 8px',
+    fontSize: '11px',
     backgroundColor: '#e9ecef',
     border: 'none',
-    borderRadius: '6px',
+    borderRadius: '4px',
     cursor: 'pointer',
     fontWeight: 'bold',
-  },
-  hint: {
-    margin: '0',
-    fontSize: '12px',
-    color: '#666',
-    textAlign: 'center',
   },
   categoryGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '8px',
+    gap: '4px',
+    overflowY: 'auto',
+    flex: 1,
   },
   categoryButton: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '12px 6px',
+    padding: '8px 4px',
     backgroundColor: 'white',
     border: '2px solid #e9ecef',
-    borderRadius: '10px',
+    borderRadius: '8px',
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
   categoryEmoji: {
-    fontSize: '28px',
+    fontSize: '22px',
     marginBottom: '2px',
   },
   categoryLabel: {
-    fontSize: '13px',
+    fontSize: '11px',
     fontWeight: 'bold',
     color: '#333',
   },
   categoryCount: {
-    fontSize: '11px',
+    fontSize: '9px',
     color: '#666',
-  },
-  equippedInfo: {
-    padding: '6px 10px',
-    backgroundColor: '#fff3cd',
-    borderRadius: '6px',
-    fontSize: '12px',
-    textAlign: 'center',
   },
   itemGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: '6px',
+    gap: '4px',
+    overflowY: 'auto',
+    flex: 1,
   },
   itemButton: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '6px',
+    padding: '4px',
     backgroundColor: 'white',
     border: '2px solid #e9ecef',
-    borderRadius: '8px',
+    borderRadius: '6px',
     transition: 'box-shadow 0.2s',
     userSelect: 'none',
   },
@@ -596,8 +607,8 @@ const styles: Record<string, CSSProperties> = {
   },
   itemImageContainer: {
     position: 'relative',
-    width: '55px',
-    height: '55px',
+    width: '48px',
+    height: '48px',
     marginBottom: '2px',
   },
   itemImage: {
@@ -608,25 +619,25 @@ const styles: Record<string, CSSProperties> = {
   },
   equippedBadge: {
     position: 'absolute',
-    top: '-4px',
-    right: '-4px',
-    width: '18px',
-    height: '18px',
+    top: '-3px',
+    right: '-3px',
+    width: '14px',
+    height: '14px',
     backgroundColor: '#ff69b4',
     color: 'white',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '11px',
+    fontSize: '9px',
     fontWeight: 'bold',
   },
   itemName: {
-    fontSize: '10px',
+    fontSize: '9px',
     color: '#333',
     textAlign: 'center',
     lineHeight: 1.1,
-    maxWidth: '60px',
+    maxWidth: '50px',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -639,7 +650,7 @@ const styles: Record<string, CSSProperties> = {
   emptyMessage: {
     textAlign: 'center',
     color: '#666',
-    padding: '16px',
-    fontSize: '13px',
+    padding: '12px',
+    fontSize: '11px',
   },
 };

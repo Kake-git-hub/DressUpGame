@@ -139,6 +139,8 @@ export class PixiEngine {
     if (config.imageUrl && config.imageUrl.length > 0) {
       try {
         const texture = await Assets.load(config.imageUrl);
+        // 縮小時の画質向上：リニア補間を使用
+        texture.source.scaleMode = 'linear';
         const dollSprite = new Sprite(texture);
 
         // キャンバスに収まるようにスケーリング（高さの90%に合わせてから、ドールスケールを適用）
@@ -283,6 +285,8 @@ export class PixiEngine {
       if (item.imageUrl) {
         try {
           const texture = await Assets.load(item.imageUrl);
+          // 縮小時の画質向上：リニア補間を使用
+          texture.source.scaleMode = 'linear';
           const clothingSprite = new Sprite(texture);
 
           // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）

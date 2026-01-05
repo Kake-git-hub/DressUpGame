@@ -2,6 +2,7 @@
  * DollControlPanel コンポーネント
  * ドールの位置とサイズを調整するコントロールパネル
  * タッチ/マウスで直接ドラッグ移動、ピンチでサイズ変更
+ * ドール位置を基準点としてドラッグ
  */
 import { useEffect, useRef, useCallback, type CSSProperties } from 'react';
 import type { DollTransform } from '../types';
@@ -18,8 +19,6 @@ export function DollControlPanel({
   transform,
   onChange,
   isVisible,
-  canvasWidth,
-  canvasHeight,
 }: DollControlPanelProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -35,10 +34,10 @@ export function DollControlPanel({
     return Math.sqrt(dx * dx + dy * dy);
   };
 
-  // 位置を制限（背景全域に移動可能）
+  // 位置を制限（背景領域外にもはみ出せるように広めに）
   const clampPosition = (x: number, y: number) => ({
-    x: Math.max(0, Math.min(100, x)),
-    y: Math.max(0, Math.min(100, y)),
+    x: Math.max(-20, Math.min(120, x)),
+    y: Math.max(-20, Math.min(120, y)),
   });
 
   // マウス/タッチ開始
@@ -57,12 +56,11 @@ export function DollControlPanel({
     const deltaX = e.clientX - startPos.current.x;
     const deltaY = e.clientY - startPos.current.y;
 
-    // ピクセルをパーセンテージに変換（表示サイズ基準。CSSスケール/DPR差によるズレ対策）
+    // ピクセルをパーセンテージに変換（オーバーレイ全体のサイズ基準）
     const rect = overlayRef.current?.getBoundingClientRect();
-    const baseWidth = rect?.width || canvasWidth;
-    const baseHeight = rect?.height || canvasHeight;
-    const percentX = (deltaX / baseWidth) * 100;
-    const percentY = (deltaY / baseHeight) * 100;
+    if (!rect) return;
+    const percentX = (deltaX / rect.width) * 100;
+    const percentY = (deltaY / rect.height) * 100;
 
     const newPos = clampPosition(
       startTransform.current.x + percentX,
@@ -70,7 +68,7 @@ export function DollControlPanel({
     );
 
     onChange({ ...transform, ...newPos });
-  }, [isVisible, canvasWidth, canvasHeight, transform, onChange]);
+  }, [isVisible, transform, onChange]);
 
   // マウス/タッチ終了
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
@@ -95,7 +93,7 @@ export function DollControlPanel({
       const currentDistance = getTouchDistance(e.touches);
       if (currentDistance !== null && lastTouchDistance.current !== null) {
         const scaleFactor = currentDistance / lastTouchDistance.current;
-        const newScale = Math.max(0.5, Math.min(1.5, transform.scale * scaleFactor));
+        const newScale = Math.max(0.3, Math.min(2.0, transform.scale * scaleFactor));
         onChange({ ...transform, scale: newScale });
         lastTouchDistance.current = currentDistance;
       }
@@ -128,11 +126,7 @@ export function DollControlPanel({
   return (
     <div
       ref={overlayRef}
-      style={{
-        ...styles.overlay,
-        width: canvasWidth,
-        height: canvasHeight,
-      }}
+      style={styles.overlay}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -140,7 +134,7 @@ export function DollControlPanel({
     >
       {/* 操作ガイド */}
       <div style={styles.guideTop}>
-        <span style={styles.guideText}>ドラッグで移動 / ピンチでサイズ変更</span>
+        <span style={styles.guideText}>ドラッグで移動 / ピンチでサイズ</span>
       </div>
     </div>
   );
@@ -151,6 +145,8 @@ const styles: Record<string, CSSProperties> = {
     position: 'absolute',
     top: 0,
     left: 0,
+    right: 0,
+    bottom: 0,
     cursor: 'move',
     touchAction: 'none',
     backgroundColor: 'transparent',
@@ -162,14 +158,15 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     justifyContent: 'center',
     gap: '20px',
-    padding: '10px',
+    padding: '8px',
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: '8px',
     margin: '8px',
     boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+    alignSelf: 'center',
   },
   guideText: {
-    fontSize: '14px',
+    fontSize: '12px',
     color: '#666',
     fontWeight: 'bold',
   },

@@ -2,9 +2,9 @@
  * AvatarCanvas コンポーネント
  * PixiJSでドールと着せた服を表示するキャンバス
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
-import type { DollConfig, EquippedItem, DollTransform } from '../types';
+import type { DollConfig, EquippedItem, DollTransform, ClothingItemData, Position } from '../types';
 
 interface AvatarCanvasProps {
   width?: number;
@@ -16,6 +16,12 @@ interface AvatarCanvasProps {
   backgroundImageUrl?: string; // 背景画像のURL
   dollTransform?: DollTransform; // ドールの位置・スケール
   onCanvasReady?: () => void;
+  // movableアイテムドラッグ中プレビュー
+  draggingPreview?: {
+    item: ClothingItemData;
+    position: Position;
+  } | null;
+  avatarSectionRef?: RefObject<HTMLElement | null>;
 }
 
 export function AvatarCanvas({
@@ -28,6 +34,8 @@ export function AvatarCanvas({
   backgroundImageUrl,
   dollTransform,
   onCanvasReady,
+  draggingPreview,
+  avatarSectionRef,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PixiEngine | null>(null);
@@ -143,15 +151,45 @@ export function AvatarCanvas({
     }
   }, [dollTransform, isReady]);
 
+  // ドラッグプレビューの位置計算
+  const previewStyle = (() => {
+    if (!draggingPreview || !avatarSectionRef?.current) return null;
+    const rect = avatarSectionRef.current.getBoundingClientRect();
+    return {
+      left: draggingPreview.position.x - rect.left,
+      top: draggingPreview.position.y - rect.top,
+    };
+  })();
+
   return (
-    <canvas
-      ref={canvasRef}
-      id="avatar-canvas"
-      data-testid="avatar-canvas"
-      style={{
-        borderRadius: '12px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-      }}
-    />
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <canvas
+        ref={canvasRef}
+        id="avatar-canvas"
+        data-testid="avatar-canvas"
+        style={{
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        }}
+      />
+      {/* movableアイテムドラッグ中のプレビュー */}
+      {draggingPreview && previewStyle && (
+        <img
+          src={draggingPreview.item.imageUrl}
+          alt={draggingPreview.item.name}
+          style={{
+            position: 'absolute',
+            left: previewStyle.left,
+            top: previewStyle.top,
+            transform: 'translate(-50%, -50%)',
+            maxWidth: '80px',
+            maxHeight: '80px',
+            opacity: 0.7,
+            pointerEvents: 'none',
+            filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))',
+          }}
+        />
+      )}
+    </div>
   );
 }
