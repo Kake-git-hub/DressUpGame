@@ -36,11 +36,44 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-// 画像をBase64に変換
-export function fileToBase64(file: File): Promise<string> {
+function inferImageMimeType(fileName?: string): string | null {
+  if (!fileName) return null;
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return null;
+  }
+}
+
+function normalizeDataUrlMime(dataUrl: string, desiredMime: string | null): string {
+  if (!desiredMime || !desiredMime.startsWith('image/')) return dataUrl;
+  const match = dataUrl.match(/^data:([^;]*);base64,/);
+  if (!match) return dataUrl;
+  const currentMime = match[1] ?? '';
+  if (currentMime.startsWith('image/')) return dataUrl;
+  // ZIP由来などで application/octet-stream になっているケースを補正
+  return dataUrl.replace(/^data:[^;]*;base64,/, `data:${desiredMime};base64,`);
+}
+
+// 画像をBase64(Data URL)に変換（ZIP由来などでmimeが欠ける場合は拡張子から補正）
+export function fileToBase64(file: Blob, fileName?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = () => {
+      const raw = reader.result as string;
+      const mimeFromBlob = (file as File).type || '';
+      const desiredMime = mimeFromBlob.startsWith('image/') ? mimeFromBlob : inferImageMimeType(fileName);
+      resolve(normalizeDataUrlMime(raw, desiredMime));
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -221,7 +254,7 @@ export async function addCustomDoll(
   imageFile: File
 ): Promise<DollData> {
   const id = `custom-doll-${Date.now()}`;
-  const base64 = await fileToBase64(imageFile);
+  const base64 = await fileToBase64(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
   const doll: DollData = {
@@ -270,7 +303,7 @@ export async function addCustomBackground(
   imageFile: File
 ): Promise<BackgroundData> {
   const id = `custom-bg-${Date.now()}`;
-  const base64 = await fileToBase64(imageFile);
+  const base64 = await fileToBase64(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
   const bg: BackgroundData = {
@@ -293,7 +326,7 @@ export async function addCustomClothing(
   imageFile: File
 ): Promise<ClothingItemData> {
   const id = `custom-clothing-${Date.now()}`;
-  const base64 = await fileToBase64(imageFile);
+  const base64 = await fileToBase64(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得
@@ -407,10 +440,15 @@ function extractImagesFromFiles(files: FileList): { name: string; file: File }[]
 }
 
 // Blobをbase64に変換
-function blobToBase64(blob: Blob): Promise<string> {
+function blobToBase64(blob: Blob, fileName?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = () => {
+      const raw = reader.result as string;
+      const mimeFromBlob = (blob as File).type || '';
+      const desiredMime = mimeFromBlob.startsWith('image/') ? mimeFromBlob : inferImageMimeType(fileName);
+      resolve(normalizeDataUrlMime(raw, desiredMime));
+    };
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
@@ -434,7 +472,7 @@ export async function bulkImportFromZip(
   
   for (const { name, blob } of images) {
     try {
-      const base64 = await blobToBase64(blob);
+      const base64 = await blobToBase64(blob, name);
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
@@ -637,7 +675,7 @@ export async function bulkImportFromHierarchicalFolder(
     }
     
     try {
-      const base64 = await fileToBase64(file);
+      const base64 = await fileToBase64(file, file.name);
       const id = `custom-${category.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const name = file.name.replace(/\.[^.]+$/, '');
       
@@ -851,7 +889,7 @@ export async function importPresetFromFolder(
   // 背景を取り込み
   for (const { name, file } of backgroundFiles) {
     try {
-      const base64 = await fileToBase64(file);
+      const base64 = await fileToBase64(file, file.name);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
@@ -876,7 +914,7 @@ export async function importPresetFromFolder(
       
       // 最初のドールを使用
       const dollFile = data.dolls[0];
-      const dollBase64 = await fileToBase64(dollFile.file);
+      const dollBase64 = await fileToBase64(dollFile.file, dollFile.file.name);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
       
@@ -890,7 +928,7 @@ export async function importPresetFromFolder(
         categories.push(getCategoryInfo(category));
         
         for (const { name, file } of clothingFiles) {
-          const base64 = await fileToBase64(file);
+          const base64 = await fileToBase64(file, file.name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
@@ -1035,7 +1073,7 @@ export async function importPresetFromZip(
   // 背景を取り込み
   for (const { name, blob } of backgroundFiles) {
     try {
-      const base64 = await blobToBase64(blob);
+      const base64 = await blobToBase64(blob, name);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
@@ -1058,7 +1096,7 @@ export async function importPresetFromZip(
       }
       
       const dollFile = data.dolls[0];
-      const dollBase64 = await blobToBase64(dollFile.blob);
+      const dollBase64 = await blobToBase64(dollFile.blob, dollFile.name);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
       
@@ -1071,7 +1109,7 @@ export async function importPresetFromZip(
         categories.push(getCategoryInfo(category));
         
         for (const { name, blob } of clothingFiles) {
-          const base64 = await blobToBase64(blob);
+          const base64 = await blobToBase64(blob, name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           

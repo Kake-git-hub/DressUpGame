@@ -57,9 +57,12 @@ export function DollControlPanel({
     const deltaX = e.clientX - startPos.current.x;
     const deltaY = e.clientY - startPos.current.y;
 
-    // ピクセルをパーセンテージに変換
-    const percentX = (deltaX / canvasWidth) * 100;
-    const percentY = (deltaY / canvasHeight) * 100;
+    // ピクセルをパーセンテージに変換（表示サイズ基準。CSSスケール/DPR差によるズレ対策）
+    const rect = overlayRef.current?.getBoundingClientRect();
+    const baseWidth = rect?.width || canvasWidth;
+    const baseHeight = rect?.height || canvasHeight;
+    const percentX = (deltaX / baseWidth) * 100;
+    const percentY = (deltaY / baseHeight) * 100;
 
     const newPos = clampPosition(
       startTransform.current.x + percentX,

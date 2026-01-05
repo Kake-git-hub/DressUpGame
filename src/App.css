@@ -304,7 +304,7 @@ textarea {
 .background-layer {
   position: absolute;
   left: 0;
-  right: 360px; /* メニュー幅 + マージン */
+  right: 300px; /* メニュー幅(280px) + マージン(20px) */
   top: 0;
   bottom: 0;
   z-index: 0;
