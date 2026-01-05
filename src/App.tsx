@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.4.8';
+const APP_VERSION = '0.4.9-debug';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -250,6 +250,16 @@ function App() {
 
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
   const [showDollControls, setShowDollControls] = useState(false);
+
+  // デバッグ: ドール画像URL確認
+  useEffect(() => {
+    if (currentDollSafe) {
+      console.log('=== currentDollSafe ===');
+      console.log('id:', currentDollSafe.id);
+      console.log('name:', currentDollSafe.name);
+      console.log('bodyImageUrl:', currentDollSafe.bodyImageUrl ? currentDollSafe.bodyImageUrl.substring(0, 80) + '...' : 'EMPTY');
+    }
+  }, [currentDollSafe]);
 
   // 現在の背景
   const currentBackground = useMemo(() => 

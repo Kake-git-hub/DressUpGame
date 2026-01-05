@@ -136,8 +136,9 @@ export class PixiEngine {
     const dollScale = this.dollTransform.scale;
 
     // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
-    if (config.imageUrl) {
+    if (config.imageUrl && config.imageUrl.length > 0) {
       try {
+        console.log('ドール画像読み込み開始:', config.imageUrl.substring(0, 100) + '...');
         const texture = await Assets.load(config.imageUrl);
         const dollSprite = new Sprite(texture);
 
@@ -152,11 +153,14 @@ export class PixiEngine {
         dollSprite.y = centerY;
 
         this.dollContainer.addChild(dollSprite);
+        console.log('ドール画像描画成功');
         return;
       } catch (error) {
         console.warn('ドール画像の読み込みに失敗、プレースホルダーを表示:', error);
         // 画像読み込み失敗時はプレースホルダーを表示
       }
+    } else {
+      console.log('ドール画像URLなし、プレースホルダーを表示');
     }
 
     // プレースホルダーとしてシンプルな人形を描画
