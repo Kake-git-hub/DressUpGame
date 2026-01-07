@@ -92,10 +92,10 @@ textarea {
   padding-left: 16px;
 }
 
-/* アバターセクション - 背景と同じ全画面領域 */
+/* アバターセクション - 画面全体に配置 */
 .avatar-section {
-  position: absolute;
-  left: 160px; /* メニュー幅(140px) + マージン(20px) */
+  position: fixed;
+  left: 0;
   right: 0;
   top: 0;
   bottom: 0;
@@ -104,6 +104,11 @@ textarea {
   align-items: center;
   overflow: visible; /* ドールがはみ出せるように */
   z-index: 1; /* 背景より上、メニューより下 */
+  pointer-events: none; /* クリックは下層に通す */
+}
+
+.avatar-section canvas {
+  pointer-events: auto; /* キャンバス自体はクリック可能 */
 }
 
 /* パレットセクション - 左端に固定 */
@@ -113,7 +118,7 @@ textarea {
   height: calc(100vh - 60px);
   overflow-y: auto;
   z-index: 10;
-  padding-top: 56px;
+  padding-top: 72px; /* ボタン(48px) + マージン(24px) */
 }
 
 /* リセットボタン */
@@ -164,10 +169,6 @@ textarea {
 
   .palette-section {
     width: 140px;
-  }
-
-  .avatar-section {
-    left: 160px; /* メニュー幅(140px) + マージン(20px) */
   }
 
   .app-footer {
@@ -297,14 +298,14 @@ textarea {
   box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
 }
 
-/* 背景レイヤー（ドールエリア全域） */
+/* 背景レイヤー（画面全体の最背面） */
 .background-layer {
-  position: absolute;
-  left: 160px; /* メニュー幅(140px) + マージン(20px) */
+  position: fixed;
+  left: 0;
   right: 0;
   top: 0;
   bottom: 0;
-  z-index: 0;
+  z-index: -1;
 }
 
 /* 位置調整中のavatar-section */

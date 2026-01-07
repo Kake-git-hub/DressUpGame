@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.5.4';
+const APP_VERSION = '0.6.0';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -225,11 +225,10 @@ function App() {
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
       
       // movableアイテムの場合、ドロップ位置を保存
-      if (scaledItem.movable && dropPosition && avatarSectionRef.current) {
-        const rect = avatarSectionRef.current.getBoundingClientRect();
-        // ドロップ位置をパーセンテージに変換
-        const percentX = ((dropPosition.x - rect.left) / rect.width) * 100;
-        const percentY = ((dropPosition.y - rect.top) / rect.height) * 100;
+      if (scaledItem.movable && dropPosition) {
+        // 画面全体に対するパーセンテージを計算
+        const percentX = (dropPosition.x / window.innerWidth) * 100;
+        const percentY = (dropPosition.y / window.innerHeight) * 100;
         
         const itemWithOffset = {
           ...scaledItem,
@@ -245,7 +244,7 @@ function App() {
     [equipItem, scaledItems, currentDoll]
   );
 
-  // movableアイテムドラッグ中のコールバック
+  // アイテムドラッグ中のコールバック（全アイテム対象）
   const handleDragMove = useCallback((item: ClothingItemData, position: Position) => {
     if (!avatarSectionRef.current) return;
     const rect = avatarSectionRef.current.getBoundingClientRect();
@@ -412,14 +411,14 @@ function App() {
               />
             )}
 
-            {/* movableアイテムドラッグ中のプレビュー */}
+            {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
             {draggingPreview && avatarSectionRef.current && (() => {
               const rect = avatarSectionRef.current.getBoundingClientRect();
               const left = draggingPreview.position.x - rect.left;
               const top = draggingPreview.position.y - rect.top;
               return (
                 <img
-                  src={draggingPreview.item.imageUrl}
+                  src={draggingPreview.item.thumbnailUrl || draggingPreview.item.imageUrl}
                   alt={draggingPreview.item.name}
                   style={{
                     position: 'absolute',

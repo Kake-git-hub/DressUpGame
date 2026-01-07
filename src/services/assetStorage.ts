@@ -5,7 +5,7 @@
  */
 
 import type { ClothingItemData, DollData, BackgroundData, ClothingType, DollPreset, CategoryInfo } from '../types';
-import { DEFAULT_CATEGORY_MAP, getCategoryInfo } from '../types';
+import { DEFAULT_CATEGORY_MAP, getCategoryInfo, parseFolderName } from '../types';
 
 const STORAGE_KEYS = {
   CUSTOM_DOLLS: 'dressup_custom_dolls',
@@ -176,8 +176,10 @@ export function saveCustomClothing(items: ClothingItemData[]): void {
     position: i.position,
     anchorType: i.anchorType,
     dollId: i.dollId,
+    movable: i.movable,
+    hasThumbnail: !!i.thumbnailUrl, // サムネイルがあるかフラグ
     isCustom: true,
-    // imageUrlは保存しない（IndexedDBから復元）
+    // imageUrl, thumbnailUrlは保存しない（IndexedDBから復元）
   }));
   localStorage.setItem(STORAGE_KEYS.CUSTOM_CLOTHING, JSON.stringify(data));
 }
@@ -237,7 +239,15 @@ export async function restoreClothingImages(items: ClothingItemData[]): Promise<
     if (item.isCustom && !item.imageUrl) {
       const imageData = await getImageFromStorage(item.id);
       if (imageData) {
-        restored.push({ ...item, imageUrl: imageData });
+        // サムネイルがある場合は復元
+        let thumbnailUrl: string | undefined;
+        if ((item as any).hasThumbnail) {
+          const thumbData = await getImageFromStorage(`${item.id}-thumb`);
+          if (thumbData) {
+            thumbnailUrl = thumbData;
+          }
+        }
+        restored.push({ ...item, imageUrl: imageData, thumbnailUrl });
       } else {
         console.warn(`服画像が見つかりません: ${item.id}`);
       }
@@ -593,10 +603,15 @@ function createDollData(id: string, name: string, base64: string): DollData {
 }
 
 // 服データを作成するヘルパー（動的カテゴリ対応）
-// categoryRaw: 元のフォルダ名（_movable サフィックス含む可能性あり）
+// categoryRaw: 元のフォルダ名（_movable サフィックス含む可能性あり、番号プレフィックス含む可能性あり）
 function createClothingData(id: string, name: string, type: ClothingType, base64: string, categoryRaw?: string): ClothingItemData {
+  // フォルダ名から番号とラベルを抽出（例: "1_くつした" → { order: 1, label: "くつした" }）
+  const parsed = parseFolderName(categoryRaw || type);
+  const categoryLabel = parsed.label; // 番号を除いたカテゴリ名
+  const layerOrder = parsed.order; // レイヤー順（番号がなければundefined）
+  
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得、なければ汎用値
-  const mapping = DEFAULT_CATEGORY_MAP[type.toLowerCase()];
+  const mapping = DEFAULT_CATEGORY_MAP[categoryLabel.toLowerCase()];
   const defaults = mapping || {
     position: { x: 0, y: 0 },
     zIndex: 25,
@@ -612,13 +627,14 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
   return {
     id,
     name,
-    type,
+    type: categoryLabel.toLowerCase(), // 番号を除いたカテゴリ名を使用
     imageUrl: base64,
     position: defaults.position,
     baseZIndex: mapping?.zIndex || 25,
     anchorType: defaults.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet',
     isCustom: true,
     movable,
+    layerOrder,
   };
 }
 
@@ -806,7 +822,8 @@ export async function importPresetFromFolder(
   // ファイルをプリセット別に分類
   const presetMap = new Map<string, {
     dolls: { name: string; file: File }[];
-    clothing: Map<string, { name: string; file: File }[]>;
+    clothing: Map<string, { name: string; file: File; thumbFile?: File }[]>;
+    clothingThumbs: Map<string, File>; // サムネイル用マップ（ベース名 -> File）
   }>();
   const backgroundFiles: { name: string; file: File }[] = [];
   
@@ -835,15 +852,21 @@ export async function importPresetFromFolder(
     const fullPath = file.webkitRelativePath || file.name;
     const path = fullPath.replace(/\\/g, '/');
     const parts = path.split('/').filter(p => p.length > 0);
-    const fileName = file.name.replace(/\.[^.]+$/, '');
+    const fileNameWithoutExt = file.name.replace(/\.[^.]+$/, '');
     
-    console.log(`処理中: ${path} (parts: ${parts.join(' > ')})`);
+    // _thumbサフィックスをチェック
+    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb');
+    const baseName = isThumb ? fileNameWithoutExt.replace(/_thumb$/i, '') : fileNameWithoutExt;
+    
+    console.log(`処理中: ${path} (parts: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
     // 背景フォルダ（パス内にbackgroundsがあれば背景）
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
-      backgroundFiles.push({ name: fileName, file });
-      console.log(`  → 背景として追加: ${fileName}`);
+      if (!isThumb) {
+        backgroundFiles.push({ name: baseName, file });
+        console.log(`  → 背景として追加: ${baseName}`);
+      }
       continue;
     }
     
@@ -858,7 +881,7 @@ export async function importPresetFromFolder(
     const presetId = dollFolderName.toLowerCase();
     
     if (!presetMap.has(presetId)) {
-      presetMap.set(presetId, { dolls: [], clothing: new Map() });
+      presetMap.set(presetId, { dolls: [], clothing: new Map(), clothingThumbs: new Map() });
     }
     const preset = presetMap.get(presetId)!;
     
@@ -868,8 +891,10 @@ export async function importPresetFromFolder(
     // dolls フォルダ内の画像
     const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
     if (dollsIndex !== -1) {
-      preset.dolls.push({ name: fileName, file });
-      console.log(`  → ドールとして追加: ${presetId} / ${fileName}`);
+      if (!isThumb) {
+        preset.dolls.push({ name: baseName, file });
+        console.log(`  → ドールとして追加: ${presetId} / ${baseName}`);
+      }
       continue;
     }
     
@@ -879,11 +904,19 @@ export async function importPresetFromFolder(
       const category = subParts[clothingIndex + 1].toLowerCase();
       // カテゴリがファイル名でないことを確認
       if (category && !category.includes('.')) {
-        if (!preset.clothing.has(category)) {
-          preset.clothing.set(category, []);
+        if (isThumb) {
+          // サムネイルの場合はthumbsマップに保存
+          const thumbKey = `${category}/${baseName}`;
+          preset.clothingThumbs.set(thumbKey, file);
+          console.log(`  → サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
+        } else {
+          // 本体画像の場合
+          if (!preset.clothing.has(category)) {
+            preset.clothing.set(category, []);
+          }
+          preset.clothing.get(category)!.push({ name: baseName, file });
+          console.log(`  → 服として追加: ${presetId} / ${category} / ${baseName}`);
         }
-        preset.clothing.get(category)!.push({ name: fileName, file });
-        console.log(`  → 服として追加: ${presetId} / ${category}`);
       }
     }
   }
@@ -891,7 +924,7 @@ export async function importPresetFromFolder(
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種, サムネイル${data.clothingThumbs.size}枚`);
   }
   
   // 背景を取り込み
@@ -942,7 +975,22 @@ export async function importPresetFromFolder(
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
+          // サムネイルがあれば読み込み
+          const thumbKey = `${categoryRaw}/${name}`;
+          const thumbFile = data.clothingThumbs.get(thumbKey);
+          let thumbnailUrl: string | undefined;
+          if (thumbFile) {
+            thumbnailUrl = await fileToBase64(thumbFile, thumbFile.name);
+            const thumbId = `${id}-thumb`;
+            await saveImageToStorage(thumbId, thumbnailUrl);
+            console.log(`  サムネイル読み込み: ${thumbKey}`);
+          }
+          
           const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
+          // サムネイルURLを追加
+          if (thumbnailUrl) {
+            item.thumbnailUrl = thumbnailUrl;
+          }
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
@@ -1008,6 +1056,7 @@ export async function importPresetFromZip(
   const presetMap = new Map<string, {
     dolls: { name: string; blob: Blob; fileNameWithExt: string }[];
     clothing: Map<string, { name: string; blob: Blob; fileNameWithExt: string }[]>;
+    clothingThumbs: Map<string, { blob: Blob; fileNameWithExt: string }>; // サムネイル用マップ
   }>();
   const backgroundFiles: { name: string; blob: Blob; fileNameWithExt: string }[] = [];
   
@@ -1022,18 +1071,24 @@ export async function importPresetFromZip(
     // パスをパース（最後の要素はファイル名）
     const pathParts = path.replace(/\\/g, '/').split('/').filter(p => p.length > 0);
     const fileNameWithExt = pathParts.pop() || '';
-    const fileName = fileNameWithExt.replace(/\.[^.]+$/, '');
+    const fileNameWithoutExt = fileNameWithExt.replace(/\.[^.]+$/, '');
     const parts = pathParts; // ディレクトリ部分のみ
     
-    console.log(`処理中: ${path} (dirs: ${parts.join(' > ')})`);
+    // _thumbサフィックスをチェック
+    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb');
+    const baseName = isThumb ? fileNameWithoutExt.replace(/_thumb$/i, '') : fileNameWithoutExt;
+    
+    console.log(`処理中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
     const blob = await file.async('blob');
     
     // 背景フォルダ
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
-      backgroundFiles.push({ name: fileName, blob, fileNameWithExt });
-      console.log(`  → 背景として追加: ${fileName}`);
+      if (!isThumb) {
+        backgroundFiles.push({ name: baseName, blob, fileNameWithExt });
+        console.log(`  → 背景として追加: ${baseName}`);
+      }
       continue;
     }
     
@@ -1047,7 +1102,7 @@ export async function importPresetFromZip(
     const presetId = parts[dollFolderIndex].toLowerCase();
     
     if (!presetMap.has(presetId)) {
-      presetMap.set(presetId, { dolls: [], clothing: new Map() });
+      presetMap.set(presetId, { dolls: [], clothing: new Map(), clothingThumbs: new Map() });
     }
     const preset = presetMap.get(presetId)!;
     
@@ -1057,8 +1112,10 @@ export async function importPresetFromZip(
     // dolls フォルダ内
     const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
     if (dollsIndex !== -1) {
-      preset.dolls.push({ name: fileName, blob, fileNameWithExt });
-      console.log(`  → ドールとして追加: ${presetId} / ${fileName}`);
+      if (!isThumb) {
+        preset.dolls.push({ name: baseName, blob, fileNameWithExt });
+        console.log(`  → ドールとして追加: ${presetId} / ${baseName}`);
+      }
       continue;
     }
     
@@ -1066,18 +1123,25 @@ export async function importPresetFromZip(
     const clothingIndex = subParts.findIndex(p => p.toLowerCase() === 'clothing');
     if (clothingIndex !== -1 && clothingIndex + 1 < subParts.length) {
       const category = subParts[clothingIndex + 1].toLowerCase();
-      if (!preset.clothing.has(category)) {
-        preset.clothing.set(category, []);
+      if (isThumb) {
+        // サムネイルの場合はthumbsマップに保存
+        const thumbKey = `${category}/${baseName}`;
+        preset.clothingThumbs.set(thumbKey, { blob, fileNameWithExt });
+        console.log(`  → サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
+      } else {
+        if (!preset.clothing.has(category)) {
+          preset.clothing.set(category, []);
+        }
+        preset.clothing.get(category)!.push({ name: baseName, blob, fileNameWithExt });
+        console.log(`  → 服として追加: ${presetId} / ${category} / ${baseName}`);
       }
-      preset.clothing.get(category)!.push({ name: fileName, blob, fileNameWithExt });
-      console.log(`  → 服として追加: ${presetId} / ${category} / ${fileName}`);
     }
   }
   
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種, サムネイル${data.clothingThumbs.size}枚`);
   }
   
   // 背景を取り込み
@@ -1125,7 +1189,22 @@ export async function importPresetFromZip(
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
+          // サムネイルがあれば読み込み
+          const thumbKey = `${categoryRaw}/${name}`;
+          const thumbData = data.clothingThumbs.get(thumbKey);
+          let thumbnailUrl: string | undefined;
+          if (thumbData) {
+            thumbnailUrl = await blobToBase64(thumbData.blob, thumbData.fileNameWithExt);
+            const thumbId = `${id}-thumb`;
+            await saveImageToStorage(thumbId, thumbnailUrl);
+            console.log(`  サムネイル読み込み: ${thumbKey}`);
+          }
+          
           const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
+          // サムネイルURLを追加
+          if (thumbnailUrl) {
+            item.thumbnailUrl = thumbnailUrl;
+          }
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);

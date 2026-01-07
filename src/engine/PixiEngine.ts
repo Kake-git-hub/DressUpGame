@@ -281,6 +281,21 @@ export class PixiEngine {
 
     // 既にソートされていることを想定（useDressUpでソート済み）
     for (const item of items) {
+      // movableアイテムの場合、オフセットを取得
+      const offsetX = (item as EquippedItem).offsetX ?? 0;
+      const offsetY = (item as EquippedItem).offsetY ?? 0;
+      
+      // movableアイテムの位置計算
+      // offsetX/offsetYは中央(50%)からのパーセンテージオフセット
+      let itemX = centerX;
+      let itemY = centerY;
+      
+      if (item.movable && (offsetX !== 0 || offsetY !== 0)) {
+        // ドロップ位置をピクセルに変換
+        itemX = (this.app.screen.width * (50 + offsetX)) / 100;
+        itemY = (this.app.screen.height * (50 + offsetY)) / 100;
+      }
+
       // imageUrlがある場合は画像を読み込み
       if (item.imageUrl) {
         try {
@@ -297,19 +312,19 @@ export class PixiEngine {
           // アンカーを中央に
           clothingSprite.anchor.set(0.5);
 
-          // 位置を設定（ドールと同じ中央位置）
-          clothingSprite.x = centerX;
-          clothingSprite.y = centerY;
+          // 位置を設定
+          clothingSprite.x = itemX;
+          clothingSprite.y = itemY;
 
           this.clothingContainer!.addChild(clothingSprite);
         } catch (error) {
           console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
           // 画像読み込み失敗時はプレースホルダーを表示
-          this.drawClothingPlaceholder(item, centerX, centerY, s);
+          this.drawClothingPlaceholder(item, itemX, itemY, s);
         }
       } else {
         // imageUrlがない場合はプレースホルダー
-        this.drawClothingPlaceholder(item, centerX, centerY, s);
+        this.drawClothingPlaceholder(item, itemX, itemY, s);
       }
     }
   }

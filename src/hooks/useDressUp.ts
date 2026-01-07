@@ -92,10 +92,17 @@ export function useDressUp(
   );
 
   // 装備中のアイテム一覧を取得（レンダリング順にソート）
-  // equipOrder（後から着せたものが上）を最優先、baseZIndexは補助的に使用
+  // layerOrder（フォルダ名の番号）を最優先でソート（小さい方が下＝先に描画）
+  // layerOrderがない場合はbaseZIndexを使用、最後にequipOrderで安定ソート
   const getEquippedItems = useCallback((): EquippedItem[] => {
     return [...state.equippedItems].sort((a, b) => {
-      // 着せた順番で並べる（後が上）
+      // layerOrderがある場合はそれを最優先
+      const aLayer = a.layerOrder ?? a.baseZIndex ?? 0;
+      const bLayer = b.layerOrder ?? b.baseZIndex ?? 0;
+      if (aLayer !== bLayer) {
+        return aLayer - bLayer; // 小さい方が下（先に描画）
+      }
+      // 同じレイヤーなら着せた順番で並べる（後が上）
       return a.equipOrder - b.equipOrder;
     });
   }, [state.equippedItems]);

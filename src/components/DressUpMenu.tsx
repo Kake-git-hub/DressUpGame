@@ -146,12 +146,10 @@ export function DressUpMenu({
       {showBackgrounds ? (
         // 背景選択画面
         <>
-          <div style={styles.header}>
-            <button style={styles.backButton} onClick={() => setShowBackgrounds(false)}>
-              ← もどる
-            </button>
-            <h3 style={styles.titleSmall}>🖼️ はいけい</h3>
-          </div>
+          {/* 戻るボタン（大きく） */}
+          <button style={styles.backButtonLarge} onClick={() => setShowBackgrounds(false)}>
+            ← もどる
+          </button>
           
           <div style={styles.backgroundGrid}>
             {/* なし（背景なし）オプション */}
@@ -199,6 +197,16 @@ export function DressUpMenu({
       ) : !selectedCategory ? (
         // カテゴリー選択画面
         <>
+          {/* 背景選択ボタン（一番上） */}
+          <button
+            style={styles.backgroundButtonTop}
+            onClick={() => setShowBackgrounds(true)}
+          >
+            <span style={styles.categoryEmoji}>🖼️</span>
+            <span style={styles.categoryLabel}>はいけい</span>
+            {currentBackgroundId && <span style={styles.activeDot}>●</span>}
+          </button>
+
           {/* リセットボタン（服を着ている場合のみ表示） */}
           {clothingCount > 0 && (
             <button style={styles.resetButtonTop} onClick={onReset}>
@@ -224,50 +232,16 @@ export function DressUpMenu({
               </button>
             ))}
           </div>
-          
-          {/* 背景選択ボタン */}
-          <div style={styles.actionButtons}>
-            <button
-              style={styles.actionButton}
-              onClick={() => setShowBackgrounds(true)}
-            >
-              🖼️ はいけい
-              {currentBackgroundId && <span style={styles.activeDot}>●</span>}
-            </button>
-          </div>
         </>
       ) : (
         // アイテム選択画面（ドラッグ&ドロップ）
         <>
-          <div style={styles.header}>
-            <button style={styles.backButton} onClick={handleBack}>
-              ← もどる
-            </button>
-            <h3 style={styles.titleSmall}>
-              {dynamicCategories.find(c => c.type === selectedCategory)?.emoji || '📁'}{' '}
-              {dynamicCategories.find(c => c.type === selectedCategory)?.label || selectedCategory}
-            </h3>
-          </div>
+          {/* 戻るボタン（大きく） */}
+          <button style={styles.backButtonLarge} onClick={handleBack}>
+            ← もどる
+          </button>
 
           <div style={styles.itemGrid}>
-            {/* 「なし」ボタン - 脱がせる */}
-            {equippedInCategory && onItemRemove && (
-              <button
-                style={{
-                  ...styles.itemButton,
-                  ...styles.noneButton,
-                }}
-                onClick={() => {
-                  onItemRemove(selectedCategory!);
-                  handleBack();
-                }}
-              >
-                <div style={styles.itemImageContainer}>
-                  <span style={{ fontSize: '24px' }}>✕</span>
-                </div>
-                <span style={styles.itemName}>なし</span>
-              </button>
-            )}
             {filteredItems.map(item => (
               <DraggableItem
                 key={item.id}
@@ -275,11 +249,24 @@ export function DressUpMenu({
                 isEquipped={equippedIds.has(item.id)}
                 onDrop={onItemDrop}
                 dropTargetId={dropTargetId}
-                onDragMove={item.movable ? onDragMove : undefined}
-                onDragEnd={item.movable ? onDragEnd : undefined}
+                onDragMove={onDragMove}
+                onDragEnd={onDragEnd}
               />
             ))}
           </div>
+
+          {/* 「なし」ボタン - 一番下に配置 */}
+          {equippedInCategory && onItemRemove && (
+            <button
+              style={styles.noneButtonBottom}
+              onClick={() => {
+                onItemRemove(selectedCategory!);
+                handleBack();
+              }}
+            >
+              ✕ なし
+            </button>
+          )}
 
           {filteredItems.length === 0 && (
             <p style={styles.emptyMessage}>
@@ -333,7 +320,7 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
       x: e.clientX - startPos.current.x,
       y: e.clientY - startPos.current.y,
     });
-    // movableアイテムの場合、親にドラッグ位置を通知
+    // 全アイテムで親にドラッグ位置を通知（プレビュー表示用）
     if (onDragMove) {
       onDragMove(item, { x: e.clientX, y: e.clientY });
     }
@@ -375,10 +362,9 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
         setDragPos({ x: 0, y: 0 });
         onDragEnd?.();
       }}
-    >
-      <div style={styles.itemImageContainer}>
+    >      <div style={styles.itemImageContainer}>
         <img
-          src={item.imageUrl}
+          src={item.thumbnailUrl || item.imageUrl}
           alt={item.name}
           style={styles.itemImage}
           draggable={false}
@@ -390,7 +376,6 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
           <div style={styles.equippedBadge}>✓</div>
         )}
       </div>
-      <span style={styles.itemName}>{item.name}</span>
     </div>
   );
 }
@@ -545,6 +530,32 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     fontWeight: 'bold',
   },
+  backButtonLarge: {
+    width: '100%',
+    padding: '12px',
+    marginBottom: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#333',
+    backgroundColor: '#e9ecef',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  backgroundButtonTop: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    padding: '8px',
+    marginBottom: '6px',
+    backgroundColor: '#e0f7fa',
+    border: '2px solid #80deea',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    gap: '6px',
+  },
   categoryGrid: {
     display: 'flex',
     flexDirection: 'column',
@@ -579,23 +590,24 @@ const styles: Record<string, CSSProperties> = {
     color: '#666',
   },
   itemGrid: {
-    display: 'flex',
-    flexDirection: 'column',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
     gap: '4px',
     overflowY: 'auto',
     flex: 1,
   },
   itemButton: {
     display: 'flex',
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
+    justifyContent: 'center',
     padding: '4px',
     backgroundColor: 'white',
     border: '2px solid #e9ecef',
     borderRadius: '6px',
     transition: 'box-shadow 0.2s',
     userSelect: 'none',
-    gap: '6px',
+    aspectRatio: '1',
   },
   itemButtonEquipped: {
     border: '2px solid #ff69b4',
@@ -608,9 +620,11 @@ const styles: Record<string, CSSProperties> = {
   },
   itemImageContainer: {
     position: 'relative',
-    width: '48px',
-    height: '48px',
-    marginBottom: '2px',
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemImage: {
     width: '100%',
@@ -643,10 +657,18 @@ const styles: Record<string, CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  noneButton: {
+  noneButtonBottom: {
+    width: '100%',
+    padding: '12px',
+    marginTop: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#666',
     backgroundColor: '#f8f8f8',
     border: '2px dashed #ccc',
+    borderRadius: '8px',
     cursor: 'pointer',
+    flexShrink: 0,
   },
   emptyMessage: {
     textAlign: 'center',

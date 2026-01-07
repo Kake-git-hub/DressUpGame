@@ -81,18 +81,41 @@ export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string
   'face': { label: '顔パーツ', emoji: '😊', zIndex: 40, position: { x: 0, y: -80 }, anchorType: 'head', movable: true },
 };
 
+// フォルダ名から番号とラベルを抽出（例: "1_くつした" → { order: 1, label: "くつした" }）
+// フォーマット: 「番号_ラベル」（番号は省略可、_movableサフィックスは除去）
+export function parseFolderName(folderName: string): { order: number | undefined; label: string } {
+  // _movable サフィックスを除去
+  const withoutMovable = folderName.replace(/_movable/gi, '');
+  
+  // 先頭の数字と_を分離（例: "1_くつした" → ["1", "くつした"]）
+  const match = withoutMovable.match(/^(\d+)_(.+)$/);
+  if (match) {
+    return {
+      order: parseInt(match[1], 10),
+      label: match[2],
+    };
+  }
+  // 番号なしの場合
+  return {
+    order: undefined,
+    label: withoutMovable,
+  };
+}
+
 // フォルダ名からカテゴリ情報を取得（なければデフォルト作成）
 // フォルダ名に _movable が含まれる場合は自由配置可能
+// 番号プレフィックス（例: "1_"）も除去してラベルを取得
 export function getCategoryInfo(folderName: string): CategoryInfo {
-  // _movable サフィックスを除去してベース名を取得
-  const baseName = folderName.replace(/_movable/gi, '').toLowerCase();
+  // parseFolderNameを使って番号とラベルを分離
+  const parsed = parseFolderName(folderName);
+  const baseName = parsed.label.toLowerCase();
   
   const mapping = DEFAULT_CATEGORY_MAP[baseName];
   if (mapping) {
     return { type: baseName, label: mapping.label, emoji: mapping.emoji };
   }
-  // 未知のカテゴリはフォルダ名をそのまま使用
-  return { type: baseName, label: folderName.replace(/_movable/gi, ''), emoji: '📁' };
+  // 未知のカテゴリはパース後のラベルをそのまま使用
+  return { type: baseName, label: parsed.label, emoji: '📁' };
 }
 
 // フォルダ名から movable フラグを判定
@@ -120,6 +143,7 @@ export interface ClothingItemData {
   name: string;
   type: ClothingType;
   imageUrl: string;
+  thumbnailUrl?: string; // サムネイル画像URL（オプション）
   position: Position; // ドール上での配置位置（基準サイズ200x300時）
   baseZIndex: number; // 基本重ね順（タイプごとのベース値）
   tags?: string[]; // 検索/フィルタ用タグ
@@ -134,6 +158,8 @@ export interface ClothingItemData {
   // 自由配置時のオフセット（装着後に移動した分）
   offsetX?: number;
   offsetY?: number;
+  // レイヤー順（フォルダ名の先頭番号から取得、小さい方が下）
+  layerOrder?: number;
 }
 
 // 装備中のアイテム（動的zIndex付き）
