@@ -367,6 +367,7 @@ function App() {
                 dollImageUrl={currentDollSafe.bodyImageUrl}
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
+                menuOffset={MENU_WIDTH}
               />
             )}
 

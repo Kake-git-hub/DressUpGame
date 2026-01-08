@@ -15,6 +15,7 @@ interface AvatarCanvasProps {
   dollImageUrl?: string; // ドールベース画像のURL
   backgroundImageUrl?: string; // 背景画像のURL
   dollTransform?: DollTransform; // ドールの位置・スケール
+  menuOffset?: number; // メニュー幅オフセット（背景位置調整用）
   onCanvasReady?: () => void;
 }
 
@@ -27,6 +28,7 @@ export function AvatarCanvas({
   dollImageUrl,
   backgroundImageUrl,
   dollTransform,
+  menuOffset = 0,
   onCanvasReady,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,6 +58,9 @@ export function AvatarCanvas({
 
         // 成功した場合のみrefに保存
         engineRef.current = engine;
+
+        // メニューオフセットを設定（背景位置調整用）
+        engine.setMenuOffset(menuOffset);
 
         // ドールの初期位置・スケールを設定
         if (dollTransform) {

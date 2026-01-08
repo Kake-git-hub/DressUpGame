@@ -15,6 +15,7 @@ export class PixiEngine {
   private destroyed = false;
   private customFaceUrl: string | null = null;
   private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
+  private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -87,6 +88,11 @@ export class PixiEngine {
     }
   }
 
+  // メニューオフセットを設定（背景位置調整用）
+  setMenuOffset(offset: number): void {
+    this.menuOffset = offset;
+  }
+
   // 背景を設定
   async setBackground(imageUrl: string | null): Promise<void> {
     if (!this.backgroundContainer || !this.app || !this.initialized || this.destroyed) {
@@ -110,9 +116,10 @@ export class PixiEngine {
       const scale = Math.max(scaleX, scaleY);
       bgSprite.scale.set(scale);
 
-      // 中央に配置
+      // ドール中心に配置（メニュー幅を考慮）
       bgSprite.anchor.set(0.5);
-      bgSprite.x = this.app.screen.width / 2;
+      // 背景中心 = メニュー幅 + (キャンバス幅 - メニュー幅) / 2 = (キャンバス幅 + メニュー幅) / 2
+      bgSprite.x = (this.app.screen.width + this.menuOffset) / 2;
       bgSprite.y = this.app.screen.height / 2;
 
       this.backgroundContainer.addChild(bgSprite);

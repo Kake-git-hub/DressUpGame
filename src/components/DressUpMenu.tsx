@@ -84,18 +84,6 @@ export function DressUpMenu({
   if (showBackgrounds) {
     return (
       <div style={styles.outerContainer}>
-        {/* 左側スクロールスペース（タッチしてスクロール用） */}
-        <div 
-          style={styles.scrollSpace}
-          onTouchStart={(e) => e.stopPropagation()}
-        >
-          <div style={styles.scrollIndicator}>
-            <span style={styles.scrollArrow}>▲</span>
-            <span style={styles.scrollText}>スクロール</span>
-            <span style={styles.scrollArrow}>▼</span>
-          </div>
-        </div>
-
         <div style={styles.container}>
           {/* 戻るボタン */}
           <button 
@@ -160,18 +148,6 @@ export function DressUpMenu({
   // メインメニュー（服アイテム）
   return (
     <div style={styles.outerContainer}>
-      {/* 左側スクロールスペース（タッチしてスクロール用） */}
-      <div 
-        style={styles.scrollSpace}
-        onTouchStart={(e) => e.stopPropagation()}
-      >
-        <div style={styles.scrollIndicator}>
-          <span style={styles.scrollArrow}>▲</span>
-          <span style={styles.scrollText}>スクロール</span>
-          <span style={styles.scrollArrow}>▼</span>
-        </div>
-      </div>
-
       <div style={styles.container}>
         {/* ヘッダー：ドール選択 */}
         <div style={styles.menuHeader}>
@@ -349,10 +325,10 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
   );
 }
 
-const MENU_WIDTH = 120;
-const SCROLL_SPACE_WIDTH = 30;
+const MENU_WIDTH = 150;
+const SCROLL_PADDING = 30; // 左側のスクロール用余白
 const ITEM_PADDING = 4;
-const ITEM_SIZE = MENU_WIDTH - ITEM_PADDING * 2 - 8;
+const ITEM_SIZE = MENU_WIDTH - SCROLL_PADDING - ITEM_PADDING * 2 - 8;
 
 const styles: Record<string, CSSProperties> = {
   outerContainer: {
@@ -361,38 +337,11 @@ const styles: Record<string, CSSProperties> = {
     height: '100%',
     maxHeight: 'calc(100vh - 140px)',
   },
-  scrollSpace: {
-    width: `${SCROLL_SPACE_WIDTH}px`,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#e9ecef',
-    borderRadius: '8px 0 0 8px',
-    cursor: 'ns-resize',
-    userSelect: 'none',
-  },
-  scrollIndicator: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px',
-    color: '#999',
-  },
-  scrollArrow: {
-    fontSize: '12px',
-    color: '#aaa',
-  },
-  scrollText: {
-    writingMode: 'vertical-rl',
-    fontSize: '9px',
-    color: '#999',
-    letterSpacing: '2px',
-  },
   container: {
     backgroundColor: '#f8f9fa',
-    borderRadius: '0 12px 12px 0',
+    borderRadius: '12px',
     padding: `${ITEM_PADDING}px`,
+    paddingLeft: `${SCROLL_PADDING}px`, // 左側にスクロール用余白
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
     width: `${MENU_WIDTH}px`,
     display: 'flex',
