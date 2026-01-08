@@ -1,9 +1,9 @@
 /**
  * DressUpMenu コンポーネント
  * 背景はボタン切り替えで別画面、服はフォルダ名でグループ化して表示
- * 左側にスクロール用スライダー配置
+ * 左側にスクロール用スペースを配置（誤ドラッグ防止）
  */
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
 
@@ -43,38 +43,8 @@ export function DressUpMenu({
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
   
-  // スクロール用
+  // スクロール用ref
   const itemListRef = useRef<HTMLDivElement>(null);
-  const [scrollPercent, setScrollPercent] = useState(0);
-  const [maxScroll, setMaxScroll] = useState(0);
-
-  // スクロール位置を更新
-  const updateScrollInfo = useCallback(() => {
-    if (itemListRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = itemListRef.current;
-      const max = scrollHeight - clientHeight;
-      setMaxScroll(max);
-      setScrollPercent(max > 0 ? scrollTop / max : 0);
-    }
-  }, []);
-
-  useEffect(() => {
-    const el = itemListRef.current;
-    if (el) {
-      el.addEventListener('scroll', updateScrollInfo);
-      updateScrollInfo();
-      return () => el.removeEventListener('scroll', updateScrollInfo);
-    }
-  }, [updateScrollInfo, showBackgrounds]);
-
-  // スライダー操作
-  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
-    setScrollPercent(value);
-    if (itemListRef.current && maxScroll > 0) {
-      itemListRef.current.scrollTop = value * maxScroll;
-    }
-  }, [maxScroll]);
 
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
@@ -114,17 +84,16 @@ export function DressUpMenu({
   if (showBackgrounds) {
     return (
       <div style={styles.outerContainer}>
-        {/* 左側スライダー */}
-        <div style={styles.sliderContainer}>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={scrollPercent}
-            onChange={handleSliderChange}
-            style={styles.slider}
-          />
+        {/* 左側スクロールスペース（タッチしてスクロール用） */}
+        <div 
+          style={styles.scrollSpace}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          <div style={styles.scrollIndicator}>
+            <span style={styles.scrollArrow}>▲</span>
+            <span style={styles.scrollText}>スクロール</span>
+            <span style={styles.scrollArrow}>▼</span>
+          </div>
         </div>
 
         <div style={styles.container}>
@@ -191,17 +160,16 @@ export function DressUpMenu({
   // メインメニュー（服アイテム）
   return (
     <div style={styles.outerContainer}>
-      {/* 左側スライダー */}
-      <div style={styles.sliderContainer}>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={scrollPercent}
-          onChange={handleSliderChange}
-          style={styles.slider}
-        />
+      {/* 左側スクロールスペース（タッチしてスクロール用） */}
+      <div 
+        style={styles.scrollSpace}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
+        <div style={styles.scrollIndicator}>
+          <span style={styles.scrollArrow}>▲</span>
+          <span style={styles.scrollText}>スクロール</span>
+          <span style={styles.scrollArrow}>▼</span>
+        </div>
       </div>
 
       <div style={styles.container}>
@@ -382,7 +350,7 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
 }
 
 const MENU_WIDTH = 120;
-const SLIDER_WIDTH = 24;
+const SCROLL_SPACE_WIDTH = 30;
 const ITEM_PADDING = 4;
 const ITEM_SIZE = MENU_WIDTH - ITEM_PADDING * 2 - 8;
 
@@ -393,25 +361,37 @@ const styles: Record<string, CSSProperties> = {
     height: '100%',
     maxHeight: 'calc(100vh - 140px)',
   },
-  sliderContainer: {
-    width: `${SLIDER_WIDTH}px`,
+  scrollSpace: {
+    width: `${SCROLL_SPACE_WIDTH}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingRight: '4px',
+    backgroundColor: '#e9ecef',
+    borderRadius: '8px 0 0 8px',
+    cursor: 'ns-resize',
+    userSelect: 'none',
   },
-  slider: {
-    writingMode: 'vertical-lr' as const,
-    direction: 'rtl' as const,
-    width: '20px',
-    height: '100%',
-    cursor: 'pointer',
-    accentColor: '#ff69b4',
+  scrollIndicator: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#999',
+  },
+  scrollArrow: {
+    fontSize: '12px',
+    color: '#aaa',
+  },
+  scrollText: {
+    writingMode: 'vertical-rl',
+    fontSize: '9px',
+    color: '#999',
+    letterSpacing: '2px',
   },
   container: {
     backgroundColor: '#f8f9fa',
-    borderRadius: '12px',
+    borderRadius: '0 12px 12px 0',
     padding: `${ITEM_PADDING}px`,
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
     width: `${MENU_WIDTH}px`,
@@ -489,8 +469,7 @@ const styles: Record<string, CSSProperties> = {
     gap: '2px',
     overflowY: 'auto',
     flex: 1,
-    scrollbarWidth: 'none', // Firefox
-    msOverflowStyle: 'none', // IE
+    WebkitOverflowScrolling: 'touch', // iOS用スムーススクロール
   },
   sectionLabel: {
     fontSize: '11px',
@@ -593,14 +572,3 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.5,
   },
 };
-
-// スクロールバーを非表示にするCSS（WebKit用）
-const scrollbarHideStyle = document.createElement('style');
-scrollbarHideStyle.textContent = `
-  .dress-up-item-list::-webkit-scrollbar {
-    display: none;
-  }
-`;
-if (typeof document !== 'undefined') {
-  document.head.appendChild(scrollbarHideStyle);
-}

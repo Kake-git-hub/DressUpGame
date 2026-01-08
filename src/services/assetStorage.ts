@@ -854,9 +854,12 @@ export async function importPresetFromFolder(
     const parts = path.split('/').filter(p => p.length > 0);
     const fileNameWithoutExt = file.name.replace(/\.[^.]+$/, '');
     
-    // _thumbサフィックスをチェック
-    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb');
-    const baseName = isThumb ? fileNameWithoutExt.replace(/_thumb$/i, '') : fileNameWithoutExt;
+    // _thumbサフィックスをチェック（_thumb, _thumbnailの両方に対応）
+    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb') || 
+                    fileNameWithoutExt.toLowerCase().endsWith('_thumbnail');
+    const baseName = isThumb 
+      ? fileNameWithoutExt.replace(/_(thumb|thumbnail)$/i, '') 
+      : fileNameWithoutExt;
     
     console.log(`処理中: ${path} (parts: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
@@ -1074,9 +1077,12 @@ export async function importPresetFromZip(
     const fileNameWithoutExt = fileNameWithExt.replace(/\.[^.]+$/, '');
     const parts = pathParts; // ディレクトリ部分のみ
     
-    // _thumbサフィックスをチェック
-    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb');
-    const baseName = isThumb ? fileNameWithoutExt.replace(/_thumb$/i, '') : fileNameWithoutExt;
+    // _thumbサフィックスをチェック（_thumb, _thumbnailの両方に対応）
+    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb') ||
+                    fileNameWithoutExt.toLowerCase().endsWith('_thumbnail');
+    const baseName = isThumb 
+      ? fileNameWithoutExt.replace(/_(thumb|thumbnail)$/i, '') 
+      : fileNameWithoutExt;
     
     console.log(`処理中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     

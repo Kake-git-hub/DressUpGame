@@ -33,8 +33,8 @@ const DEFAULT_DOLLS: DollData[] = [];
 const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 
 // ドールが未登録でも落ちないためのフォールバック寸法
-// メニュー幅（px）
-const MENU_WIDTH = 160;
+// メニュー幅（px）= スクロールスペース(30) + メニュー本体(120)
+const MENU_WIDTH = 150;
 
 const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
   width: 400,
@@ -120,27 +120,18 @@ function App() {
 
   // メニュー幅はコンポーネント外で定義済み
 
-  // キャンバスサイズ（iPad横向き最適化）
+  // キャンバスサイズ（メニュー以外の画面いっぱい）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
 
-  // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた中央エリア）
+  // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた全体）
   useEffect(() => {
     const updateCanvasSize = () => {
       const vh = window.innerHeight;
       const vw = window.innerWidth;
 
-      // メニューを除いたエリアの中央に配置
-      const availableWidth = vw - MENU_WIDTH - 40; // 左右マージン
-      const maxHeight = vh - 80;
-
-      const dollAspect = 0.5;
-      let height = maxHeight;
-      let width = height * dollAspect;
-
-      if (width > availableWidth) {
-        width = availableWidth;
-        height = width / dollAspect;
-      }
+      // メニューを除いた画面全体
+      const width = vw - MENU_WIDTH;
+      const height = vh;
 
       setCanvasSize({
         width: Math.floor(width),
