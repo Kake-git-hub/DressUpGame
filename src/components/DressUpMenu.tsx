@@ -325,8 +325,8 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
   );
 }
 
-const MENU_WIDTH = 150;
-const SCROLL_PADDING = 30; // 左側のスクロール用余白
+const MENU_WIDTH = 160;
+const SCROLL_PADDING = 30; // 右側のスクロール用余白
 const ITEM_PADDING = 4;
 const ITEM_SIZE = MENU_WIDTH - SCROLL_PADDING - ITEM_PADDING * 2 - 8;
 
@@ -341,7 +341,7 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: '#f8f9fa',
     borderRadius: '12px',
     padding: `${ITEM_PADDING}px`,
-    paddingLeft: `${SCROLL_PADDING}px`, // 左側にスクロール用余白
+    paddingRight: `${SCROLL_PADDING}px`, // 右側にスクロール用余白
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
     width: `${MENU_WIDTH}px`,
     display: 'flex',
@@ -419,6 +419,7 @@ const styles: Record<string, CSSProperties> = {
     overflowY: 'auto',
     flex: 1,
     WebkitOverflowScrolling: 'touch', // iOS用スムーススクロール
+    paddingRight: `${SCROLL_PADDING}px`,
   },
   sectionLabel: {
     fontSize: '11px',

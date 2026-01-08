@@ -16,6 +16,7 @@ export class PixiEngine {
   private customFaceUrl: string | null = null;
   private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
   private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
+  private backgroundMask: Graphics | null = null;
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -75,6 +76,7 @@ export class PixiEngine {
   private cleanup(): void {
     this.initialized = false;
     this.backgroundContainer = null;
+    this.backgroundMask = null;
     this.dollContainer = null;
     this.clothingContainer = null;
     this.faceContainer = null;
@@ -101,6 +103,7 @@ export class PixiEngine {
 
     // 既存の背景をクリア
     this.backgroundContainer.removeChildren();
+    this.backgroundMask = null;
 
     if (!imageUrl) {
       return;
@@ -110,19 +113,28 @@ export class PixiEngine {
       const texture = await Assets.load(imageUrl);
       const bgSprite = new Sprite(texture);
 
-      // キャンバス全体をカバーするようにスケーリング
-      const scaleX = this.app.screen.width / texture.width;
+      const availableWidth = Math.max(0, this.app.screen.width - this.menuOffset);
+
+      // ドール領域（メニュー以外）をカバーするようにスケーリング
+      const scaleX = availableWidth / texture.width;
       const scaleY = this.app.screen.height / texture.height;
       const scale = Math.max(scaleX, scaleY);
       bgSprite.scale.set(scale);
 
-      // ドール中心に配置（メニュー幅を考慮）
+      // ドール領域の中心に配置
       bgSprite.anchor.set(0.5);
-      // 背景中心 = メニュー幅 + (キャンバス幅 - メニュー幅) / 2 = (キャンバス幅 + メニュー幅) / 2
-      bgSprite.x = (this.app.screen.width + this.menuOffset) / 2;
+      bgSprite.x = this.menuOffset + availableWidth / 2;
       bgSprite.y = this.app.screen.height / 2;
 
+      // メニュー領域をマスクして背景が被らないようにする
+      const mask = new Graphics();
+      mask.rect(this.menuOffset, 0, availableWidth, this.app.screen.height);
+      mask.fill(0xffffff);
+      this.backgroundMask = mask;
+      bgSprite.mask = mask;
+
       this.backgroundContainer.addChild(bgSprite);
+      this.backgroundContainer.addChild(mask);
     } catch (error) {
       console.warn('背景画像の読み込みに失敗:', error);
     }

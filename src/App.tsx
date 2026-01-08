@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.7.3';
+const APP_VERSION = '0.7.4';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -33,8 +33,8 @@ const DEFAULT_DOLLS: DollData[] = [];
 const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 
 // ドールが未登録でも落ちないためのフォールバック寸法
-// メニュー幅（px）= スクロールスペース(30) + メニュー本体(120)
-const MENU_WIDTH = 150;
+// メニュー幅（px）
+const MENU_WIDTH = 160;
 
 const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
   width: 400,
