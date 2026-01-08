@@ -9,6 +9,9 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import type { EquippedItem } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 
+// デバウンス用タイマーID型
+type TimerId = ReturnType<typeof setTimeout>;
+
 interface ItemAdjustPanelProps {
   item: EquippedItem;
   onAdjust: (adjustment: ItemAdjustment) => void;
@@ -73,7 +76,14 @@ export function ItemAdjustPanel({
     setRotation(item.adjustRotation ?? 0);
   }, [item.id, item.adjustOffsetX, item.adjustOffsetY, item.adjustScale, item.adjustRotation]);
 
-  // 値が変わったら親に通知（震え対策: refで前回値と比較）
+  // onAdjustをrefで保持（依存配列から除外するため）
+  const onAdjustRef = useRef(onAdjust);
+  onAdjustRef.current = onAdjust;
+
+  // デバウンスタイマー
+  const debounceTimerRef = useRef<TimerId | null>(null);
+
+  // 値が変わったら親に通知（震え対策: デバウンス + 前回値比較）
   const prevValuesRef = useRef({ offsetX, offsetY, scale, rotation });
   useEffect(() => {
     const prev = prevValuesRef.current;
@@ -85,14 +95,29 @@ export function ItemAdjustPanel({
       prev.rotation !== rotation
     ) {
       prevValuesRef.current = { offsetX, offsetY, scale, rotation };
-      onAdjust({
-        adjustOffsetX: offsetX,
-        adjustOffsetY: offsetY,
-        adjustScale: scale,
-        adjustRotation: rotation,
-      });
+      
+      // 既存タイマーをクリア
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      
+      // 16ms後に通知（60fps相当）
+      debounceTimerRef.current = setTimeout(() => {
+        onAdjustRef.current({
+          adjustOffsetX: offsetX,
+          adjustOffsetY: offsetY,
+          adjustScale: scale,
+          adjustRotation: rotation,
+        });
+      }, 16);
     }
-  }, [offsetX, offsetY, scale, rotation, onAdjust]);
+    
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [offsetX, offsetY, scale, rotation]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
