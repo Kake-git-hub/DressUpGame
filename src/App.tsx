@@ -6,9 +6,10 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, DollControlPanel } from './components';
+import { AvatarCanvas, DressUpMenu, DollControlPanel, ItemAdjustPanel } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
+import type { ItemAdjustment } from './hooks/useDressUp';
 import {
   loadCustomDolls,
   loadCustomBackgrounds,
@@ -21,7 +22,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.7.8';
+const APP_VERSION = '0.8.0';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -206,10 +207,45 @@ function App() {
   }, [activeDimensions, canvasSize.height, currentDoll]);
 
   // 着せ替え状態管理フック
-  const { equipItem, unequipItem, getEquippedItems, resetAll } = useDressUp(scaledItems, scaledUnderwear);
+  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment, getLastEquippedItem } = useDressUp(scaledItems, scaledUnderwear);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
+
+  // アイテム調整モード
+  const [isAdjustingItem, setIsAdjustingItem] = useState(false);
+  const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
+
+  // 調整中のアイテム
+  const adjustingItem = useMemo(() => {
+    if (!adjustingItemId) return null;
+    return equippedItems.find(item => item.id === adjustingItemId) ?? null;
+  }, [adjustingItemId, equippedItems]);
+
+  // キャンバスタップで調整モード開始（最後に着せた服を選択）
+  const handleCanvasTap = useCallback(() => {
+    // ドール調整モード中は無視
+    if (showDollControls) return;
+    
+    const lastItem = getLastEquippedItem();
+    if (lastItem) {
+      setAdjustingItemId(lastItem.id);
+      setIsAdjustingItem(true);
+    }
+  }, [showDollControls, getLastEquippedItem]);
+
+  // アイテム調整値を更新
+  const handleItemAdjust = useCallback((adjustment: ItemAdjustment) => {
+    if (adjustingItemId) {
+      updateItemAdjustment(adjustingItemId, adjustment);
+    }
+  }, [adjustingItemId, updateItemAdjustment]);
+
+  // 調整モード終了
+  const handleAdjustClose = useCallback(() => {
+    setIsAdjustingItem(false);
+    setAdjustingItemId(null);
+  }, []);
 
   // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
@@ -369,6 +405,7 @@ function App() {
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
                 menuOffset={MENU_WIDTH}
+                onTap={handleCanvasTap}
               />
             )}
 
@@ -381,6 +418,28 @@ function App() {
                 canvasWidth={canvasSize.width}
                 canvasHeight={canvasSize.height}
               />
+            )}
+
+            {/* アイテム調整パネル（キャンバス上に表示） */}
+            {isAdjustingItem && adjustingItem && (
+              <ItemAdjustPanel
+                item={adjustingItem}
+                onAdjust={handleItemAdjust}
+                onClose={handleAdjustClose}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
+              />
+            )}
+
+            {/* アイテム調整ボタン（調整モードでないとき表示） */}
+            {!showDollControls && !isAdjustingItem && equippedItems.length > 0 && (
+              <button
+                className="item-adjust-button"
+                onClick={handleCanvasTap}
+                title="最後に着せた服を調整"
+              >
+                👗 服を調整
+              </button>
             )}
 
             {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
@@ -410,8 +469,8 @@ function App() {
           </section>
         )}
 
-        {/* ドレスアップメニュー - 位置調整中は非表示 */}
-        {!showDollControls && (
+        {/* ドレスアップメニュー - 位置調整中・アイテム調整中は非表示 */}
+        {!showDollControls && !isAdjustingItem && (
           <section className="palette-section">
             <DressUpMenu
               items={filteredClothing}
@@ -434,7 +493,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>ドラッグしてドールにきせてね！</p>
+        <p>{isAdjustingItem ? '服の位置・大きさ・傾きを調整中' : 'ドラッグしてドールにきせてね！'}</p>
       </footer>
 
       {/* 設定パネル */}

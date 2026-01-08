@@ -168,6 +168,11 @@ export interface EquippedItem extends ClothingItemData {
   // 自由配置時のオフセット（装着後に移動した分）
   currentOffsetX?: number;
   currentOffsetY?: number;
+  // 調整値（位置調整機能で変更した分）
+  adjustOffsetX?: number;
+  adjustOffsetY?: number;
+  adjustScale?: number;    // 1.0が等倍
+  adjustRotation?: number; // ラジアン
 }
 
 // 背景画像の定義

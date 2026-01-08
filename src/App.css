@@ -322,3 +322,202 @@ textarea {
 .avatar-section.adjusting {
   z-index: 50;
 }
+
+/* アイテム調整パネル */
+.item-adjust-panel {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  z-index: 200;
+  min-width: 280px;
+  max-width: 400px;
+  backdrop-filter: blur(10px);
+  border: 2px solid var(--primary-color);
+}
+
+.item-adjust-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.item-adjust-title {
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: var(--primary-color);
+}
+
+.item-adjust-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.item-adjust-close:hover {
+  transform: scale(1.1);
+}
+
+.item-adjust-close:active {
+  transform: scale(0.95);
+}
+
+/* ドラッグエリア */
+.item-adjust-drag-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #f0f0ff 0%, #fff0f5 100%);
+  border-radius: 12px;
+  border: 2px dashed #ccc;
+  font-size: 1rem;
+  color: #666;
+  touch-action: none;
+}
+
+.item-adjust-drag-area:active {
+  background: linear-gradient(135deg, #e0e0ff 0%, #ffe0f0 100%);
+  border-color: var(--primary-color);
+}
+
+.drag-hint {
+  font-size: 0.85rem;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* スライダーグループ */
+.item-adjust-slider-group {
+  margin-bottom: 12px;
+}
+
+.item-adjust-slider-group label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+  color: #555;
+}
+
+.slider-reset {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #eee;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.slider-reset:hover {
+  background: #ddd;
+}
+
+.item-adjust-slider-group input[type='range'] {
+  width: 100%;
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, #ff69b4, #9370db);
+  border-radius: 4px;
+  outline: none;
+}
+
+.item-adjust-slider-group input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  background: white;
+  border: 3px solid var(--primary-color);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.item-adjust-slider-group input[type='range']::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  background: white;
+  border: 3px solid var(--primary-color);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 全リセットボタン */
+.item-adjust-reset-all {
+  width: 100%;
+  padding: 12px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.item-adjust-reset-all:hover {
+  background: #eee;
+}
+
+.item-adjust-reset-all:active {
+  background: #ddd;
+}
+
+/* 調整ボタン（キャンバス右上） */
+.item-adjust-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border: none;
+  border-radius: 24px;
+  color: white;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 105, 180, 0.4);
+  z-index: 100;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.item-adjust-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(255, 105, 180, 0.5);
+}
+
+.item-adjust-button:active {
+  transform: scale(0.95);
+}
+
+.item-adjust-button:disabled {
+  background: #ccc;
+  box-shadow: none;
+  cursor: not-allowed;
+}

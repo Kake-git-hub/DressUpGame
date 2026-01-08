@@ -30,6 +30,14 @@ const createInitialState = (
   };
 };
 
+// アイテム調整値
+export interface ItemAdjustment {
+  adjustOffsetX?: number;  // 位置オフセットX（ピクセル）
+  adjustOffsetY?: number;  // 位置オフセットY（ピクセル）
+  adjustScale?: number;    // スケール（1.0がデフォルト）
+  adjustRotation?: number; // 回転（度）
+}
+
 export interface UseDressUpReturn {
   // 現在の状態
   state: DressUpState;
@@ -45,6 +53,10 @@ export interface UseDressUpReturn {
   resetAll: () => void;
   // 下着も含めて全て脱がせる
   resetAllIncludingUnderwear: () => void;
+  // アイテムの調整値を更新
+  updateItemAdjustment: (itemId: string, adjustment: ItemAdjustment) => void;
+  // 最後に着せたアイテムを取得
+  getLastEquippedItem: () => EquippedItem | null;
 }
 
 export function useDressUp(
@@ -126,6 +138,32 @@ export function useDressUp(
     }));
   }, []);
 
+  // アイテムの調整値を更新
+  const updateItemAdjustment = useCallback((itemId: string, adjustment: ItemAdjustment) => {
+    setState((prev) => ({
+      ...prev,
+      equippedItems: prev.equippedItems.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              adjustOffsetX: adjustment.adjustOffsetX ?? item.adjustOffsetX,
+              adjustOffsetY: adjustment.adjustOffsetY ?? item.adjustOffsetY,
+              adjustScale: adjustment.adjustScale ?? item.adjustScale,
+              adjustRotation: adjustment.adjustRotation ?? item.adjustRotation,
+            }
+          : item
+      ),
+    }));
+  }, []);
+
+  // 最後に着せたアイテムを取得（最大equipOrderのアイテム）
+  const getLastEquippedItem = useCallback((): EquippedItem | null => {
+    if (state.equippedItems.length === 0) return null;
+    return state.equippedItems.reduce((latest, item) =>
+      item.equipOrder > latest.equipOrder ? item : latest
+    );
+  }, [state.equippedItems]);
+
   return {
     state,
     equipItem,
@@ -134,5 +172,7 @@ export function useDressUp(
     getEquippedItems,
     resetAll,
     resetAllIncludingUnderwear,
+    updateItemAdjustment,
+    getLastEquippedItem,
   };
 }

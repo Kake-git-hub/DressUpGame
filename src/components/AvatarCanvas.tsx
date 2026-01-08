@@ -17,6 +17,7 @@ interface AvatarCanvasProps {
   dollTransform?: DollTransform; // ドールの位置・スケール
   menuOffset?: number; // メニュー幅オフセット（背景位置調整用）
   onCanvasReady?: () => void;
+  onTap?: () => void; // キャンバスタップ時のコールバック
 }
 
 export function AvatarCanvas({
@@ -30,6 +31,7 @@ export function AvatarCanvas({
   dollTransform,
   menuOffset = 0,
   onCanvasReady,
+  onTap,
 }: AvatarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PixiEngine | null>(null);
@@ -153,8 +155,10 @@ export function AvatarCanvas({
       ref={canvasRef}
       id="avatar-canvas"
       data-testid="avatar-canvas"
+      onClick={onTap}
       style={{
         borderRadius: '0',
+        cursor: onTap ? 'pointer' : 'default',
       }}
     />
   );

@@ -12,3 +12,4 @@ export { ItemImporter } from './ItemImporter';
 export { ItemManager } from './ItemManager';
 export { SettingsPanel } from './SettingsPanel';
 export { DollControlPanel } from './DollControlPanel';
+export { ItemAdjustPanel } from './ItemAdjustPanel';

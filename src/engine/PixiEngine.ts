@@ -300,6 +300,12 @@ export class PixiEngine {
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
       
+      // 調整値を取得（デフォルト値を設定）
+      const adjustOffsetX = (item as EquippedItem).adjustOffsetX ?? 0;
+      const adjustOffsetY = (item as EquippedItem).adjustOffsetY ?? 0;
+      const adjustScale = (item as EquippedItem).adjustScale ?? 1.0;
+      const adjustRotation = (item as EquippedItem).adjustRotation ?? 0;
+      
       // movableアイテムの位置計算
       // offsetX/offsetYは中央(50%)からのパーセンテージオフセット
       let itemX = centerX;
@@ -310,6 +316,10 @@ export class PixiEngine {
         itemX = (this.app.screen.width * (50 + offsetX)) / 100;
         itemY = (this.app.screen.height * (50 + offsetY)) / 100;
       }
+      
+      // 調整オフセットを適用（ピクセル単位）
+      itemX += adjustOffsetX;
+      itemY += adjustOffsetY;
 
       // imageUrlがある場合は画像を読み込み
       if (item.imageUrl) {
@@ -322,7 +332,8 @@ export class PixiEngine {
           // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）
           const maxHeight = this.app.screen.height * 0.9;
           const baseScale = maxHeight / texture.height;
-          clothingSprite.scale.set(baseScale * s);
+          // 調整スケールを適用
+          clothingSprite.scale.set(baseScale * s * adjustScale);
 
           // アンカーを中央に
           clothingSprite.anchor.set(0.5);
@@ -330,6 +341,9 @@ export class PixiEngine {
           // 位置を設定
           clothingSprite.x = itemX;
           clothingSprite.y = itemY;
+          
+          // 回転を適用（度からラジアンに変換）
+          clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
           this.clothingContainer!.addChild(clothingSprite);
         } catch (error) {
