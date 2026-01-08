@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.7.3';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -315,6 +315,7 @@ function App() {
 
   return (
     <div className="app">
+      <div className="version-badge version-badge--fixed">v{APP_VERSION}</div>
       {/* 設定ボタン - 位置調整中は非表示 */}
       {!showDollControls && (
         <button
@@ -434,7 +435,6 @@ function App() {
 
       <footer className="app-footer">
         <p>ドラッグしてドールにきせてね！</p>
-        <span className="version-badge">v{APP_VERSION}</span>
       </footer>
 
       {/* 設定パネル */}
