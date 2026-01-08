@@ -81,23 +81,42 @@ export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string
   'face': { label: '顔パーツ', emoji: '😊', zIndex: 40, position: { x: 0, y: -80 }, anchorType: 'head', movable: true },
 };
 
-// フォルダ名から番号とラベルを抽出（例: "1_くつした" → { order: 1, label: "くつした" }）
-// フォーマット: 「番号_ラベル」（番号は省略可、_movableサフィックスは除去）
-export function parseFolderName(folderName: string): { order: number | undefined; label: string } {
+// フォルダ名から番号とラベルを抽出
+// フォーマット1: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス" → layerOrder: 1, categoryOrder: 2, label: "ドレス"）
+// フォーマット2: 「番号_ラベル」（例: "1_くつした" → layerOrder: 1, categoryOrder: undefined, label: "くつした"）
+// _movableサフィックスは除去
+export function parseFolderName(folderName: string): { 
+  order: number | undefined; 
+  categoryOrder: number | undefined;
+  label: string 
+} {
   // _movable サフィックスを除去
   const withoutMovable = folderName.replace(/_movable/gi, '');
   
-  // 先頭の数字と_を分離（例: "1_くつした" → ["1", "くつした"]）
-  const match = withoutMovable.match(/^(\d+)_(.+)$/);
-  if (match) {
+  // 新フォーマット: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス"）
+  const newMatch = withoutMovable.match(/^(\d+)_(\d+)_(.+)$/);
+  if (newMatch) {
     return {
-      order: parseInt(match[1], 10),
-      label: match[2],
+      order: parseInt(newMatch[1], 10),
+      categoryOrder: parseInt(newMatch[2], 10),
+      label: newMatch[3],
     };
   }
+  
+  // 旧フォーマット: 「番号_ラベル」（例: "1_くつした"）
+  const oldMatch = withoutMovable.match(/^(\d+)_(.+)$/);
+  if (oldMatch) {
+    return {
+      order: parseInt(oldMatch[1], 10),
+      categoryOrder: undefined,
+      label: oldMatch[2],
+    };
+  }
+  
   // 番号なしの場合
   return {
     order: undefined,
+    categoryOrder: undefined,
     label: withoutMovable,
   };
 }
@@ -160,6 +179,8 @@ export interface ClothingItemData {
   offsetY?: number;
   // レイヤー順（フォルダ名の先頭番号から取得、小さい方が下）
   layerOrder?: number;
+  // カテゴリ並び順（フォルダ名の2番目の番号から取得、メニュー表示順）
+  categoryOrder?: number;
 }
 
 // 装備中のアイテム（動的zIndex付き）

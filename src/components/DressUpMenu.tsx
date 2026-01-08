@@ -59,23 +59,28 @@ export function DressUpMenu({
 
   // アイテムをフォルダ名(type)でグループ化（元の順序を保持）
   const groupedItems = useMemo(() => {
-    const groups = new Map<string, { items: ClothingItemData[]; layerOrder: number }>();
+    const groups = new Map<string, { items: ClothingItemData[]; categoryOrder: number; layerOrder: number }>();
     
     items.forEach(item => {
       const key = item.type;
       if (!groups.has(key)) {
         groups.set(key, { 
           items: [], 
+          categoryOrder: item.categoryOrder ?? 999,
           layerOrder: item.layerOrder ?? item.baseZIndex ?? 999 
         });
       }
       groups.get(key)!.items.push(item);
     });
     
-    // layerOrder順でソート
-    const sorted = Array.from(groups.entries()).sort((a, b) => 
-      a[1].layerOrder - b[1].layerOrder
-    );
+    // categoryOrder順でソート（categoryOrderがない場合はlayerOrder順）
+    const sorted = Array.from(groups.entries()).sort((a, b) => {
+      // まずcategoryOrderで比較
+      const catOrderDiff = a[1].categoryOrder - b[1].categoryOrder;
+      if (catOrderDiff !== 0) return catOrderDiff;
+      // categoryOrderが同じ場合はlayerOrderで比較
+      return a[1].layerOrder - b[1].layerOrder;
+    });
     
     return new Map(sorted.map(([key, val]) => [key, val.items]));
   }, [items]);

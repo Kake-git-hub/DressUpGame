@@ -309,6 +309,7 @@ textarea {
   flex-direction: column;
   gap: 8px;
   z-index: 100;
+  pointer-events: auto;
 }
 
 /* ツールボタン共通 */
@@ -327,6 +328,9 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tool-button:hover {

@@ -622,10 +622,13 @@ function createDollData(id: string, name: string, base64: string): DollData {
 // 服データを作成するヘルパー（動的カテゴリ対応）
 // categoryRaw: 元のフォルダ名（_movable サフィックス含む可能性あり、番号プレフィックス含む可能性あり）
 function createClothingData(id: string, name: string, type: ClothingType, base64: string, categoryRaw?: string): ClothingItemData {
-  // フォルダ名から番号とラベルを抽出（例: "1_くつした" → { order: 1, label: "くつした" }）
+  // フォルダ名から番号とラベルを抽出
+  // 新フォーマット: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス"）
+  // 旧フォーマット: 「番号_ラベル」（例: "1_くつした"）
   const parsed = parseFolderName(categoryRaw || type);
   const categoryLabel = parsed.label; // 番号を除いたカテゴリ名
   const layerOrder = parsed.order; // レイヤー順（番号がなければundefined）
+  const categoryOrder = parsed.categoryOrder; // カテゴリ並び順（番号がなければundefined）
   
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得、なければ汎用値
   const mapping = DEFAULT_CATEGORY_MAP[categoryLabel.toLowerCase()];
@@ -652,6 +655,7 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     isCustom: true,
     movable,
     layerOrder,
+    categoryOrder,
   };
 }
 
@@ -871,11 +875,12 @@ export async function importPresetFromFolder(
     const parts = path.split('/').filter(p => p.length > 0);
     const fileNameWithoutExt = file.name.replace(/\.[^.]+$/, '');
     
-    // _thumbサフィックスをチェック（_thumb, _thumbnailの両方に対応）
-    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb') || 
+    // _サムネサフィックスをチェック（_サムネ, _thumb, _thumbnailに対応）
+    const isThumb = fileNameWithoutExt.endsWith('_サムネ') ||
+                    fileNameWithoutExt.toLowerCase().endsWith('_thumb') || 
                     fileNameWithoutExt.toLowerCase().endsWith('_thumbnail');
     const baseName = isThumb 
-      ? fileNameWithoutExt.replace(/_(thumb|thumbnail)$/i, '') 
+      ? fileNameWithoutExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '') 
       : fileNameWithoutExt;
     
     console.log(`処理中: ${path} (parts: ${parts.join(' > ')}, isThumb: ${isThumb})`);
@@ -1094,11 +1099,12 @@ export async function importPresetFromZip(
     const fileNameWithoutExt = fileNameWithExt.replace(/\.[^.]+$/, '');
     const parts = pathParts; // ディレクトリ部分のみ
     
-    // _thumbサフィックスをチェック（_thumb, _thumbnailの両方に対応）
-    const isThumb = fileNameWithoutExt.toLowerCase().endsWith('_thumb') ||
+    // _サムネサフィックスをチェック（_サムネ, _thumb, _thumbnailに対応）
+    const isThumb = fileNameWithoutExt.endsWith('_サムネ') ||
+                    fileNameWithoutExt.toLowerCase().endsWith('_thumb') ||
                     fileNameWithoutExt.toLowerCase().endsWith('_thumbnail');
     const baseName = isThumb 
-      ? fileNameWithoutExt.replace(/_(thumb|thumbnail)$/i, '') 
+      ? fileNameWithoutExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '') 
       : fileNameWithoutExt;
     
     console.log(`処理中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
