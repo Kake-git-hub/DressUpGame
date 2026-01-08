@@ -96,49 +96,51 @@ export function DressUpMenu({
           <div style={styles.sectionLabel}>🖼️ はいけい</div>
 
           <div style={styles.itemList} ref={itemListRef}>
-            {/* 背景なしオプション */}
-            <button
-              style={{
-                ...styles.itemButton,
-                ...(currentBackgroundId === null ? styles.itemButtonSelected : {}),
-              }}
-              onClick={() => onBackgroundChange?.(null)}
-            >
-              <div style={styles.itemImageContainer}>
-                <span style={{ fontSize: '24px' }}>✕</span>
-              </div>
-              <span style={styles.itemLabel}>なし</span>
-            </button>
-
-            {backgrounds.map(bg => (
+            <div style={styles.scrollContent}>
+              {/* 背景なしオプション（他と同サイズに統一） */}
               <button
-                key={bg.id}
                 style={{
                   ...styles.itemButton,
-                  ...(currentBackgroundId === bg.id ? styles.itemButtonSelected : {}),
+                  ...(currentBackgroundId === null ? styles.itemButtonSelected : {}),
                 }}
-                onClick={() => onBackgroundChange?.(bg.id)}
+                onClick={() => onBackgroundChange?.(null)}
               >
                 <div style={styles.itemImageContainer}>
-                  <img
-                    src={bg.thumbnailUrl || bg.imageUrl}
-                    alt={bg.name}
-                    style={styles.itemImage}
-                    draggable={false}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
-                    }}
-                  />
+                  <span style={{ fontSize: '24px' }}>✕</span>
+                  <span style={styles.noneOverlayLabel}>なし</span>
                 </div>
               </button>
-            ))}
 
-            {backgrounds.length === 0 && (
-              <p style={styles.emptyMessage}>
-                背景がありません<br />
-                設定からプリセットを取り込んでください
-              </p>
-            )}
+              {backgrounds.map(bg => (
+                <button
+                  key={bg.id}
+                  style={{
+                    ...styles.itemButton,
+                    ...(currentBackgroundId === bg.id ? styles.itemButtonSelected : {}),
+                  }}
+                  onClick={() => onBackgroundChange?.(bg.id)}
+                >
+                  <div style={styles.itemImageContainer}>
+                    <img
+                      src={bg.thumbnailUrl || bg.imageUrl}
+                      alt={bg.name}
+                      style={styles.itemImage}
+                      draggable={false}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+                      }}
+                    />
+                  </div>
+                </button>
+              ))}
+
+              {backgrounds.length === 0 && (
+                <p style={styles.emptyMessage}>
+                  背景がありません<br />
+                  設定からプリセットを取り込んでください
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -191,42 +193,44 @@ export function DressUpMenu({
 
         {/* スクロール可能なアイテムリスト */}
         <div style={styles.itemList} ref={itemListRef}>
-          {Array.from(groupedItems.entries()).map(([folderName, folderItems]) => (
-            <div key={folderName}>
-              {/* フォルダ名ラベル */}
-              <div style={styles.folderLabel}>{folderName}</div>
-              
-              {/* フォルダ内アイテム */}
-              {folderItems.map(item => (
-                <DraggableItem
-                  key={item.id}
-                  item={item}
-                  isEquipped={equippedIds.has(item.id)}
-                  onDrop={onItemDrop}
-                  dropTargetId={dropTargetId}
-                  onDragMove={onDragMove}
-                  onDragEnd={onDragEnd}
-                />
-              ))}
+          <div style={styles.scrollContent}>
+            {Array.from(groupedItems.entries()).map(([folderName, folderItems]) => (
+              <div key={folderName}>
+                {/* フォルダ名ラベル */}
+                <div style={styles.folderLabel}>{folderName}</div>
+                
+                {/* フォルダ内アイテム */}
+                {folderItems.map(item => (
+                  <DraggableItem
+                    key={item.id}
+                    item={item}
+                    isEquipped={equippedIds.has(item.id)}
+                    onDrop={onItemDrop}
+                    dropTargetId={dropTargetId}
+                    onDragMove={onDragMove}
+                    onDragEnd={onDragEnd}
+                  />
+                ))}
 
-              {/* カテゴリの「なし」ボタン */}
-              {equippedTypes.has(folderName as ClothingType) && (
-                <button
-                  style={styles.removeButton}
-                  onClick={() => onItemRemove?.(folderName as ClothingType)}
-                >
-                  ✕ なし
-                </button>
-              )}
-            </div>
-          ))}
+                {/* カテゴリの「なし」ボタン */}
+                {equippedTypes.has(folderName as ClothingType) && (
+                  <button
+                    style={styles.removeButton}
+                    onClick={() => onItemRemove?.(folderName as ClothingType)}
+                  >
+                    ✕ なし
+                  </button>
+                )}
+              </div>
+            ))}
 
-          {items.length === 0 && (
-            <p style={styles.emptyMessage}>
-              アイテムがありません<br />
-              設定からプリセットを取り込んでください
-            </p>
-          )}
+            {items.length === 0 && (
+              <p style={styles.emptyMessage}>
+                アイテムがありません<br />
+                設定からプリセットを取り込んでください
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -419,6 +423,13 @@ const styles: Record<string, CSSProperties> = {
     overflowY: 'auto',
     flex: 1,
     WebkitOverflowScrolling: 'touch', // iOS用スムーススクロール
+    paddingRight: 0,
+  },
+  // スクロールコンテナは全幅のまま、内容だけ右側を空ける
+  scrollContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
     paddingRight: `${SCROLL_PADDING}px`,
   },
   sectionLabel: {
@@ -474,6 +485,16 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  noneOverlayLabel: {
+    position: 'absolute',
+    bottom: '2px',
+    left: '0',
+    right: '0',
+    textAlign: 'center',
+    fontSize: '10px',
+    color: '#666',
+    pointerEvents: 'none',
   },
   itemImage: {
     width: '100%',
