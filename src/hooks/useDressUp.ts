@@ -61,11 +61,21 @@ export interface UseDressUpReturn {
 
 export function useDressUp(
   initialItems: ClothingItemData[] = [],
-  defaultUnderwear: ClothingItemData[] = []
+  defaultUnderwear: ClothingItemData[] = [],
+  savedEquipped: EquippedItem[] = []
 ): UseDressUpReturn {
-  const [state, setState] = useState<DressUpState>(() =>
-    createInitialState(initialItems, defaultUnderwear)
-  );
+  const [state, setState] = useState<DressUpState>(() => {
+    // 保存された装備があればそれを使用
+    if (savedEquipped.length > 0) {
+      const maxEquipOrder = Math.max(...savedEquipped.map(i => i.equipOrder), 0);
+      return {
+        equippedItems: savedEquipped,
+        availableItems: initialItems,
+        equipCounter: maxEquipOrder + 1,
+      };
+    }
+    return createInitialState(initialItems, defaultUnderwear);
+  });
 
   // 服を着せる（同じタイプの服は置き換え）
   const equipItem = useCallback((item: ClothingItemData) => {

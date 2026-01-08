@@ -19,11 +19,20 @@ import {
   restoreBackgroundImages,
   restoreClothingImages,
 } from './services/assetStorage';
+import {
+  saveEquippedItems,
+  loadEquippedItems,
+  loadDollTransform,
+  saveCurrentDollId,
+  loadCurrentDollId,
+  saveCurrentBackgroundId,
+  loadCurrentBackgroundId,
+} from './services/stateStorage';
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform, Position } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.0a';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -121,8 +130,15 @@ function App() {
   // 服アイテム一覧（デフォルト + カスタム）
   const [allClothing, setAllClothing] = useState<ClothingItemData[]>(DEFAULT_CLOTHING);
 
-  // 現在のドールID（ドール0件を許容）
-  const [currentDollId, setCurrentDollId] = useState<string>(DEFAULT_DOLLS[0]?.id ?? '');
+  // 保存されたドールID・背景IDを復元
+  const savedDollId = loadCurrentDollId();
+  const savedBackgroundId = loadCurrentBackgroundId();
+
+  // 現在のドールID（保存から復元、なければデフォルト）
+  const [currentDollId, setCurrentDollId] = useState<string>(savedDollId ?? DEFAULT_DOLLS[0]?.id ?? '');
+
+  // 現在の背景ID（保存から復元）
+  const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(savedBackgroundId);
 
   // 現在のドール（0件ならnull）
   const currentDoll = useMemo(() => {
@@ -217,11 +233,19 @@ function App() {
     return DEFAULT_UNDERWEAR.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
   }, [activeDimensions, canvasSize.height, currentDoll]);
 
-  // 着せ替え状態管理フック
-  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear);
+  // 保存された装備アイテム（初期化時に1回だけ読み込み）
+  const savedEquipped = useMemo(() => loadEquippedItems(), []);
+
+  // 着せ替え状態管理フック（保存された装備を渡す）
+  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear, savedEquipped);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
+
+  // 装備変更時に保存
+  useEffect(() => {
+    saveEquippedItems(equippedItems);
+  }, [equippedItems]);
 
 
   // ...existing code...
@@ -346,23 +370,24 @@ function App() {
     resetAll();
   }, [resetAll]);
 
-  // ドール切り替え
+  // ドール切り替え（保存も行う）
   const handleDollChange = useCallback(
     (dollId: string) => {
       setCurrentDollId(dollId);
+      saveCurrentDollId(dollId);
       resetAll();
     },
     [resetAll]
   );
 
-  // 背景ID
-  const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(null);
-
   // ドール位置・スケール調整
   // x: メニューを除いた領域の中央（メニュー幅%の半分 + 残り幅の中央）
   const menuWidthPercent = (MENU_WIDTH / window.innerWidth) * 100;
   const initialDollX = menuWidthPercent + (100 - menuWidthPercent) / 2;
-  const [dollTransform, setDollTransform] = useState<DollTransform>({ x: initialDollX, y: 50, scale: 1.0 });
+  const [dollTransform, setDollTransform] = useState<DollTransform>(() => {
+    const saved = loadDollTransform();
+    return saved ?? { x: initialDollX, y: 50, scale: 1.0 };
+  });
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 
   // movableアイテムのドラッグ中プレビュー用
@@ -378,9 +403,10 @@ function App() {
     [currentBackgroundId, allBackgrounds]
   );
 
-  // 背景切り替え
+  // 背景切り替え（保存も行う）
   const handleBackgroundChange = useCallback((bgId: string | null) => {
     setCurrentBackgroundId(bgId);
+    saveCurrentBackgroundId(bgId);
   }, []);
 
   // カスタムドール更新（SettingsPanelから呼ばれる）
