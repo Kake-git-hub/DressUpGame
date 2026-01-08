@@ -494,6 +494,22 @@ export class PixiEngine {
     }
   }
 
+  // スクリーンショットを取得（Data URL）
+  async takeScreenshot(): Promise<string | null> {
+    if (!this.app || !this.initialized || this.destroyed) {
+      return null;
+    }
+
+    try {
+      // rendererからキャンバスをキャプチャ
+      const canvas = this.app.canvas as HTMLCanvasElement;
+      return canvas.toDataURL('image/png');
+    } catch (error) {
+      console.error('スクリーンショット取得エラー:', error);
+      return null;
+    }
+  }
+
   // 初期化済みかどうか
   isInitialized(): boolean {
     return this.initialized && this.app !== null && !this.destroyed;

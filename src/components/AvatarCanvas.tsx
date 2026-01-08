@@ -2,9 +2,14 @@
  * AvatarCanvas コンポーネント
  * PixiJSでドールと着せた服を表示するキャンバス
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
 import type { DollConfig, EquippedItem, DollTransform } from '../types';
+
+// 外部から呼び出せるメソッド
+export interface AvatarCanvasHandle {
+  takeScreenshot: () => Promise<string | null>;
+}
 
 interface AvatarCanvasProps {
   width?: number;
@@ -17,10 +22,9 @@ interface AvatarCanvasProps {
   dollTransform?: DollTransform; // ドールの位置・スケール
   menuOffset?: number; // メニュー幅オフセット（背景位置調整用）
   onCanvasReady?: () => void;
-  onTap?: () => void; // キャンバスタップ時のコールバック
 }
 
-export function AvatarCanvas({
+export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(function AvatarCanvas({
   width = 400,
   height = 500,
   dollConfig,
@@ -31,11 +35,20 @@ export function AvatarCanvas({
   dollTransform,
   menuOffset = 0,
   onCanvasReady,
-  onTap,
-}: AvatarCanvasProps) {
+}, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PixiEngine | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  // 外部に公開するメソッド
+  useImperativeHandle(ref, () => ({
+    takeScreenshot: async () => {
+      if (engineRef.current?.isInitialized()) {
+        return engineRef.current.takeScreenshot();
+      }
+      return null;
+    },
+  }), []);
 
   // PixiJS初期化
   useEffect(() => {
@@ -155,11 +168,9 @@ export function AvatarCanvas({
       ref={canvasRef}
       id="avatar-canvas"
       data-testid="avatar-canvas"
-      onClick={onTap}
       style={{
         borderRadius: '0',
-        cursor: onTap ? 'pointer' : 'default',
       }}
     />
   );
-}
+});

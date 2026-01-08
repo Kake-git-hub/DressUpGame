@@ -6,7 +6,8 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, DollControlPanel, ItemAdjustPanel } from './components';
+import { AvatarCanvas, DressUpMenu, DollControlPanel, ItemAdjustPanel, DrawingCanvas, EraserCanvas } from './components';
+import type { AvatarCanvasHandle } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
@@ -22,7 +23,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.8.4';
+const APP_VERSION = '0.9.0';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -98,11 +99,18 @@ function scaleItemPosition(
 }
 
 function App() {
-    // ドール調整モード
-    const [showDollControls, setShowDollControls] = useState(false);
+  // キャンバスへの参照
+  const avatarCanvasRef = useRef<AvatarCanvasHandle>(null);
+  const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // ドール調整モード
+  const [showDollControls, setShowDollControls] = useState(false);
   // 設定画面の表示状態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // ドール調整モード
+  // お絵描きモード
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  // 消しゴムモード
+  const [isEraserMode, setIsEraserMode] = useState(false);
 
   // ドール一覧（デフォルト + カスタム）
   const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
@@ -121,8 +129,6 @@ function App() {
     if (allDolls.length === 0) return null;
     return allDolls.find(d => d.id === currentDollId) ?? allDolls[0];
   }, [currentDollId, allDolls]);
-
-  // ドール調整モード
 
   // メニュー幅はコンポーネント外で定義済み
 
@@ -234,24 +240,29 @@ function App() {
   const equippedItemsRef = useRef(equippedItems);
   equippedItemsRef.current = equippedItems;
 
-  // キャンバスタップで調整モード開始（即座に切り替え）
-  const handleCanvasTap = useCallback(() => {
-    // ドール調整モード中は無視
-    if (showDollControls) return;
+  // 調整ボタンクリックで調整モード開始
+  const handleAdjustButtonClick = useCallback(() => {
+    // 既に調整モード中は無視
+    if (showDollControls || isAdjustingItem) return;
     
-    // Refから直接取得（依存配列を減らしてタイムラグ解消）
+    // Refから直接取得
     const items = equippedItemsRef.current;
-    if (items.length === 0) return;
+    
+    if (items.length === 0) {
+      // 服がない場合はドール調整モードに入る
+      setShowDollControls(true);
+      return;
+    }
     
     // 最後に着せたアイテムを取得（最大equipOrder）
     const lastItem = items.reduce((latest, item) =>
       item.equipOrder > latest.equipOrder ? item : latest
     );
     
-    // 即座に状態更新（バッチ処理）
+    // 即座にアイテム調整モードに入る
     setAdjustingItemId(lastItem.id);
     setIsAdjustingItem(true);
-  }, [showDollControls]);
+  }, [showDollControls, isAdjustingItem]);
 
   // アイテム調整値を更新（useRefで安定化）
   const adjustingItemIdRef = useRef(adjustingItemId);
@@ -268,6 +279,26 @@ function App() {
   const handleAdjustClose = useCallback(() => {
     setIsAdjustingItem(false);
     setAdjustingItemId(null);
+  }, []);
+
+  // スクリーンショットを撮影して保存
+  const handleScreenshot = useCallback(async () => {
+    if (!avatarCanvasRef.current) return;
+    
+    try {
+      const dataUrl = await avatarCanvasRef.current.takeScreenshot();
+      if (!dataUrl) return;
+      
+      // ダウンロードリンクを作成
+      const link = document.createElement('a');
+      link.download = `dressup-${Date.now()}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('スクリーンショット保存エラー:', error);
+    }
   }, []);
 
   // 服をドロップした時の処理（全アイテム通常装着）
@@ -373,8 +404,8 @@ function App() {
   return (
     <div className="app">
       <div className="version-badge version-badge--fixed">v{APP_VERSION}</div>
-      {/* 設定ボタン - 位置調整中は非表示 */}
-      {!showDollControls && (
+      {/* 設定ボタン - 調整中は非表示 */}
+      {!showDollControls && !isAdjustingItem && (
         <button
           className="settings-button"
           onClick={() => setIsSettingsOpen(true)}
@@ -383,15 +414,6 @@ function App() {
           ⚙️
         </button>
       )}
-
-      {/* ドール調整ボタン */}
-      <button
-        className={`doll-control-button ${showDollControls ? 'active' : ''}`}
-        onClick={() => setShowDollControls(!showDollControls)}
-        title={showDollControls ? '調整を終了' : 'ドール調整'}
-      >
-        {showDollControls ? '✓' : '📐'}
-      </button>
 
       <main className="app-main">
         {/* ドールが存在する場合のみ表示 */}
@@ -419,6 +441,7 @@ function App() {
               </div>
             ) : (
               <AvatarCanvas
+                ref={avatarCanvasRef}
                 width={canvasSize.width}
                 height={canvasSize.height}
                 equippedItems={equippedItems}
@@ -426,7 +449,6 @@ function App() {
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
                 menuOffset={MENU_WIDTH}
-                onTap={handleCanvasTap}
               />
             )}
 
@@ -441,15 +463,57 @@ function App() {
               />
             )}
 
-            {/* アイテム調整ボタン（調整モードでないとき表示） */}
-            {!showDollControls && !isAdjustingItem && equippedItems.length > 0 && (
-              <button
-                className="item-adjust-button"
-                onClick={handleCanvasTap}
-                title="服を調整"
-              >
-                👗
-              </button>
+            {/* お絵描きキャンバス */}
+            <DrawingCanvas
+              width={canvasSize.width}
+              height={canvasSize.height}
+              isActive={isDrawingMode}
+              onClose={() => setIsDrawingMode(false)}
+              canvasRef={drawingCanvasRef}
+            />
+
+            {/* 消しゴムキャンバス */}
+            <EraserCanvas
+              width={canvasSize.width}
+              height={canvasSize.height}
+              isActive={isEraserMode}
+              onClose={() => setIsEraserMode(false)}
+            />
+
+            {/* 消しゴムマスクはPixiEngine側で処理 */}
+
+            {/* ツールボタン（調整モードでないとき表示） */}
+            {!showDollControls && !isAdjustingItem && !isDrawingMode && !isEraserMode && (
+              <div className="tool-buttons">
+                <button
+                  className="tool-button"
+                  onClick={handleAdjustButtonClick}
+                  title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}
+                >
+                  {equippedItems.length > 0 ? '👗' : '📐'}
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={() => setIsEraserMode(true)}
+                  title="けしゴム"
+                >
+                  🧽
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={() => setIsDrawingMode(true)}
+                  title="おえかき"
+                >
+                  ✏️
+                </button>
+                <button
+                  className="tool-button"
+                  onClick={handleScreenshot}
+                  title="スクショ"
+                >
+                  📷
+                </button>
+              </div>
             )}
 
             {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}

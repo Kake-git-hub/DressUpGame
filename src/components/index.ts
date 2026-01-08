@@ -2,6 +2,7 @@
  * コンポーネントのエクスポート
  */
 export { AvatarCanvas } from './AvatarCanvas';
+export type { AvatarCanvasHandle } from './AvatarCanvas';
 export { ClothingItem } from './ClothingItem';
 export { DraggableClothingItem } from './DraggableClothingItem';
 export { ClothingPalette } from './ClothingPalette';
@@ -13,3 +14,5 @@ export { ItemManager } from './ItemManager';
 export { SettingsPanel } from './SettingsPanel';
 export { DollControlPanel } from './DollControlPanel';
 export { ItemAdjustPanel } from './ItemAdjustPanel';
+export { DrawingCanvas } from './DrawingCanvas';
+export { EraserCanvas } from './EraserCanvas';
