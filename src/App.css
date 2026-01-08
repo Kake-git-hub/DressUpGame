@@ -114,9 +114,8 @@ textarea {
 /* パレットセクション - 左端に固定 */
 .palette-section {
   flex-shrink: 0;
-  width: 140px;
+  width: 150px;
   height: calc(100vh - 60px);
-  overflow-y: auto;
   z-index: 10;
   padding-top: 72px; /* ボタン(48px) + マージン(24px) */
 }
@@ -168,7 +167,7 @@ textarea {
   }
 
   .palette-section {
-    width: 140px;
+    width: 150px;
   }
 
   .app-footer {

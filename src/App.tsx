@@ -21,7 +21,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -33,6 +33,9 @@ const DEFAULT_DOLLS: DollData[] = [];
 const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 
 // ドールが未登録でも落ちないためのフォールバック寸法
+// メニュー幅（px）
+const MENU_WIDTH = 150;
+
 const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
   width: 400,
   height: 800,
@@ -115,8 +118,7 @@ function App() {
     return allDolls.find(d => d.id === currentDollId) ?? allDolls[0];
   }, [currentDollId, allDolls]);
 
-  // メニュー幅
-  const MENU_WIDTH = 300;
+  // メニュー幅はコンポーネント外で定義済み
 
   // キャンバスサイズ（iPad横向き最適化）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
@@ -218,27 +220,12 @@ function App() {
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
 
-  // 服をドロップした時の処理
+  // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
-    (item: ClothingItemData, dropPosition?: Position) => {
+    (item: ClothingItemData) => {
       if (!currentDoll) return;
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
-      
-      // movableアイテムの場合、ドロップ位置を保存
-      if (scaledItem.movable && dropPosition) {
-        // 画面全体に対するパーセンテージを計算
-        const percentX = (dropPosition.x / window.innerWidth) * 100;
-        const percentY = (dropPosition.y / window.innerHeight) * 100;
-        
-        const itemWithOffset = {
-          ...scaledItem,
-          offsetX: percentX - 50, // 中央からのオフセット
-          offsetY: percentY - 50,
-        };
-        equipItem(itemWithOffset);
-      } else {
-        equipItem(scaledItem);
-      }
+      equipItem(scaledItem);
       setDraggingPreview(null);
     },
     [equipItem, scaledItems, currentDoll]
@@ -291,7 +278,10 @@ function App() {
   const [currentBackgroundId, setCurrentBackgroundId] = useState<string | null>(null);
 
   // ドール位置・スケール調整
-  const [dollTransform, setDollTransform] = useState<DollTransform>({ x: 50, y: 50, scale: 1.0 });
+  // x: メニューを除いた領域の中央（メニュー幅%の半分 + 残り幅の中央）
+  const menuWidthPercent = (MENU_WIDTH / window.innerWidth) * 100;
+  const initialDollX = menuWidthPercent + (100 - menuWidthPercent) / 2;
+  const [dollTransform, setDollTransform] = useState<DollTransform>({ x: initialDollX, y: 50, scale: 1.0 });
 
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
   const [showDollControls, setShowDollControls] = useState(false);
