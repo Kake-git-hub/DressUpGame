@@ -22,7 +22,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -431,9 +431,9 @@ function App() {
               <button
                 className="item-adjust-button"
                 onClick={handleCanvasTap}
-                title="最後に着せた服を調整"
+                title="服を調整"
               >
-                👗 服を調整
+                👗
               </button>
             )}
 

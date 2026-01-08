@@ -323,7 +323,7 @@ textarea {
   z-index: 50;
 }
 
-/* アイテム調整オーバーレイ（画面全体） */
+/* アイテム調整オーバーレイ（画面全体・透明） */
 .item-adjust-overlay {
   position: fixed;
   top: 0;
@@ -332,100 +332,20 @@ textarea {
   bottom: 0;
   z-index: 200;
   touch-action: none;
-  background: rgba(0, 0, 0, 0.1);
+  background: transparent;
 }
 
-/* 操作ガイド（上部） */
-.item-adjust-guide {
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
-  padding: 16px 24px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(10px);
-  text-align: center;
-}
-
-.guide-item {
-  font-size: 0.95rem;
-  color: #555;
-  margin: 4px 0;
-}
-
-.guide-values {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #eee;
-  font-size: 0.9rem;
-  color: #888;
-}
-
-/* 下部ボタン群 */
-.item-adjust-buttons {
-  position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 16px;
-}
-
-.item-adjust-reset-btn {
-  padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 2px solid #ddd;
-  border-radius: 30px;
-  font-size: 1.1rem;
-  font-weight: bold;
-  color: #666;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.item-adjust-reset-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
-}
-
-.item-adjust-reset-btn:active {
-  transform: scale(0.95);
-}
-
-.item-adjust-done-btn {
-  padding: 16px 40px;
-  background: linear-gradient(135deg, #28a745 0%, #218838 100%);
-  border: none;
-  border-radius: 30px;
-  font-size: 1.2rem;
-  font-weight: bold;
-  color: white;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.item-adjust-done-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(40, 167, 69, 0.5);
-}
-
-.item-adjust-done-btn:active {
-  transform: scale(0.95);
-}
-
-/* 調整ボタン（キャンバス右上） */
+/* 調整ボタン（固定位置、メニューの外） */
 .item-adjust-button {
-  position: absolute;
+  position: fixed;
   top: 16px;
   right: 16px;
-  padding: 12px 20px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
   border: none;
-  border-radius: 24px;
+  border-radius: 50%;
   color: white;
   font-size: 1rem;
   font-weight: bold;
@@ -436,16 +356,79 @@ textarea {
 }
 
 .item-adjust-button:hover {
-  transform: scale(1.05);
+  transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(255, 105, 180, 0.5);
 }
 
 .item-adjust-button:active {
-  transform: scale(0.95);
+  transform: scale(0.9);
 }
 
 .item-adjust-button:disabled {
   background: #ccc;
   box-shadow: none;
   cursor: not-allowed;
+}
+
+/* 完了・リセットボタン（右上） */
+.item-adjust-top-buttons {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 300;
+}
+
+.item-adjust-done-btn-small {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: linear-gradient(135deg, #28a745 0%, #218838 100%);
+  border: none;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-adjust-done-btn-small:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(40, 167, 69, 0.5);
+}
+
+.item-adjust-done-btn-small:active {
+  transform: scale(0.9);
+}
+
+.item-adjust-reset-btn-small {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #ddd;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  color: #666;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-adjust-reset-btn-small:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+.item-adjust-reset-btn-small:active {
+  transform: scale(0.9);
 }

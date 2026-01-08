@@ -73,14 +73,25 @@ export function ItemAdjustPanel({
     setRotation(item.adjustRotation ?? 0);
   }, [item.id, item.adjustOffsetX, item.adjustOffsetY, item.adjustScale, item.adjustRotation]);
 
-  // 値が変わったら親に通知
+  // 値が変わったら親に通知（震え対策: refで前回値と比較）
+  const prevValuesRef = useRef({ offsetX, offsetY, scale, rotation });
   useEffect(() => {
-    onAdjust({
-      adjustOffsetX: offsetX,
-      adjustOffsetY: offsetY,
-      adjustScale: scale,
-      adjustRotation: rotation,
-    });
+    const prev = prevValuesRef.current;
+    // 値が実際に変わった場合のみ通知
+    if (
+      prev.offsetX !== offsetX ||
+      prev.offsetY !== offsetY ||
+      prev.scale !== scale ||
+      prev.rotation !== rotation
+    ) {
+      prevValuesRef.current = { offsetX, offsetY, scale, rotation };
+      onAdjust({
+        adjustOffsetX: offsetX,
+        adjustOffsetY: offsetY,
+        adjustScale: scale,
+        adjustRotation: rotation,
+      });
+    }
   }, [offsetX, offsetY, scale, rotation, onAdjust]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
@@ -257,25 +268,13 @@ export function ItemAdjustPanel({
       onWheel={handleWheel}
       style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
     >
-      {/* 操作ガイド */}
-      <div className="item-adjust-guide">
-        <div className="guide-item">👆 一本指ドラッグ: 位置移動</div>
-        <div className="guide-item">🤏 ピンチ: 大きさ変更</div>
-        <div className="guide-item">🔄 二本指回転: 傾き変更</div>
-        <div className="guide-values">
-          位置: ({Math.round(offsetX)}, {Math.round(offsetY)}) / 
-          大きさ: {(scale * 100).toFixed(0)}% / 
-          傾き: {rotation.toFixed(0)}°
-        </div>
-      </div>
-
-      {/* 下部ボタン */}
-      <div className="item-adjust-buttons">
-        <button className="item-adjust-reset-btn" onClick={handleResetAll}>
-          ↺ リセット
+      {/* 右上ボタン（完了・リセット） */}
+      <div className="item-adjust-top-buttons">
+        <button className="item-adjust-done-btn-small" onClick={onClose} title="完了">
+          ✓
         </button>
-        <button className="item-adjust-done-btn" onClick={onClose}>
-          ✓ 完了
+        <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">
+          ↺
         </button>
       </div>
     </div>
