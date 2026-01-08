@@ -1,8 +1,9 @@
 /**
  * DressUpMenu コンポーネント
  * 背景はボタン切り替えで別画面、服はフォルダ名でグループ化して表示
+ * 左側にスクロール用スライダー配置
  */
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
 
@@ -26,6 +27,7 @@ interface DressUpMenuProps {
 export function DressUpMenu({
   items,
   onItemDrop,
+  onItemRemove,
   equippedItems,
   onReset,
   dolls,
@@ -40,95 +42,147 @@ export function DressUpMenu({
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
+  
+  // スクロール用
+  const itemListRef = useRef<HTMLDivElement>(null);
+  const [scrollPercent, setScrollPercent] = useState(0);
+  const [maxScroll, setMaxScroll] = useState(0);
+
+  // スクロール位置を更新
+  const updateScrollInfo = useCallback(() => {
+    if (itemListRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = itemListRef.current;
+      const max = scrollHeight - clientHeight;
+      setMaxScroll(max);
+      setScrollPercent(max > 0 ? scrollTop / max : 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = itemListRef.current;
+    if (el) {
+      el.addEventListener('scroll', updateScrollInfo);
+      updateScrollInfo();
+      return () => el.removeEventListener('scroll', updateScrollInfo);
+    }
+  }, [updateScrollInfo, showBackgrounds]);
+
+  // スライダー操作
+  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseFloat(e.target.value);
+    setScrollPercent(value);
+    if (itemListRef.current && maxScroll > 0) {
+      itemListRef.current.scrollTop = value * maxScroll;
+    }
+  }, [maxScroll]);
 
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
+
+  // 装備中のタイプをセット化
+  const equippedTypes = useMemo(() => new Set(equippedItems.map(i => i.type)), [equippedItems]);
 
   // 下着以外の装備数
   const clothingCount = equippedItems.filter(
     i => i.type !== 'underwear_top' && i.type !== 'underwear_bottom'
   ).length;
 
-  // アイテムをフォルダ名(type)でグループ化
+  // アイテムをフォルダ名(type)でグループ化（元の順序を保持）
   const groupedItems = useMemo(() => {
-    const groups = new Map<string, ClothingItemData[]>();
+    const groups = new Map<string, { items: ClothingItemData[]; layerOrder: number }>();
     
-    // layerOrder順にソートしてからグループ化
-    const sortedItems = [...items].sort((a, b) => {
-      const aLayer = a.layerOrder ?? a.baseZIndex ?? 0;
-      const bLayer = b.layerOrder ?? b.baseZIndex ?? 0;
-      return aLayer - bLayer;
-    });
-    
-    sortedItems.forEach(item => {
+    items.forEach(item => {
       const key = item.type;
       if (!groups.has(key)) {
-        groups.set(key, []);
+        groups.set(key, { 
+          items: [], 
+          layerOrder: item.layerOrder ?? item.baseZIndex ?? 999 
+        });
       }
-      groups.get(key)!.push(item);
+      groups.get(key)!.items.push(item);
     });
     
-    return groups;
+    // layerOrder順でソート
+    const sorted = Array.from(groups.entries()).sort((a, b) => 
+      a[1].layerOrder - b[1].layerOrder
+    );
+    
+    return new Map(sorted.map(([key, val]) => [key, val.items]));
   }, [items]);
 
   // 背景選択画面
   if (showBackgrounds) {
     return (
-      <div style={styles.container}>
-        {/* 戻るボタン */}
-        <button 
-          style={styles.backButton} 
-          onClick={() => setShowBackgrounds(false)}
-        >
-          ← もどる
-        </button>
+      <div style={styles.outerContainer}>
+        {/* 左側スライダー */}
+        <div style={styles.sliderContainer}>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={scrollPercent}
+            onChange={handleSliderChange}
+            style={styles.slider}
+          />
+        </div>
 
-        <div style={styles.sectionLabel}>🖼️ はいけい</div>
-
-        <div style={styles.itemList}>
-          {/* 背景なしオプション */}
-          <button
-            style={{
-              ...styles.itemButton,
-              ...(currentBackgroundId === null ? styles.itemButtonSelected : {}),
-            }}
-            onClick={() => onBackgroundChange?.(null)}
+        <div style={styles.container}>
+          {/* 戻るボタン */}
+          <button 
+            style={styles.backButton} 
+            onClick={() => setShowBackgrounds(false)}
           >
-            <div style={styles.itemImageContainer}>
-              <span style={{ fontSize: '24px' }}>✕</span>
-            </div>
-            <span style={styles.itemLabel}>なし</span>
+            ← もどる
           </button>
 
-          {backgrounds.map(bg => (
+          <div style={styles.sectionLabel}>🖼️ はいけい</div>
+
+          <div style={styles.itemList} ref={itemListRef}>
+            {/* 背景なしオプション */}
             <button
-              key={bg.id}
               style={{
                 ...styles.itemButton,
-                ...(currentBackgroundId === bg.id ? styles.itemButtonSelected : {}),
+                ...(currentBackgroundId === null ? styles.itemButtonSelected : {}),
               }}
-              onClick={() => onBackgroundChange?.(bg.id)}
+              onClick={() => onBackgroundChange?.(null)}
             >
               <div style={styles.itemImageContainer}>
-                <img
-                  src={bg.thumbnailUrl || bg.imageUrl}
-                  alt={bg.name}
-                  style={styles.itemImage}
-                  draggable={false}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
-                  }}
-                />
+                <span style={{ fontSize: '24px' }}>✕</span>
               </div>
+              <span style={styles.itemLabel}>なし</span>
             </button>
-          ))}
 
-          {backgrounds.length === 0 && (
-            <p style={styles.emptyMessage}>
-              背景がありません<br />
-              設定からプリセットを取り込んでください
-            </p>
-          )}
+            {backgrounds.map(bg => (
+              <button
+                key={bg.id}
+                style={{
+                  ...styles.itemButton,
+                  ...(currentBackgroundId === bg.id ? styles.itemButtonSelected : {}),
+                }}
+                onClick={() => onBackgroundChange?.(bg.id)}
+              >
+                <div style={styles.itemImageContainer}>
+                  <img
+                    src={bg.thumbnailUrl || bg.imageUrl}
+                    alt={bg.name}
+                    style={styles.itemImage}
+                    draggable={false}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+                    }}
+                  />
+                </div>
+              </button>
+            ))}
+
+            {backgrounds.length === 0 && (
+              <p style={styles.emptyMessage}>
+                背景がありません<br />
+                設定からプリセットを取り込んでください
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -136,75 +190,100 @@ export function DressUpMenu({
 
   // メインメニュー（服アイテム）
   return (
-    <div style={styles.container}>
-      {/* ヘッダー：ドール選択 */}
-      <div style={styles.menuHeader}>
-        <select
-          style={styles.dollSelect}
-          value={currentDollId}
-          onChange={(e) => onDollChange(e.target.value)}
-          disabled={dolls.length === 0}
-        >
-          {dolls.length === 0 ? (
-            <option value="">ドールなし</option>
-          ) : (
-            dolls.map(doll => (
-              <option key={doll.id} value={doll.id}>
-                {doll.name}
-              </option>
-            ))
-          )}
-        </select>
+    <div style={styles.outerContainer}>
+      {/* 左側スライダー */}
+      <div style={styles.sliderContainer}>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={scrollPercent}
+          onChange={handleSliderChange}
+          style={styles.slider}
+        />
       </div>
 
-      {/* 背景ボタン */}
-      {backgrounds.length > 0 && (
-        <button 
-          style={{
-            ...styles.backgroundButton,
-            ...(currentBackgroundId ? styles.backgroundButtonActive : {}),
-          }}
-          onClick={() => setShowBackgrounds(true)}
-        >
-          🖼️ はいけい {currentBackgroundId ? '✓' : ''}
-        </button>
-      )}
+      <div style={styles.container}>
+        {/* ヘッダー：ドール選択 */}
+        <div style={styles.menuHeader}>
+          <select
+            style={styles.dollSelect}
+            value={currentDollId}
+            onChange={(e) => onDollChange(e.target.value)}
+            disabled={dolls.length === 0}
+          >
+            {dolls.length === 0 ? (
+              <option value="">ドールなし</option>
+            ) : (
+              dolls.map(doll => (
+                <option key={doll.id} value={doll.id}>
+                  {doll.name}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
 
-      {/* リセットボタン（服を着ている場合のみ表示） */}
-      {clothingCount > 0 && (
-        <button style={styles.resetButton} onClick={onReset}>
-          🔄 リセット
-        </button>
-      )}
-
-      {/* スクロール可能なアイテムリスト */}
-      <div style={styles.itemList}>
-        {Array.from(groupedItems.entries()).map(([folderName, folderItems]) => (
-          <div key={folderName}>
-            {/* フォルダ名ラベル */}
-            <div style={styles.folderLabel}>{folderName}</div>
-            
-            {/* フォルダ内アイテム */}
-            {folderItems.map(item => (
-              <DraggableItem
-                key={item.id}
-                item={item}
-                isEquipped={equippedIds.has(item.id)}
-                onDrop={onItemDrop}
-                dropTargetId={dropTargetId}
-                onDragMove={onDragMove}
-                onDragEnd={onDragEnd}
-              />
-            ))}
-          </div>
-        ))}
-
-        {items.length === 0 && (
-          <p style={styles.emptyMessage}>
-            アイテムがありません<br />
-            設定からプリセットを取り込んでください
-          </p>
+        {/* 背景ボタン */}
+        {backgrounds.length > 0 && (
+          <button 
+            style={{
+              ...styles.backgroundButton,
+              ...(currentBackgroundId ? styles.backgroundButtonActive : {}),
+            }}
+            onClick={() => setShowBackgrounds(true)}
+          >
+            🖼️ はいけい {currentBackgroundId ? '✓' : ''}
+          </button>
         )}
+
+        {/* リセットボタン（服を着ている場合のみ表示） */}
+        {clothingCount > 0 && (
+          <button style={styles.resetButton} onClick={onReset}>
+            🔄 リセット
+          </button>
+        )}
+
+        {/* スクロール可能なアイテムリスト */}
+        <div style={styles.itemList} ref={itemListRef}>
+          {Array.from(groupedItems.entries()).map(([folderName, folderItems]) => (
+            <div key={folderName}>
+              {/* フォルダ名ラベル */}
+              <div style={styles.folderLabel}>{folderName}</div>
+              
+              {/* フォルダ内アイテム */}
+              {folderItems.map(item => (
+                <DraggableItem
+                  key={item.id}
+                  item={item}
+                  isEquipped={equippedIds.has(item.id)}
+                  onDrop={onItemDrop}
+                  dropTargetId={dropTargetId}
+                  onDragMove={onDragMove}
+                  onDragEnd={onDragEnd}
+                />
+              ))}
+
+              {/* カテゴリの「なし」ボタン */}
+              {equippedTypes.has(folderName as ClothingType) && (
+                <button
+                  style={styles.removeButton}
+                  onClick={() => onItemRemove?.(folderName as ClothingType)}
+                >
+                  ✕ なし
+                </button>
+              )}
+            </div>
+          ))}
+
+          {items.length === 0 && (
+            <p style={styles.emptyMessage}>
+              アイテムがありません<br />
+              設定からプリセットを取り込んでください
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -302,11 +381,34 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
   );
 }
 
-const MENU_WIDTH = 140;
-const ITEM_PADDING = 6;
-const ITEM_SIZE = MENU_WIDTH - ITEM_PADDING * 2 - 12;
+const MENU_WIDTH = 120;
+const SLIDER_WIDTH = 24;
+const ITEM_PADDING = 4;
+const ITEM_SIZE = MENU_WIDTH - ITEM_PADDING * 2 - 8;
 
 const styles: Record<string, CSSProperties> = {
+  outerContainer: {
+    display: 'flex',
+    flexDirection: 'row',
+    height: '100%',
+    maxHeight: 'calc(100vh - 140px)',
+  },
+  sliderContainer: {
+    width: `${SLIDER_WIDTH}px`,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingRight: '4px',
+  },
+  slider: {
+    writingMode: 'vertical-lr' as const,
+    direction: 'rtl' as const,
+    width: '20px',
+    height: '100%',
+    cursor: 'pointer',
+    accentColor: '#ff69b4',
+  },
   container: {
     backgroundColor: '#f8f9fa',
     borderRadius: '12px',
@@ -317,21 +419,20 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: 'column',
     gap: '4px',
     height: '100%',
-    maxHeight: 'calc(100vh - 140px)',
     overflow: 'hidden',
   },
   menuHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    paddingBottom: '6px',
+    gap: '4px',
+    paddingBottom: '4px',
     borderBottom: '1px solid #e9ecef',
     flexShrink: 0,
   },
   dollSelect: {
     flex: 1,
-    padding: '6px 8px',
-    fontSize: '12px',
+    padding: '4px 6px',
+    fontSize: '11px',
     borderRadius: '6px',
     border: '2px solid #e9ecef',
     backgroundColor: 'white',
@@ -340,8 +441,8 @@ const styles: Record<string, CSSProperties> = {
   },
   backgroundButton: {
     width: '100%',
-    padding: '8px',
-    fontSize: '11px',
+    padding: '6px',
+    fontSize: '10px',
     fontWeight: 'bold',
     color: '#666',
     backgroundColor: '#e9ecef',
@@ -349,7 +450,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: '6px',
     cursor: 'pointer',
     flexShrink: 0,
-    marginBottom: '4px',
+    marginBottom: '2px',
   },
   backgroundButtonActive: {
     backgroundColor: '#d4edda',
@@ -358,8 +459,8 @@ const styles: Record<string, CSSProperties> = {
   },
   backButton: {
     width: '100%',
-    padding: '10px',
-    fontSize: '12px',
+    padding: '8px',
+    fontSize: '11px',
     fontWeight: 'bold',
     color: '#666',
     backgroundColor: '#e9ecef',
@@ -367,13 +468,13 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: '6px',
     cursor: 'pointer',
     flexShrink: 0,
-    marginBottom: '8px',
+    marginBottom: '4px',
   },
   resetButton: {
     width: '100%',
-    padding: '8px',
-    marginBottom: '4px',
-    fontSize: '11px',
+    padding: '6px',
+    marginBottom: '2px',
+    fontSize: '10px',
     fontWeight: 'bold',
     color: 'white',
     background: 'linear-gradient(135deg, #ff69b4 0%, #9370db 100%)',
@@ -385,25 +486,26 @@ const styles: Record<string, CSSProperties> = {
   itemList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '4px',
+    gap: '2px',
     overflowY: 'auto',
     flex: 1,
-    paddingRight: '2px',
+    scrollbarWidth: 'none', // Firefox
+    msOverflowStyle: 'none', // IE
   },
   sectionLabel: {
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: 'bold',
     color: '#333',
-    padding: '8px 4px',
-    marginBottom: '4px',
+    padding: '6px 4px',
+    marginBottom: '2px',
     borderBottom: '2px solid #ff69b4',
   },
   folderLabel: {
-    fontSize: '10px',
+    fontSize: '9px',
     fontWeight: 'bold',
     color: '#666',
-    padding: '6px 4px 2px',
-    marginTop: '4px',
+    padding: '4px 2px 2px',
+    marginTop: '2px',
     borderBottom: '1px solid #e9ecef',
     backgroundColor: '#f0f0f0',
     borderRadius: '4px 4px 0 0',
@@ -413,10 +515,10 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '4px',
+    padding: '2px',
     backgroundColor: 'white',
     border: '2px solid #e9ecef',
-    borderRadius: '8px',
+    borderRadius: '6px',
     transition: 'box-shadow 0.2s',
     userSelect: 'none',
     width: `${ITEM_SIZE}px`,
@@ -451,30 +553,54 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: 'none',
   },
   itemLabel: {
-    fontSize: '10px',
+    fontSize: '9px',
     color: '#666',
     marginTop: '2px',
   },
   equippedBadge: {
     position: 'absolute',
-    top: '-3px',
-    right: '-3px',
-    width: '16px',
-    height: '16px',
+    top: '-2px',
+    right: '-2px',
+    width: '14px',
+    height: '14px',
     backgroundColor: '#ff69b4',
     color: 'white',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '10px',
+    fontSize: '9px',
     fontWeight: 'bold',
+  },
+  removeButton: {
+    width: '100%',
+    padding: '6px 4px',
+    fontSize: '9px',
+    fontWeight: 'bold',
+    color: '#666',
+    backgroundColor: '#f8f9fa',
+    border: '1px dashed #ccc',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    marginTop: '2px',
+    marginBottom: '4px',
   },
   emptyMessage: {
     textAlign: 'center',
     color: '#666',
     padding: '12px',
-    fontSize: '11px',
+    fontSize: '10px',
     lineHeight: 1.5,
   },
 };
+
+// スクロールバーを非表示にするCSS（WebKit用）
+const scrollbarHideStyle = document.createElement('style');
+scrollbarHideStyle.textContent = `
+  .dress-up-item-list::-webkit-scrollbar {
+    display: none;
+  }
+`;
+if (typeof document !== 'undefined') {
+  document.head.appendChild(scrollbarHideStyle);
+}

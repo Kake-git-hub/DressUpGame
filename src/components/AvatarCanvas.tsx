@@ -149,8 +149,7 @@ export function AvatarCanvas({
       id="avatar-canvas"
       data-testid="avatar-canvas"
       style={{
-        borderRadius: '12px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        borderRadius: '0',
       }}
     />
   );

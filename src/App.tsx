@@ -34,7 +34,7 @@ const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 
 // ドールが未登録でも落ちないためのフォールバック寸法
 // メニュー幅（px）
-const MENU_WIDTH = 150;
+const MENU_WIDTH = 160;
 
 const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
   width: 400,
@@ -345,18 +345,6 @@ function App() {
       </button>
 
       <main className="app-main">
-        {/* 背景をドールエリア全体に表示 */}
-        {currentBackground && (
-          <div
-            className="background-layer"
-            style={{
-              backgroundImage: `url(${currentBackground.imageUrl})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-            }}
-          />
-        )}
-
         {/* ドールが存在する場合のみ表示 */}
         {currentDollSafe && (
           <section 
@@ -386,6 +374,7 @@ function App() {
                 height={canvasSize.height}
                 equippedItems={equippedItems}
                 dollImageUrl={currentDollSafe.bodyImageUrl}
+                backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
               />
             )}
