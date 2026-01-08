@@ -98,8 +98,11 @@ function scaleItemPosition(
 }
 
 function App() {
+    // ドール調整モード
+    const [showDollControls, setShowDollControls] = useState(false);
   // 設定画面の表示状態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // ドール調整モード
 
   // ドール一覧（デフォルト + カスタム）
   const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
@@ -118,6 +121,8 @@ function App() {
     if (allDolls.length === 0) return null;
     return allDolls.find(d => d.id === currentDollId) ?? allDolls[0];
   }, [currentDollId, allDolls]);
+
+  // ドール調整モード
 
   // メニュー幅はコンポーネント外で定義済み
 
@@ -211,6 +216,9 @@ function App() {
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
+
+
+  // ...existing code...
 
   // アイテム調整モード
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);
@@ -309,9 +317,7 @@ function App() {
   const menuWidthPercent = (MENU_WIDTH / window.innerWidth) * 100;
   const initialDollX = menuWidthPercent + (100 - menuWidthPercent) / 2;
   const [dollTransform, setDollTransform] = useState<DollTransform>({ x: initialDollX, y: 50, scale: 1.0 });
-
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
-  const [showDollControls, setShowDollControls] = useState(false);
 
   // movableアイテムのドラッグ中プレビュー用
   const [draggingPreview, setDraggingPreview] = useState<{
