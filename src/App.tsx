@@ -22,7 +22,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.8.3';
+const APP_VERSION = '0.8.4';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -212,7 +212,7 @@ function App() {
   }, [activeDimensions, canvasSize.height, currentDoll]);
 
   // 着せ替え状態管理フック
-  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment, getLastEquippedItem } = useDressUp(scaledItems, scaledUnderwear);
+  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear);
 
   // 装備中のアイテム
   const equippedItems = getEquippedItems();
@@ -230,18 +230,28 @@ function App() {
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
+  // 装備アイテムをRefで保持（即座にアクセスするため）
+  const equippedItemsRef = useRef(equippedItems);
+  equippedItemsRef.current = equippedItems;
+
   // キャンバスタップで調整モード開始（即座に切り替え）
   const handleCanvasTap = useCallback(() => {
     // ドール調整モード中は無視
     if (showDollControls) return;
     
-    const lastItem = getLastEquippedItem();
-    if (lastItem) {
-      // 即座に状態更新
-      setAdjustingItemId(lastItem.id);
-      setIsAdjustingItem(true);
-    }
-  }, [showDollControls, getLastEquippedItem]);
+    // Refから直接取得（依存配列を減らしてタイムラグ解消）
+    const items = equippedItemsRef.current;
+    if (items.length === 0) return;
+    
+    // 最後に着せたアイテムを取得（最大equipOrder）
+    const lastItem = items.reduce((latest, item) =>
+      item.equipOrder > latest.equipOrder ? item : latest
+    );
+    
+    // 即座に状態更新（バッチ処理）
+    setAdjustingItemId(lastItem.id);
+    setIsAdjustingItem(true);
+  }, [showDollControls]);
 
   // アイテム調整値を更新（useRefで安定化）
   const adjustingItemIdRef = useRef(adjustingItemId);
