@@ -426,17 +426,6 @@ function App() {
               />
             )}
 
-            {/* アイテム調整パネル（キャンバス上に表示） */}
-            {isAdjustingItem && adjustingItem && (
-              <ItemAdjustPanel
-                item={adjustingItem}
-                onAdjust={handleItemAdjust}
-                onClose={handleAdjustClose}
-                canvasWidth={canvasSize.width}
-                canvasHeight={canvasSize.height}
-              />
-            )}
-
             {/* アイテム調整ボタン（調整モードでないとき表示） */}
             {!showDollControls && !isAdjustingItem && equippedItems.length > 0 && (
               <button
@@ -498,9 +487,23 @@ function App() {
         )}
       </main>
 
-      <footer className="app-footer">
-        <p>{isAdjustingItem ? '服の位置・大きさ・傾きを調整中' : 'ドラッグしてドールにきせてね！'}</p>
-      </footer>
+      {/* フッター - 調整中は非表示 */}
+      {!isAdjustingItem && (
+        <footer className="app-footer">
+          <p>ドラッグしてドールにきせてね！</p>
+        </footer>
+      )}
+
+      {/* アイテム調整オーバーレイ（画面全体） */}
+      {isAdjustingItem && adjustingItem && (
+        <ItemAdjustPanel
+          item={adjustingItem}
+          onAdjust={handleItemAdjust}
+          onClose={handleAdjustClose}
+          canvasWidth={canvasSize.width}
+          canvasHeight={canvasSize.height}
+        />
+      )}
 
       {/* 設定パネル */}
       <SettingsPanel

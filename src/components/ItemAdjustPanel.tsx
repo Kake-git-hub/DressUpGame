@@ -1,6 +1,9 @@
 /**
  * アイテム調整パネル
- * 位置・大きさ・傾きをスライダーで調整
+ * タッチジェスチャーで位置・大きさ・傾きを調整
+ * - 一本指タッチ: 位置移動
+ * - ピンチ: 拡大縮小
+ * - 二本指回転: 傾き
  */
 import { useCallback, useState, useEffect, useRef } from 'react';
 import type { EquippedItem } from '../types';
@@ -12,6 +15,26 @@ interface ItemAdjustPanelProps {
   onClose: () => void;
   canvasWidth: number;
   canvasHeight: number;
+}
+
+// タッチポイントの型
+interface TouchPoint {
+  clientX: number;
+  clientY: number;
+}
+
+// 2点間の距離を計算
+function getDistance(touch1: TouchPoint, touch2: TouchPoint): number {
+  const dx = touch1.clientX - touch2.clientX;
+  const dy = touch1.clientY - touch2.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// 2点間の角度を計算（度）
+function getAngle(touch1: TouchPoint, touch2: TouchPoint): number {
+  const dx = touch2.clientX - touch1.clientX;
+  const dy = touch2.clientY - touch1.clientY;
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
 }
 
 export function ItemAdjustPanel({
@@ -27,9 +50,20 @@ export function ItemAdjustPanel({
   const [scale, setScale] = useState(item.adjustScale ?? 1.0);
   const [rotation, setRotation] = useState(item.adjustRotation ?? 0);
 
-  // ドラッグ状態
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  // タッチ状態
+  const touchStartRef = useRef<{
+    // 一本指用
+    x: number;
+    y: number;
+    offsetX: number;
+    offsetY: number;
+    // 二本指用
+    initialDistance: number;
+    initialScale: number;
+    initialAngle: number;
+    initialRotation: number;
+  } | null>(null);
+  const [touchCount, setTouchCount] = useState(0);
 
   // アイテムが変わったらリセット
   useEffect(() => {
@@ -52,16 +86,6 @@ export function ItemAdjustPanel({
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
 
-  // スケールのリセット
-  const handleResetScale = useCallback(() => {
-    setScale(1.0);
-  }, []);
-
-  // 回転のリセット
-  const handleResetRotation = useCallback(() => {
-    setRotation(0);
-  }, []);
-
   // 全リセット
   const handleResetAll = useCallback(() => {
     setOffsetX(0);
@@ -70,103 +94,190 @@ export function ItemAdjustPanel({
     setRotation(0);
   }, []);
 
-  // ドラッグ開始
-  const handleDragStart = useCallback((e: React.PointerEvent) => {
+  // タッチ開始
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
     e.preventDefault();
-    setIsDragging(true);
-    dragStartRef.current = {
+    const touches = e.touches;
+    setTouchCount(touches.length);
+
+    if (touches.length === 1) {
+      // 一本指: 位置移動開始
+      touchStartRef.current = {
+        x: touches[0].clientX,
+        y: touches[0].clientY,
+        offsetX,
+        offsetY,
+        initialDistance: 0,
+        initialScale: scale,
+        initialAngle: 0,
+        initialRotation: rotation,
+      };
+    } else if (touches.length === 2) {
+      // 二本指: ピンチ・回転開始
+      const distance = getDistance(touches[0], touches[1]);
+      const angle = getAngle(touches[0], touches[1]);
+      touchStartRef.current = {
+        x: 0,
+        y: 0,
+        offsetX,
+        offsetY,
+        initialDistance: distance,
+        initialScale: scale,
+        initialAngle: angle,
+        initialRotation: rotation,
+      };
+    }
+  }, [offsetX, offsetY, scale, rotation]);
+
+  // タッチ移動
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    const touches = e.touches;
+    if (!touchStartRef.current) return;
+
+    if (touches.length === 1 && touchCount === 1) {
+      // 一本指: 位置移動
+      const deltaX = touches[0].clientX - touchStartRef.current.x;
+      const deltaY = touches[0].clientY - touchStartRef.current.y;
+      
+      const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetX + deltaX));
+      const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetY + deltaY));
+      
+      setOffsetX(newOffsetX);
+      setOffsetY(newOffsetY);
+    } else if (touches.length === 2) {
+      // 二本指: ピンチ（スケール）と回転
+      const currentDistance = getDistance(touches[0], touches[1]);
+      const currentAngle = getAngle(touches[0], touches[1]);
+
+      // スケール変更（ピンチ）
+      if (touchStartRef.current.initialDistance > 0) {
+        const scaleRatio = currentDistance / touchStartRef.current.initialDistance;
+        const newScale = Math.max(0.5, Math.min(2.0, touchStartRef.current.initialScale * scaleRatio));
+        setScale(newScale);
+      }
+
+      // 回転変更
+      const angleDelta = currentAngle - touchStartRef.current.initialAngle;
+      let newRotation = touchStartRef.current.initialRotation + angleDelta;
+      // -180〜180の範囲に正規化
+      while (newRotation > 180) newRotation -= 360;
+      while (newRotation < -180) newRotation += 360;
+      setRotation(newRotation);
+    }
+  }, [maxOffset, touchCount]);
+
+  // タッチ終了
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    const touches = e.touches;
+    setTouchCount(touches.length);
+
+    if (touches.length === 0) {
+      touchStartRef.current = null;
+    } else if (touches.length === 1) {
+      // 二本指から一本指に戻った場合、一本指モードに切り替え
+      touchStartRef.current = {
+        x: touches[0].clientX,
+        y: touches[0].clientY,
+        offsetX,
+        offsetY,
+        initialDistance: 0,
+        initialScale: scale,
+        initialAngle: 0,
+        initialRotation: rotation,
+      };
+    }
+  }, [offsetX, offsetY, scale, rotation]);
+
+  // マウス操作（PC用）
+  const [isMouseDragging, setIsMouseDragging] = useState(false);
+  const mouseStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // ボタンクリックは無視
+    if ((e.target as HTMLElement).closest('button')) return;
+    
+    setIsMouseDragging(true);
+    mouseStartRef.current = {
       x: e.clientX,
       y: e.clientY,
       offsetX,
       offsetY,
     };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, [offsetX, offsetY]);
 
-  // ドラッグ中
-  const handleDragMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
-    
-    const deltaX = e.clientX - dragStartRef.current.x;
-    const deltaY = e.clientY - dragStartRef.current.y;
-    
-    const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, dragStartRef.current.offsetX + deltaX));
-    const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, dragStartRef.current.offsetY + deltaY));
-    
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isMouseDragging || !mouseStartRef.current) return;
+
+    const deltaX = e.clientX - mouseStartRef.current.x;
+    const deltaY = e.clientY - mouseStartRef.current.y;
+
+    const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetX + deltaX));
+    const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetY + deltaY));
+
     setOffsetX(newOffsetX);
     setOffsetY(newOffsetY);
-  }, [isDragging, maxOffset]);
+  }, [isMouseDragging, maxOffset]);
 
-  // ドラッグ終了
-  const handleDragEnd = useCallback(() => {
-    setIsDragging(false);
-    dragStartRef.current = null;
+  const handleMouseUp = useCallback(() => {
+    setIsMouseDragging(false);
+    mouseStartRef.current = null;
+  }, []);
+
+  // ホイールでスケール・回転（Shift押しながらで回転）
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.shiftKey) {
+      // Shift + ホイール: 回転
+      const delta = e.deltaY > 0 ? 5 : -5;
+      setRotation((prev) => {
+        let newRotation = prev + delta;
+        while (newRotation > 180) newRotation -= 360;
+        while (newRotation < -180) newRotation += 360;
+        return newRotation;
+      });
+    } else {
+      // ホイール: スケール
+      const delta = e.deltaY > 0 ? -0.05 : 0.05;
+      setScale((prev) => Math.max(0.5, Math.min(2.0, prev + delta)));
+    }
   }, []);
 
   return (
-    <div className="item-adjust-panel">
-      <div className="item-adjust-header">
-        <span className="item-adjust-title">📍 {item.name}</span>
-        <button className="item-adjust-close" onClick={onClose} title="閉じる">
-          ✓
+    <div
+      className="item-adjust-overlay"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onWheel={handleWheel}
+      style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
+    >
+      {/* 操作ガイド */}
+      <div className="item-adjust-guide">
+        <div className="guide-item">👆 一本指ドラッグ: 位置移動</div>
+        <div className="guide-item">🤏 ピンチ: 大きさ変更</div>
+        <div className="guide-item">🔄 二本指回転: 傾き変更</div>
+        <div className="guide-values">
+          位置: ({Math.round(offsetX)}, {Math.round(offsetY)}) / 
+          大きさ: {(scale * 100).toFixed(0)}% / 
+          傾き: {rotation.toFixed(0)}°
+        </div>
+      </div>
+
+      {/* 下部ボタン */}
+      <div className="item-adjust-buttons">
+        <button className="item-adjust-reset-btn" onClick={handleResetAll}>
+          ↺ リセット
+        </button>
+        <button className="item-adjust-done-btn" onClick={onClose}>
+          ✓ 完了
         </button>
       </div>
-
-      {/* ドラッグエリア（位置調整用） */}
-      <div
-        className="item-adjust-drag-area"
-        onPointerDown={handleDragStart}
-        onPointerMove={handleDragMove}
-        onPointerUp={handleDragEnd}
-        onPointerCancel={handleDragEnd}
-        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-      >
-        <span>↔️ ドラッグで位置調整</span>
-        <span className="drag-hint">
-          X: {Math.round(offsetX)}px / Y: {Math.round(offsetY)}px
-        </span>
-      </div>
-
-      {/* スケールスライダー */}
-      <div className="item-adjust-slider-group">
-        <label>
-          <span>📐 大きさ: {(scale * 100).toFixed(0)}%</span>
-          <button className="slider-reset" onClick={handleResetScale} title="リセット">
-            ↺
-          </button>
-        </label>
-        <input
-          type="range"
-          min="50"
-          max="200"
-          step="5"
-          value={scale * 100}
-          onChange={(e) => setScale(Number(e.target.value) / 100)}
-        />
-      </div>
-
-      {/* 回転スライダー */}
-      <div className="item-adjust-slider-group">
-        <label>
-          <span>🔄 傾き: {rotation.toFixed(0)}°</span>
-          <button className="slider-reset" onClick={handleResetRotation} title="リセット">
-            ↺
-          </button>
-        </label>
-        <input
-          type="range"
-          min="-180"
-          max="180"
-          step="5"
-          value={rotation}
-          onChange={(e) => setRotation(Number(e.target.value))}
-        />
-      </div>
-
-      {/* リセットボタン */}
-      <button className="item-adjust-reset-all" onClick={handleResetAll}>
-        🔄 すべてリセット
-      </button>
     </div>
   );
 }
