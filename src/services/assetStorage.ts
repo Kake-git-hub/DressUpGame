@@ -173,6 +173,7 @@ export function saveCustomClothing(items: ClothingItemData[]): void {
     name: i.name,
     type: i.type,
     baseZIndex: i.baseZIndex,
+    layerOrder: i.layerOrder,
     position: i.position,
     anchorType: i.anchorType,
     dollId: i.dollId,
@@ -188,7 +189,23 @@ export function saveCustomClothing(items: ClothingItemData[]): void {
 export function loadCustomClothing(): ClothingItemData[] {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_CLOTHING);
-    return data ? JSON.parse(data) : [];
+    const parsed = data ? (JSON.parse(data) as any[]) : [];
+    // レガシーデータの型揺れ（文字列→数値）や欠落を最低限補正
+    return parsed.map((i) => {
+      const baseZIndex = typeof i.baseZIndex === 'string' ? Number(i.baseZIndex) : i.baseZIndex;
+      const layerOrder =
+        typeof i.layerOrder === 'string'
+          ? Number(i.layerOrder)
+          : typeof i.layerOrder === 'number'
+            ? i.layerOrder
+            : undefined;
+
+      return {
+        ...i,
+        baseZIndex: Number.isFinite(baseZIndex) ? baseZIndex : 25,
+        layerOrder: Number.isFinite(layerOrder as number) ? (layerOrder as number) : undefined,
+      } as ClothingItemData;
+    });
   } catch {
     return [];
   }
