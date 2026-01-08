@@ -6,7 +6,7 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, DollControlPanel, ItemAdjustPanel, DrawingCanvas, EraserCanvas } from './components';
+import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DrawingCanvas, EraserCanvas } from './components';
 import type { AvatarCanvasHandle } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.0a';
+const APP_VERSION = '0.9.1';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -112,8 +112,6 @@ function App() {
   const avatarCanvasRef = useRef<AvatarCanvasHandle>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   
-  // ドール調整モード
-  const [showDollControls, setShowDollControls] = useState(false);
   // 設定画面の表示状態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   // お絵描きモード
@@ -250,13 +248,13 @@ function App() {
 
   // ...existing code...
 
-  // アイテム調整モード
+  // アイテム調整モード（adjustingItemId === null の場合はドール調整モード）
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);
   const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
 
-  // 調整中のアイテム（IDが変わった時のみ再計算）
+  // 調整中のアイテム（IDが変わった時のみ再計算）- nullの場合はドール調整
   const adjustingItem = useMemo(() => {
-    if (!adjustingItemId) return null;
+    if (adjustingItemId === null) return null;  // ドール調整モード
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
@@ -267,14 +265,15 @@ function App() {
   // 調整ボタンクリックで調整モード開始
   const handleAdjustButtonClick = useCallback(() => {
     // 既に調整モード中は無視
-    if (showDollControls || isAdjustingItem) return;
+    if (isAdjustingItem) return;
     
     // Refから直接取得
     const items = equippedItemsRef.current;
     
     if (items.length === 0) {
-      // 服がない場合はドール調整モードに入る
-      setShowDollControls(true);
+      // 服がない場合はドール調整モードに入る（adjustingItemId = null）
+      setAdjustingItemId(null);
+      setIsAdjustingItem(true);
       return;
     }
     
@@ -286,7 +285,7 @@ function App() {
     // 即座にアイテム調整モードに入る
     setAdjustingItemId(lastItem.id);
     setIsAdjustingItem(true);
-  }, [showDollControls, isAdjustingItem]);
+  }, [isAdjustingItem]);
 
   // アイテム調整値を更新（useRefで安定化）
   const adjustingItemIdRef = useRef(adjustingItemId);
@@ -298,6 +297,11 @@ function App() {
       updateItemAdjustment(itemId, adjustment);
     }
   }, [updateItemAdjustment]);
+
+  // アイテム切り替え（null = ドール調整モード）
+  const handleAdjustItemChange = useCallback((itemId: string | null) => {
+    setAdjustingItemId(itemId);
+  }, []);
 
   // 調整モード終了
   const handleAdjustClose = useCallback(() => {
@@ -431,7 +435,7 @@ function App() {
     <div className="app">
       <div className="version-badge version-badge--fixed">v{APP_VERSION}</div>
       {/* 設定ボタン - 調整中は非表示 */}
-      {!showDollControls && !isAdjustingItem && (
+      {!isAdjustingItem && (
         <button
           className="settings-button"
           onClick={() => setIsSettingsOpen(true)}
@@ -446,7 +450,7 @@ function App() {
         {currentDollSafe && (
           <section 
             ref={avatarSectionRef}
-            className={`avatar-section ${showDollControls ? 'adjusting' : ''}`}
+            className="avatar-section"
           >
             {isTestMode ? (
               <div
@@ -478,17 +482,6 @@ function App() {
               />
             )}
 
-            {/* ドール調整パネル（キャンバス上に表示） */}
-            {showDollControls && (
-              <DollControlPanel
-                transform={dollTransform}
-                onChange={setDollTransform}
-                isVisible={showDollControls}
-                canvasWidth={canvasSize.width}
-                canvasHeight={canvasSize.height}
-              />
-            )}
-
             {/* お絵描きキャンバス */}
             <DrawingCanvas
               width={canvasSize.width}
@@ -509,7 +502,7 @@ function App() {
             {/* 消しゴムマスクはPixiEngine側で処理 */}
 
             {/* ツールボタン（調整モードでないとき表示） */}
-            {!showDollControls && !isAdjustingItem && !isDrawingMode && !isEraserMode && (
+            {!isAdjustingItem && !isDrawingMode && !isEraserMode && (
               <div className="tool-buttons">
                 <button
                   className="tool-button"
@@ -569,8 +562,8 @@ function App() {
           </section>
         )}
 
-        {/* ドレスアップメニュー - 位置調整中・アイテム調整中は非表示 */}
-        {!showDollControls && !isAdjustingItem && (
+        {/* ドレスアップメニュー - アイテム調整中は非表示 */}
+        {!isAdjustingItem && (
           <section className="palette-section">
             <DressUpMenu
               items={filteredClothing}
@@ -599,14 +592,18 @@ function App() {
         </footer>
       )}
 
-      {/* アイテム調整オーバーレイ（画面全体） */}
-      {isAdjustingItem && adjustingItem && (
+      {/* アイテム調整オーバーレイ（画面全体） - ドール調整も含む */}
+      {isAdjustingItem && (
         <ItemAdjustPanel
           item={adjustingItem}
+          allItems={equippedItems}
           onAdjust={handleItemAdjust}
+          onItemChange={handleAdjustItemChange}
           onClose={handleAdjustClose}
           canvasWidth={canvasSize.width}
           canvasHeight={canvasSize.height}
+          dollTransform={dollTransform}
+          onDollTransformChange={setDollTransform}
         />
       )}
 
