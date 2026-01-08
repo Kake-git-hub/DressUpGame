@@ -251,7 +251,15 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
+  const movedDistance = useRef(0);
   const elementRef = useRef<HTMLDivElement>(null);
+
+  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
+    const menu = document.querySelector('.palette-section');
+    if (!menu) return false;
+    const rect = (menu as HTMLElement).getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }, []);
 
   const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
     const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
@@ -266,15 +274,16 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
     setIsDragging(true);
     startPos.current = { x: e.clientX, y: e.clientY };
     setDragPos({ x: 0, y: 0 });
+    movedDistance.current = 0;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDragging) return;
-    setDragPos({
-      x: e.clientX - startPos.current.x,
-      y: e.clientY - startPos.current.y,
-    });
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
+    setDragPos({ x: dx, y: dy });
     if (onDragMove) {
       onDragMove(item, { x: e.clientX, y: e.clientY });
     }
@@ -285,11 +294,21 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
     setIsDragging(false);
     setDragPos({ x: 0, y: 0 });
     onDragEnd?.();
-    
+
+    // タップ（ほぼ移動なし）は装着しない
+    if (movedDistance.current < 10) {
+      return;
+    }
+
+    // メニュー領域上で指を離した場合は装着しない（キャンバスが背面にあっても誤判定を防ぐ）
+    if (isInsideMenu(e.clientX, e.clientY)) {
+      return;
+    }
+
     if (checkIsOverTarget(e.clientX, e.clientY)) {
       onDrop(item);
     }
-  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd]);
+  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd, isInsideMenu]);
 
   return (
     <div
@@ -345,7 +364,6 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: '#f8f9fa',
     borderRadius: '12px',
     padding: `${ITEM_PADDING}px`,
-    paddingRight: `${SCROLL_PADDING}px`, // 右側にスクロール用余白
     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
     width: `${MENU_WIDTH}px`,
     display: 'flex',
@@ -430,7 +448,8 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
-    paddingRight: `${SCROLL_PADDING}px`,
+    width: `calc(100% - ${SCROLL_PADDING}px)`,
+    boxSizing: 'border-box',
   },
   sectionLabel: {
     fontSize: '11px',
