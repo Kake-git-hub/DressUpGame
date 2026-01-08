@@ -16,7 +16,6 @@ export class PixiEngine {
   private customFaceUrl: string | null = null;
   private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
   private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
-  private backgroundMask: Graphics | null = null;
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -76,7 +75,6 @@ export class PixiEngine {
   private cleanup(): void {
     this.initialized = false;
     this.backgroundContainer = null;
-    this.backgroundMask = null;
     this.dollContainer = null;
     this.clothingContainer = null;
     this.faceContainer = null;
@@ -103,7 +101,6 @@ export class PixiEngine {
 
     // 既存の背景をクリア
     this.backgroundContainer.removeChildren();
-    this.backgroundMask = null;
 
     if (!imageUrl) {
       return;
@@ -130,7 +127,6 @@ export class PixiEngine {
       const mask = new Graphics();
       mask.rect(this.menuOffset, 0, availableWidth, this.app.screen.height);
       mask.fill(0xffffff);
-      this.backgroundMask = mask;
       bgSprite.mask = mask;
 
       this.backgroundContainer.addChild(bgSprite);
