@@ -66,7 +66,6 @@ export function ItemAdjustPanel({
   const [dollX, setDollX] = useState(dollTransform.x);
   const [dollY, setDollY] = useState(dollTransform.y);
   const [dollScale, setDollScale] = useState(dollTransform.scale);
-  const [dollRotation, setDollRotation] = useState(dollTransform.rotation ?? 0);
 
   // タッチ状態
   const touchStartRef = useRef<{
@@ -98,8 +97,7 @@ export function ItemAdjustPanel({
     setDollX(dollTransform.x);
     setDollY(dollTransform.y);
     setDollScale(dollTransform.scale);
-    setDollRotation(dollTransform.rotation ?? 0);
-  }, [dollTransform.x, dollTransform.y, dollTransform.scale, dollTransform.rotation]);
+  }, [dollTransform.x, dollTransform.y, dollTransform.scale]);
 
   // onAdjustをrefで保持（依存配列から除外するため）
   const onAdjustRef = useRef(onAdjust);
@@ -151,7 +149,7 @@ export function ItemAdjustPanel({
   }, [offsetX, offsetY, scale, rotation, isDollMode]);
 
   // ドール値が変わったら親に通知
-  const prevDollValuesRef = useRef({ dollX, dollY, dollScale, dollRotation });
+  const prevDollValuesRef = useRef({ dollX, dollY, dollScale });
   useEffect(() => {
     if (!isDollMode) return; // アイテムモードでは無視
     
@@ -159,10 +157,9 @@ export function ItemAdjustPanel({
     if (
       prev.dollX !== dollX ||
       prev.dollY !== dollY ||
-      prev.dollScale !== dollScale ||
-      prev.dollRotation !== dollRotation
+      prev.dollScale !== dollScale
     ) {
-      prevDollValuesRef.current = { dollX, dollY, dollScale, dollRotation };
+      prevDollValuesRef.current = { dollX, dollY, dollScale };
       
       if (dollDebounceTimerRef.current) {
         clearTimeout(dollDebounceTimerRef.current);
@@ -173,7 +170,6 @@ export function ItemAdjustPanel({
           x: dollX,
           y: dollY,
           scale: dollScale,
-          rotation: dollRotation,
         });
       }, 16);
     }
@@ -183,7 +179,7 @@ export function ItemAdjustPanel({
         clearTimeout(dollDebounceTimerRef.current);
       }
     };
-  }, [dollX, dollY, dollScale, dollRotation, isDollMode]);
+  }, [dollX, dollY, dollScale, isDollMode]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
@@ -195,7 +191,6 @@ export function ItemAdjustPanel({
       setDollX(50);
       setDollY(50);
       setDollScale(1.0);
-      setDollRotation(0);
     } else {
       // アイテムモード
       setOffsetX(0);
@@ -215,7 +210,7 @@ export function ItemAdjustPanel({
     const currentOffsetX = isDollMode ? dollX : offsetX;
     const currentOffsetY = isDollMode ? dollY : offsetY;
     const currentScale = isDollMode ? dollScale : scale;
-    const currentRotation = isDollMode ? dollRotation : rotation;
+    const currentRotation = isDollMode ? 0 : rotation; // ドールモードでは回転なし
 
     if (touches.length === 1) {
       // 一本指: 位置移動開始
@@ -244,7 +239,7 @@ export function ItemAdjustPanel({
         initialRotation: currentRotation,
       };
     }
-  }, [isDollMode, dollX, dollY, dollScale, dollRotation, offsetX, offsetY, scale, rotation]);
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation]);
 
   // タッチ移動
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
@@ -291,14 +286,12 @@ export function ItemAdjustPanel({
         }
       }
 
-      // 回転変更
-      const angleDelta = currentAngle - touchStartRef.current.initialAngle;
-      let newRotation = touchStartRef.current.initialRotation + angleDelta;
-      while (newRotation > 180) newRotation -= 360;
-      while (newRotation < -180) newRotation += 360;
-      if (isDollMode) {
-        setDollRotation(newRotation);
-      } else {
+      // 回転変更（アイテムモードのみ）
+      if (!isDollMode) {
+        const angleDelta = currentAngle - touchStartRef.current.initialAngle;
+        let newRotation = touchStartRef.current.initialRotation + angleDelta;
+        while (newRotation > 180) newRotation -= 360;
+        while (newRotation < -180) newRotation += 360;
         setRotation(newRotation);
       }
     }
@@ -313,7 +306,7 @@ export function ItemAdjustPanel({
     const currentOffsetX = isDollMode ? dollX : offsetX;
     const currentOffsetY = isDollMode ? dollY : offsetY;
     const currentScale = isDollMode ? dollScale : scale;
-    const currentRotation = isDollMode ? dollRotation : rotation;
+    const currentRotation = isDollMode ? 0 : rotation; // ドールモードでは回転なし
 
     if (touches.length === 0) {
       touchStartRef.current = null;
@@ -330,7 +323,7 @@ export function ItemAdjustPanel({
         initialRotation: currentRotation,
       };
     }
-  }, [isDollMode, dollX, dollY, dollScale, dollRotation, offsetX, offsetY, scale, rotation]);
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation]);
 
   // マウス操作（PC用）
   const [isMouseDragging, setIsMouseDragging] = useState(false);
@@ -383,27 +376,18 @@ export function ItemAdjustPanel({
     mouseStartRef.current = null;
   }, []);
 
-  // ホイールでスケール・回転（Shift押しながらで回転）
+  // ホイールでスケール・回転（Shift押しながらで回転、アイテムモードのみ）
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    if (e.shiftKey) {
-      // Shift + ホイール: 回転
+    if (e.shiftKey && !isDollMode) {
+      // Shift + ホイール: 回転（アイテムモードのみ）
       const delta = e.deltaY > 0 ? 5 : -5;
-      if (isDollMode) {
-        setDollRotation((prev) => {
-          let newRotation = prev + delta;
-          while (newRotation > 180) newRotation -= 360;
-          while (newRotation < -180) newRotation += 360;
-          return newRotation;
-        });
-      } else {
-        setRotation((prev) => {
-          let newRotation = prev + delta;
-          while (newRotation > 180) newRotation -= 360;
-          while (newRotation < -180) newRotation += 360;
-          return newRotation;
-        });
-      }
+      setRotation((prev) => {
+        let newRotation = prev + delta;
+        while (newRotation > 180) newRotation -= 360;
+        while (newRotation < -180) newRotation += 360;
+        return newRotation;
+      });
     } else {
       // ホイール: スケール
       const delta = e.deltaY > 0 ? -0.05 : 0.05;

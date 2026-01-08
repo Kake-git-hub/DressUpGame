@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -379,11 +379,11 @@ function App() {
     [resetAll]
   );
 
-  // ドール位置・スケール・回転調整
+  // ドール位置・スケール調整
   // x: 背景中央（50%）
   const [dollTransform, setDollTransform] = useState<DollTransform>(() => {
     const saved = loadDollTransform();
-    return saved ?? { x: 50, y: 50, scale: 1.0, rotation: 0 };
+    return saved ?? { x: 50, y: 50, scale: 1.0 };
   });
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 
