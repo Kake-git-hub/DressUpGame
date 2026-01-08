@@ -309,11 +309,12 @@ export interface DollPreset {
   categories: CategoryInfo[];     // 使用可能なカテゴリ（フォルダから動的に検出）
 }
 
-// ドールの位置・サイズ調整用
+// ドールの位置・サイズ・回転調整用
 export interface DollTransform {
-  x: number;      // X位置（%）
-  y: number;      // Y位置（%）
-  scale: number;  // スケール（1.0 = 100%）
+  x: number;        // X位置（%）
+  y: number;        // Y位置（%）
+  scale: number;    // スケール（1.0 = 100%）
+  rotation: number; // 回転（度）
 }
 
 // ゲーム状態

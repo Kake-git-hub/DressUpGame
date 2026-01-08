@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -271,7 +271,7 @@ function App() {
     const items = equippedItemsRef.current;
     
     if (items.length === 0) {
-      // 服がない場合はドール調整モードに入る（adjustingItemId = null）
+      // 服がない場合のみドール調整モードに入る
       setAdjustingItemId(null);
       setIsAdjustingItem(true);
       return;
@@ -297,11 +297,6 @@ function App() {
       updateItemAdjustment(itemId, adjustment);
     }
   }, [updateItemAdjustment]);
-
-  // アイテム切り替え（null = ドール調整モード）
-  const handleAdjustItemChange = useCallback((itemId: string | null) => {
-    setAdjustingItemId(itemId);
-  }, []);
 
   // 調整モード終了
   const handleAdjustClose = useCallback(() => {
@@ -384,13 +379,11 @@ function App() {
     [resetAll]
   );
 
-  // ドール位置・スケール調整
-  // x: メニューを除いた領域の中央（メニュー幅%の半分 + 残り幅の中央）
-  const menuWidthPercent = (MENU_WIDTH / window.innerWidth) * 100;
-  const initialDollX = menuWidthPercent + (100 - menuWidthPercent) / 2;
+  // ドール位置・スケール・回転調整
+  // x: 背景中央（50%）
   const [dollTransform, setDollTransform] = useState<DollTransform>(() => {
     const saved = loadDollTransform();
-    return saved ?? { x: initialDollX, y: 50, scale: 1.0 };
+    return saved ?? { x: 50, y: 50, scale: 1.0, rotation: 0 };
   });
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 
@@ -592,13 +585,11 @@ function App() {
         </footer>
       )}
 
-      {/* アイテム調整オーバーレイ（画面全体） - ドール調整も含む */}
+      {/* アイテム/ドール調整オーバーレイ（画面全体） */}
       {isAdjustingItem && (
         <ItemAdjustPanel
           item={adjustingItem}
-          allItems={equippedItems}
           onAdjust={handleItemAdjust}
-          onItemChange={handleAdjustItemChange}
           onClose={handleAdjustClose}
           canvasWidth={canvasSize.width}
           canvasHeight={canvasSize.height}

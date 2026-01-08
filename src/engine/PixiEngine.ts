@@ -14,7 +14,7 @@ export class PixiEngine {
   private initialized = false;
   private destroyed = false;
   private customFaceUrl: string | null = null;
-  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
+  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0, rotation: 0 }; // %単位、中央
   private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
 
   // 初期化
@@ -149,6 +149,7 @@ export class PixiEngine {
     const centerX = (this.app.screen.width * this.dollTransform.x) / 100;
     const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
     const dollScale = this.dollTransform.scale;
+    const dollRotation = (this.dollTransform.rotation ?? 0) * (Math.PI / 180); // 度→ラジアン
 
     // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
     if (config.imageUrl && config.imageUrl.length > 0) {
@@ -163,10 +164,11 @@ export class PixiEngine {
         const baseScale = maxHeight / texture.height;
         dollSprite.scale.set(baseScale * dollScale);
 
-        // 位置を設定
+        // 位置と回転を設定
         dollSprite.anchor.set(0.5);
         dollSprite.x = centerX;
         dollSprite.y = centerY;
+        dollSprite.rotation = dollRotation;
 
         this.dollContainer.addChild(dollSprite);
         return;
