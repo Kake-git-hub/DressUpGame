@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -118,6 +118,8 @@ function App() {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   // 消しゴムモード
   const [isEraserMode, setIsEraserMode] = useState(false);
+  // クロマキー（グリーンバック透過）有効フラグ
+  const [chromaKeyEnabled, setChromaKeyEnabled] = useState(false);
 
   // ドール一覧（デフォルト + カスタム）
   const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
@@ -472,6 +474,7 @@ function App() {
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
                 menuOffset={MENU_WIDTH}
+                chromaKeyEnabled={chromaKeyEnabled}
               />
             )}
 
@@ -524,6 +527,13 @@ function App() {
                   title="スクショ"
                 >
                   📷
+                </button>
+                <button
+                  className={`tool-button ${chromaKeyEnabled ? 'tool-button--active' : ''}`}
+                  onClick={() => setChromaKeyEnabled(prev => !prev)}
+                  title={chromaKeyEnabled ? 'クロマキーOFF' : 'クロマキーON（グリーンバック透過）'}
+                >
+                  🟢
                 </button>
               </div>
             )}

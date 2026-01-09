@@ -348,6 +348,15 @@ textarea {
   cursor: not-allowed;
 }
 
+.tool-button--active {
+  background: linear-gradient(135deg, #00ff00 0%, #00cc00 100%);
+  box-shadow: 0 0 12px rgba(0, 255, 0, 0.6);
+}
+
+.tool-button--active:hover {
+  box-shadow: 0 0 16px rgba(0, 255, 0, 0.8);
+}
+
 /* アイテム調整パネル - ヘッダー */
 .item-adjust-header {
   position: fixed;

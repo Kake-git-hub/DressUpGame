@@ -9,6 +9,8 @@ import type { DollConfig, EquippedItem, DollTransform } from '../types';
 // 外部から呼び出せるメソッド
 export interface AvatarCanvasHandle {
   takeScreenshot: () => Promise<string | null>;
+  setChromaKeyEnabled: (enabled: boolean) => void;
+  isChromaKeyEnabled: () => boolean;
 }
 
 interface AvatarCanvasProps {
@@ -21,6 +23,7 @@ interface AvatarCanvasProps {
   backgroundImageUrl?: string; // 背景画像のURL
   dollTransform?: DollTransform; // ドールの位置・スケール
   menuOffset?: number; // メニュー幅オフセット（背景位置調整用）
+  chromaKeyEnabled?: boolean; // クロマキー有効フラグ
   onCanvasReady?: () => void;
 }
 
@@ -34,6 +37,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   backgroundImageUrl,
   dollTransform,
   menuOffset = 0,
+  chromaKeyEnabled = false,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,6 +51,14 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
         return engineRef.current.takeScreenshot();
       }
       return null;
+    },
+    setChromaKeyEnabled: (enabled: boolean) => {
+      if (engineRef.current?.isInitialized()) {
+        engineRef.current.setChromaKeyEnabled(enabled);
+      }
+    },
+    isChromaKeyEnabled: () => {
+      return engineRef.current?.isChromaKeyEnabled() ?? false;
     },
   }), []);
 
@@ -162,6 +174,15 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       engineRef.current.drawClothing(equippedItems);
     }
   }, [dollTransform, isReady]);
+
+  // クロマキー有効フラグが変わったら服を再描画
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.setChromaKeyEnabled(chromaKeyEnabled);
+      // 服を再描画してフィルタを適用
+      engineRef.current.drawClothing(equippedItems);
+    }
+  }, [chromaKeyEnabled, isReady]);
 
   return (
     <canvas

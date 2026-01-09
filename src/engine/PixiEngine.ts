@@ -4,6 +4,7 @@
  */
 import { Application, Container, Graphics, Sprite, Assets } from 'pixi.js';
 import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
+import { ChromaKeyFilter } from './ChromaKeyFilter';
 
 export class PixiEngine {
   private app: Application | null = null;
@@ -16,6 +17,8 @@ export class PixiEngine {
   private customFaceUrl: string | null = null;
   private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
   private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
+  private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
+  private chromaKeyEnabled = false; // クロマキー有効フラグ
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -346,6 +349,11 @@ export class PixiEngine {
           // 回転を適用（度からラジアンに変換）
           clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
+          // クロマキーフィルタを適用（有効な場合）
+          if (this.chromaKeyEnabled && this.chromaKeyFilter) {
+            clothingSprite.filters = [this.chromaKeyFilter];
+          }
+
           this.clothingContainer!.addChild(clothingSprite);
         } catch (error) {
           console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
@@ -514,5 +522,40 @@ export class PixiEngine {
   // 初期化済みかどうか
   isInitialized(): boolean {
     return this.initialized && this.app !== null && !this.destroyed;
+  }
+
+  // クロマキーフィルタの有効/無効を設定
+  setChromaKeyEnabled(enabled: boolean): void {
+    this.chromaKeyEnabled = enabled;
+    if (enabled && !this.chromaKeyFilter) {
+      // フィルタを作成（RGB(0, 255, 0) のグリーンバック用）
+      this.chromaKeyFilter = new ChromaKeyFilter({
+        keyColor: 0x00FF00,
+        threshold: 0.4,   // 色の許容範囲
+        smoothing: 0.15,  // エッジのスムージング
+      });
+    }
+  }
+
+  // クロマキーフィルタが有効かどうか
+  isChromaKeyEnabled(): boolean {
+    return this.chromaKeyEnabled;
+  }
+
+  // クロマキーフィルタのパラメータを設定
+  setChromaKeyParams(params: { keyColor?: number; threshold?: number; smoothing?: number }): void {
+    if (!this.chromaKeyFilter) {
+      this.chromaKeyFilter = new ChromaKeyFilter(params);
+    } else {
+      if (params.keyColor !== undefined) {
+        this.chromaKeyFilter.keyColor = params.keyColor;
+      }
+      if (params.threshold !== undefined) {
+        this.chromaKeyFilter.threshold = params.threshold;
+      }
+      if (params.smoothing !== undefined) {
+        this.chromaKeyFilter.smoothing = params.smoothing;
+      }
+    }
   }
 }
