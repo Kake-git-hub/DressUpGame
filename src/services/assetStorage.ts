@@ -79,6 +79,86 @@ export function fileToBase64(file: Blob, fileName?: string): Promise<string> {
   });
 }
 
+/**
+ * 画像を処理：右下のウォーターマーク領域をカット＋クロマキー透過を適用
+ * @param dataUrl 元画像のData URL
+ * @param cropBottomRight 右下カットのサイズ（px）、デフォルト80
+ * @returns 処理済みのData URL
+ */
+export function processImageWithChromaKey(
+  dataUrl: string,
+  cropBottomRight: number = 80
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl); // フォールバック
+        return;
+      }
+
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // 右下のウォーターマーク領域の境界
+      const cropStartX = canvas.width - cropBottomRight;
+      const cropStartY = canvas.height - cropBottomRight;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // ピクセル座標を計算
+        const pixelIndex = i / 4;
+        const x = pixelIndex % canvas.width;
+        const y = Math.floor(pixelIndex / canvas.width);
+
+        // 右下領域のウォーターマークを透過
+        if (x >= cropStartX && y >= cropStartY) {
+          data[i + 3] = 0; // 透明にする
+          continue;
+        }
+
+        // クロマキー処理：純粋な緑（#00FF00付近）を透過
+        // 緑が非常に高く（>180）、赤青が低い（<100）場合に透過
+        const isGreen = g > 180 && r < 100 && b < 100;
+        // または、緑が支配的で彩度が高い場合
+        const greenDominance = g - Math.max(r, b);
+        const isGreenDominant = greenDominance > 80 && g > 150;
+
+        if (isGreen || isGreenDominant) {
+          // 完全に緑なら完全透過、エッジはグラデーション
+          const greenness = Math.min(1, greenDominance / 150);
+          data[i + 3] = Math.round(data[i + 3] * (1 - greenness));
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('画像の読み込みに失敗'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * 画像ファイルを読み込み、処理（右下カット＋クロマキー）してBase64で返す
+ */
+export async function fileToBase64WithProcessing(
+  file: Blob,
+  fileName?: string
+): Promise<string> {
+  const raw = await fileToBase64(file, fileName);
+  return processImageWithChromaKey(raw);
+}
+
 // 画像をIndexedDBに保存
 export async function saveImageToStorage(id: string, base64Data: string): Promise<void> {
   const db = await openDB();
@@ -281,7 +361,8 @@ export async function addCustomDoll(
   imageFile: File
 ): Promise<DollData> {
   const id = `custom-doll-${Date.now()}`;
-  const base64 = await fileToBase64(imageFile, imageFile.name);
+  // 右下ウォーターマーク除去＋クロマキー処理
+  const base64 = await fileToBase64WithProcessing(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
   const doll: DollData = {
@@ -353,7 +434,8 @@ export async function addCustomClothing(
   imageFile: File
 ): Promise<ClothingItemData> {
   const id = `custom-clothing-${Date.now()}`;
-  const base64 = await fileToBase64(imageFile, imageFile.name);
+  // 右下ウォーターマーク除去＋クロマキー処理
+  const base64 = await fileToBase64WithProcessing(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得
@@ -546,7 +628,10 @@ export async function bulkImportFromFolder(
   
   for (const { name, file } of images) {
     try {
-      const base64 = await fileToBase64(file);
+      // ドール・服は右下カット＋クロマキー処理、背景はそのまま
+      const base64 = targetType === 'backgrounds' 
+        ? await fileToBase64(file)
+        : await fileToBase64WithProcessing(file, file.name);
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
@@ -720,7 +805,10 @@ export async function bulkImportFromHierarchicalFolder(
     }
     
     try {
-      const base64 = await fileToBase64(file, file.name);
+      // ドール・服は右下カット＋クロマキー処理、背景はそのまま
+      const base64 = category.type === 'backgrounds'
+        ? await fileToBase64(file, file.name)
+        : await fileToBase64WithProcessing(file, file.name);
       const id = `custom-${category.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const name = file.name.replace(/\.[^.]+$/, '');
       
@@ -980,7 +1068,8 @@ export async function importPresetFromFolder(
       
       // 最初のドールを使用
       const dollFile = data.dolls[0];
-      const dollBase64 = await fileToBase64(dollFile.file, dollFile.file.name);
+      // 右下ウォーターマーク除去＋クロマキー処理
+      const dollBase64 = await fileToBase64WithProcessing(dollFile.file, dollFile.file.name);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
       
@@ -996,16 +1085,17 @@ export async function importPresetFromFolder(
         categories.push(getCategoryInfo(categoryRaw));
         
         for (const { name, file } of clothingFiles) {
-          const base64 = await fileToBase64(file, file.name);
+          // 右下ウォーターマーク除去＋クロマキー処理
+          const base64 = await fileToBase64WithProcessing(file, file.name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          // サムネイルがあれば読み込み
+          // サムネイルがあれば読み込み（サムネイルも処理）
           const thumbKey = `${categoryRaw}/${name}`;
           const thumbFile = data.clothingThumbs.get(thumbKey);
           let thumbnailUrl: string | undefined;
           if (thumbFile) {
-            thumbnailUrl = await fileToBase64(thumbFile, thumbFile.name);
+            thumbnailUrl = await fileToBase64WithProcessing(thumbFile, thumbFile.name);
             const thumbId = `${id}-thumb`;
             await saveImageToStorage(thumbId, thumbnailUrl);
             console.log(`  サムネイル読み込み: ${thumbKey}`);
