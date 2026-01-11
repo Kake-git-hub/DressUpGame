@@ -177,6 +177,11 @@ export class PixiEngine {
         dollSprite.x = centerX;
         dollSprite.y = centerY;
 
+        // クロマキーフィルタを適用（有効な場合）
+        if (this.chromaKeyEnabled && this.chromaKeyFilter) {
+          dollSprite.filters = [this.chromaKeyFilter];
+        }
+
         this.dollContainer.addChild(dollSprite);
         return;
       } catch (error) {

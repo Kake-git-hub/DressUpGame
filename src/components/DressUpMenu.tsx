@@ -363,7 +363,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'row',
     height: '100%',
-    maxHeight: 'calc(100vh - 40px)', // バージョン表示ぎりぎりまで拡大
+    maxHeight: 'calc(100vh - 24px)', // バージョン表示との隙間を最小限に
   },
   container: {
     backgroundColor: '#f8f9fa',
