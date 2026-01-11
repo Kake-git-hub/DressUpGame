@@ -73,60 +73,51 @@ void main(void)
     // 緑色の強さ（緑チャンネルが赤青より大きいほど緑っぽい）
     float greenDominance = color.g - max(color.r, color.b);
     
-    // 彩度も考慮（彩度が高いほど色がはっきり）
+    // 彩度（高いほど鮮やか）
     float saturation = hsv.y;
     
-    // 緑と判定する条件を複合的に評価
-    // 1. 色相が緑に近い
-    // 2. 緑チャンネルが支配的
-    // 3. 彩度がある程度高い
+    // ===== 肌色保護 =====
+    // 肌色は赤が比較的高く（R > 0.5）、彩度は中〜低め
+    // 赤みがある色は透過しない
+    float skinProtect = smoothstep(0.35, 0.55, color.r);
+    
+    // ===== 純粋な緑のみを透過 =====
     float greenScore = 0.0;
     
-    // 色相ベースのスコア（緑の色相に近いほど高い）
-    float hueScore = 1.0 - smoothstep(0.0, uThreshold * 0.3, hueDiff);
-    
-    // 緑支配度スコア（緑が他より強いほど高い）
-    float dominanceScore = smoothstep(-0.1, 0.2, greenDominance);
-    
-    // 彩度スコア（グリーンバックは通常高彩度）
-    float satScore = smoothstep(0.2, 0.5, saturation);
-    
-    // キー色との直接距離
+    // 1. キー色との直接距離（最も信頼できる）
     float dist = distance(color.rgb, uKeyColor);
     float distScore = 1.0 - smoothstep(0.0, uThreshold, dist);
+    greenScore = distScore;
     
-    // 総合スコア（複数の指標を組み合わせ）
-    greenScore = max(distScore, hueScore * dominanceScore * satScore);
+    // 2. 色相ベースのスコア（緑の色相に近く、彩度が高い場合のみ）
+    float hueScore = 1.0 - smoothstep(0.0, uThreshold * 0.25, hueDiff);
+    float dominanceScore = smoothstep(0.15, 0.4, greenDominance);
+    float satScore = smoothstep(0.5, 0.8, saturation);
+    float hueBasedScore = hueScore * dominanceScore * satScore;
+    greenScore = max(greenScore, hueBasedScore);
     
-    // 薄い緑（低彩度寄り）も拾う追加スコア
-    // greenが赤青平均より高いほどスコア↑（淡いグリーンバックの残り対策）
-    float greenDominanceSoft = color.g - 0.5 * (color.r + color.b);
-    float softScore = smoothstep(0.02, 0.18, greenDominanceSoft) * smoothstep(0.20, 0.70, color.g);
-    greenScore = max(greenScore, softScore * 0.9);
+    // 3. 純粋な緑判定（G が非常に高く、R と B が低い場合）
+    float pureGreen = step(0.7, color.g) * step(color.r, 0.4) * step(color.b, 0.4);
+    greenScore = max(greenScore, pureGreen * 0.95);
     
-    // スムージングを適用したアルファ値を計算（淡い緑も消えるよう少し強め）
-    float alpha = 1.0 - smoothstep(0.15, 0.15 + uSmoothing, greenScore);
+    // 肌色保護を適用（赤みがある部分はスコアを下げる）
+    greenScore = greenScore * (1.0 - skinProtect * 0.9);
+    
+    // スムージングを適用したアルファ値を計算
+    float alpha = 1.0 - smoothstep(0.25, 0.25 + uSmoothing, greenScore);
     
     // スピル除去（エッジ部分の緑被りを軽減）
     vec3 despilledColor = color.rgb;
-    if (uSpillRemoval > 0.0 && greenDominance > 0.0) {
-        // 緑の過剰分を除去
-        float spillAmount = greenDominance * uSpillRemoval * (1.0 - alpha);
-        despilledColor.g = color.g - spillAmount;
+    if (uSpillRemoval > 0.0 && greenDominance > 0.0 && alpha < 1.0) {
+        // 緑の過剰分を除去（ただし肌色保護を考慮）
+        float spillAmount = greenDominance * uSpillRemoval * (1.0 - alpha) * (1.0 - skinProtect);
+        despilledColor.g = max(0.0, color.g - spillAmount);
         // 少し明度を補正
-        despilledColor.r = min(1.0, color.r + spillAmount * 0.1);
-        despilledColor.b = min(1.0, color.b + spillAmount * 0.1);
-    }
-
-    // さらに淡いエッジの緑を抑える（alphaが下がるほど強く）
-    if (uSpillRemoval > 0.0) {
-      float edge = clamp(1.0 - alpha, 0.0, 1.0);
-      float avgRB = (despilledColor.r + despilledColor.b) * 0.5;
-      float targetG = min(despilledColor.g, avgRB);
-      despilledColor.g = mix(despilledColor.g, targetG, edge * uSpillRemoval);
+        despilledColor.r = min(1.0, color.r + spillAmount * 0.05);
+        despilledColor.b = min(1.0, color.b + spillAmount * 0.05);
     }
     
-    // 出力はプレマルチアルファにしてフリンジ（薄緑の縁）を減らす
+    // 出力（通常アルファ）
     float outA = color.a * alpha;
     finalColor = vec4(despilledColor * outA, outA);
 }
