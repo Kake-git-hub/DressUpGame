@@ -22,7 +22,8 @@ interface AvatarCanvasProps {
   dollImageUrl?: string; // ドールベース画像のURL
   backgroundImageUrl?: string; // 背景画像のURL
   dollTransform?: DollTransform; // ドールの位置・スケール
-  menuOffset?: number; // メニュー幅オフセット（背景位置調整用）
+  menuOffset?: number; // メニュー幅オフセット（左側）
+  rightOffset?: number; // 右ボタン領域オフセット（右側）
   chromaKeyEnabled?: boolean; // クロマキー有効フラグ
   onCanvasReady?: () => void;
 }
@@ -37,6 +38,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   backgroundImageUrl,
   dollTransform,
   menuOffset = 0,
+  rightOffset = 60,
   chromaKeyEnabled = false,
   onCanvasReady,
 }, ref) {
@@ -86,8 +88,9 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
         // 成功した場合のみrefに保存
         engineRef.current = engine;
 
-        // メニューオフセットを設定（背景位置調整用）
+        // メニューオフセット・右オフセットを設定（背景・ドール位置調整用）
         engine.setMenuOffset(menuOffset);
+        engine.setRightOffset(rightOffset);
 
         // ドールの初期位置・スケールを設定
         if (dollTransform) {

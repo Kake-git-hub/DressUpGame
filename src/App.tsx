@@ -46,6 +46,8 @@ const DEFAULT_BACKGROUNDS: BackgroundData[] = [];
 // ドールが未登録でも落ちないためのフォールバック寸法
 // メニュー幅（px）
 const MENU_WIDTH = 160;
+// 右ボタン領域幅（px）- ボタン44px + 余白16px
+const RIGHT_BUTTON_WIDTH = 60;
 
 const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
   width: 400,
@@ -476,6 +478,7 @@ function App() {
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
                 menuOffset={MENU_WIDTH}
+                rightOffset={RIGHT_BUTTON_WIDTH}
                 chromaKeyEnabled={chromaKeyEnabled}
               />
             )}

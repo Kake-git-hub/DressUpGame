@@ -15,8 +15,9 @@ export class PixiEngine {
   private initialized = false;
   private destroyed = false;
   private customFaceUrl: string | null = null;
-  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、中央
-  private menuOffset = 0; // メニュー幅オフセット（背景中心調整用）
+  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、利用可能領域の中央
+  private menuOffset = 0; // メニュー幅オフセット（左側）
+  private rightOffset = 60; // 右ボタン領域のオフセット（右側）
   private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
   private chromaKeyEnabled = false; // クロマキー有効フラグ
 
@@ -97,9 +98,23 @@ export class PixiEngine {
     }
   }
 
-  // メニューオフセットを設定（背景位置調整用）
+  // メニューオフセットを設定（背景・ドール位置調整用）
   setMenuOffset(offset: number): void {
     this.menuOffset = offset;
+  }
+
+  // 右ボタン領域オフセットを設定
+  setRightOffset(offset: number): void {
+    this.rightOffset = offset;
+  }
+
+  // 利用可能な描画領域（メニューとボタンを除いた中央領域）
+  private getAvailableArea(): { x: number; width: number; centerX: number } {
+    if (!this.app) return { x: 0, width: 0, centerX: 0 };
+    const x = this.menuOffset;
+    const width = Math.max(0, this.app.screen.width - this.menuOffset - this.rightOffset);
+    const centerX = x + width / 2;
+    return { x, width, centerX };
   }
 
   // 背景を設定
@@ -119,22 +134,22 @@ export class PixiEngine {
       const texture = await Assets.load(imageUrl);
       const bgSprite = new Sprite(texture);
 
-      const availableWidth = Math.max(0, this.app.screen.width - this.menuOffset);
+      const area = this.getAvailableArea();
 
-      // ドール領域（メニュー以外）をカバーするようにスケーリング
-      const scaleX = availableWidth / texture.width;
+      // 利用可能領域に収まるようにスケーリング（containモード：全体が見える）
+      const scaleX = area.width / texture.width;
       const scaleY = this.app.screen.height / texture.height;
-      const scale = Math.max(scaleX, scaleY);
+      const scale = Math.min(scaleX, scaleY);
       bgSprite.scale.set(scale);
 
-      // ドール領域の中心に配置
+      // 利用可能領域の中心に配置
       bgSprite.anchor.set(0.5);
-      bgSprite.x = this.menuOffset + availableWidth / 2;
+      bgSprite.x = area.centerX;
       bgSprite.y = this.app.screen.height / 2;
 
-      // メニュー領域をマスクして背景が被らないようにする
+      // メニュー・ボタン領域をマスクして背景が被らないようにする
       const mask = new Graphics();
-      mask.rect(this.menuOffset, 0, availableWidth, this.app.screen.height);
+      mask.rect(area.x, 0, area.width, this.app.screen.height);
       mask.fill(0xffffff);
       bgSprite.mask = mask;
 
@@ -154,8 +169,10 @@ export class PixiEngine {
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
 
-    // 位置をパーセントからピクセルに変換
-    const centerX = (this.app.screen.width * this.dollTransform.x) / 100;
+    // 利用可能領域の中心を基準にドール位置を計算
+    const area = this.getAvailableArea();
+    // dollTransformのx,yは利用可能領域内での%位置（50%=中央）
+    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
     const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
     const dollScale = this.dollTransform.scale;
 
@@ -260,8 +277,10 @@ export class PixiEngine {
       return;
     }
 
-    const centerX = this.app.screen.width / 2;
-    const centerY = this.app.screen.height / 2;
+    // 利用可能領域の中心を基準に顔の位置を計算
+    const area = this.getAvailableArea();
+    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
+    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
 
     try {
       // 画像をロード
@@ -303,8 +322,9 @@ export class PixiEngine {
     // 既存の服をクリア
     this.clothingContainer.removeChildren();
 
-    // 位置をパーセントからピクセルに変換
-    const centerX = (this.app.screen.width * this.dollTransform.x) / 100;
+    // 利用可能領域の中心を基準に服の位置を計算
+    const area = this.getAvailableArea();
+    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
     const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
     const s = this.dollTransform.scale; // スケール
 
@@ -326,8 +346,8 @@ export class PixiEngine {
       let itemY = centerY;
       
       if (item.movable && (offsetX !== 0 || offsetY !== 0)) {
-        // ドロップ位置をピクセルに変換
-        itemX = (this.app.screen.width * (50 + offsetX)) / 100;
+        // ドロップ位置を利用可能領域内のピクセルに変換
+        itemX = area.x + (area.width * (50 + offsetX)) / 100;
         itemY = (this.app.screen.height * (50 + offsetY)) / 100;
       }
       
@@ -513,7 +533,7 @@ export class PixiEngine {
     }
   }
 
-  // スクリーンショットを取得（Data URL）- 現在の表示のままキャプチャ
+  // スクリーンショットを取得（Data URL）- 利用可能領域のみキャプチャ
   async takeScreenshot(): Promise<string | null> {
     if (!this.app || !this.initialized || this.destroyed) {
       return null;
@@ -523,15 +543,16 @@ export class PixiEngine {
       // レンダリングを強制更新
       this.app.render();
 
-      // 背景と同じ領域（メニュー以外）を切り出してキャプチャ
+      // 利用可能領域（メニュー・ボタン以外）を切り出してキャプチャ
       const source = this.app.canvas as HTMLCanvasElement;
       const resolution = this.app.renderer.resolution ?? 1;
-      const cropX = Math.max(0, Math.round(this.menuOffset * resolution));
-      const cropW = Math.max(0, Math.round((this.app.screen.width - this.menuOffset) * resolution));
+      const area = this.getAvailableArea();
+      const cropX = Math.max(0, Math.round(area.x * resolution));
+      const cropW = Math.max(0, Math.round(area.width * resolution));
       const cropH = Math.max(0, Math.round(this.app.screen.height * resolution));
 
-      // メニューオフセットがない場合はそのまま
-      if (cropX === 0) {
+      // オフセットがない場合はそのまま
+      if (cropX === 0 && cropW >= source.width) {
         return source.toDataURL('image/png');
       }
 

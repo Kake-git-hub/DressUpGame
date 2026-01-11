@@ -82,12 +82,12 @@ export function fileToBase64(file: Blob, fileName?: string): Promise<string> {
 /**
  * 画像を処理：右下のウォーターマーク領域をカット＋クロマキー透過を適用
  * @param dataUrl 元画像のData URL
- * @param cropBottomRight 右下カットのサイズ（px）、デフォルト80
+ * @param cropBottomRight 右下カットのサイズ（px）、デフォルト120
  * @returns 処理済みのData URL
  */
 export function processImageWithChromaKey(
   dataUrl: string,
-  cropBottomRight: number = 80
+  cropBottomRight: number = 120
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
