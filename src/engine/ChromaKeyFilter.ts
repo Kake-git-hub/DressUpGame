@@ -98,8 +98,14 @@ void main(void)
     // 総合スコア（複数の指標を組み合わせ）
     greenScore = max(distScore, hueScore * dominanceScore * satScore);
     
-    // スムージングを適用したアルファ値を計算
-    float alpha = 1.0 - smoothstep(0.3, 0.3 + uSmoothing, greenScore);
+    // 薄い緑（低彩度寄り）も拾う追加スコア
+    // greenが赤青平均より高いほどスコア↑（淡いグリーンバックの残り対策）
+    float greenDominanceSoft = color.g - 0.5 * (color.r + color.b);
+    float softScore = smoothstep(0.02, 0.18, greenDominanceSoft) * smoothstep(0.20, 0.70, color.g);
+    greenScore = max(greenScore, softScore * 0.9);
+    
+    // スムージングを適用したアルファ値を計算（淡い緑も消えるよう少し強め）
+    float alpha = 1.0 - smoothstep(0.15, 0.15 + uSmoothing, greenScore);
     
     // スピル除去（エッジ部分の緑被りを軽減）
     vec3 despilledColor = color.rgb;
@@ -111,9 +117,18 @@ void main(void)
         despilledColor.r = min(1.0, color.r + spillAmount * 0.1);
         despilledColor.b = min(1.0, color.b + spillAmount * 0.1);
     }
+
+    // さらに淡いエッジの緑を抑える（alphaが下がるほど強く）
+    if (uSpillRemoval > 0.0) {
+      float edge = clamp(1.0 - alpha, 0.0, 1.0);
+      float avgRB = (despilledColor.r + despilledColor.b) * 0.5;
+      float targetG = min(despilledColor.g, avgRB);
+      despilledColor.g = mix(despilledColor.g, targetG, edge * uSpillRemoval);
+    }
     
-    // 元のアルファ値と掛け合わせる
-    finalColor = vec4(despilledColor, color.a * alpha);
+    // 出力はプレマルチアルファにしてフリンジ（薄緑の縁）を減らす
+    float outA = color.a * alpha;
+    finalColor = vec4(despilledColor * outA, outA);
 }
 `;
 

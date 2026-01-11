@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.9.6';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
@@ -431,7 +431,6 @@ function App() {
 
   return (
     <div className="app">
-      <div className="version-badge version-badge--fixed">v{APP_VERSION}</div>
       {/* 設定ボタン - 調整中は非表示 */}
       {!isAdjustingItem && (
         <button
@@ -566,6 +565,9 @@ function App() {
               onDragMove={handleDragMove}
               onDragEnd={handleDragEnd}
             />
+
+            {/* バージョン表示（メニュー下） */}
+            <div className="version-badge">v{APP_VERSION}</div>
           </section>
         )}
       </main>

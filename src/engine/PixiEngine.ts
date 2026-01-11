@@ -513,117 +513,44 @@ export class PixiEngine {
     }
   }
 
-  // スクリーンショットを取得（Data URL）- ドールと背景を中央に配置
+  // スクリーンショットを取得（Data URL）- 現在の表示のままキャプチャ
   async takeScreenshot(): Promise<string | null> {
     if (!this.app || !this.initialized || this.destroyed) {
       return null;
     }
 
     try {
-      // 現在のドール位置を保存
-      const savedTransform = { ...this.dollTransform };
-      const savedMenuOffset = this.menuOffset;
-      
-      // 一時的に中央に配置
-      this.dollTransform = { x: 50, y: 50, scale: savedTransform.scale };
-      this.menuOffset = 0;
-      
-      // 背景を中央に再描画
-      if (this.backgroundContainer && this.backgroundContainer.children.length > 0) {
-        const bgSprite = this.backgroundContainer.children[0];
-        if (bgSprite && 'anchor' in bgSprite) {
-          (bgSprite as Sprite).x = this.app.screen.width / 2;
-        }
-      }
-      
-      // ドールと服を中央に再描画するため、一度描画を更新
-      // (実際の再描画は呼び出し側で行う想定だが、位置だけ調整)
-      const centerX = this.app.screen.width / 2;
-      const centerY = this.app.screen.height / 2;
-      
-      // ドールコンテナ内のスプライトを中央に移動
-      if (this.dollContainer) {
-        for (const child of this.dollContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = centerX;
-            (child as Sprite).y = centerY;
-          }
-        }
-      }
-      
-      // 顔コンテナ内のスプライトを中央に移動
-      if (this.faceContainer) {
-        for (const child of this.faceContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = centerX;
-            (child as Sprite).y = centerY - 80 * savedTransform.scale;
-          }
-        }
-      }
-      
-      // 服コンテナ内のスプライトを中央に移動
-      if (this.clothingContainer) {
-        for (const child of this.clothingContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = centerX;
-            (child as Sprite).y = centerY;
-          }
-        }
-      }
-      
       // レンダリングを強制更新
       this.app.render();
-      
-      // rendererからキャンバスをキャプチャ
-      const canvas = this.app.canvas as HTMLCanvasElement;
-      const dataUrl = canvas.toDataURL('image/png');
-      
-      // 元の位置に戻す
-      this.dollTransform = savedTransform;
-      this.menuOffset = savedMenuOffset;
-      
-      // 位置を元に戻す
-      const originalCenterX = (this.app.screen.width * savedTransform.x) / 100;
-      const originalCenterY = (this.app.screen.height * savedTransform.y) / 100;
-      
-      if (this.backgroundContainer && this.backgroundContainer.children.length > 0) {
-        const bgSprite = this.backgroundContainer.children[0];
-        if (bgSprite && 'anchor' in bgSprite) {
-          (bgSprite as Sprite).x = this.app.screen.width / 2 + savedMenuOffset / 2;
-        }
+
+      // 背景と同じ領域（メニュー以外）を切り出してキャプチャ
+      const source = this.app.canvas as HTMLCanvasElement;
+      const resolution = this.app.renderer.resolution ?? 1;
+      const cropX = Math.max(0, Math.round(this.menuOffset * resolution));
+      const cropW = Math.max(0, Math.round((this.app.screen.width - this.menuOffset) * resolution));
+      const cropH = Math.max(0, Math.round(this.app.screen.height * resolution));
+
+      // メニューオフセットがない場合はそのまま
+      if (cropX === 0) {
+        return source.toDataURL('image/png');
       }
-      
-      if (this.dollContainer) {
-        for (const child of this.dollContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = originalCenterX;
-            (child as Sprite).y = originalCenterY;
-          }
-        }
+
+      const safeW = Math.min(cropW, Math.max(0, source.width - cropX));
+      const safeH = Math.min(cropH, source.height);
+      if (safeW <= 0 || safeH <= 0) {
+        return source.toDataURL('image/png');
       }
-      
-      if (this.faceContainer) {
-        for (const child of this.faceContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = originalCenterX;
-            (child as Sprite).y = originalCenterY - 80 * savedTransform.scale;
-          }
-        }
+
+      const out = document.createElement('canvas');
+      out.width = safeW;
+      out.height = safeH;
+      const ctx = out.getContext('2d');
+      if (!ctx) {
+        return source.toDataURL('image/png');
       }
-      
-      if (this.clothingContainer) {
-        for (const child of this.clothingContainer.children) {
-          if ('anchor' in child) {
-            (child as Sprite).x = originalCenterX;
-            (child as Sprite).y = originalCenterY;
-          }
-        }
-      }
-      
-      // 元の表示に戻す
-      this.app.render();
-      
-      return dataUrl;
+
+      ctx.drawImage(source, cropX, 0, safeW, safeH, 0, 0, safeW, safeH);
+      return out.toDataURL('image/png');
     } catch (error) {
       console.error('スクリーンショット取得エラー:', error);
       return null;
