@@ -27,8 +27,24 @@ class MockApplication {
 
 class MockContainer {
   label = '';
-  addChild = vi.fn();
-  removeChildren = vi.fn();
+  children: unknown[] = [];
+  addChild = vi.fn((child: unknown) => {
+    this.children.push(child);
+    return child;
+  });
+  removeChildren = vi.fn(() => {
+    const removed = [...this.children];
+    this.children = [];
+    return removed;
+  });
+  removeChild = vi.fn((child: unknown) => {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) {
+      this.children.splice(idx, 1);
+    }
+    return child;
+  });
+  destroy = vi.fn();
 }
 
 class MockGraphics {

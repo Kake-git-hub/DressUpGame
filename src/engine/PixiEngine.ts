@@ -319,19 +319,21 @@ export class PixiEngine {
       return;
     }
 
-    // 既存の服をクリア
-    this.clothingContainer.removeChildren();
-
     // 利用可能領域の中心を基準に服の位置を計算
     const area = this.getAvailableArea();
     const centerX = area.x + (area.width * this.dollTransform.x) / 100;
     const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
     const s = this.dollTransform.scale; // スケール
 
+    // 新しい一時コンテナを作成（全ロード完了後に一括表示するため）
+    const tempContainer = new Container();
+    tempContainer.label = 'tempClothingContainer';
+
     // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
     const loadPromises = items.map(async (item) => {
       if (item.imageUrl) {
         try {
+          // キャッシュ済みならすぐに返る
           const texture = await Assets.load(item.imageUrl);
           return { item, texture, error: null };
         } catch (error) {
@@ -343,7 +345,13 @@ export class PixiEngine {
 
     const loadedItems = await Promise.all(loadPromises);
 
-    // ロード完了後、一括で描画
+    // 破棄チェック（ロード中に破棄された場合）
+    if (this.destroyed || !this.clothingContainer) {
+      tempContainer.destroy({ children: true });
+      return;
+    }
+
+    // ロード完了後、一時コンテナに描画
     for (const { item, texture, error } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
@@ -397,27 +405,35 @@ export class PixiEngine {
           clothingSprite.filters = [this.chromaKeyFilter];
         }
 
-        this.clothingContainer!.addChild(clothingSprite);
+        tempContainer.addChild(clothingSprite);
       } else if (error) {
         // 画像読み込み失敗時はプレースホルダーを表示
         console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
-        this.drawClothingPlaceholder(item, itemX, itemY, s);
+        this.drawClothingPlaceholderTo(tempContainer, item, itemX, itemY, s);
       } else {
         // imageUrlがない場合はプレースホルダー
-        this.drawClothingPlaceholder(item, itemX, itemY, s);
+        this.drawClothingPlaceholderTo(tempContainer, item, itemX, itemY, s);
       }
     }
+
+    // 全描画完了後、既存の服を削除して一時コンテナの内容を移動
+    this.clothingContainer.removeChildren();
+    while (tempContainer.children.length > 0) {
+      const child = tempContainer.children[0];
+      tempContainer.removeChild(child);
+      this.clothingContainer.addChild(child);
+    }
+    tempContainer.destroy();
   }
 
-  // 服のプレースホルダーを描画
-  private drawClothingPlaceholder(
+  // 服のプレースホルダーを指定コンテナに描画
+  private drawClothingPlaceholderTo(
+    container: Container,
     item: ClothingItemData | EquippedItem,
     centerX: number,
     centerY: number,
     s: number
   ): void {
-    if (!this.clothingContainer) return;
-    
     const clothing = new Graphics();
 
       switch (item.type) {
@@ -485,7 +501,7 @@ export class PixiEngine {
           break;
       }
 
-      this.clothingContainer.addChild(clothing);
+      container.addChild(clothing);
   }
 
   // リサイズ
