@@ -243,11 +243,11 @@ textarea {
   pointer-events: none;
 }
 
-/* 設定ボタン */
+/* 設定ボタン - 右下に配置 */
 .settings-button {
   position: fixed;
-  top: 16px;
-  left: 16px;
+  bottom: 16px;
+  right: 16px;
   width: 48px;
   height: 48px;
   border-radius: 50%;

@@ -363,7 +363,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'row',
     height: '100%',
-    maxHeight: 'calc(100vh - 140px)',
+    maxHeight: 'calc(100vh - 80px)', // 設定ボタンが右下に移動したので縦幅を拡大
   },
   container: {
     backgroundColor: '#f8f9fa',

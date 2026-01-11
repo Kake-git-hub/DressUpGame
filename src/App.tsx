@@ -114,12 +114,12 @@ function App() {
   
   // 設定画面の表示状態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // お絵描きモード
+  // お絵描きモード（現在未使用）
   const [isDrawingMode, setIsDrawingMode] = useState(false);
-  // 消しゴムモード
+  // 消しゴムモード（現在未使用）
   const [isEraserMode, setIsEraserMode] = useState(false);
-  // クロマキー（グリーンバック透過）有効フラグ
-  const [chromaKeyEnabled, setChromaKeyEnabled] = useState(false);
+  // クロマキー（グリーンバック透過）常時ON
+  const chromaKeyEnabled = true;
 
   // ドール一覧（デフォルト + カスタム）
   const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
@@ -369,6 +369,9 @@ function App() {
   // リセット
   const handleReset = useCallback(() => {
     resetAll();
+    // 背景もクリア
+    setCurrentBackgroundId(null);
+    saveCurrentBackgroundId(null);
   }, [resetAll]);
 
   // ドール切り替え（保存も行う）
@@ -509,31 +512,10 @@ function App() {
                 </button>
                 <button
                   className="tool-button"
-                  onClick={() => setIsEraserMode(true)}
-                  title="けしゴム"
-                >
-                  🧽
-                </button>
-                <button
-                  className="tool-button"
-                  onClick={() => setIsDrawingMode(true)}
-                  title="おえかき"
-                >
-                  ✏️
-                </button>
-                <button
-                  className="tool-button"
                   onClick={handleScreenshot}
                   title="スクショ"
                 >
                   📷
-                </button>
-                <button
-                  className={`tool-button ${chromaKeyEnabled ? 'tool-button--active' : ''}`}
-                  onClick={() => setChromaKeyEnabled(prev => !prev)}
-                  title={chromaKeyEnabled ? 'クロマキーOFF' : 'クロマキーON（グリーンバック透過）'}
-                >
-                  🟢
                 </button>
               </div>
             )}
