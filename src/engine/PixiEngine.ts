@@ -70,6 +70,9 @@ export class PixiEngine {
       this.clothingContainer.label = 'clothingContainer';
       this.app.stage.addChild(this.clothingContainer);
 
+      // クロマキーを常時ONにする
+      this.setChromaKeyEnabled(true);
+
       this.initialized = true;
     } catch (error) {
       console.error('PixiJS初期化エラー:', error);
