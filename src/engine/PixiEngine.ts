@@ -328,8 +328,23 @@ export class PixiEngine {
     const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
     const s = this.dollTransform.scale; // スケール
 
-    // 既にソートされていることを想定（useDressUpでソート済み）
-    for (const item of items) {
+    // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
+    const loadPromises = items.map(async (item) => {
+      if (item.imageUrl) {
+        try {
+          const texture = await Assets.load(item.imageUrl);
+          return { item, texture, error: null };
+        } catch (error) {
+          return { item, texture: null, error };
+        }
+      }
+      return { item, texture: null, error: null };
+    });
+
+    const loadedItems = await Promise.all(loadPromises);
+
+    // ロード完了後、一括で描画
+    for (const { item, texture, error } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
@@ -355,41 +370,38 @@ export class PixiEngine {
       itemX += adjustOffsetX;
       itemY += adjustOffsetY;
 
-      // imageUrlがある場合は画像を読み込み
-      if (item.imageUrl) {
-        try {
-          const texture = await Assets.load(item.imageUrl);
-          // 縮小時の画質向上：リニア補間を使用
-          texture.source.scaleMode = 'linear';
-          const clothingSprite = new Sprite(texture);
+      // テクスチャがロード済みの場合はスプライトを作成
+      if (texture) {
+        // 縮小時の画質向上：リニア補間を使用
+        texture.source.scaleMode = 'linear';
+        const clothingSprite = new Sprite(texture);
 
-          // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）
-          const maxHeight = this.app.screen.height * 0.9;
-          const baseScale = maxHeight / texture.height;
-          // 調整スケールを適用
-          clothingSprite.scale.set(baseScale * s * adjustScale);
+        // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）
+        const maxHeight = this.app.screen.height * 0.9;
+        const baseScale = maxHeight / texture.height;
+        // 調整スケールを適用
+        clothingSprite.scale.set(baseScale * s * adjustScale);
 
-          // アンカーを中央に
-          clothingSprite.anchor.set(0.5);
+        // アンカーを中央に
+        clothingSprite.anchor.set(0.5);
 
-          // 位置を設定
-          clothingSprite.x = itemX;
-          clothingSprite.y = itemY;
-          
-          // 回転を適用（度からラジアンに変換）
-          clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
+        // 位置を設定
+        clothingSprite.x = itemX;
+        clothingSprite.y = itemY;
+        
+        // 回転を適用（度からラジアンに変換）
+        clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-          // クロマキーフィルタを適用（有効な場合）
-          if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-            clothingSprite.filters = [this.chromaKeyFilter];
-          }
-
-          this.clothingContainer!.addChild(clothingSprite);
-        } catch (error) {
-          console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
-          // 画像読み込み失敗時はプレースホルダーを表示
-          this.drawClothingPlaceholder(item, itemX, itemY, s);
+        // クロマキーフィルタを適用（有効な場合）
+        if (this.chromaKeyEnabled && this.chromaKeyFilter) {
+          clothingSprite.filters = [this.chromaKeyFilter];
         }
+
+        this.clothingContainer!.addChild(clothingSprite);
+      } else if (error) {
+        // 画像読み込み失敗時はプレースホルダーを表示
+        console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
+        this.drawClothingPlaceholder(item, itemX, itemY, s);
       } else {
         // imageUrlがない場合はプレースホルダー
         this.drawClothingPlaceholder(item, itemX, itemY, s);

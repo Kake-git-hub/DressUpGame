@@ -1090,12 +1090,12 @@ export async function importPresetFromFolder(
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          // サムネイルがあれば読み込み（サムネイルも処理）
+          // サムネイルがあれば読み込み（サムネイルはウォーターマークカット不要）
           const thumbKey = `${categoryRaw}/${name}`;
           const thumbFile = data.clothingThumbs.get(thumbKey);
           let thumbnailUrl: string | undefined;
           if (thumbFile) {
-            thumbnailUrl = await fileToBase64WithProcessing(thumbFile, thumbFile.name);
+            thumbnailUrl = await fileToBase64(thumbFile, thumbFile.name);
             const thumbId = `${id}-thumb`;
             await saveImageToStorage(thumbId, thumbnailUrl);
             console.log(`  サムネイル読み込み: ${thumbKey}`);
