@@ -32,7 +32,7 @@ import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTr
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
