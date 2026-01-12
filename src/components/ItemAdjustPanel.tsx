@@ -363,6 +363,33 @@ export function ItemAdjustPanel({
       onWheel={handleWheel}
       style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
     >
+      {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
+      {!isDollMode && item?.imageUrl && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px) scale(${scale}) rotate(${rotation}deg)`,
+            transformOrigin: 'center center',
+            pointerEvents: 'none',
+            zIndex: 50,
+            opacity: 0.85,
+            filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
+          }}
+        >
+          <img
+            src={item.imageUrl}
+            alt="調整プレビュー"
+            style={{
+              maxHeight: `${canvasHeight * 0.7}px`,
+              maxWidth: `${canvasWidth * 0.7}px`,
+              objectFit: 'contain',
+            }}
+          />
+        </div>
+      )}
+
       {/* 右上ボタン（完了・リセット） */}
       <div className="item-adjust-top-buttons">
         <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">

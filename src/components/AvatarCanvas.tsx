@@ -187,6 +187,32 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     }
   }, [chromaKeyEnabled, isReady]);
 
+  // iPad等でバックグラウンドから復帰した時に再描画（WebGLコンテキストロスト対策）
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isReady && engineRef.current?.isInitialized()) {
+        // 再描画をトリガー
+        if (backgroundImageUrl) {
+          engineRef.current.setBackground(backgroundImageUrl);
+        }
+        engineRef.current.drawDoll({
+          width: 200,
+          height: 300,
+          imageUrl: dollImageUrl || '',
+        });
+        engineRef.current.drawClothing(equippedItems);
+        if (customFaceUrl) {
+          engineRef.current.setCustomFace(customFaceUrl);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isReady, backgroundImageUrl, dollImageUrl, equippedItems, customFaceUrl]);
+
   return (
     <canvas
       ref={canvasRef}
