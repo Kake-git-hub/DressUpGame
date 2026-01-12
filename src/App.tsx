@@ -592,6 +592,8 @@ function App() {
           canvasHeight={canvasSize.height}
           dollTransform={dollTransform}
           onDollTransformChange={setDollTransform}
+          menuOffset={MENU_WIDTH}
+          rightOffset={RIGHT_BUTTON_WIDTH}
         />
       )}
 

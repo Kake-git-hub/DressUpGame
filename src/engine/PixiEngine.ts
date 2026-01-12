@@ -622,6 +622,8 @@ export class PixiEngine {
         smoothing: 0.15,  // エッジのスムージング
         spillRemoval: 0.8, // スピル除去強度
       });
+      // 高解像度ディスプレイ対応
+      this.chromaKeyFilter.resolution = window.devicePixelRatio || 1;
     }
   }
 

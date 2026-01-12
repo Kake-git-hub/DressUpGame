@@ -20,6 +20,9 @@ interface ItemAdjustPanelProps {
   // ドール調整用
   dollTransform: DollTransform;
   onDollTransformChange: (transform: DollTransform) => void;
+  // メニュー・ボタン領域のオフセット
+  menuOffset?: number;
+  rightOffset?: number;
 }
 
 // タッチポイントの型
@@ -50,9 +53,15 @@ export function ItemAdjustPanel({
   canvasHeight,
   dollTransform,
   onDollTransformChange,
+  menuOffset = 0,
+  rightOffset = 0,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
+
+  // 利用可能領域の計算（PixiEngineと同じ計算）
+  const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
+  const availableX = menuOffset;
 
   // 現在の調整値（ローカルステート）- アイテムモード用
   const [offsetX, setOffsetX] = useState(item?.adjustOffsetX ?? 0);
@@ -380,11 +389,11 @@ export function ItemAdjustPanel({
     >
       {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
       {!isDollMode && transparentImageUrl && (() => {
-        // ドール中心位置を計算（dollTransformのx,yはパーセンテージ）
-        const dollCenterX = (canvasWidth * dollTransform.x) / 100;
+        // ドール中心位置を計算（PixiEngineと同じ計算: 利用可能領域内の%位置）
+        const dollCenterX = availableX + (availableWidth * dollTransform.x) / 100;
         const dollCenterY = (canvasHeight * dollTransform.y) / 100;
         // movableアイテムの場合はドロップ位置も考慮
-        const itemOffsetX = item?.movable ? (canvasWidth * (item.offsetX ?? 0)) / 100 : 0;
+        const itemOffsetX = item?.movable ? (availableWidth * (item.offsetX ?? 0)) / 100 : 0;
         const itemOffsetY = item?.movable ? (canvasHeight * (item.offsetY ?? 0)) / 100 : 0;
         // 基準位置 = ドール中心 + movableオフセット + 調整オフセット
         const baseX = dollCenterX + itemOffsetX + offsetX;
@@ -413,6 +422,52 @@ export function ItemAdjustPanel({
                 objectFit: 'contain',
               }}
             />
+          </div>
+        );
+      })()}
+
+      {/* ドールモード時：ドール位置のプレビュー枚（単純な十字線） */}
+      {isDollMode && (() => {
+        const dollCenterX = availableX + (availableWidth * dollX) / 100;
+        const dollCenterY = (canvasHeight * dollY) / 100;
+
+        return (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${dollCenterX}px`,
+              top: `${dollCenterY}px`,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              zIndex: 50,
+            }}
+          >
+            {/* 十字線でドール中心を表示 */}
+            <div style={{
+              width: '80px',
+              height: '2px',
+              backgroundColor: 'rgba(255, 105, 180, 0.8)',
+              position: 'absolute',
+              left: '-40px',
+              top: '-1px',
+            }} />
+            <div style={{
+              width: '2px',
+              height: '80px',
+              backgroundColor: 'rgba(255, 105, 180, 0.8)',
+              position: 'absolute',
+              left: '-1px',
+              top: '-40px',
+            }} />
+            <div style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              border: '2px solid rgba(255, 105, 180, 0.8)',
+              position: 'absolute',
+              left: '-10px',
+              top: '-10px',
+            }} />
           </div>
         );
       })()}
