@@ -594,6 +594,7 @@ function App() {
           onDollTransformChange={setDollTransform}
           menuOffset={MENU_WIDTH}
           rightOffset={RIGHT_BUTTON_WIDTH}
+          dollImageUrl={currentDollSafe?.bodyImageUrl}
         />
       )}
 

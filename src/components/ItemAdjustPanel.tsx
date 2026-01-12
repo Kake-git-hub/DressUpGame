@@ -23,6 +23,8 @@ interface ItemAdjustPanelProps {
   // メニュー・ボタン領域のオフセット
   menuOffset?: number;
   rightOffset?: number;
+  // ドール画像URL（ドール調整モードのプレビュー用）
+  dollImageUrl?: string;
 }
 
 // タッチポイントの型
@@ -55,11 +57,16 @@ export function ItemAdjustPanel({
   onDollTransformChange,
   menuOffset = 0,
   rightOffset = 0,
+  dollImageUrl,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
 
-  // 利用可能領域の計算（PixiEngineと同じ計算）
+  // キャンバスは画面中央に配置されているため、左上の位置を計算
+  const canvasLeft = (window.innerWidth - canvasWidth) / 2;
+  const canvasTop = (window.innerHeight - canvasHeight) / 2;
+
+  // 利用可能領域の計算（PixiEngineと同じ計算、キャンバス内座標）
   const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
   const availableX = menuOffset;
 
@@ -393,7 +400,7 @@ export function ItemAdjustPanel({
         const dollCenterX = availableX + (availableWidth * dollTransform.x) / 100;
         const dollCenterY = (canvasHeight * dollTransform.y) / 100;
         
-        // アイテムの基準位置を計算
+        // アイテムの基準位置を計算（キャンバス内座標）
         let baseX: number;
         let baseY: number;
         
@@ -410,13 +417,17 @@ export function ItemAdjustPanel({
         // 調整オフセットを適用
         baseX += offsetX;
         baseY += offsetY;
+        
+        // キャンバス内座標 → window座標に変換
+        const windowX = canvasLeft + baseX;
+        const windowY = canvasTop + baseY;
 
         return (
           <div
             style={{
               position: 'absolute',
-              left: `${baseX}px`,
-              top: `${baseY}px`,
+              left: `${windowX}px`,
+              top: `${windowY}px`,
               transform: `translate(-50%, -50%) scale(${scale * dollTransform.scale}) rotate(${rotation}deg)`,
               transformOrigin: 'center center',
               pointerEvents: 'none',
@@ -438,48 +449,60 @@ export function ItemAdjustPanel({
         );
       })()}
 
-      {/* ドールモード時：ドール位置のプレビュー枚（単純な十字線） */}
+      {/* ドールモード時：ドール画像のプレビュー */}
       {isDollMode && (() => {
         const dollCenterX = availableX + (availableWidth * dollX) / 100;
         const dollCenterY = (canvasHeight * dollY) / 100;
+        
+        // キャンバス内座標 → window座標に変換
+        const windowX = canvasLeft + dollCenterX;
+        const windowY = canvasTop + dollCenterY;
 
         return (
           <div
             style={{
               position: 'absolute',
-              left: `${dollCenterX}px`,
-              top: `${dollCenterY}px`,
-              transform: 'translate(-50%, -50%)',
+              left: `${windowX}px`,
+              top: `${windowY}px`,
+              transform: `translate(-50%, -50%) scale(${dollScale})`,
+              transformOrigin: 'center center',
               pointerEvents: 'none',
               zIndex: 50,
+              opacity: 0.85,
+              filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
             }}
           >
-            {/* 十字線でドール中心を表示 */}
-            <div style={{
-              width: '80px',
-              height: '2px',
-              backgroundColor: 'rgba(255, 105, 180, 0.8)',
-              position: 'absolute',
-              left: '-40px',
-              top: '-1px',
-            }} />
-            <div style={{
-              width: '2px',
-              height: '80px',
-              backgroundColor: 'rgba(255, 105, 180, 0.8)',
-              position: 'absolute',
-              left: '-1px',
-              top: '-40px',
-            }} />
-            <div style={{
-              width: '20px',
-              height: '20px',
-              borderRadius: '50%',
-              border: '2px solid rgba(255, 105, 180, 0.8)',
-              position: 'absolute',
-              left: '-10px',
-              top: '-10px',
-            }} />
+            {dollImageUrl ? (
+              <img
+                src={dollImageUrl}
+                alt="ドールプレビュー"
+                style={{
+                  height: `${canvasHeight * 0.9}px`,
+                  width: 'auto',
+                  objectFit: 'contain',
+                }}
+              />
+            ) : (
+              /* ドール画像がない場合は十字線 */
+              <>
+                <div style={{
+                  width: '80px',
+                  height: '2px',
+                  backgroundColor: 'rgba(255, 105, 180, 0.8)',
+                  position: 'absolute',
+                  left: '-40px',
+                  top: '-1px',
+                }} />
+                <div style={{
+                  width: '2px',
+                  height: '80px',
+                  backgroundColor: 'rgba(255, 105, 180, 0.8)',
+                  position: 'absolute',
+                  left: '-1px',
+                  top: '-40px',
+                }} />
+              </>
+            )}
           </div>
         );
       })()}
