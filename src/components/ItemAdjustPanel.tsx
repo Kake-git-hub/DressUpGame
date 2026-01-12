@@ -10,9 +10,6 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import type { EquippedItem, DollTransform } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 
-// デバウンス用タイマーID型
-type TimerId = ReturnType<typeof setTimeout>;
-
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
   onAdjust: (adjustment: ItemAdjustment) => void;
@@ -106,80 +103,33 @@ export function ItemAdjustPanel({
   const onDollTransformChangeRef = useRef(onDollTransformChange);
   onDollTransformChangeRef.current = onDollTransformChange;
 
-  // デバウンスタイマー
-  const debounceTimerRef = useRef<TimerId | null>(null);
-  const dollDebounceTimerRef = useRef<TimerId | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  // アイテム値が変わったら親に通知（震え対策: デバウンス + 前回値比較）
-  const prevValuesRef = useRef({ offsetX, offsetY, scale, rotation });
-  useEffect(() => {
-    if (isDollMode) return; // ドールモードでは無視
-    
-    const prev = prevValuesRef.current;
-    // 値が実際に変わった場合のみ通知
-    if (
-      prev.offsetX !== offsetX ||
-      prev.offsetY !== offsetY ||
-      prev.scale !== scale ||
-      prev.rotation !== rotation
-    ) {
-      prevValuesRef.current = { offsetX, offsetY, scale, rotation };
-      
-      // 既存タイマーをクリア
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      
-      // 16ms後に通知（60fps相当）
-      debounceTimerRef.current = setTimeout(() => {
-        onAdjustRef.current({
-          adjustOffsetX: offsetX,
-          adjustOffsetY: offsetY,
-          adjustScale: scale,
-          adjustRotation: rotation,
-        });
-      }, 16);
-    }
-    
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, [offsetX, offsetY, scale, rotation, isDollMode]);
+  // アイテム調整値は「完了」ボタンで親に反映（リアルタイム反映を廃止し高速化）
 
-  // ドール値が変わったら親に通知
-  const prevDollValuesRef = useRef({ dollX, dollY, dollScale });
-  useEffect(() => {
-    if (!isDollMode) return; // アイテムモードでは無視
-    
-    const prev = prevDollValuesRef.current;
-    if (
-      prev.dollX !== dollX ||
-      prev.dollY !== dollY ||
-      prev.dollScale !== dollScale
-    ) {
-      prevDollValuesRef.current = { dollX, dollY, dollScale };
-      
-      if (dollDebounceTimerRef.current) {
-        clearTimeout(dollDebounceTimerRef.current);
-      }
-      
-      dollDebounceTimerRef.current = setTimeout(() => {
-        onDollTransformChangeRef.current({
-          x: dollX,
-          y: dollY,
-          scale: dollScale,
-        });
-      }, 16);
+  // ドール調整値も「完了」ボタンで親に反映（リアルタイム反映を廃止し高速化）
+
+  // 完了ボタン押下時：ローカルの調整値を親に反映してからclose
+  const handleClose = useCallback(() => {
+    if (isDollMode) {
+      // ドールモード: ドールの位置・スケールを反映
+      onDollTransformChangeRef.current({
+        x: dollX,
+        y: dollY,
+        scale: dollScale,
+      });
+    } else {
+      // アイテムモード: アイテムの調整値を反映
+      onAdjustRef.current({
+        adjustOffsetX: offsetX,
+        adjustOffsetY: offsetY,
+        adjustScale: scale,
+        adjustRotation: rotation,
+      });
     }
-    
-    return () => {
-      if (dollDebounceTimerRef.current) {
-        clearTimeout(dollDebounceTimerRef.current);
-      }
-    };
-  }, [dollX, dollY, dollScale, isDollMode]);
+    onCloseRef.current();
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
@@ -415,7 +365,7 @@ export function ItemAdjustPanel({
     >
       {/* 右上ボタン（完了・リセット） */}
       <div className="item-adjust-top-buttons">
-        <button className="item-adjust-done-btn-small" onClick={onClose} title="完了">
+        <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">
           ✓
         </button>
         <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">

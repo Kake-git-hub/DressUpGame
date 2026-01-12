@@ -80,7 +80,7 @@ export function fileToBase64(file: Blob, fileName?: string): Promise<string> {
 }
 
 /**
- * 画像を処理：右下のウォーターマーク領域をカット＋クロマキー透過を適用
+ * 画像を処理：右下のウォーターマーク領域をカット（クロマキーはGPUフィルタで処理）
  * @param dataUrl 元画像のData URL
  * @param cropBottomRight 右下カットのサイズ（px）、デフォルト160
  * @returns 処理済みのData URL
@@ -103,44 +103,11 @@ export function processImageWithChromaKey(
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-
-      // 右下のウォーターマーク領域の境界
+      // 右下のウォーターマーク領域のみクリア（高速処理）
       const cropStartX = canvas.width - cropBottomRight;
       const cropStartY = canvas.height - cropBottomRight;
+      ctx.clearRect(cropStartX, cropStartY, cropBottomRight, cropBottomRight);
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        // ピクセル座標を計算
-        const pixelIndex = i / 4;
-        const x = pixelIndex % canvas.width;
-        const y = Math.floor(pixelIndex / canvas.width);
-
-        // 右下領域のウォーターマークを透過
-        if (x >= cropStartX && y >= cropStartY) {
-          data[i + 3] = 0; // 透明にする
-          continue;
-        }
-
-        // クロマキー処理：純粋な緑（#00FF00付近）を透過
-        // 緑が非常に高く（>180）、赤青が低い（<100）場合に透過
-        const isGreen = g > 180 && r < 100 && b < 100;
-        // または、緑が支配的で彩度が高い場合
-        const greenDominance = g - Math.max(r, b);
-        const isGreenDominant = greenDominance > 80 && g > 150;
-
-        if (isGreen || isGreenDominant) {
-          // 完全に緑なら完全透過、エッジはグラデーション
-          const greenness = Math.min(1, greenDominance / 150);
-          data[i + 3] = Math.round(data[i + 3] * (1 - greenness));
-        }
-      }
-
-      ctx.putImageData(imageData, 0, 0);
       resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = () => reject(new Error('画像の読み込みに失敗'));
