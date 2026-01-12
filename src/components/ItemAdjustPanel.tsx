@@ -9,6 +9,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import type { EquippedItem, DollTransform } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
+import { getTransparentImage } from '../services/assetStorage';
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
@@ -63,6 +64,20 @@ export function ItemAdjustPanel({
   const [dollX, setDollX] = useState(dollTransform.x);
   const [dollY, setDollY] = useState(dollTransform.y);
   const [dollScale, setDollScale] = useState(dollTransform.scale);
+
+  // プレビュー用の透過処理済み画像URL
+  const [transparentImageUrl, setTransparentImageUrl] = useState<string | null>(null);
+
+  // アイテムが変わったら透過画像を取得
+  useEffect(() => {
+    if (item?.id && item?.imageUrl) {
+      getTransparentImage(item.id, item.imageUrl)
+        .then(setTransparentImageUrl)
+        .catch(() => setTransparentImageUrl(item.imageUrl)); // フォールバック
+    } else {
+      setTransparentImageUrl(null);
+    }
+  }, [item?.id, item?.imageUrl]);
 
   // タッチ状態
   const touchStartRef = useRef<{
@@ -364,31 +379,43 @@ export function ItemAdjustPanel({
       style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
     >
       {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
-      {!isDollMode && item?.imageUrl && (
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px) scale(${scale}) rotate(${rotation}deg)`,
-            transformOrigin: 'center center',
-            pointerEvents: 'none',
-            zIndex: 50,
-            opacity: 0.85,
-            filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
-          }}
-        >
-          <img
-            src={item.imageUrl}
-            alt="調整プレビュー"
+      {!isDollMode && transparentImageUrl && (() => {
+        // ドール中心位置を計算（dollTransformのx,yはパーセンテージ）
+        const dollCenterX = (canvasWidth * dollTransform.x) / 100;
+        const dollCenterY = (canvasHeight * dollTransform.y) / 100;
+        // movableアイテムの場合はドロップ位置も考慮
+        const itemOffsetX = item?.movable ? (canvasWidth * (item.offsetX ?? 0)) / 100 : 0;
+        const itemOffsetY = item?.movable ? (canvasHeight * (item.offsetY ?? 0)) / 100 : 0;
+        // 基準位置 = ドール中心 + movableオフセット + 調整オフセット
+        const baseX = dollCenterX + itemOffsetX + offsetX;
+        const baseY = dollCenterY + itemOffsetY + offsetY;
+
+        return (
+          <div
             style={{
-              maxHeight: `${canvasHeight * 0.7}px`,
-              maxWidth: `${canvasWidth * 0.7}px`,
-              objectFit: 'contain',
+              position: 'absolute',
+              left: `${baseX}px`,
+              top: `${baseY}px`,
+              transform: `translate(-50%, -50%) scale(${scale * dollTransform.scale}) rotate(${rotation}deg)`,
+              transformOrigin: 'center center',
+              pointerEvents: 'none',
+              zIndex: 50,
+              opacity: 0.85,
+              filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
             }}
-          />
-        </div>
-      )}
+          >
+            <img
+              src={transparentImageUrl}
+              alt="調整プレビュー"
+              style={{
+                height: `${canvasHeight * 0.9}px`,
+                width: 'auto',
+                objectFit: 'contain',
+              }}
+            />
+          </div>
+        );
+      })()}
 
       {/* 右上ボタン（完了・リセット） */}
       <div className="item-adjust-top-buttons">

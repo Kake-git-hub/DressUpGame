@@ -116,6 +116,57 @@ export function processImageWithChromaKey(
 }
 
 /**
+ * グリーンバック透過処理（クロマキー）
+ * HSV色空間でグリーン系の色を透明にする
+ * @param dataUrl 元画像のData URL
+ * @returns 透過処理済みのData URL
+ */
+export function processChromaKeyTransparent(dataUrl: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // グリーンバック判定（明るい緑: #00B140付近、中間緑、暗い緑）
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // 緑が支配的かどうかを判定
+        // 条件: Gが一番大きく、GがRとBの両方より十分大きい
+        const greenDominance = g - Math.max(r, b);
+        const isGreenDominant = greenDominance > 30; // 緑が30以上優勢
+        const isNotTooGray = Math.max(r, g, b) - Math.min(r, g, b) > 40; // 彩度がある程度ある
+        const isGreenRange = g > 60 && g < 255; // 緑が中程度以上
+
+        if (isGreenDominant && isNotTooGray && isGreenRange) {
+          // 透明にする
+          data[i + 3] = 0;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('画像の読み込みに失敗'));
+    img.src = dataUrl;
+  });
+}
+
+/**
  * 画像ファイルを読み込み、処理（右下カット＋クロマキー）してBase64で返す
  */
 export async function fileToBase64WithProcessing(
@@ -152,6 +203,27 @@ export async function getImageFromStorage(id: string): Promise<string | null> {
     };
     request.onerror = () => reject(request.error);
   });
+}
+
+/**
+ * 透過処理済み画像を取得（なければ元画像から生成してキャッシュ）
+ * @param id アイテムID
+ * @param originalImageUrl 元画像URL（フォールバック用）
+ * @returns 透過処理済み画像のData URL
+ */
+export async function getTransparentImage(id: string, originalImageUrl: string): Promise<string> {
+  const transparentId = `${id}_transparent`;
+  
+  // キャッシュから取得を試みる
+  const cached = await getImageFromStorage(transparentId);
+  if (cached) {
+    return cached;
+  }
+  
+  // キャッシュがない場合は生成して保存
+  const transparent = await processChromaKeyTransparent(originalImageUrl);
+  await saveImageToStorage(transparentId, transparent);
+  return transparent;
 }
 
 // 画像をIndexedDBから削除
@@ -405,6 +477,10 @@ export async function addCustomClothing(
   const base64 = await fileToBase64WithProcessing(imageFile, imageFile.name);
   await saveImageToStorage(id, base64);
   
+  // 透過処理済み画像も保存（プレビュー用）
+  const transparentBase64 = await processChromaKeyTransparent(base64);
+  await saveImageToStorage(`${id}_transparent`, transparentBase64);
+  
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得
   const mapping = DEFAULT_CATEGORY_MAP[type.toLowerCase()];
   const defaults = mapping || {
@@ -445,6 +521,7 @@ export async function deleteCustomBackground(id: string): Promise<void> {
 
 export async function deleteCustomClothing(id: string): Promise<void> {
   await deleteImageFromStorage(id);
+  await deleteImageFromStorage(`${id}_transparent`); // 透過画像も削除
   const items = loadCustomClothing().filter(i => i.id !== id);
   saveCustomClothing(items);
 }
@@ -552,6 +629,12 @@ export async function bulkImportFromZip(
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
+      // 服の場合は透過画像も保存
+      if (targetType === 'clothing') {
+        const transparentBase64 = await processChromaKeyTransparent(base64);
+        await saveImageToStorage(`${id}_transparent`, transparentBase64);
+      }
+      
       if (targetType === 'dolls') {
         const doll = createDollData(id, name, base64);
         result.items.push(doll);
@@ -601,6 +684,12 @@ export async function bulkImportFromFolder(
         : await fileToBase64WithProcessing(file, file.name);
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
+      
+      // 服の場合は透過画像も保存
+      if (targetType === 'clothing') {
+        const transparentBase64 = await processChromaKeyTransparent(base64);
+        await saveImageToStorage(`${id}_transparent`, transparentBase64);
+      }
       
       if (targetType === 'dolls') {
         const doll = createDollData(id, name, base64);
