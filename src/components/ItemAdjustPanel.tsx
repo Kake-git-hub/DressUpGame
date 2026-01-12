@@ -392,12 +392,24 @@ export function ItemAdjustPanel({
         // ドール中心位置を計算（PixiEngineと同じ計算: 利用可能領域内の%位置）
         const dollCenterX = availableX + (availableWidth * dollTransform.x) / 100;
         const dollCenterY = (canvasHeight * dollTransform.y) / 100;
-        // movableアイテムの場合はドロップ位置も考慮
-        const itemOffsetX = item?.movable ? (availableWidth * (item.offsetX ?? 0)) / 100 : 0;
-        const itemOffsetY = item?.movable ? (canvasHeight * (item.offsetY ?? 0)) / 100 : 0;
-        // 基準位置 = ドール中心 + movableオフセット + 調整オフセット
-        const baseX = dollCenterX + itemOffsetX + offsetX;
-        const baseY = dollCenterY + itemOffsetY + offsetY;
+        
+        // アイテムの基準位置を計算
+        let baseX: number;
+        let baseY: number;
+        
+        if (item?.movable && ((item.offsetX ?? 0) !== 0 || (item.offsetY ?? 0) !== 0)) {
+          // movableアイテム: 中央(50%) + offset で計算（PixiEngineと同じ）
+          baseX = availableX + (availableWidth * (50 + (item.offsetX ?? 0))) / 100;
+          baseY = (canvasHeight * (50 + (item.offsetY ?? 0))) / 100;
+        } else {
+          // 通常アイテム: ドール中心
+          baseX = dollCenterX;
+          baseY = dollCenterY;
+        }
+        
+        // 調整オフセットを適用
+        baseX += offsetX;
+        baseY += offsetY;
 
         return (
           <div
