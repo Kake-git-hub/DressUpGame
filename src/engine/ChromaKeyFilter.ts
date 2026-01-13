@@ -97,14 +97,20 @@ void main(void)
     greenScore = max(greenScore, hueBasedScore);
     
     // 3. 純粋な緑判定（G が非常に高く、R と B が低い場合）
-    float pureGreen = step(0.7, color.g) * step(color.r, 0.4) * step(color.b, 0.4);
+    // 閾値を厳しくして白/銀色を保護
+    float pureGreen = step(0.75, color.g) * step(color.r, 0.35) * step(color.b, 0.35);
     greenScore = max(greenScore, pureGreen * 0.95);
     
     // 肌色保護を適用（赤みがある部分はスコアを下げる）
     greenScore = greenScore * (1.0 - skinProtect * 0.9);
     
-    // スムージングを適用したアルファ値を計算
-    float alpha = 1.0 - smoothstep(0.25, 0.25 + uSmoothing, greenScore);
+    // 白/銀色保護（明るい色で彩度が低い場合は透過しない）
+    float brightness = (color.r + color.g + color.b) / 3.0;
+    float whiteSilverProtect = smoothstep(0.5, 0.7, brightness) * smoothstep(0.4, 0.2, saturation);
+    greenScore = greenScore * (1.0 - whiteSilverProtect * 0.8);
+    
+    // スムージングを適用したアルファ値を計算（より滑らかなエッジ）
+    float alpha = 1.0 - smoothstep(0.3, 0.3 + uSmoothing, greenScore);
     
     // スピル除去（エッジ部分の緑被りを軽減）
     vec3 despilledColor = color.rgb;
@@ -147,8 +153,8 @@ export class ChromaKeyFilter extends Filter {
   constructor(options: ChromaKeyFilterOptions = {}) {
     const {
       keyColor = 0x00FF00, // デフォルト: 緑
-      threshold = 0.4,
-      smoothing = 0.15,
+      threshold = 0.35,    // 少し厳しく（白/銀色保護）
+      smoothing = 0.25,    // エッジを滑らかに
       spillRemoval = 0.8,
     } = options;
 
