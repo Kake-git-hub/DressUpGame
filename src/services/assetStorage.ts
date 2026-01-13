@@ -139,22 +139,25 @@ export function processChromaKeyTransparent(dataUrl: string): Promise<string> {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
-      // グリーンバック判定（明るい緑: #00B140付近、中間緑、暗い緑）
+      // グリーンバック判定（より厳密な判定 + エッジのソフト透過）
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
 
         // 緑が支配的かどうかを判定
-        // 条件: Gが一番大きく、GがRとBの両方より十分大きい
         const greenDominance = g - Math.max(r, b);
-        const isGreenDominant = greenDominance > 30; // 緑が30以上優勢
-        const isNotTooGray = Math.max(r, g, b) - Math.min(r, g, b) > 40; // 彩度がある程度ある
-        const isGreenRange = g > 60 && g < 255; // 緑が中程度以上
-
-        if (isGreenDominant && isNotTooGray && isGreenRange) {
-          // 透明にする
+        const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+        
+        // 純粋なグリーンバック: 緑が非常に優勢で彩度が高い
+        // 閾値を厳しくして白/銀色を保護
+        if (greenDominance > 50 && saturation > 60 && g > 80) {
+          // 完全に透明
           data[i + 3] = 0;
+        } else if (greenDominance > 35 && saturation > 45 && g > 60) {
+          // エッジ部分: ソフトな透過（ギザギザ軽減）
+          const alpha = Math.max(0, 255 - (greenDominance - 35) * 10);
+          data[i + 3] = Math.min(data[i + 3], alpha);
         }
       }
 
