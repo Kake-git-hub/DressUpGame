@@ -2,7 +2,7 @@
 
 子供向け2D着せ替えWebゲーム
 
-## 📌 現在のバージョン: v0.9.5
+## 📌 現在のバージョン: v0.9.6
 
 ## ✨ 特徴
 
@@ -11,10 +11,11 @@
 - 📱 iPad/タブレット対応（タッチ操作・ピンチズーム）
 - 🔄 リセットボタンで全部脱がせる
 - 🖼️ 背景切り替え機能
-- 📐 ドール・アイテム位置調整機能
+- 📐 ドール・アイテム位置調整機能（リアルタイムプレビュー付き）
 - 📦 ZIPプリセットインポート対応
 - 📸 スクリーンショット保存機能
-- 🟩 グリーンバック自動透過（クロマキー常時ON）
+- 🟩 グリーンバック自動透過（クロマキー常時ON、GPU高速処理）
+- 🔁 `_overlap`アイテムの重複装備対応
 
 ---
 
@@ -125,6 +126,9 @@ clothing/
 | フラグ | 説明 | 例 |
 |--------|------|-----|
 | `_movable` | 自由配置可能にする | `10_1_かお_movable/` |
+| `_overlap` | 同カテゴリで重複装備可能 | `11_10_アクセサリー_overlap/` |
+
+**フラグは併用可能**: `11_10_アクセサリー_movable_overlap/`
 
 ### 定義済みカテゴリ
 
@@ -150,12 +154,14 @@ clothing/
 
 ### 画像サイズ一覧
 
-| 種類 | 推奨サイズ | アスペクト比 | 形式 |
-|------|-----------|-------------|------|
-| ドール | **512×1024px** | 1:2（縦長） | PNG（透過） |
-| 服アイテム | **512×1024px** | ドールと同じ | PNG（透過） |
-| 背景 | **1920×1080px** | 16:9（横長） | PNG/JPEG |
-| サムネイル | **64×64px** | 1:1（正方形） | PNG |
+| 種類 | 推奨サイズ | 最大サイズ | 形式 |
+|------|-----------|-----------|------|
+| ドール | **800〜1200px** | 2000px | PNG（透過） |
+| 服アイテム | **800〜1200px** | 2000px | PNG（透過） |
+| 背景 | **1200〜1600px** | 1920px | PNG/JPEG |
+| サムネイル | **64×64px** | 128px | PNG |
+
+> ⚠️ **高画質すぎる画像は非推奨**: 最終表示サイズが400〜600px程度のため、4000px超の画像はメモリ消費・処理遅延の原因になります。1000px前後が最適です。
 
 ### 詳細仕様
 
@@ -425,6 +431,15 @@ interface EquippedItem extends ClothingItemData {
 }
 ```
 
+### クロマキー処理の二重構造
+
+| 処理 | 場所 | 用途 |
+|------|------|------|
+| **CPU処理** | `assetStorage.ts` → `processChromaKeyTransparent()` | インポート時、プレビュー用キャッシュ生成 |
+| **GPU処理** | `ChromaKeyFilter.ts` | 通常表示時、リアルタイム処理 |
+
+両方で閾値を調整済み（白/銀色保護、エッジ滑らか化）。
+
 ### PixiJS描画フロー
 
 1. `AvatarCanvas` マウント時に `PixiEngine.init()`
@@ -436,14 +451,68 @@ interface EquippedItem extends ClothingItemData {
 
 ## 📝 更新履歴
 
+- **v0.9.6** - アイテム調整リアルタイムプレビュー、`_overlap`重複装備、iPad復帰対応、クロマキー品質改善（白/銀色保護、エッジ滑らか化）
 - **v0.9.5** - クロマキー常時ON、緑残りの改善、スクショ中央化、リセットで背景もクリア、設定ボタン右下へ、画質改善
 - **v0.9.4** - クロマキー（グリーンバック透過）機能追加
-
 - **v0.9.3** - ドール回転機能削除、スクリーンショット修正
 - **v0.9.2** - ドール回転追加、調整UI簡略化、初期位置修正
 - **v0.9.1** - ItemAdjustPanel統合（ドール＋アイテム調整）
 - **v0.9.0** - アイテム調整機能追加
 - **v0.6.0** - movableアイテム、レイヤー順制御
+
+---
+
+## 🔄 開発引き継ぎ情報
+
+### 現在の状態
+
+- **GitHub**: https://github.com/Kake-git-hub/DressUpGame.git
+- **ブランチ**: main
+- **デプロイ**: GitHub Pages（自動）
+
+### 主要ファイル
+
+| ファイル | 役割 |
+|----------|------|
+| `src/App.tsx` | メインアプリ、状態管理、UI統合 |
+| `src/engine/PixiEngine.ts` | PixiJS描画エンジン、ドール/服/背景の描画 |
+| `src/engine/ChromaKeyFilter.ts` | GPUクロマキーシェーダー（GLSL） |
+| `src/services/assetStorage.ts` | IndexedDB/LocalStorage、画像処理、インポート |
+| `src/components/ItemAdjustPanel.tsx` | アイテム/ドール位置調整UI |
+| `src/components/AvatarCanvas.tsx` | PixiJSキャンバスのReactラッパー |
+| `src/hooks/useDressUp.ts` | 着せ替え状態管理（equip/unequip） |
+| `src/types/index.ts` | 型定義、カテゴリマッピング、フォルダ名パース |
+
+### 処理フロー
+
+```
+画像インポート → assetStorage.ts
+  ├─ 右下ウォーターマーク除去（clearRect）
+  ├─ クロマキー透過処理（CPUピクセル処理）→ _transparent キャッシュ保存
+  └─ IndexedDB保存
+
+描画 → PixiEngine.ts
+  ├─ 背景 → backgroundContainer
+  ├─ ドール → dollContainer（ChromaKeyFilter適用）
+  └─ 服 → clothingContainer（ChromaKeyFilter適用、layerOrder順）
+
+アイテム調整 → ItemAdjustPanel.tsx
+  ├─ ローカルstate（offsetX/Y, scale, rotation）
+  ├─ CSSトランスフォームでリアルタイムプレビュー（透過キャッシュ画像使用）
+  └─ 完了時のみ親に反映 → equippedItemsを更新
+```
+
+### 未解決の既知の問題
+
+1. **グリーンバックの緑線が微妙に残る** - クロマキー閾値調整で改善したが完璧ではない。元画像の輪郭を明確にするのが根本解決。
+2. **iPad Safari WebGLコンテキストロスト** - visibilitychange対応済みだが、稀に発生する可能性あり。
+
+### 今後の拡張候補
+
+- [ ] インポート時の画像自動リサイズ（2000px超を縮小）
+- [ ] アイテムのアウトライン表示オプション
+- [ ] カテゴリの折りたたみUI
+- [ ] 複数プリセットの切り替え
 
 ---
 
