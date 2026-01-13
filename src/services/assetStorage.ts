@@ -293,10 +293,12 @@ export function saveCustomClothing(items: ClothingItemData[]): void {
     type: i.type,
     baseZIndex: i.baseZIndex,
     layerOrder: i.layerOrder,
+    categoryOrder: i.categoryOrder,
     position: i.position,
     anchorType: i.anchorType,
     dollId: i.dollId,
     movable: i.movable,
+    allowOverlap: i.allowOverlap,
     hasThumbnail: !!i.thumbnailUrl, // サムネイルがあるかフラグ
     isCustom: true,
     // imageUrl, thumbnailUrlは保存しない（IndexedDBから復元）
@@ -785,6 +787,9 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
   const isDefaultMovable = mapping?.movable ?? false;
   const movable = hasMovableSuffix || isDefaultMovable;
   
+  // overlap判定: categoryRawに_overlapがあるか
+  const allowOverlap = rawLower.includes('_overlap');
+  
   return {
     id,
     name,
@@ -797,6 +802,7 @@ function createClothingData(id: string, name: string, type: ClothingType, base64
     movable,
     layerOrder,
     categoryOrder,
+    allowOverlap,
   };
 }
 

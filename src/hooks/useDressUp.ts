@@ -77,11 +77,18 @@ export function useDressUp(
     return createInitialState(initialItems, defaultUnderwear);
   });
 
-  // 服を着せる（同じタイプの服は置き換え）
+  // 服を着せる（同じタイプの服は置き換え、ただしallowOverlap=trueのアイテムは重複可能）
   const equipItem = useCallback((item: ClothingItemData) => {
     setState((prev) => {
-      // 同じタイプのアイテムを除去
-      const filteredItems = prev.equippedItems.filter((e) => e.type !== item.type);
+      let filteredItems: EquippedItem[];
+      
+      if (item.allowOverlap) {
+        // allowOverlap=trueの場合：同じIDのアイテムのみ除去（同じアイテムの再装備）
+        filteredItems = prev.equippedItems.filter((e) => e.id !== item.id);
+      } else {
+        // 通常：同じタイプのアイテムを除去
+        filteredItems = prev.equippedItems.filter((e) => e.type !== item.type);
+      }
 
       // 新しいアイテムを追加
       const newEquippedItem: EquippedItem = {

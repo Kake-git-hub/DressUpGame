@@ -84,17 +84,17 @@ export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string
 // フォルダ名から番号とラベルを抽出
 // フォーマット1: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス" → layerOrder: 1, categoryOrder: 2, label: "ドレス"）
 // フォーマット2: 「番号_ラベル」（例: "1_くつした" → layerOrder: 1, categoryOrder: undefined, label: "くつした"）
-// _movableサフィックスは除去
+// _movable/_overlapサフィックスは除去
 export function parseFolderName(folderName: string): { 
   order: number | undefined; 
   categoryOrder: number | undefined;
   label: string 
 } {
-  // _movable サフィックスを除去
-  const withoutMovable = folderName.replace(/_movable/gi, '');
+  // _movable / _overlap サフィックスを除去
+  const withoutSuffix = folderName.replace(/_movable/gi, '').replace(/_overlap/gi, '');
   
   // 新フォーマット: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス"）
-  const newMatch = withoutMovable.match(/^(\d+)_(\d+)_(.+)$/);
+  const newMatch = withoutSuffix.match(/^(\d+)_(\d+)_(.+)$/);
   if (newMatch) {
     return {
       order: parseInt(newMatch[1], 10),
@@ -104,7 +104,7 @@ export function parseFolderName(folderName: string): {
   }
   
   // 旧フォーマット: 「番号_ラベル」（例: "1_くつした"）
-  const oldMatch = withoutMovable.match(/^(\d+)_(.+)$/);
+  const oldMatch = withoutSuffix.match(/^(\d+)_(.+)$/);
   if (oldMatch) {
     return {
       order: parseInt(oldMatch[1], 10),
@@ -117,7 +117,7 @@ export function parseFolderName(folderName: string): {
   return {
     order: undefined,
     categoryOrder: undefined,
-    label: withoutMovable,
+    label: withoutSuffix,
   };
 }
 
@@ -143,8 +143,13 @@ export function isMovableCategory(folderName: string): boolean {
   // _movable サフィックスがある場合
   if (lower.includes('_movable')) return true;
   // デフォルトで movable なカテゴリ
-  const baseName = lower.replace(/_movable/gi, '');
+  const baseName = lower.replace(/_movable/gi, '').replace(/_overlap/gi, '');
   return DEFAULT_CATEGORY_MAP[baseName]?.movable ?? false;
+}
+
+// フォルダ名から overlap（重複可能）フラグを判定
+export function isOverlapCategory(folderName: string): boolean {
+  return folderName.toLowerCase().includes('_overlap');
 }
 
 // レガシー互換: 静的カテゴリリスト
@@ -181,6 +186,8 @@ export interface ClothingItemData {
   layerOrder?: number;
   // カテゴリ並び順（フォルダ名の2番目の番号から取得、メニュー表示順）
   categoryOrder?: number;
+  // 重複装備可能フラグ（フォルダ名に_overlapがあると有効）
+  allowOverlap?: boolean;
 }
 
 // 装備中のアイテム（動的zIndex付き）
