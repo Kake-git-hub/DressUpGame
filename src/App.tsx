@@ -480,6 +480,7 @@ function App() {
                 menuOffset={MENU_WIDTH}
                 rightOffset={RIGHT_BUTTON_WIDTH}
                 chromaKeyEnabled={chromaKeyEnabled}
+                adjustingItemId={isAdjustingItem ? adjustingItemId : null}
               />
             )}
 

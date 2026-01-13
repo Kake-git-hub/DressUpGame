@@ -432,8 +432,6 @@ export function ItemAdjustPanel({
               transformOrigin: 'center center',
               pointerEvents: 'none',
               zIndex: 50,
-              opacity: 0.85,
-              filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
             }}
           >
             <img

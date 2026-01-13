@@ -25,6 +25,7 @@ interface AvatarCanvasProps {
   menuOffset?: number; // メニュー幅オフセット（左側）
   rightOffset?: number; // 右ボタン領域オフセット（右側）
   chromaKeyEnabled?: boolean; // クロマキー有効フラグ
+  adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
   onCanvasReady?: () => void;
 }
 
@@ -40,6 +41,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   menuOffset = 0,
   rightOffset = 60,
   chromaKeyEnabled = false,
+  adjustingItemId = null,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,9 +148,13 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   // 装備アイテムが変わったら再描画
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.drawClothing(equippedItems);
+      // 調整中のアイテムは非表示にする
+      const itemsToRender = adjustingItemId
+        ? equippedItems.filter(item => item.id !== adjustingItemId)
+        : equippedItems;
+      engineRef.current.drawClothing(itemsToRender);
     }
-  }, [equippedItems, isReady]);
+  }, [equippedItems, adjustingItemId, isReady]);
 
   // カスタム顔が変わったら更新
   useEffect(() => {
