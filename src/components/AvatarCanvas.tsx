@@ -221,38 +221,65 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
   // iPad等でバックグラウンドから復帰した時に再描画（WebGLコンテキストロスト対策）
   useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && isReady && engineRef.current?.isInitialized()) {
-        // 少し待ってから再描画（iPadでのWebGL復帰待ち）
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        if (!engineRef.current?.isInitialized()) return;
-        
-        // 再描画をトリガー
-        console.log('画面復帰：再描画開始');
-        try {
-          if (backgroundImageUrl) {
-            await engineRef.current.setBackground(backgroundImageUrl);
-          }
-          await engineRef.current.drawDoll({
-            width: 200,
-            height: 300,
-            imageUrl: dollImageUrl || '',
-          });
-          await engineRef.current.drawClothing(equippedItems);
-          if (customFaceUrl) {
-            await engineRef.current.setCustomFace(customFaceUrl);
-          }
-          engineRef.current.forceRedraw();
-        } catch (error) {
-          console.error('画面復帰時の再描画エラー:', error);
+    // 再描画処理（共通）
+    const redrawAll = async () => {
+      if (!isReady || !engineRef.current?.isInitialized()) return;
+      
+      // 少し待ってから再描画（WebGL復帰待ち）
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      if (!engineRef.current?.isInitialized()) return;
+      
+      console.log('画面復帰：再描画開始');
+      try {
+        if (backgroundImageUrl) {
+          await engineRef.current.setBackground(backgroundImageUrl);
         }
+        await engineRef.current.drawDoll({
+          width: 200,
+          height: 300,
+          imageUrl: dollImageUrl || '',
+        });
+        await engineRef.current.drawClothing(equippedItems);
+        if (customFaceUrl) {
+          await engineRef.current.setCustomFace(customFaceUrl);
+        }
+        engineRef.current.forceRedraw();
+      } catch (error) {
+        console.error('画面復帰時の再描画エラー:', error);
       }
     };
 
+    // visibilitychange（Chrome/Firefox用）
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        redrawAll();
+      }
+    };
+
+    // pageshow（Safari bfcache対策）
+    const handlePageShow = (event: PageTransitionEvent) => {
+      // persisted=true はbfcacheから復元された場合
+      if (event.persisted) {
+        console.log('Safari bfcache復元検出');
+        redrawAll();
+      }
+    };
+
+    // focus（Safari追加対策：別アプリから戻った時）
+    const handleFocus = () => {
+      // Safariでは別アプリから戻った時にvisibilitychangeが発火しないことがある
+      redrawAll();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('focus', handleFocus);
+    
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [isReady, backgroundImageUrl, dollImageUrl, equippedItems, customFaceUrl]);
 

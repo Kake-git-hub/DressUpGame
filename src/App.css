@@ -11,6 +11,15 @@
   --background-color: #fff5f5;
   --text-color: #333;
   --shadow-color: rgba(0, 0, 0, 0.1);
+  /* メニュー高さ用ビューポート変数（フォールバック） */
+  --menu-vh: 100vh;
+}
+
+/* Safari 15.4+ dvh対応 */
+@supports (height: 100dvh) {
+  :root {
+    --menu-vh: 100dvh;
+  }
 }
 
 /* リセット */

@@ -363,7 +363,8 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'row',
     height: '100%',
-    maxHeight: 'calc(100dvh - 16px)', // iPad向け：dvh使用＋余白確保
+    // Safari対応：vhフォールバック + dvh（CSS変数で上書き）
+    maxHeight: 'calc(var(--menu-vh, 100vh) - 24px)',
   },
   container: {
     backgroundColor: '#f8f9fa',
