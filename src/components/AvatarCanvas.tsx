@@ -112,6 +112,32 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
         // コールバック呼び出し
         onCanvasReady?.();
+
+        // コンテキストロスト時の再描画コールバックを設定
+        engine.setContextLostCallback(async () => {
+          // キャンセルされていたら処理を中止
+          if (cancelled || !engineRef.current?.isInitialized()) return;
+          
+          // 全コンテンツを再描画
+          console.log('WebGLコンテキスト復元：再描画開始');
+          try {
+            if (backgroundImageUrl) {
+              await engineRef.current.setBackground(backgroundImageUrl);
+            }
+            await engineRef.current.drawDoll({
+              width: 200,
+              height: 300,
+              imageUrl: dollImageUrl || '',
+            });
+            await engineRef.current.drawClothing(equippedItems);
+            if (customFaceUrl) {
+              await engineRef.current.setCustomFace(customFaceUrl);
+            }
+            engineRef.current.forceRedraw();
+          } catch (error) {
+            console.error('WebGLコンテキスト復元時の再描画エラー:', error);
+          }
+        });
       } catch (error) {
         console.error('PixiJS初期化エラー:', error);
         engine.destroy();
@@ -195,20 +221,31 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
   // iPad等でバックグラウンドから復帰した時に再描画（WebGLコンテキストロスト対策）
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible' && isReady && engineRef.current?.isInitialized()) {
+        // 少し待ってから再描画（iPadでのWebGL復帰待ち）
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (!engineRef.current?.isInitialized()) return;
+        
         // 再描画をトリガー
-        if (backgroundImageUrl) {
-          engineRef.current.setBackground(backgroundImageUrl);
-        }
-        engineRef.current.drawDoll({
-          width: 200,
-          height: 300,
-          imageUrl: dollImageUrl || '',
-        });
-        engineRef.current.drawClothing(equippedItems);
-        if (customFaceUrl) {
-          engineRef.current.setCustomFace(customFaceUrl);
+        console.log('画面復帰：再描画開始');
+        try {
+          if (backgroundImageUrl) {
+            await engineRef.current.setBackground(backgroundImageUrl);
+          }
+          await engineRef.current.drawDoll({
+            width: 200,
+            height: 300,
+            imageUrl: dollImageUrl || '',
+          });
+          await engineRef.current.drawClothing(equippedItems);
+          if (customFaceUrl) {
+            await engineRef.current.setCustomFace(customFaceUrl);
+          }
+          engineRef.current.forceRedraw();
+        } catch (error) {
+          console.error('画面復帰時の再描画エラー:', error);
         }
       }
     };

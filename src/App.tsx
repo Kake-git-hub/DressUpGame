@@ -387,10 +387,10 @@ function App() {
   );
 
   // ドール位置・スケール調整
-  // x: 背景中央（50%）
+  // x: 背景中央（50%）、y: 背景中心に合わせて45%（ドールは足元基準ではなく中央基準）
   const [dollTransform, setDollTransform] = useState<DollTransform>(() => {
     const saved = loadDollTransform();
-    return saved ?? { x: 50, y: 50, scale: 1.0 };
+    return saved ?? { x: 50, y: 45, scale: 1.0 };
   });
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 

@@ -15,11 +15,12 @@ export class PixiEngine {
   private initialized = false;
   private destroyed = false;
   private customFaceUrl: string | null = null;
-  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、利用可能領域の中央
+  private dollTransform: DollTransform = { x: 50, y: 45, scale: 1.0 }; // %単位、利用可能領域の中央（Y=45%で背景中心に合わせる）
   private menuOffset = 0; // メニュー幅オフセット（左側）
   private rightOffset = 60; // 右ボタン領域のオフセット（右側）
   private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
   private chromaKeyEnabled = false; // クロマキー有効フラグ
+  private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -74,6 +75,10 @@ export class PixiEngine {
       // クロマキーを常時ONにする
       this.setChromaKeyEnabled(true);
 
+      // キャンバス参照を保存（コンテキストロスト検知用）
+      // WebGLコンテキストロスト対策（iPad等でバックグラウンドから復帰時）
+      this.setupContextLostHandler(canvas);
+
       this.initialized = true;
     } catch (error) {
       console.error('PixiJS初期化エラー:', error);
@@ -95,6 +100,36 @@ export class PixiEngine {
         // 無視
       }
       this.app = null;
+    }
+  }
+
+  // WebGLコンテキストロストのハンドリング設定
+  private setupContextLostHandler(canvas: HTMLCanvasElement): void {
+    // コンテキストが失われた時
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      console.warn('WebGLコンテキストがロストしました');
+    });
+
+    // コンテキストが復元された時
+    canvas.addEventListener('webglcontextrestored', () => {
+      console.log('WebGLコンテキストが復元されました');
+      // コールバックがあれば呼び出し
+      if (this.contextLostCallback) {
+        this.contextLostCallback();
+      }
+    });
+  }
+
+  // コンテキストロスト時のコールバックを設定
+  setContextLostCallback(callback: () => void): void {
+    this.contextLostCallback = callback;
+  }
+
+  // 強制的に再描画を要求（コンテキスト復元後等に使用）
+  forceRedraw(): void {
+    if (this.app && this.initialized && !this.destroyed) {
+      this.app.render();
     }
   }
 
