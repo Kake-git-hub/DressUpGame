@@ -29,6 +29,7 @@ import {
   loadCurrentBackgroundId,
 } from './services/stateStorage';
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform, Position } from './types';
+import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
@@ -387,10 +388,10 @@ function App() {
   );
 
   // ドール位置・スケール調整
-  // x: 背景中央（50%）、y: 背景中心に合わせて45%（ドールは足元基準ではなく中央基準）
+  // デフォルトは背景中央（DEFAULT_DOLL_TRANSFORMを使用）
   const [dollTransform, setDollTransform] = useState<DollTransform>(() => {
     const saved = loadDollTransform();
-    return saved ?? { x: 50, y: 45, scale: 1.0 };
+    return saved ?? DEFAULT_DOLL_TRANSFORM;
   });
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 

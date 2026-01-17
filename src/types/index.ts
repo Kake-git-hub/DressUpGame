@@ -323,6 +323,13 @@ export interface DollTransform {
   scale: number;    // スケール（1.0 = 100%）
 }
 
+// ドールのデフォルト初期位置（全体で統一）
+export const DEFAULT_DOLL_TRANSFORM: DollTransform = {
+  x: 50,     // 背景中央
+  y: 50,     // 背景中央
+  scale: 1.0,
+};
+
 // ゲーム状態
 export interface GameState {
   phase: 'doll-select' | 'background-select' | 'dress-up' | 'complete';

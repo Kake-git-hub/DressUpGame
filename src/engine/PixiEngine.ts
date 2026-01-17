@@ -15,7 +15,7 @@ export class PixiEngine {
   private initialized = false;
   private destroyed = false;
   private customFaceUrl: string | null = null;
-  private dollTransform: DollTransform = { x: 50, y: 45, scale: 1.0 }; // %単位、利用可能領域の中央（Y=45%で背景中心に合わせる）
+  private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、背景領域の中央
   private menuOffset = 0; // メニュー幅オフセット（左側）
   private rightOffset = 60; // 右ボタン領域のオフセット（右側）
   private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ

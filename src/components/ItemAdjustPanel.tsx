@@ -8,6 +8,7 @@
  */
 import { useCallback, useState, useEffect, useRef } from 'react';
 import type { EquippedItem, DollTransform } from '../types';
+import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { getTransparentImage } from '../services/assetStorage';
 
@@ -168,10 +169,10 @@ export function ItemAdjustPanel({
   // 全リセット
   const handleResetAll = useCallback(() => {
     if (isDollMode) {
-      // ドールモード: 中央に戻す
-      setDollX(50);
-      setDollY(50);
-      setDollScale(1.0);
+      // ドールモード: デフォルト初期位置に戻す
+      setDollX(DEFAULT_DOLL_TRANSFORM.x);
+      setDollY(DEFAULT_DOLL_TRANSFORM.y);
+      setDollScale(DEFAULT_DOLL_TRANSFORM.scale);
     } else {
       // アイテムモード
       setOffsetX(0);
