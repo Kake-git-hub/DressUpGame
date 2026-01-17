@@ -36,6 +36,7 @@ export interface ItemAdjustment {
   adjustOffsetY?: number;  // 位置オフセットY（ピクセル）
   adjustScale?: number;    // スケール（1.0がデフォルト）
   adjustRotation?: number; // 回転（度）
+  layerAdjust?: number;    // レイヤー調整（+で手前、-で奥）
 }
 
 export interface UseDressUpReturn {
@@ -122,12 +123,13 @@ export function useDressUp(
 
   // 装備中のアイテム一覧を取得（レンダリング順にソート）
   // layerOrder（フォルダ名の番号）を最優先でソート（小さい方が下＝先に描画）
+  // layerAdjust（一時的なレイヤー調整）を加算して最終レイヤー値を決定
   // layerOrderがない場合はbaseZIndexを使用、最後にequipOrderで安定ソート
   const getEquippedItems = useCallback((): EquippedItem[] => {
     return [...state.equippedItems].sort((a, b) => {
-      // layerOrderがある場合はそれを最優先
-      const aLayer = a.layerOrder ?? a.baseZIndex ?? 0;
-      const bLayer = b.layerOrder ?? b.baseZIndex ?? 0;
+      // layerOrderがある場合はそれを最優先、layerAdjustを加算
+      const aLayer = (a.layerOrder ?? a.baseZIndex ?? 0) + (a.layerAdjust ?? 0);
+      const bLayer = (b.layerOrder ?? b.baseZIndex ?? 0) + (b.layerAdjust ?? 0);
       if (aLayer !== bLayer) {
         return aLayer - bLayer; // 小さい方が下（先に描画）
       }
@@ -167,6 +169,7 @@ export function useDressUp(
               adjustOffsetY: adjustment.adjustOffsetY ?? item.adjustOffsetY,
               adjustScale: adjustment.adjustScale ?? item.adjustScale,
               adjustRotation: adjustment.adjustRotation ?? item.adjustRotation,
+              layerAdjust: adjustment.layerAdjust ?? item.layerAdjust,
             }
           : item
       ),

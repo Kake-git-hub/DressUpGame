@@ -76,6 +76,7 @@ export function ItemAdjustPanel({
   const [offsetY, setOffsetY] = useState(item?.adjustOffsetY ?? 0);
   const [scale, setScale] = useState(item?.adjustScale ?? 1.0);
   const [rotation, setRotation] = useState(item?.adjustRotation ?? 0);
+  const [layerAdjust, setLayerAdjust] = useState(item?.layerAdjust ?? 0);
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -118,8 +119,9 @@ export function ItemAdjustPanel({
       setOffsetY(item.adjustOffsetY ?? 0);
       setScale(item.adjustScale ?? 1.0);
       setRotation(item.adjustRotation ?? 0);
+      setLayerAdjust(item.layerAdjust ?? 0);
     }
-  }, [item?.id, item?.adjustOffsetX, item?.adjustOffsetY, item?.adjustScale, item?.adjustRotation]);
+  }, [item?.id, item?.adjustOffsetX, item?.adjustOffsetY, item?.adjustScale, item?.adjustRotation, item?.layerAdjust]);
 
   // ドールTransformが変わったらローカルステートも更新
   useEffect(() => {
@@ -158,10 +160,11 @@ export function ItemAdjustPanel({
         adjustOffsetY: offsetY,
         adjustScale: scale,
         adjustRotation: rotation,
+        layerAdjust: layerAdjust,
       });
     }
     onCloseRef.current();
-  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation]);
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
@@ -179,8 +182,19 @@ export function ItemAdjustPanel({
       setOffsetY(0);
       setScale(1.0);
       setRotation(0);
+      setLayerAdjust(0);
     }
   }, [isDollMode]);
+
+  // レイヤーを手前に
+  const handleLayerUp = useCallback(() => {
+    setLayerAdjust((prev) => Math.min(prev + 5, 50));
+  }, []);
+
+  // レイヤーを奥に
+  const handleLayerDown = useCallback(() => {
+    setLayerAdjust((prev) => Math.max(prev - 5, -50));
+  }, []);
 
   // タッチ開始
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -515,6 +529,31 @@ export function ItemAdjustPanel({
           ↺
         </button>
       </div>
+
+      {/* レイヤー調整ボタン（アイテムモードのみ、左下） */}
+      {!isDollMode && (
+        <div className="item-adjust-layer-buttons">
+          <button 
+            className="item-adjust-layer-btn" 
+            onClick={handleLayerUp} 
+            title="手前へ"
+          >
+            <span className="layer-icon">⬆</span>
+            <span className="layer-label">手前</span>
+          </button>
+          <button 
+            className="item-adjust-layer-btn" 
+            onClick={handleLayerDown} 
+            title="奥へ"
+          >
+            <span className="layer-icon">⬇</span>
+            <span className="layer-label">奥</span>
+          </button>
+          {layerAdjust !== 0 && (
+            <span className="layer-value">{layerAdjust > 0 ? `+${layerAdjust}` : layerAdjust}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

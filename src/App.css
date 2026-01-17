@@ -481,6 +481,60 @@ textarea {
   transform: scale(0.9);
 }
 
+/* レイヤー調整ボタン（左下） */
+.item-adjust-layer-buttons {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 300;
+  align-items: flex-start;
+}
+
+.item-adjust-layer-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #ddd;
+  border-radius: 24px;
+  font-size: 0.9rem;
+  color: #555;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.item-adjust-layer-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 1);
+}
+
+.item-adjust-layer-btn:active {
+  transform: scale(0.95);
+}
+
+.item-adjust-layer-btn .layer-icon {
+  font-size: 1rem;
+}
+
+.item-adjust-layer-btn .layer-label {
+  font-weight: 500;
+}
+
+.item-adjust-layer-buttons .layer-value {
+  padding: 4px 10px;
+  background: rgba(255, 105, 180, 0.2);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  color: #ff69b4;
+  font-weight: bold;
+}
+
 /* 前後切り替えボタン（下部中央） */
 .item-adjust-nav-buttons {
   position: fixed;

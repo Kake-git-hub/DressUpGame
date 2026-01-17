@@ -200,7 +200,8 @@ export interface EquippedItem extends ClothingItemData {
   adjustOffsetX?: number;
   adjustOffsetY?: number;
   adjustScale?: number;    // 1.0が等倍
-  adjustRotation?: number; // ラジアン
+  adjustRotation?: number; // 回転（度）
+  layerAdjust?: number;    // レイヤー調整値（一時的な前後変更）
 }
 
 // 背景画像の定義
