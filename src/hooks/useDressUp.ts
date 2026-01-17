@@ -37,6 +37,7 @@ export interface ItemAdjustment {
   adjustScale?: number;    // スケール（1.0がデフォルト）
   adjustRotation?: number; // 回転（度）
   layerAdjust?: number;    // レイヤー調整（+で手前、-で奥）
+  colorHue?: number;       // 色相調整（-180〜180度）
 }
 
 export interface UseDressUpReturn {
@@ -170,6 +171,7 @@ export function useDressUp(
               adjustScale: adjustment.adjustScale ?? item.adjustScale,
               adjustRotation: adjustment.adjustRotation ?? item.adjustRotation,
               layerAdjust: adjustment.layerAdjust ?? item.layerAdjust,
+              colorHue: adjustment.colorHue ?? item.colorHue,
             }
           : item
       ),

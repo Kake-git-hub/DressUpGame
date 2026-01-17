@@ -202,6 +202,7 @@ export interface EquippedItem extends ClothingItemData {
   adjustScale?: number;    // 1.0が等倍
   adjustRotation?: number; // 回転（度）
   layerAdjust?: number;    // レイヤー調整値（一時的な前後変更）
+  colorHue?: number;       // 色相調整値（-180〜180度）
 }
 
 // 背景画像の定義

@@ -2,7 +2,7 @@
  * PixiJS描画エンジン
  * ドールと服のレンダリングを担当
  */
-import { Application, Container, Graphics, Sprite, Assets } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter } from 'pixi.js';
 import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 import { ChromaKeyFilter } from './ChromaKeyFilter';
 import { EdgeTrimFilter } from './EdgeTrimFilter';
@@ -482,13 +482,20 @@ export class PixiEngine {
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-        // フィルタを適用（エッジトリム + クロマキー）
+        // フィルタを適用（エッジトリム + クロマキー + カラー調整）
         const filters = [];
         if (this.edgeTrimEnabled && this.edgeTrimFilter) {
           filters.push(this.edgeTrimFilter);
         }
         if (this.chromaKeyEnabled && this.chromaKeyFilter) {
           filters.push(this.chromaKeyFilter);
+        }
+        // 色相フィルター（colorHueが設定されている場合）
+        const colorHue = (item as EquippedItem).colorHue ?? 0;
+        if (colorHue !== 0) {
+          const hueFilter = new ColorMatrixFilter();
+          hueFilter.hue(colorHue, false);
+          filters.push(hueFilter);
         }
         if (filters.length > 0) {
           clothingSprite.filters = filters;

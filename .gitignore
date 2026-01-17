@@ -31,6 +31,9 @@ coverage/
 # Local preset artifacts (do not commit)
 preset-template.zip
 
+# Local icon source (do not commit)
+public/app-icon.png
+
 # User-generated sample assets under preset-template (keep only template structure/docs)
 preset-template/backgrounds/*.png
 preset-template/backgrounds/*.jpg

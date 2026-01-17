@@ -77,6 +77,7 @@ export function ItemAdjustPanel({
   const [scale, setScale] = useState(item?.adjustScale ?? 1.0);
   const [rotation, setRotation] = useState(item?.adjustRotation ?? 0);
   const [layerAdjust, setLayerAdjust] = useState(item?.layerAdjust ?? 0);
+  const [colorHue, setColorHue] = useState(item?.colorHue ?? 0);
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -120,8 +121,9 @@ export function ItemAdjustPanel({
       setScale(item.adjustScale ?? 1.0);
       setRotation(item.adjustRotation ?? 0);
       setLayerAdjust(item.layerAdjust ?? 0);
+      setColorHue(item.colorHue ?? 0);
     }
-  }, [item?.id, item?.adjustOffsetX, item?.adjustOffsetY, item?.adjustScale, item?.adjustRotation, item?.layerAdjust]);
+  }, [item?.id, item?.adjustOffsetX, item?.adjustOffsetY, item?.adjustScale, item?.adjustRotation, item?.layerAdjust, item?.colorHue]);
 
   // ドールTransformが変わったらローカルステートも更新
   useEffect(() => {
@@ -161,10 +163,11 @@ export function ItemAdjustPanel({
         adjustScale: scale,
         adjustRotation: rotation,
         layerAdjust: layerAdjust,
+        colorHue: colorHue,
       });
     }
     onCloseRef.current();
-  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust]);
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust, colorHue]);
 
   // 位置の範囲（キャンバスサイズの50%まで）
   const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
@@ -183,6 +186,7 @@ export function ItemAdjustPanel({
       setScale(1.0);
       setRotation(0);
       setLayerAdjust(0);
+      setColorHue(0);
     }
   }, [isDollMode]);
 
@@ -442,6 +446,7 @@ export function ItemAdjustPanel({
               transformOrigin: 'center center',
               pointerEvents: 'none',
               zIndex: 50,
+              filter: colorHue !== 0 ? `hue-rotate(${colorHue}deg)` : undefined,
             }}
           >
             <img
@@ -534,6 +539,24 @@ export function ItemAdjustPanel({
           </button>
         )}
       </div>
+
+      {/* 左側の色相スライダー（アイテムモードのみ） */}
+      {!isDollMode && (
+        <div className="item-adjust-hue-slider">
+          <div className="hue-label">🎨</div>
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            value={colorHue}
+            onChange={(e) => setColorHue(Number(e.target.value))}
+            className="hue-slider-vertical"
+            title={`色相: ${colorHue}°`}
+          />
+          <div className="hue-value">{colorHue}°</div>
+        </div>
+      )}
     </div>
   );
 }
