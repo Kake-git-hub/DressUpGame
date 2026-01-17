@@ -186,14 +186,9 @@ export function ItemAdjustPanel({
     }
   }, [isDollMode]);
 
-  // レイヤーを手前に
-  const handleLayerUp = useCallback(() => {
-    setLayerAdjust((prev) => Math.min(prev + 5, 50));
-  }, []);
-
-  // レイヤーを奥に
-  const handleLayerDown = useCallback(() => {
-    setLayerAdjust((prev) => Math.max(prev - 5, -50));
+  // レイヤーを最前面に
+  const handleBringToFront = useCallback(() => {
+    setLayerAdjust(100); // 大きな値で最前面に
   }, []);
 
   // タッチ開始
@@ -520,7 +515,7 @@ export function ItemAdjustPanel({
         );
       })()}
 
-      {/* 右上ボタン（完了・リセット） */}
+      {/* 右上ボタン（完了・リセット・最前面） */}
       <div className="item-adjust-top-buttons">
         <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">
           ✓
@@ -528,32 +523,17 @@ export function ItemAdjustPanel({
         <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">
           ↺
         </button>
+        {/* 最前面ボタン（アイテムモードのみ） */}
+        {!isDollMode && (
+          <button 
+            className={`item-adjust-front-btn ${layerAdjust > 0 ? 'active' : ''}`}
+            onClick={handleBringToFront} 
+            title="最前面に"
+          >
+            ⬆
+          </button>
+        )}
       </div>
-
-      {/* レイヤー調整ボタン（アイテムモードのみ、左下） */}
-      {!isDollMode && (
-        <div className="item-adjust-layer-buttons">
-          <button 
-            className="item-adjust-layer-btn" 
-            onClick={handleLayerUp} 
-            title="手前へ"
-          >
-            <span className="layer-icon">⬆</span>
-            <span className="layer-label">手前</span>
-          </button>
-          <button 
-            className="item-adjust-layer-btn" 
-            onClick={handleLayerDown} 
-            title="奥へ"
-          >
-            <span className="layer-icon">⬇</span>
-            <span className="layer-label">奥</span>
-          </button>
-          {layerAdjust !== 0 && (
-            <span className="layer-value">{layerAdjust > 0 ? `+${layerAdjust}` : layerAdjust}</span>
-          )}
-        </div>
-      )}
     </div>
   );
 }
