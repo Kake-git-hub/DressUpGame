@@ -23,6 +23,7 @@ import {
   saveEquippedItems,
   loadEquippedItems,
   loadDollTransform,
+  saveDollTransform,
   saveCurrentDollId,
   loadCurrentDollId,
   saveCurrentBackgroundId,
@@ -393,6 +394,12 @@ function App() {
     const saved = loadDollTransform();
     return saved ?? DEFAULT_DOLL_TRANSFORM;
   });
+
+  // ドール位置変更時に保存
+  useEffect(() => {
+    saveDollTransform(dollTransform);
+  }, [dollTransform]);
+
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 
   // movableアイテムのドラッグ中プレビュー用

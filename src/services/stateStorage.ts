@@ -9,7 +9,32 @@ const STORAGE_KEYS = {
   DOLL_TRANSFORM: 'dressup_doll_transform',
   CURRENT_DOLL_ID: 'dressup_current_doll_id',
   CURRENT_BACKGROUND_ID: 'dressup_current_background_id',
+  // バージョン管理（古いデータを無効化するため）
+  STATE_VERSION: 'dressup_state_version',
 } as const;
+
+// 現在の状態バージョン（形式変更時にインクリメント）
+const CURRENT_STATE_VERSION = 2;
+
+// バージョンチェック（古いデータをクリア）
+function checkAndMigrateVersion(): void {
+  try {
+    const savedVersion = localStorage.getItem(STORAGE_KEYS.STATE_VERSION);
+    const version = savedVersion ? parseInt(savedVersion, 10) : 0;
+    
+    if (version < CURRENT_STATE_VERSION) {
+      // 古いドール位置データをクリア（新しいデフォルト値を使用させる）
+      localStorage.removeItem(STORAGE_KEYS.DOLL_TRANSFORM);
+      localStorage.setItem(STORAGE_KEYS.STATE_VERSION, String(CURRENT_STATE_VERSION));
+      console.log(`State migrated from version ${version} to ${CURRENT_STATE_VERSION}`);
+    }
+  } catch (error) {
+    console.error('バージョンチェックエラー:', error);
+  }
+}
+
+// 初期化時にバージョンチェック
+checkAndMigrateVersion();
 
 // 装備アイテムを保存
 export function saveEquippedItems(items: EquippedItem[]): void {
