@@ -16,6 +16,7 @@ import {
   restoreBackgroundImages,
   restoreClothingImages,
   clearAllCustomData,
+  type ImportProgress,
 } from '../services/assetStorage';
 
 interface SettingsPanelProps {
@@ -40,6 +41,7 @@ export function SettingsPanel({
   onClothingChange,
 }: SettingsPanelProps) {
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const presetFolderInputRef = useRef<HTMLInputElement>(null);
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,11 +53,14 @@ export function SettingsPanel({
     if (!files || files.length === 0) return;
     
     setIsImporting(true);
+    setImportProgress({ phase: 'parsing', current: 0, total: 1, message: '準備中...' });
     try {
       console.log('=== フォルダ取り込み開始 ===');
       console.log(`選択ファイル数: ${files.length}`);
       
-      const result = await importPresetFromFolder(files);
+      const result = await importPresetFromFolder(files, (progress) => {
+        setImportProgress(progress);
+      });
       
       // 状態を全置換（デフォルト + 新規取り込み分）
       const newDolls = result.presets.items.map(p => p.doll);
@@ -92,6 +97,7 @@ export function SettingsPanel({
       alert('プリセットの取り込みに失敗しました');
     } finally {
       setIsImporting(false);
+      setImportProgress(null);
       if (presetFolderInputRef.current) presetFolderInputRef.current.value = '';
     }
   };
@@ -102,8 +108,11 @@ export function SettingsPanel({
     if (!file) return;
     
     setIsImporting(true);
+    setImportProgress({ phase: 'parsing', current: 0, total: 1, message: '準備中...' });
     try {
-      const result = await importPresetFromZip(file);
+      const result = await importPresetFromZip(file, (progress) => {
+        setImportProgress(progress);
+      });
       
       // 状態を全て上書き（デフォルト + 新規インポート）
       if (result.presets.items.length > 0) {
@@ -138,6 +147,7 @@ export function SettingsPanel({
       alert('ZIPの取り込みに失敗しました');
     } finally {
       setIsImporting(false);
+      setImportProgress(null);
       if (presetZipInputRef.current) presetZipInputRef.current.value = '';
     }
   };
@@ -259,7 +269,27 @@ export function SettingsPanel({
               </label>
             </div>
             
-            {isImporting && <p style={styles.importingText}>📥 取り込み中...</p>}
+            {isImporting && importProgress && (
+              <div style={styles.progressContainer}>
+                <p style={styles.importingText}>📥 {importProgress.message}</p>
+                <div style={styles.progressBar}>
+                  <div 
+                    style={{
+                      ...styles.progressFill,
+                      width: importProgress.total > 0 
+                        ? `${Math.round((importProgress.current / importProgress.total) * 100)}%` 
+                        : '0%'
+                    }} 
+                  />
+                </div>
+                <p style={styles.progressDetail}>
+                  {importProgress.current} / {importProgress.total}
+                </p>
+              </div>
+            )}
+            {isImporting && !importProgress && (
+              <p style={styles.importingText}>📥 取り込み中...</p>
+            )}
           </div>
 
           {/* 現在の素材 */}
@@ -578,5 +608,31 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 'bold',
     cursor: 'pointer',
     opacity: 0.8,
+  },
+  progressContainer: {
+    marginTop: '12px',
+    padding: '12px',
+    backgroundColor: '#e3f2fd',
+    borderRadius: '8px',
+  },
+  progressBar: {
+    width: '100%',
+    height: '8px',
+    backgroundColor: '#bbdefb',
+    borderRadius: '4px',
+    overflow: 'hidden',
+    marginTop: '8px',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#2196f3',
+    borderRadius: '4px',
+    transition: 'width 0.3s ease',
+  },
+  progressDetail: {
+    fontSize: '11px',
+    color: '#1565c0',
+    textAlign: 'center' as const,
+    marginTop: '4px',
   },
 };

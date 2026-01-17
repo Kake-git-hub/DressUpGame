@@ -930,6 +930,28 @@ export async function bulkImportFromHierarchicalFolder(
 
 // ========== 新プリセット形式（ドール専用） ==========
 
+// 進捗コールバック用の型
+export interface ImportProgress {
+  phase: 'parsing' | 'backgrounds' | 'dolls' | 'clothing' | 'saving' | 'complete';
+  current: number;
+  total: number;
+  message: string;
+}
+
+export type ProgressCallback = (progress: ImportProgress) => void;
+
+// UIスレッドを解放するためのユーティリティ
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => {
+    // requestIdleCallbackが使えればそれを使う、なければsetTimeout
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(resolve, { timeout: 50 });
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 // プリセット取り込み結果
 export interface PresetImportResult {
   presets: { success: number; failed: number; items: DollPreset[] };
@@ -984,8 +1006,15 @@ export function loadDollPresets(): DollPreset[] {
 
 // プリセットフォルダから取り込み（新形式: doll-{id}/clothing/{category}/）
 export async function importPresetFromFolder(
-  files: FileList
+  files: FileList,
+  onProgress?: ProgressCallback
 ): Promise<PresetImportResult> {
+  const reportProgress = (progress: ImportProgress) => {
+    if (onProgress) onProgress(progress);
+  };
+
+  reportProgress({ phase: 'parsing', current: 0, total: 1, message: 'ファイルを解析中...' });
+
   const result: PresetImportResult = {
     presets: { success: 0, failed: 0, items: [] },
     backgrounds: { success: 0, failed: 0, items: [] },
@@ -1099,6 +1128,9 @@ export async function importPresetFromFolder(
     }
   }
   
+  reportProgress({ phase: 'parsing', current: 1, total: 1, message: 'ファイル分類完了' });
+  await yieldToMain();
+  
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
@@ -1106,7 +1138,16 @@ export async function importPresetFromFolder(
   }
   
   // 背景を取り込み
-  for (const { name, file } of backgroundFiles) {
+  const bgTotal = backgroundFiles.length;
+  for (let i = 0; i < backgroundFiles.length; i++) {
+    const { name, file } = backgroundFiles[i];
+    reportProgress({ 
+      phase: 'backgrounds', 
+      current: i + 1, 
+      total: bgTotal, 
+      message: `背景を取り込み中... (${i + 1}/${bgTotal})` 
+    });
+    
     try {
       const base64 = await fileToBase64(file, file.name);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1119,10 +1160,34 @@ export async function importPresetFromFolder(
       console.error('Background import failed:', name, e);
       result.backgrounds.failed++;
     }
+    
+    // 5件ごとにUIスレッドを解放
+    if ((i + 1) % 5 === 0) {
+      await yieldToMain();
+    }
   }
   
+  // 全服の総数をカウント
+  let totalClothingCount = 0;
+  for (const [, data] of presetMap) {
+    for (const [, items] of data.clothing) {
+      totalClothingCount += items.length;
+    }
+  }
+  let clothingProcessed = 0;
+  
   // 各プリセットを取り込み
-  for (const [presetId, data] of presetMap) {
+  const presetEntries = Array.from(presetMap.entries());
+  for (let pi = 0; pi < presetEntries.length; pi++) {
+    const [presetId, data] = presetEntries[pi];
+    
+    reportProgress({ 
+      phase: 'dolls', 
+      current: pi + 1, 
+      total: presetEntries.length, 
+      message: `ドール取り込み中... (${pi + 1}/${presetEntries.length})` 
+    });
+    
     try {
       // ドールがなければスキップ
       if (data.dolls.length === 0) {
@@ -1150,6 +1215,14 @@ export async function importPresetFromFolder(
         categories.push(getCategoryInfo(categoryRaw));
         
         for (const { name, file } of clothingFiles) {
+          clothingProcessed++;
+          reportProgress({ 
+            phase: 'clothing', 
+            current: clothingProcessed, 
+            total: totalClothingCount, 
+            message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
+          });
+          
           // 右下ウォーターマーク除去＋クロマキー処理
           const base64 = await fileToBase64WithProcessing(file, file.name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1174,6 +1247,11 @@ export async function importPresetFromFolder(
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
+          
+          // 3件ごとにUIスレッドを解放
+          if (clothingProcessed % 3 === 0) {
+            await yieldToMain();
+          }
         }
       }
       
@@ -1192,7 +1270,12 @@ export async function importPresetFromFolder(
       console.error(`Preset ${presetId} import failed:`, e);
       result.presets.failed++;
     }
+    
+    await yieldToMain();
   }
+  
+  reportProgress({ phase: 'saving', current: 0, total: 1, message: 'データを保存中...' });
+  await yieldToMain();
   
   // すべてのドールと服を一括保存（全上書き）
   const allDolls = result.presets.items.map(p => p.doll);
@@ -1215,13 +1298,22 @@ export async function importPresetFromFolder(
     saveDollPresets(result.presets.items);
   }
   
+  reportProgress({ phase: 'complete', current: 1, total: 1, message: '取り込み完了！' });
+  
   return result;
 }
 
-// ZIPからプリセット取り込み
+// ZIPからプリセット取り込み（進捗コールバック対応）
 export async function importPresetFromZip(
-  zipFile: File
+  zipFile: File,
+  onProgress?: ProgressCallback
 ): Promise<PresetImportResult> {
+  const reportProgress = (progress: ImportProgress) => {
+    if (onProgress) onProgress(progress);
+  };
+
+  reportProgress({ phase: 'parsing', current: 0, total: 1, message: 'ZIPファイルを解析中...' });
+
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(zipFile);
   
@@ -1322,6 +1414,9 @@ export async function importPresetFromZip(
     }
   }
   
+  reportProgress({ phase: 'parsing', current: 1, total: 1, message: 'ファイル分類完了' });
+  await yieldToMain();
+  
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
@@ -1329,7 +1424,16 @@ export async function importPresetFromZip(
   }
   
   // 背景を取り込み
-  for (const { name, blob, fileNameWithExt } of backgroundFiles) {
+  const bgTotal = backgroundFiles.length;
+  for (let i = 0; i < backgroundFiles.length; i++) {
+    const { name, blob, fileNameWithExt } = backgroundFiles[i];
+    reportProgress({ 
+      phase: 'backgrounds', 
+      current: i + 1, 
+      total: bgTotal, 
+      message: `背景を取り込み中... (${i + 1}/${bgTotal})` 
+    });
+    
     try {
       const base64 = await blobToBase64(blob, fileNameWithExt);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1342,10 +1446,34 @@ export async function importPresetFromZip(
       console.error('Background import failed:', name, e);
       result.backgrounds.failed++;
     }
+    
+    // 5件ごとにUIスレッドを解放
+    if ((i + 1) % 5 === 0) {
+      await yieldToMain();
+    }
   }
   
+  // 全服の総数をカウント
+  let totalClothingCount = 0;
+  for (const [, data] of presetMap) {
+    for (const [, items] of data.clothing) {
+      totalClothingCount += items.length;
+    }
+  }
+  let clothingProcessed = 0;
+  
   // 各プリセットを取り込み
-  for (const [presetId, data] of presetMap) {
+  const presetEntries = Array.from(presetMap.entries());
+  for (let pi = 0; pi < presetEntries.length; pi++) {
+    const [presetId, data] = presetEntries[pi];
+    
+    reportProgress({ 
+      phase: 'dolls', 
+      current: pi + 1, 
+      total: presetEntries.length, 
+      message: `ドール取り込み中... (${pi + 1}/${presetEntries.length})` 
+    });
+    
     try {
       if (data.dolls.length === 0) {
         console.warn(`プリセット ${presetId} にドールがありません`);
@@ -1369,6 +1497,14 @@ export async function importPresetFromZip(
         categories.push(getCategoryInfo(categoryRaw));
         
         for (const { name, blob, fileNameWithExt: clothingFileExt } of clothingFiles) {
+          clothingProcessed++;
+          reportProgress({ 
+            phase: 'clothing', 
+            current: clothingProcessed, 
+            total: totalClothingCount, 
+            message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
+          });
+          
           const base64 = await blobToBase64(blob, clothingFileExt);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
@@ -1392,6 +1528,11 @@ export async function importPresetFromZip(
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
+          
+          // 3件ごとにUIスレッドを解放
+          if (clothingProcessed % 3 === 0) {
+            await yieldToMain();
+          }
         }
       }
       
@@ -1410,7 +1551,12 @@ export async function importPresetFromZip(
       console.error(`Preset ${presetId} import failed:`, e);
       result.presets.failed++;
     }
+    
+    await yieldToMain();
   }
+  
+  reportProgress({ phase: 'saving', current: 0, total: 1, message: 'データを保存中...' });
+  await yieldToMain();
   
   // すべてのドールと服を一括保存（全上書き）
   const allDolls = result.presets.items.map(p => p.doll);
@@ -1432,6 +1578,8 @@ export async function importPresetFromZip(
   if (result.presets.items.length > 0) {
     saveDollPresets(result.presets.items);
   }
+  
+  reportProgress({ phase: 'complete', current: 1, total: 1, message: '取り込み完了！' });
   
   return result;
 }
