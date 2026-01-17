@@ -12,7 +12,6 @@ interface DressUpMenuProps {
   onItemDrop: (item: ClothingItemData) => void;
   onItemRemove?: (type: ClothingType) => void;
   equippedItems: ClothingItemData[];
-  onReset: () => void;
   dolls: DollData[];
   currentDollId: string;
   onDollChange: (dollId: string) => void;
@@ -29,7 +28,6 @@ export function DressUpMenu({
   onItemDrop,
   onItemRemove,
   equippedItems,
-  onReset,
   dolls,
   currentDollId,
   onDollChange,
@@ -51,11 +49,6 @@ export function DressUpMenu({
 
   // 装備中のタイプをセット化
   const equippedTypes = useMemo(() => new Set(equippedItems.map(i => i.type)), [equippedItems]);
-
-  // 下着以外の装備数
-  const clothingCount = equippedItems.filter(
-    i => i.type !== 'underwear_top' && i.type !== 'underwear_bottom'
-  ).length;
 
   // アイテムをフォルダ名(type)でグループ化（元の順序を保持）
   const groupedItems = useMemo(() => {
@@ -186,13 +179,6 @@ export function DressUpMenu({
             onClick={() => setShowBackgrounds(true)}
           >
             🖼️ はいけい {currentBackgroundId ? '✓' : ''}
-          </button>
-        )}
-
-        {/* リセットボタン（服を着ている場合のみ表示） */}
-        {clothingCount > 0 && (
-          <button style={styles.resetButton} onClick={onReset}>
-            🔄 リセット
           </button>
         )}
 

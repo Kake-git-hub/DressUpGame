@@ -433,15 +433,32 @@ function App() {
 
   return (
     <div className="app">
-      {/* 設定ボタン - 調整中は非表示 */}
+      {/* 右下ボタングループ - 調整中は非表示 */}
       {!isAdjustingItem && (
-        <button
-          className="settings-button"
-          onClick={() => setIsSettingsOpen(true)}
-          title="せってい"
-        >
-          ⚙️
-        </button>
+        <div className="bottom-right-buttons">
+          {/* リセットボタン（服を着ている場合のみ表示） */}
+          {equippedItems.filter(i => i.type !== 'underwear_top' && i.type !== 'underwear_bottom').length > 0 && (
+            <button
+              className="reset-button-fixed"
+              onClick={() => {
+                if (window.confirm('きせかえをリセットしますか？')) {
+                  handleReset();
+                }
+              }}
+              title="リセット"
+            >
+              🔄
+            </button>
+          )}
+          {/* 設定ボタン */}
+          <button
+            className="settings-button"
+            onClick={() => setIsSettingsOpen(true)}
+            title="せってい"
+          >
+            ⚙️
+          </button>
+        </div>
       )}
 
       <main className="app-main">
@@ -558,7 +575,6 @@ function App() {
               onItemDrop={handleItemDrop}
               onItemRemove={handleItemRemove}
               equippedItems={equippedItems}
-              onReset={handleReset}
               dolls={allDolls}
               currentDollId={currentDollId}
               onDollChange={handleDollChange}

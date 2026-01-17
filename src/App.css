@@ -245,9 +245,6 @@ textarea {
 
 /* 設定ボタン - 右下に配置 */
 .settings-button {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -257,7 +254,6 @@ textarea {
   font-size: 1.5rem;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 100;
   transition: transform 0.2s, box-shadow 0.2s;
   display: flex;
   align-items: center;
@@ -270,6 +266,43 @@ textarea {
 }
 
 .settings-button:active {
+  transform: scale(0.95);
+}
+
+/* 右下ボタングループ */
+.bottom-right-buttons {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+/* 固定リセットボタン */
+.reset-button-fixed {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 105, 180, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reset-button-fixed:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(255, 105, 180, 0.5);
+}
+
+.reset-button-fixed:active {
   transform: scale(0.95);
 }
 
