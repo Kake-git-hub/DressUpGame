@@ -21,6 +21,7 @@ export class PixiEngine {
   private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
   private chromaKeyEnabled = false; // クロマキー有効フラグ
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
+  private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -162,6 +163,14 @@ export class PixiEngine {
     this.backgroundContainer.removeChildren();
 
     if (!imageUrl) {
+      // 背景なしでもスクリーンショット用に背景領域を設定（1:1正方形）
+      const area = this.getAvailableArea();
+      const bgSize = this.app.screen.height;
+      this.backgroundArea = {
+        x: area.centerX - bgSize / 2,
+        y: 0,
+        size: bgSize,
+      };
       return;
     }
 
@@ -171,10 +180,9 @@ export class PixiEngine {
 
       const area = this.getAvailableArea();
 
-      // 利用可能領域に収まるようにスケーリング（containモード：全体が見える）
-      const scaleX = area.width / texture.width;
-      const scaleY = this.app.screen.height / texture.height;
-      const scale = Math.min(scaleX, scaleY);
+      // 背景は1:1正方形で画面縦幅いっぱいに表示
+      const bgSize = this.app.screen.height;
+      const scale = bgSize / Math.max(texture.width, texture.height);
       bgSprite.scale.set(scale);
 
       // 利用可能領域の中心に配置
@@ -182,9 +190,16 @@ export class PixiEngine {
       bgSprite.x = area.centerX;
       bgSprite.y = this.app.screen.height / 2;
 
-      // メニュー・ボタン領域をマスクして背景が被らないようにする
+      // 背景領域情報を保存（スクリーンショット用）
+      this.backgroundArea = {
+        x: area.centerX - bgSize / 2,
+        y: 0,
+        size: bgSize,
+      };
+
+      // 背景領域のみ表示（メニュー・ボタン領域をマスク）
       const mask = new Graphics();
-      mask.rect(area.x, 0, area.width, this.app.screen.height);
+      mask.rect(this.backgroundArea.x, 0, bgSize, bgSize);
       mask.fill(0xffffff);
       bgSprite.mask = mask;
 
@@ -193,6 +208,28 @@ export class PixiEngine {
     } catch (error) {
       console.warn('背景画像の読み込みに失敗:', error);
     }
+  }
+
+  // 背景領域の中心を取得（1:1正方形の中心）
+  private getBackgroundCenter(): { centerX: number; centerY: number; size: number } {
+    if (!this.app) return { centerX: 0, centerY: 0, size: 0 };
+    
+    if (this.backgroundArea) {
+      return {
+        centerX: this.backgroundArea.x + this.backgroundArea.size / 2,
+        centerY: this.backgroundArea.y + this.backgroundArea.size / 2,
+        size: this.backgroundArea.size,
+      };
+    }
+    
+    // フォールバック：画面高さを正方形として中心を計算
+    const area = this.getAvailableArea();
+    const size = this.app.screen.height;
+    return {
+      centerX: area.centerX,
+      centerY: size / 2,
+      size: size,
+    };
   }
 
   // ドールを描画（画像URLがあれば画像、なければプレースホルダー）
@@ -204,11 +241,11 @@ export class PixiEngine {
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
 
-    // 利用可能領域の中心を基準にドール位置を計算
-    const area = this.getAvailableArea();
-    // dollTransformのx,yは利用可能領域内での%位置（50%=中央）
-    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
-    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
+    // 背景領域の中心を基準にドール位置を計算
+    const bgCenter = this.getBackgroundCenter();
+    // dollTransformのx,yは背景領域内での%位置（50%=中央）
+    const centerX = bgCenter.centerX + ((this.dollTransform.x - 50) / 100) * bgCenter.size;
+    const centerY = bgCenter.centerY + ((this.dollTransform.y - 50) / 100) * bgCenter.size;
     const dollScale = this.dollTransform.scale;
 
     // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
@@ -312,10 +349,10 @@ export class PixiEngine {
       return;
     }
 
-    // 利用可能領域の中心を基準に顔の位置を計算
-    const area = this.getAvailableArea();
-    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
-    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
+    // 背景領域の中心を基準に顔の位置を計算
+    const bgCenter = this.getBackgroundCenter();
+    const centerX = bgCenter.centerX + ((this.dollTransform.x - 50) / 100) * bgCenter.size;
+    const centerY = bgCenter.centerY + ((this.dollTransform.y - 50) / 100) * bgCenter.size;
 
     try {
       // 画像をロード
@@ -354,10 +391,10 @@ export class PixiEngine {
       return;
     }
 
-    // 利用可能領域の中心を基準に服の位置を計算
-    const area = this.getAvailableArea();
-    const centerX = area.x + (area.width * this.dollTransform.x) / 100;
-    const centerY = (this.app.screen.height * this.dollTransform.y) / 100;
+    // 背景領域の中心を基準に服の位置を計算
+    const bgCenter = this.getBackgroundCenter();
+    const centerX = bgCenter.centerX + ((this.dollTransform.x - 50) / 100) * bgCenter.size;
+    const centerY = bgCenter.centerY + ((this.dollTransform.y - 50) / 100) * bgCenter.size;
     const s = this.dollTransform.scale; // スケール
 
     // 新しい一時コンテナを作成（全ロード完了後に一括表示するため）
@@ -404,9 +441,9 @@ export class PixiEngine {
       let itemY = centerY;
       
       if (item.movable && (offsetX !== 0 || offsetY !== 0)) {
-        // ドロップ位置を利用可能領域内のピクセルに変換
-        itemX = area.x + (area.width * (50 + offsetX)) / 100;
-        itemY = (this.app.screen.height * (50 + offsetY)) / 100;
+        // ドロップ位置を背景領域内のピクセルに変換
+        itemX = bgCenter.centerX + (offsetX / 100) * bgCenter.size;
+        itemY = bgCenter.centerY + (offsetY / 100) * bgCenter.size;
       }
       
       // 調整オフセットを適用（ピクセル単位）
@@ -596,7 +633,7 @@ export class PixiEngine {
     }
   }
 
-  // スクリーンショットを取得（Data URL）- 利用可能領域のみキャプチャ
+  // スクリーンショットを取得（Data URL）- 背景領域（1:1正方形）のみキャプチャ
   async takeScreenshot(): Promise<string | null> {
     if (!this.app || !this.initialized || this.destroyed) {
       return null;
@@ -606,35 +643,37 @@ export class PixiEngine {
       // レンダリングを強制更新
       this.app.render();
 
-      // 利用可能領域（メニュー・ボタン以外）を切り出してキャプチャ
       const source = this.app.canvas as HTMLCanvasElement;
       const resolution = this.app.renderer.resolution ?? 1;
-      const area = this.getAvailableArea();
-      const cropX = Math.max(0, Math.round(area.x * resolution));
-      const cropW = Math.max(0, Math.round(area.width * resolution));
-      const cropH = Math.max(0, Math.round(this.app.screen.height * resolution));
 
-      // オフセットがない場合はそのまま
-      if (cropX === 0 && cropW >= source.width) {
-        return source.toDataURL('image/png');
+      // 背景領域（1:1正方形）をキャプチャ
+      if (this.backgroundArea) {
+        const cropX = Math.max(0, Math.round(this.backgroundArea.x * resolution));
+        const cropY = Math.max(0, Math.round(this.backgroundArea.y * resolution));
+        const cropSize = Math.round(this.backgroundArea.size * resolution);
+
+        const safeX = Math.min(cropX, source.width);
+        const safeY = Math.min(cropY, source.height);
+        const safeSize = Math.min(cropSize, source.width - safeX, source.height - safeY);
+
+        if (safeSize <= 0) {
+          return source.toDataURL('image/png');
+        }
+
+        const out = document.createElement('canvas');
+        out.width = safeSize;
+        out.height = safeSize;
+        const ctx = out.getContext('2d');
+        if (!ctx) {
+          return source.toDataURL('image/png');
+        }
+
+        ctx.drawImage(source, safeX, safeY, safeSize, safeSize, 0, 0, safeSize, safeSize);
+        return out.toDataURL('image/png');
       }
 
-      const safeW = Math.min(cropW, Math.max(0, source.width - cropX));
-      const safeH = Math.min(cropH, source.height);
-      if (safeW <= 0 || safeH <= 0) {
-        return source.toDataURL('image/png');
-      }
-
-      const out = document.createElement('canvas');
-      out.width = safeW;
-      out.height = safeH;
-      const ctx = out.getContext('2d');
-      if (!ctx) {
-        return source.toDataURL('image/png');
-      }
-
-      ctx.drawImage(source, cropX, 0, safeW, safeH, 0, 0, safeW, safeH);
-      return out.toDataURL('image/png');
+      // 背景領域がない場合は全体をキャプチャ
+      return source.toDataURL('image/png');
     } catch (error) {
       console.error('スクリーンショット取得エラー:', error);
       return null;
