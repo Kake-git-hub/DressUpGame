@@ -5,6 +5,7 @@
 import { Application, Container, Graphics, Sprite, Assets } from 'pixi.js';
 import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 import { ChromaKeyFilter } from './ChromaKeyFilter';
+import { EdgeTrimFilter } from './EdgeTrimFilter';
 
 export class PixiEngine {
   private app: Application | null = null;
@@ -20,6 +21,8 @@ export class PixiEngine {
   private rightOffset = 60; // 右ボタン領域のオフセット（右側）
   private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
   private chromaKeyEnabled = false; // クロマキー有効フラグ
+  private edgeTrimFilter: EdgeTrimFilter | null = null; // エッジトリムフィルタ
+  private edgeTrimEnabled = true; // エッジトリム有効フラグ（デフォルトON）
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
 
@@ -266,9 +269,16 @@ export class PixiEngine {
         dollSprite.x = centerX;
         dollSprite.y = centerY;
 
-        // クロマキーフィルタを適用（有効な場合）
+        // フィルタを適用（エッジトリム + クロマキー）
+        const filters = [];
+        if (this.edgeTrimEnabled && this.edgeTrimFilter) {
+          filters.push(this.edgeTrimFilter);
+        }
         if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-          dollSprite.filters = [this.chromaKeyFilter];
+          filters.push(this.chromaKeyFilter);
+        }
+        if (filters.length > 0) {
+          dollSprite.filters = filters;
         }
 
         this.dollContainer.addChild(dollSprite);
@@ -472,9 +482,16 @@ export class PixiEngine {
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-        // クロマキーフィルタを適用（有効な場合）
+        // フィルタを適用（エッジトリム + クロマキー）
+        const filters = [];
+        if (this.edgeTrimEnabled && this.edgeTrimFilter) {
+          filters.push(this.edgeTrimFilter);
+        }
         if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-          clothingSprite.filters = [this.chromaKeyFilter];
+          filters.push(this.chromaKeyFilter);
+        }
+        if (filters.length > 0) {
+          clothingSprite.filters = filters;
         }
 
         tempContainer.addChild(clothingSprite);
@@ -698,6 +715,14 @@ export class PixiEngine {
       });
       // 高解像度ディスプレイ対応
       this.chromaKeyFilter.resolution = window.devicePixelRatio || 1;
+    }
+    // エッジトリムフィルタも初期化（背景除去後のフチ線を除去）
+    if (!this.edgeTrimFilter) {
+      this.edgeTrimFilter = new EdgeTrimFilter({
+        alphaThreshold: 0.25,  // 25%以下のアルファを除去
+        edgeSoftness: 0.15,    // 滑らかな遷移
+      });
+      this.edgeTrimFilter.resolution = window.devicePixelRatio || 1;
     }
   }
 
