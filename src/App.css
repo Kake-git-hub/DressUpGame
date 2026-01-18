@@ -82,6 +82,7 @@ textarea {
   height: var(--app-height, 100vh);
   width: var(--app-width, 100vw);
   padding: 0;
+  padding-top: env(safe-area-inset-top, 0);
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -120,8 +121,8 @@ textarea {
   position: fixed;
   left: 0;
   width: var(--app-width, 100vw);
-  top: 0;
-  height: var(--app-height, 100vh);
+  top: env(safe-area-inset-top, 0);
+  height: calc(var(--app-height, 100vh) - env(safe-area-inset-top, 0));
   display: flex;
   justify-content: center;
   align-items: center;
@@ -140,7 +141,7 @@ textarea {
   width: 160px;
   height: 100%;
   z-index: 10;
-  padding-top: 0;
+  padding-top: env(safe-area-inset-top, 0);
 }
 
 /* リセットボタン */
@@ -286,8 +287,8 @@ textarea {
 /* 右下ボタングループ */
 .bottom-right-buttons {
   position: fixed;
-  bottom: 16px;
-  right: 16px;
+  top: calc(8px + env(safe-area-inset-top, 0));
+  right: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
