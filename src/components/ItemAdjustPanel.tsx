@@ -6,11 +6,42 @@
  * - 二本指回転: 傾き
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import type { EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { getTransparentImage } from '../services/assetStorage';
+
+/**
+ * PixiJSのColorMatrixFilter.hue()と同じ行列を生成
+ * RGB立方体を輝度軸周りに回転する
+ */
+function createPixiHueMatrix(degrees: number): number[] {
+  const rotation = (degrees / 180) * Math.PI;
+  const cosR = Math.cos(rotation);
+  const sinR = Math.sin(rotation);
+  const sqrt = Math.sqrt;
+  const w = 1 / 3;
+  const sqrW = sqrt(w);
+  
+  const a00 = cosR + (1 - cosR) * w;
+  const a01 = w * (1 - cosR) - sqrW * sinR;
+  const a02 = w * (1 - cosR) + sqrW * sinR;
+  const a10 = w * (1 - cosR) + sqrW * sinR;
+  const a11 = cosR + w * (1 - cosR);
+  const a12 = w * (1 - cosR) - sqrW * sinR;
+  const a20 = w * (1 - cosR) - sqrW * sinR;
+  const a21 = w * (1 - cosR) + sqrW * sinR;
+  const a22 = cosR + w * (1 - cosR);
+  
+  // SVG feColorMatrix用の行列（5x4形式）
+  return [
+    a00, a01, a02, 0, 0,
+    a10, a11, a12, 0, 0,
+    a20, a21, a22, 0, 0,
+    0,   0,   0,   1, 0,
+  ];
+}
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
@@ -78,6 +109,16 @@ export function ItemAdjustPanel({
   const [rotation, setRotation] = useState(item?.adjustRotation ?? 0);
   const [layerAdjust, setLayerAdjust] = useState(item?.layerAdjust ?? 0);
   const [colorHue, setColorHue] = useState(item?.colorHue ?? 0);
+
+  // SVGフィルター用の一意なID
+  const hueFilterId = useMemo(() => `hue-filter-${item?.id ?? 'item'}`, [item?.id]);
+  
+  // PixiJSと同じ色相行列をSVG用に生成
+  const hueMatrixStr = useMemo(() => {
+    if (colorHue === 0) return '';
+    const matrix = createPixiHueMatrix(colorHue);
+    return matrix.join(' ');
+  }, [colorHue]);
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -437,28 +478,40 @@ export function ItemAdjustPanel({
         const windowY = canvasTop + baseY;
 
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: `${windowX}px`,
-              top: `${windowY}px`,
-              transform: `translate(-50%, -50%) scale(${scale * dollTransform.scale}) rotate(${rotation}deg)`,
-              transformOrigin: 'center center',
-              pointerEvents: 'none',
-              zIndex: 50,
-              filter: colorHue !== 0 ? `hue-rotate(${colorHue}deg)` : undefined,
-            }}
-          >
-            <img
-              src={transparentImageUrl}
-              alt="調整プレビュー"
+          <>
+            {/* PixiJSと同じ色相変換用SVGフィルター */}
+            {colorHue !== 0 && (
+              <svg width="0" height="0" style={{ position: 'absolute' }}>
+                <defs>
+                  <filter id={hueFilterId}>
+                    <feColorMatrix type="matrix" values={hueMatrixStr} />
+                  </filter>
+                </defs>
+              </svg>
+            )}
+            <div
               style={{
-                height: `${canvasHeight * 0.9}px`,
-                width: 'auto',
-                objectFit: 'contain',
+                position: 'absolute',
+                left: `${windowX}px`,
+                top: `${windowY}px`,
+                transform: `translate(-50%, -50%) scale(${scale * dollTransform.scale}) rotate(${rotation}deg)`,
+                transformOrigin: 'center center',
+                pointerEvents: 'none',
+                zIndex: 50,
+                filter: colorHue !== 0 ? `url(#${hueFilterId})` : undefined,
               }}
-            />
-          </div>
+            >
+              <img
+                src={transparentImageUrl}
+                alt="調整プレビュー"
+                style={{
+                  height: `${canvasHeight * 0.9}px`,
+                  width: 'auto',
+                  objectFit: 'contain',
+                }}
+              />
+            </div>
+          </>
         );
       })()}
 
