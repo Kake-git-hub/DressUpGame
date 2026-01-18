@@ -3,7 +3,7 @@
  * 背景はボタン切り替えで別画面、服はフォルダ名でグループ化して表示
  * 左側にスクロール用スペースを配置（誤ドラッグ防止）
  */
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, memo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
 
@@ -21,6 +21,8 @@ interface DressUpMenuProps {
   onBackgroundChange?: (backgroundId: string | null) => void;
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
+  onBackgroundDragMove?: (bg: BackgroundData, position: Position) => void;
+  onBackgroundDragEnd?: () => void;
 }
 
 export function DressUpMenu({
@@ -37,6 +39,8 @@ export function DressUpMenu({
   onBackgroundChange,
   onDragMove,
   onDragEnd,
+  onBackgroundDragMove,
+  onBackgroundDragEnd,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
@@ -110,26 +114,15 @@ export function DressUpMenu({
               </button>
 
               {backgrounds.map(bg => (
-                <button
+                <DraggableBackground
                   key={bg.id}
-                  style={{
-                    ...styles.itemButton,
-                    ...(currentBackgroundId === bg.id ? styles.itemButtonSelected : {}),
-                  }}
-                  onClick={() => onBackgroundChange?.(bg.id)}
-                >
-                  <div style={styles.itemImageContainer}>
-                    <img
-                      src={bg.thumbnailUrl || bg.imageUrl}
-                      alt={bg.name}
-                      style={styles.itemImage}
-                      draggable={false}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
-                      }}
-                    />
-                  </div>
-                </button>
+                  bg={bg}
+                  isSelected={currentBackgroundId === bg.id}
+                  onDrop={onBackgroundChange!}
+                  dropTargetId={dropTargetId}
+                  onDragMove={onBackgroundDragMove}
+                  onDragEnd={onBackgroundDragEnd}
+                />
               ))}
 
               {backgrounds.length === 0 && (
@@ -228,7 +221,7 @@ export function DressUpMenu({
   );
 }
 
-// ドラッグ可能なアイテムコンポーネント
+// ドラッグ可能なアイテムコンポーネント（メモ化で再レンダリング軽減）
 interface DraggableItemProps {
   item: ClothingItemData;
   isEquipped: boolean;
@@ -238,7 +231,7 @@ interface DraggableItemProps {
   onDragEnd?: () => void;
 }
 
-function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd }: DraggableItemProps) {
+const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd }: DraggableItemProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
@@ -327,6 +320,7 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
           alt={item.name}
           style={styles.itemImage}
           draggable={false}
+          loading="lazy"
           onError={(e) => {
             (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="40">?</text></svg>';
           }}
@@ -337,7 +331,123 @@ function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onD
       </div>
     </div>
   );
-}
+});
+
+// 背景アイテム用ドラッグコンポーネント（メモ化で再レンダリング軽減）
+const DraggableBackground = memo(function DraggableBackground({
+  bg,
+  isSelected,
+  onDrop,
+  dropTargetId,
+  onDragMove,
+  onDragEnd,
+}: {
+  bg: BackgroundData;
+  isSelected: boolean;
+  onDrop: (bgId: string | null) => void;
+  dropTargetId: string;
+  onDragMove?: (bg: BackgroundData, position: Position) => void;
+  onDragEnd?: () => void;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const startPos = useRef({ x: 0, y: 0 });
+  const movedDistance = useRef(0);
+
+  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
+    const menu = document.querySelector('[data-menu="dressup-menu"]');
+    if (!menu) return false;
+    const rect = (menu as HTMLElement).getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }, []);
+
+  const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
+    const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
+    if (!targetElement) return false;
+    const rect = targetElement.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && 
+           clientY >= rect.top && clientY <= rect.bottom;
+  }, [dropTargetId]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startPos.current = { x: e.clientX, y: e.clientY };
+    setDragPos({ x: 0, y: 0 });
+    movedDistance.current = 0;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
+    setDragPos({ x: dx, y: dy });
+    if (onDragMove) {
+      onDragMove(bg, { x: e.clientX, y: e.clientY });
+    }
+  }, [isDragging, bg, onDragMove]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setDragPos({ x: 0, y: 0 });
+    onDragEnd?.();
+
+    // タップ（ほぼ移動なし）も適用
+    if (movedDistance.current < 10) {
+      onDrop(bg.id);
+      return;
+    }
+
+    // メニュー領域上で指を離した場合は適用しない
+    if (isInsideMenu(e.clientX, e.clientY)) {
+      return;
+    }
+
+    if (checkIsOverTarget(e.clientX, e.clientY)) {
+      onDrop(bg.id);
+    }
+  }, [isDragging, checkIsOverTarget, onDrop, bg.id, onDragEnd, isInsideMenu]);
+
+  return (
+    <div
+      style={{
+        ...styles.itemButton,
+        ...(isSelected ? styles.itemButtonSelected : {}),
+        ...(isDragging ? styles.itemDragging : {}),
+        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        touchAction: 'none',
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => {
+        setIsDragging(false);
+        setDragPos({ x: 0, y: 0 });
+        onDragEnd?.();
+      }}
+    >
+      <div style={styles.itemImageContainer}>
+        <img
+          src={bg.thumbnailUrl || bg.imageUrl}
+          alt={bg.name}
+          style={styles.itemImage}
+          draggable={false}
+          loading="lazy"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+          }}
+        />
+        {isSelected && (
+          <div style={styles.equippedBadge}>✓</div>
+        )}
+      </div>
+    </div>
+  );
+});
 
 const MENU_WIDTH = 160;
 const SCROLL_PADDING = 30; // 右側のスクロール用余白

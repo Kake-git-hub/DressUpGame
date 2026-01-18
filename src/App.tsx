@@ -592,6 +592,7 @@ function App() {
               onBackgroundChange={handleBackgroundChange}
               onDragMove={handleDragMove}
               onDragEnd={handleDragEnd}
+              onBackgroundDragEnd={handleDragEnd}
             />
 
             {/* バージョン表示（メニュー下） */}

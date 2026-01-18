@@ -39,6 +39,10 @@ body {
   overflow: hidden; /* iPad横向きでスクロールを防ぐ */
   /* iPad長押しハイライトを防ぐ */
   -webkit-tap-highlight-color: transparent;
+  /* ピンチズーム禁止（iPad Safari対策） */
+  touch-action: pan-x pan-y;
+  /* Safe Area対応 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 /* iPad: 長押しで選択状態にならないように（UI部分のみ） */
