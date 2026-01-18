@@ -22,14 +22,6 @@
   }
 }
 
-/* iOS Safari: 全体を収める */
-@supports (-webkit-touch-callout: none) {
-  html, body, #root, .app {
-    height: -webkit-fill-available;
-    max-height: -webkit-fill-available;
-  }
-}
-
 /* リセット */
 * {
   margin: 0;
@@ -42,15 +34,17 @@ html,
 body {
   font-family: 'Rounded Mplus 1c', 'Hiragino Maru Gothic Pro', 'メイリオ', sans-serif;
   background: linear-gradient(135deg, #fff5f5 0%, #ffe4f3 100%);
-  min-height: 100vh;
+  height: 100%;
+  width: 100%;
   color: var(--text-color);
   overflow: hidden; /* iPad横向きでスクロールを防ぐ */
+  position: fixed; /* スクロール完全防止 */
+  top: 0;
+  left: 0;
   /* iPad長押しハイライトを防ぐ */
   -webkit-tap-highlight-color: transparent;
   /* ピンチズーム禁止（iPad Safari対策） */
   touch-action: pan-x pan-y;
-  /* Safe Area対応 */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 /* iPad: 長押しで選択状態にならないように（UI部分のみ） */
@@ -73,10 +67,8 @@ textarea {
 }
 
 #root {
-  min-height: 100vh;
-  min-height: 100dvh;
-  max-height: 100vh;
-  max-height: 100dvh;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -84,12 +76,13 @@ textarea {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  max-height: 100vh;
-  max-height: 100dvh;
+  height: 100%;
+  width: 100%;
   padding: 4px 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* ヘッダー - コンパクトに */
@@ -559,16 +552,7 @@ textarea {
   width: 28px;
   height: 140px;
   appearance: none;
-  background: linear-gradient(
-    to top,
-    hsl(0, 100%, 50%),
-    hsl(60, 100%, 50%),
-    hsl(120, 100%, 50%),
-    hsl(180, 100%, 50%),
-    hsl(240, 100%, 50%),
-    hsl(300, 100%, 50%),
-    hsl(360, 100%, 50%)
-  );
+  background: #e0e0e0;
   border-radius: 16px;
   outline: none;
   cursor: pointer;

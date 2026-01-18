@@ -158,8 +158,9 @@ function App() {
   // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた全体）
   useEffect(() => {
     const updateCanvasSize = () => {
-      const vh = window.innerHeight;
-      const vw = window.innerWidth;
+      // visualViewportを優先使用（iPad Safari対応）
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const vw = window.visualViewport?.width ?? window.innerWidth;
 
       // メニューを除いた画面全体
       const width = vw - MENU_WIDTH;
@@ -173,7 +174,12 @@ function App() {
 
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
-    return () => window.removeEventListener('resize', updateCanvasSize);
+    // visualViewportのリサイズも監視
+    window.visualViewport?.addEventListener('resize', updateCanvasSize);
+    return () => {
+      window.removeEventListener('resize', updateCanvasSize);
+      window.visualViewport?.removeEventListener('resize', updateCanvasSize);
+    };
   }, []);
 
   // 初期化時にカスタムアイテムを読み込み（IndexedDBから画像を復元）
