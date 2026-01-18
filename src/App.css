@@ -287,8 +287,8 @@ textarea {
 /* 右下ボタングループ */
 .bottom-right-buttons {
   position: fixed;
-  top: calc(8px + env(safe-area-inset-top, 0));
-  right: 8px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0));
+  right: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -351,7 +351,7 @@ textarea {
 /* ツールボタンコンテナ（右上縦並び） */
 .tool-buttons {
   position: fixed;
-  top: 16px;
+  top: calc(16px + env(safe-area-inset-top, 0));
   right: 16px;
   display: flex;
   flex-direction: column;
