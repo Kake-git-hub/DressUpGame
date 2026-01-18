@@ -940,16 +940,28 @@ export interface ImportProgress {
 
 export type ProgressCallback = (progress: ImportProgress) => void;
 
-// UIスレッドを解放するためのユーティリティ
+// UIスレッドを解放するためのユーティリティ（Safari対策で長めのタイムアウト）
 function yieldToMain(): Promise<void> {
   return new Promise(resolve => {
-    // requestIdleCallbackが使えればそれを使う、なければsetTimeout
+    // Safariはメモリ管理が厳しいので長めの待機
     if ('requestIdleCallback' in window) {
-      (window as any).requestIdleCallback(resolve, { timeout: 50 });
+      (window as any).requestIdleCallback(resolve, { timeout: 100 });
     } else {
-      setTimeout(resolve, 0);
+      // Safari向け: 少し長めのsetTimeoutでGCの機会を与える
+      setTimeout(resolve, 16);
     }
   });
+}
+
+// 強制的にGCを促すためのユーティリティ（大容量ファイル処理後に使用）
+async function forceGCHint(): Promise<void> {
+  // 一時的に大きな配列を作って解放することでGCを促す
+  if (typeof gc === 'function') {
+    // Node.js環境でのみ利用可能
+    (gc as () => void)();
+  }
+  // ブラウザ向け: 少し長めに待機してGCの機会を増やす
+  await new Promise(resolve => setTimeout(resolve, 50));
 }
 
 // プリセット取り込み結果
@@ -1161,10 +1173,8 @@ export async function importPresetFromFolder(
       result.backgrounds.failed++;
     }
     
-    // 5件ごとにUIスレッドを解放
-    if ((i + 1) % 5 === 0) {
-      await yieldToMain();
-    }
+    // 毎回UIスレッドを解放（Safari対策）
+    await yieldToMain();
   }
   
   // 全服の総数をカウント
@@ -1248,9 +1258,12 @@ export async function importPresetFromFolder(
           item.dollId = dollId;
           clothingItems.push(item);
           
-          // 3件ごとにUIスレッドを解放
-          if (clothingProcessed % 3 === 0) {
-            await yieldToMain();
+          // 毎回UIスレッドを解放（Safari対策）
+          await yieldToMain();
+          
+          // 10件ごとにGCを促す（Safari大容量対策）
+          if (clothingProcessed % 10 === 0) {
+            await forceGCHint();
           }
         }
       }
@@ -1529,9 +1542,12 @@ export async function importPresetFromZip(
           item.dollId = dollId;
           clothingItems.push(item);
           
-          // 3件ごとにUIスレッドを解放
-          if (clothingProcessed % 3 === 0) {
-            await yieldToMain();
+          // 毎回UIスレッドを解放（Safari対策）
+          await yieldToMain();
+          
+          // 10件ごとにGCを促す（Safari大容量対策）
+          if (clothingProcessed % 10 === 0) {
+            await forceGCHint();
           }
         }
       }

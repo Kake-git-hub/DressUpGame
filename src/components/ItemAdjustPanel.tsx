@@ -520,7 +520,7 @@ export function ItemAdjustPanel({
         );
       })()}
 
-      {/* 右上ボタン（完了・リセット・最前面） */}
+      {/* 右上ボタン（完了・リセット・最前面・カラー） */}
       <div className="item-adjust-top-buttons">
         <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">
           ✓
@@ -538,25 +538,29 @@ export function ItemAdjustPanel({
             ⬆
           </button>
         )}
+        {/* 色相スライダー（アイテムモードのみ） */}
+        {!isDollMode && (
+          <div 
+            className="item-adjust-hue-slider"
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="hue-label">🎨</div>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={colorHue}
+              onChange={(e) => setColorHue(Number(e.target.value))}
+              className="hue-slider-vertical"
+              title={`色相: ${colorHue}°`}
+            />
+            <div className="hue-value">{colorHue}°</div>
+          </div>
+        )}
       </div>
-
-      {/* 左側の色相スライダー（アイテムモードのみ） */}
-      {!isDollMode && (
-        <div className="item-adjust-hue-slider">
-          <div className="hue-label">🎨</div>
-          <input
-            type="range"
-            min="-180"
-            max="180"
-            step="1"
-            value={colorHue}
-            onChange={(e) => setColorHue(Number(e.target.value))}
-            className="hue-slider-vertical"
-            title={`色相: ${colorHue}°`}
-          />
-          <div className="hue-value">{colorHue}°</div>
-        </div>
-      )}
     </div>
   );
 }
