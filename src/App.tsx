@@ -323,7 +323,7 @@ function App() {
     setAdjustingItemId(null);
   }, []);
 
-  // スクリーンショットを撮影して保存
+  // スクリーンショットを撮影して保存（Web Share API対応）
   const handleScreenshot = useCallback(async () => {
     if (!avatarCanvasRef.current) return;
     
@@ -331,9 +331,35 @@ function App() {
       const dataUrl = await avatarCanvasRef.current.takeScreenshot();
       if (!dataUrl) return;
       
-      // ダウンロードリンクを作成
+      // Data URL を Blob に変換
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const fileName = `dressup-${Date.now()}.png`;
+      
+      // Web Share API が使えるかチェック（iOS/iPadOS Safari対応）
+      if (navigator.share && navigator.canShare) {
+        const file = new File([blob], fileName, { type: 'image/png' });
+        const shareData = { files: [file] };
+        
+        // ファイル共有がサポートされているかチェック
+        if (navigator.canShare(shareData)) {
+          try {
+            await navigator.share(shareData);
+            return; // 共有成功
+          } catch (shareError) {
+            // ユーザーがキャンセルした場合は何もしない
+            if ((shareError as Error).name === 'AbortError') {
+              return;
+            }
+            // その他のエラーはフォールバックへ
+            console.log('共有失敗、ダウンロードにフォールバック');
+          }
+        }
+      }
+      
+      // フォールバック: 従来のダウンロード方式
       const link = document.createElement('a');
-      link.download = `dressup-${Date.now()}.png`;
+      link.download = fileName;
       link.href = dataUrl;
       document.body.appendChild(link);
       link.click();
