@@ -81,9 +81,7 @@ textarea {
   flex-direction: column;
   height: var(--app-height, 100vh);
   width: var(--app-width, 100vw);
-  padding: 4px 16px;
-  padding-left: max(16px, env(safe-area-inset-left));
-  padding-right: max(16px, env(safe-area-inset-right));
+  padding: 0;
   overflow: hidden;
   box-sizing: border-box;
 }
