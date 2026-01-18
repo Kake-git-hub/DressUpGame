@@ -95,8 +95,11 @@ export function ItemAdjustPanel({
   const isDollMode = item === null;
 
   // キャンバスは画面中央に配置されているため、左上の位置を計算
-  const canvasLeft = (window.innerWidth - canvasWidth) / 2;
-  const canvasTop = (window.innerHeight - canvasHeight) / 2;
+  // visualViewportを優先使用（iPad Safari対応）
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  const canvasLeft = (viewportWidth - canvasWidth) / 2;
+  const canvasTop = (viewportHeight - canvasHeight) / 2;
 
   // 利用可能領域の計算（PixiEngineと同じ計算、キャンバス内座標）
   const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);

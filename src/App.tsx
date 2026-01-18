@@ -156,11 +156,16 @@ function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
 
   // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた全体）
+  // CSS変数も同時に更新してレイアウト全体を制御
   useEffect(() => {
     const updateCanvasSize = () => {
       // visualViewportを優先使用（iPad Safari対応）
       const vh = window.visualViewport?.height ?? window.innerHeight;
       const vw = window.visualViewport?.width ?? window.innerWidth;
+
+      // CSS変数に実際のビューポートサイズを設定
+      document.documentElement.style.setProperty('--app-height', `${vh}px`);
+      document.documentElement.style.setProperty('--app-width', `${vw}px`);
 
       // メニューを除いた画面全体
       const width = vw - MENU_WIDTH;
@@ -174,11 +179,13 @@ function App() {
 
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
-    // visualViewportのリサイズも監視
+    // visualViewportのリサイズも監視（iPad Safariのアドレスバー表示/非表示）
     window.visualViewport?.addEventListener('resize', updateCanvasSize);
+    window.visualViewport?.addEventListener('scroll', updateCanvasSize);
     return () => {
       window.removeEventListener('resize', updateCanvasSize);
       window.visualViewport?.removeEventListener('resize', updateCanvasSize);
+      window.visualViewport?.removeEventListener('scroll', updateCanvasSize);
     };
   }, []);
 
