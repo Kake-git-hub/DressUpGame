@@ -116,12 +116,25 @@ export function ItemAdjustPanel({
   // SVGフィルター用の一意なID
   const hueFilterId = useMemo(() => `hue-filter-${item?.id ?? 'item'}`, [item?.id]);
   
-  // PixiJSと同じ色相行列をSVG用に生成
+  // SVGフィルター要素への参照（直接更新用）
+  const hueMatrixRef = useRef<SVGFEColorMatrixElement>(null);
+  
+  // PixiJSと同じ色相行列をSVG用に生成（初期値用）
   const hueMatrixStr = useMemo(() => {
     if (colorHue === 0) return '';
     const matrix = createPixiHueMatrix(colorHue);
     return matrix.join(' ');
   }, [colorHue]);
+  
+  // カラースライダー変更時の高速更新（state更新 + 直接DOM更新）
+  const handleColorHueChange = useCallback((newHue: number) => {
+    setColorHue(newHue);
+    // DOM直接更新でリアルタイム追従を改善
+    if (hueMatrixRef.current && newHue !== 0) {
+      const matrix = createPixiHueMatrix(newHue);
+      hueMatrixRef.current.setAttribute('values', matrix.join(' '));
+    }
+  }, []);
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -482,16 +495,18 @@ export function ItemAdjustPanel({
 
         return (
           <>
-            {/* PixiJSと同じ色相変換用SVGフィルター */}
-            {colorHue !== 0 && (
-              <svg width="0" height="0" style={{ position: 'absolute' }}>
-                <defs>
-                  <filter id={hueFilterId}>
-                    <feColorMatrix type="matrix" values={hueMatrixStr} />
-                  </filter>
-                </defs>
-              </svg>
-            )}
+            {/* PixiJSと同じ色相変換用SVGフィルター（常に存在、DOM直接更新用） */}
+            <svg width="0" height="0" style={{ position: 'absolute' }}>
+              <defs>
+                <filter id={hueFilterId}>
+                  <feColorMatrix 
+                    ref={hueMatrixRef}
+                    type="matrix" 
+                    values={colorHue !== 0 ? hueMatrixStr : '1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0'} 
+                  />
+                </filter>
+              </defs>
+            </svg>
             <div
               style={{
                 position: 'absolute',
@@ -501,7 +516,7 @@ export function ItemAdjustPanel({
                 transformOrigin: 'center center',
                 pointerEvents: 'none',
                 zIndex: 50,
-                filter: colorHue !== 0 ? `url(#${hueFilterId})` : undefined,
+                filter: `url(#${hueFilterId})`,
               }}
             >
               <img
@@ -609,7 +624,7 @@ export function ItemAdjustPanel({
               max="180"
               step="1"
               value={colorHue}
-              onChange={(e) => setColorHue(Number(e.target.value))}
+              onChange={(e) => handleColorHueChange(Number(e.target.value))}
               className="hue-slider-vertical"
               title={`色相: ${colorHue}°`}
             />

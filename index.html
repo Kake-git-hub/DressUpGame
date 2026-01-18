@@ -14,6 +14,15 @@
     <title>Kids Dress-Up Game</title>
   </head>
   <body>
+    <script>
+      // iPad Safari対応: CSS変数を早期設定
+      (function() {
+        var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+        document.documentElement.style.setProperty('--app-height', vh + 'px');
+        document.documentElement.style.setProperty('--app-width', vw + 'px');
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
