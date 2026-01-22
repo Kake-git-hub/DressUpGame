@@ -202,13 +202,13 @@ export class PixiEngine {
       // 背景領域情報を保存（スクリーンショット用）
       this.backgroundArea = {
         x: area.centerX - bgSize / 2,
-        y: 0,
+        y: (this.app.screen.height - bgSize) / 2,
         size: bgSize,
       };
 
       // 背景領域のみ表示（メニュー・ボタン領域をマスク）
       const mask = new Graphics();
-      mask.rect(this.backgroundArea.x, 0, bgSize, bgSize);
+      mask.rect(this.backgroundArea.x, this.backgroundArea.y, bgSize, bgSize);
       mask.fill(0xffffff);
       bgSprite.mask = mask;
 
@@ -266,7 +266,9 @@ export class PixiEngine {
         const dollSprite = new Sprite(texture);
 
         // キャンバスに収まるようにスケーリング（高さの90%に合わせてから、ドールスケールを適用）
-        const maxHeight = this.app.screen.height * 0.9;
+        // 縦画面モードではメニューバー分を考慮して小さめに
+        const heightRatio = this.isPortrait ? 0.75 : 0.9;
+        const maxHeight = this.app.screen.height * heightRatio;
         const baseScale = maxHeight / texture.height;
         dollSprite.scale.set(baseScale * dollScale);
 
@@ -472,8 +474,10 @@ export class PixiEngine {
         texture.source.scaleMode = 'linear';
         const clothingSprite = new Sprite(texture);
 
-        // 服のサイズをドールと同じスケーリング（キャンバス高さの90%基準）
-        const maxHeight = this.app.screen.height * 0.9;
+        // 服のサイズをドールと同じスケーリング
+        // 縦画面モードではメニューバー分を考慮して小さめに
+        const heightRatio = this.isPortrait ? 0.75 : 0.9;
+        const maxHeight = this.app.screen.height * heightRatio;
         const baseScale = maxHeight / texture.height;
         // 調整スケールを適用
         clothingSprite.scale.set(baseScale * s * adjustScale);

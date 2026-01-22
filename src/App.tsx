@@ -580,26 +580,6 @@ function App() {
 
             {/* 消しゴムマスクはPixiEngine側で処理 */}
 
-            {/* ツールボタン（調整モードでないとき表示） */}
-            {!isAdjustingItem && !isDrawingMode && !isEraserMode && (
-              <div className="tool-buttons">
-                <button
-                  className="tool-button"
-                  onClick={handleAdjustButtonClick}
-                  title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}
-                >
-                  {equippedItems.length > 0 ? '👗' : '📐'}
-                </button>
-                <button
-                  className="tool-button"
-                  onClick={handleScreenshot}
-                  title="スクショ"
-                >
-                  📷
-                </button>
-              </div>
-            )}
-
             {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
             {draggingPreview && avatarSectionRef.current && (() => {
               const rect = avatarSectionRef.current.getBoundingClientRect();
@@ -625,6 +605,26 @@ function App() {
               );
             })()}
           </section>
+        )}
+
+        {/* ツールボタン（調整モードでないとき表示）- avatar-sectionの外に配置 */}
+        {currentDollSafe && !isAdjustingItem && !isDrawingMode && !isEraserMode && (
+          <div className="tool-buttons">
+            <button
+              className="tool-button"
+              onClick={handleAdjustButtonClick}
+              title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}
+            >
+              {equippedItems.length > 0 ? '👗' : '📐'}
+            </button>
+            <button
+              className="tool-button"
+              onClick={handleScreenshot}
+              title="スクショ"
+            >
+              📷
+            </button>
+          </div>
         )}
 
         {/* ドレスアップメニュー - アイテム調整中は非表示 */}
@@ -671,9 +671,10 @@ function App() {
           canvasHeight={canvasSize.height}
           dollTransform={dollTransform}
           onDollTransformChange={setDollTransform}
-          menuOffset={MENU_WIDTH}
-          rightOffset={RIGHT_BUTTON_WIDTH}
+          menuOffset={isPortrait ? 0 : MENU_WIDTH}
+          rightOffset={isPortrait ? 0 : RIGHT_BUTTON_WIDTH}
           dollImageUrl={currentDollSafe?.bodyImageUrl}
+          isPortrait={isPortrait}
         />
       )}
 

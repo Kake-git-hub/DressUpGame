@@ -50,6 +50,9 @@ export function DressUpMenu({
   // 現在選択中のカテゴリ（縦画面用）
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
+  // メニュー展開状態（縦画面用）
+  const [isMenuExpanded, setIsMenuExpanded] = useState(false);
+  
   // スクロール用ref
   const itemListRef = useRef<HTMLDivElement>(null);
   const categoryListRef = useRef<HTMLDivElement>(null);
@@ -99,6 +102,20 @@ export function DressUpMenu({
 
   // 縦画面用レイアウト
   if (isPortrait) {
+    // 閉じた状態：展開ボタンのみ表示
+    if (!isMenuExpanded) {
+      return (
+        <div style={portraitStyles.collapsedContainer} data-menu="dressup-menu">
+          <button
+            style={portraitStyles.expandButton}
+            onClick={() => setIsMenuExpanded(true)}
+          >
+            👗 きせかえ
+          </button>
+        </div>
+      );
+    }
+
     // 背景選択画面（縦画面）
     if (showBackgrounds) {
       return (
@@ -111,6 +128,12 @@ export function DressUpMenu({
               ←
             </button>
             <span style={portraitStyles.topBarTitle}>🖼️ はいけい</span>
+            <button 
+              style={portraitStyles.closeButton} 
+              onClick={() => setIsMenuExpanded(false)}
+            >
+              ▼
+            </button>
           </div>
           <div style={portraitStyles.horizontalScroll} ref={itemListRef}>
             {/* 背景なしオプション */}
@@ -165,6 +188,12 @@ export function DressUpMenu({
                 ✕
               </button>
             )}
+            <button 
+              style={portraitStyles.closeButton} 
+              onClick={() => setIsMenuExpanded(false)}
+            >
+              ▼
+            </button>
           </div>
           <div style={portraitStyles.horizontalScroll} ref={itemListRef}>
             {selectedCategoryItems.map(item => (
@@ -189,6 +218,15 @@ export function DressUpMenu({
     // メインカテゴリ一覧（縦画面）
     return (
       <div style={portraitStyles.container} data-menu="dressup-menu">
+        <div style={portraitStyles.topBar}>
+          <span style={portraitStyles.topBarTitle}>👗 きせかえ</span>
+          <button 
+            style={portraitStyles.closeButton} 
+            onClick={() => setIsMenuExpanded(false)}
+          >
+            ▼
+          </button>
+        </div>
         <div style={portraitStyles.horizontalScroll} ref={categoryListRef}>
           {/* ドール選択 */}
           <div style={portraitStyles.categoryItem}>
@@ -838,15 +876,54 @@ const PORTRAIT_CATEGORY_SIZE = 56;
 
 // 縦画面用スタイル
 const portraitStyles: Record<string, CSSProperties> = {
+  collapsedContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '48px',
+    backgroundColor: 'rgba(248, 249, 250, 0.95)',
+    borderTop: '2px solid #e9ecef',
+    pointerEvents: 'auto',
+  },
+  expandButton: {
+    padding: '10px 24px',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    color: '#fff',
+    backgroundColor: '#ff69b4',
+    border: 'none',
+    borderRadius: '24px',
+    cursor: 'pointer',
+    boxShadow: '0 2px 8px rgba(255, 105, 180, 0.4)',
+  },
+  closeButton: {
+    width: '36px',
+    height: '36px',
+    padding: 0,
+    fontSize: '16px',
+    fontWeight: 'bold',
+    color: '#666',
+    backgroundColor: '#e9ecef',
+    border: 'none',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginLeft: 'auto',
+  },
   container: {
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
-    height: '140px',
+    height: '160px',
     backgroundColor: '#f8f9fa',
     borderTop: '2px solid #e9ecef',
     padding: '8px 0',
     gap: '4px',
+    pointerEvents: 'auto',
   },
   topBar: {
     display: 'flex',
@@ -903,7 +980,6 @@ const portraitStyles: Record<string, CSSProperties> = {
     flex: 1,
     padding: '4px 12px',
     WebkitOverflowScrolling: 'touch',
-    scrollSnapType: 'x mandatory',
   },
   categoryItem: {
     display: 'flex',
@@ -926,7 +1002,6 @@ const portraitStyles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     flexShrink: 0,
     position: 'relative',
-    scrollSnapAlign: 'start',
   },
   categoryButtonEquipped: {
     border: '2px solid #ff69b4',
@@ -987,7 +1062,6 @@ const portraitStyles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     flexShrink: 0,
     position: 'relative',
-    scrollSnapAlign: 'start',
   },
   itemButtonEquipped: {
     border: '2px solid #ff69b4',
@@ -1033,14 +1107,11 @@ const portraitStyles: Record<string, CSSProperties> = {
   },
 };
 
-// 縦画面用ドラッグ可能アイテム
+// 縦画面用アイテム（タップで装着、ドラッグなし）
 const DraggableItemPortrait = memo(function DraggableItemPortrait({
   item,
   isEquipped,
   onDrop,
-  dropTargetId,
-  onDragMove,
-  onDragEnd,
 }: {
   item: ClothingItemData;
   isEquipped: boolean;
@@ -1049,86 +1120,13 @@ const DraggableItemPortrait = memo(function DraggableItemPortrait({
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
 }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
-  const startPos = useRef({ x: 0, y: 0 });
-  const movedDistance = useRef(0);
-
-  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
-    const menu = document.querySelector('[data-menu="dressup-menu"]');
-    if (!menu) return false;
-    const rect = (menu as HTMLElement).getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  }, []);
-
-  const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
-    const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
-    if (!targetElement) return false;
-    const rect = targetElement.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && 
-           clientY >= rect.top && clientY <= rect.bottom;
-  }, [dropTargetId]);
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    startPos.current = { x: e.clientX, y: e.clientY };
-    setDragPos({ x: 0, y: 0 });
-    movedDistance.current = 0;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
-    setDragPos({ x: dx, y: dy });
-    if (onDragMove) {
-      onDragMove(item, { x: e.clientX, y: e.clientY });
-    }
-  }, [isDragging, item, onDragMove]);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    setIsDragging(false);
-    setDragPos({ x: 0, y: 0 });
-    onDragEnd?.();
-
-    // タップ（ほぼ移動なし）も装着
-    if (movedDistance.current < 10) {
-      onDrop(item);
-      return;
-    }
-
-    // メニュー領域上で指を離した場合は装着しない
-    if (isInsideMenu(e.clientX, e.clientY)) {
-      return;
-    }
-
-    if (checkIsOverTarget(e.clientX, e.clientY)) {
-      onDrop(item);
-    }
-  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd, isInsideMenu]);
-
   return (
-    <div
+    <button
       style={{
         ...portraitStyles.itemButton,
         ...(isEquipped ? portraitStyles.itemButtonEquipped : {}),
-        ...(isDragging ? portraitStyles.itemDragging : {}),
-        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
-        cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={() => {
-        setIsDragging(false);
-        setDragPos({ x: 0, y: 0 });
-        onDragEnd?.();
-      }}
+      onClick={() => onDrop(item)}
     >
       <div style={portraitStyles.itemImageContainer}>
         <img
@@ -1145,18 +1143,15 @@ const DraggableItemPortrait = memo(function DraggableItemPortrait({
           <div style={portraitStyles.equippedBadge}>✓</div>
         )}
       </div>
-    </div>
+    </button>
   );
 });
 
-// 縦画面用背景ドラッグコンポーネント
+// 縦画面用背景（タップで選択、ドラッグなし）
 const DraggableBackgroundPortrait = memo(function DraggableBackgroundPortrait({
   bg,
   isSelected,
   onDrop,
-  dropTargetId: _dropTargetId,
-  onDragMove,
-  onDragEnd,
 }: {
   bg: BackgroundData;
   isSelected: boolean;
@@ -1165,60 +1160,13 @@ const DraggableBackgroundPortrait = memo(function DraggableBackgroundPortrait({
   onDragMove?: (bg: BackgroundData, position: Position) => void;
   onDragEnd?: () => void;
 }) {
-  void _dropTargetId; // 縦画面ではタップで選択するため未使用
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
-  const startPos = useRef({ x: 0, y: 0 });
-  const movedDistance = useRef(0);
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    startPos.current = { x: e.clientX, y: e.clientY };
-    setDragPos({ x: 0, y: 0 });
-    movedDistance.current = 0;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
-    setDragPos({ x: dx, y: dy });
-    if (onDragMove) {
-      onDragMove(bg, { x: e.clientX, y: e.clientY });
-    }
-  }, [isDragging, bg, onDragMove]);
-
-  const handlePointerUp = useCallback(() => {
-    if (!isDragging) return;
-    setIsDragging(false);
-    setDragPos({ x: 0, y: 0 });
-    onDragEnd?.();
-
-    // タップで選択
-    onDrop(bg.id);
-  }, [isDragging, onDrop, bg.id, onDragEnd]);
-
   return (
-    <div
+    <button
       style={{
         ...portraitStyles.itemButton,
         ...(isSelected ? portraitStyles.itemButtonSelected : {}),
-        ...(isDragging ? portraitStyles.itemDragging : {}),
-        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
-        cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
       }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={() => {
-        setIsDragging(false);
-        setDragPos({ x: 0, y: 0 });
-        onDragEnd?.();
-      }}
+      onClick={() => onDrop(bg.id)}
     >
       <div style={portraitStyles.itemImageContainer}>
         <img
@@ -1235,6 +1183,6 @@ const DraggableBackgroundPortrait = memo(function DraggableBackgroundPortrait({
           <div style={portraitStyles.equippedBadge}>✓</div>
         )}
       </div>
-    </div>
+    </button>
   );
 });

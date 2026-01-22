@@ -57,6 +57,8 @@ interface ItemAdjustPanelProps {
   rightOffset?: number;
   // ドール画像URL（ドール調整モードのプレビュー用）
   dollImageUrl?: string;
+  // 縦画面モード
+  isPortrait?: boolean;
 }
 
 // タッチポイントの型
@@ -90,6 +92,7 @@ export function ItemAdjustPanel({
   menuOffset = 0,
   rightOffset = 0,
   dollImageUrl,
+  isPortrait = false,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -523,7 +526,7 @@ export function ItemAdjustPanel({
                 src={transparentImageUrl}
                 alt="調整プレビュー"
                 style={{
-                  height: `${canvasHeight * 0.9}px`,
+                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
@@ -561,7 +564,7 @@ export function ItemAdjustPanel({
                 src={dollImageUrl}
                 alt="ドールプレビュー"
                 style={{
-                  height: `${canvasHeight * 0.9}px`,
+                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}

@@ -203,12 +203,16 @@ textarea {
 @media (max-width: 768px) and (orientation: portrait) {
   .app {
     padding: 0;
+    pointer-events: none;
   }
 
   .app-main {
     flex-direction: column;
     justify-content: flex-start;
     padding: 0;
+    pointer-events: none;
+    height: calc(var(--app-height, 100vh) - 140px);
+    overflow: hidden;
   }
 
   .avatar-section {
@@ -216,30 +220,26 @@ textarea {
     left: 0;
     top: 0;
     width: 100%;
-    height: calc(var(--app-height, 100vh) - 140px);
+    height: 100%;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .avatar-section canvas {
     pointer-events: auto;
   }
 
-  .palette-section {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: 140px;
-    z-index: 50;
-    padding: 0;
-  }
-
+  .palette-section,
   .palette-section--portrait {
     position: fixed;
-    bottom: 0;
+    bottom: calc(40px + env(safe-area-inset-bottom, 0));
     left: 0;
     right: 0;
     width: 100%;
-    height: 140px;
-    z-index: 50;
+    height: auto;
+    z-index: 100;
     padding: 0;
+    pointer-events: auto !important;
   }
 
   .app-footer {
@@ -260,8 +260,11 @@ textarea {
 
   /* ツールボタンを右上に */
   .tool-buttons {
+    position: fixed;
     top: calc(8px + env(safe-area-inset-top, 0));
     right: 8px;
+    left: auto;
+    bottom: auto;
     z-index: 200;
     pointer-events: auto;
   }
@@ -278,6 +281,21 @@ textarea {
     width: 40px;
     height: 40px;
     font-size: 1.2rem;
+    pointer-events: auto;
+  }
+
+  /* 調整パネルは縦画面でもクリック可能に */
+  .item-adjust-overlay {
+    pointer-events: auto;
+  }
+
+  .item-adjust-top-buttons {
+    pointer-events: auto;
+  }
+
+  .item-adjust-done-btn-small,
+  .item-adjust-reset-btn-small,
+  .item-adjust-front-btn {
     pointer-events: auto;
   }
 }
