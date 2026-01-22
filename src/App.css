@@ -253,12 +253,14 @@ textarea {
     right: auto;
     bottom: auto;
     flex-direction: row;
+    z-index: 200;
   }
 
   /* ツールボタンを右上に */
   .tool-buttons {
     top: calc(8px + env(safe-area-inset-top, 0));
     right: 8px;
+    z-index: 200;
   }
 
   .tool-button {
