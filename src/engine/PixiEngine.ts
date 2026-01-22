@@ -617,6 +617,29 @@ export class PixiEngine {
     }
   }
 
+  // テクスチャキャッシュをクリア（メモリ解放）
+  async clearTextureCache(): Promise<void> {
+    try {
+      // 未使用のテクスチャをアンロード
+      await Assets.unloadBundle('default');
+    } catch {
+      // バンドルがない場合は無視
+    }
+    
+    // 全キャッシュをリセット
+    Assets.reset();
+    console.log('テクスチャキャッシュをクリアしました');
+  }
+
+  // 特定のテクスチャをアンロード
+  async unloadTexture(url: string): Promise<void> {
+    try {
+      await Assets.unload(url);
+    } catch {
+      // 存在しない場合は無視
+    }
+  }
+
   // クリーンアップ
   destroy(): void {
     if (this.destroyed) {

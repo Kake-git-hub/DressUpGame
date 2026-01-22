@@ -64,6 +64,109 @@ function normalizeDataUrlMime(dataUrl: string, desiredMime: string | null): stri
   return dataUrl.replace(/^data:[^;]*;base64,/, `data:${desiredMime};base64,`);
 }
 
+// 画像の最大解像度設定（パフォーマンス最適化）
+const MAX_IMAGE_SIZE = 1024; // 本体画像の最大辺（px）
+const THUMBNAIL_SIZE = 128;  // サムネイルのサイズ（px）
+
+/**
+ * 画像をリサイズ（最大サイズを超える場合のみ縮小）
+ * @param dataUrl 元画像のData URL
+ * @param maxSize 最大辺のサイズ（px）
+ * @returns リサイズ後のData URL
+ */
+export function resizeImage(dataUrl: string, maxSize: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const { width, height } = img;
+      
+      // 最大サイズ以下ならそのまま返す
+      if (width <= maxSize && height <= maxSize) {
+        resolve(dataUrl);
+        return;
+      }
+      
+      // アスペクト比を保持してリサイズ
+      const scale = maxSize / Math.max(width, height);
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      
+      // 高品質リサイズ
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+      
+      // 透過を維持するためPNG形式で出力
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('画像の読み込みに失敗'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * サムネイルを生成（正方形に収める）
+ * @param dataUrl 元画像のData URL
+ * @param size サムネイルサイズ（px）
+ * @returns サムネイルのData URL
+ */
+export function generateThumbnail(dataUrl: string, size: number = THUMBNAIL_SIZE): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const { width, height } = img;
+      const scale = size / Math.max(width, height);
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'medium'; // サムネイルは中品質で十分
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+      
+      // JPEGで出力してサイズ削減（透過不要なメニュー表示用）
+      // ただし透過がある画像はPNGを維持
+      const hasAlpha = checkImageHasAlpha(ctx, newWidth, newHeight);
+      if (hasAlpha) {
+        resolve(canvas.toDataURL('image/png'));
+      } else {
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      }
+    };
+    img.onerror = () => reject(new Error('サムネイル生成に失敗'));
+    img.src = dataUrl;
+  });
+}
+
+// 画像に透過があるかチェック
+function checkImageHasAlpha(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 255) return true;
+  }
+  return false;
+}
+
 // 画像をBase64(Data URL)に変換（ZIP由来などでmimeが欠ける場合は拡張子から補正）
 export function fileToBase64(file: Blob, fileName?: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -170,14 +273,36 @@ export function processChromaKeyTransparent(dataUrl: string): Promise<string> {
 }
 
 /**
- * 画像ファイルを読み込み、処理（右下カット＋クロマキー）してBase64で返す
+ * 画像ファイルを読み込み、処理（右下カット＋リサイズ）してBase64で返す
+ * @returns { imageUrl, thumbnailUrl } 本体画像とサムネイル
  */
 export async function fileToBase64WithProcessing(
   file: Blob,
   fileName?: string
+): Promise<{ imageUrl: string; thumbnailUrl: string }> {
+  const raw = await fileToBase64(file, fileName);
+  const cropped = await processImageWithChromaKey(raw);
+  
+  // 本体画像をリサイズ（最大1024px）
+  const imageUrl = await resizeImage(cropped, MAX_IMAGE_SIZE);
+  
+  // サムネイルを自動生成（128px）
+  const thumbnailUrl = await generateThumbnail(cropped, THUMBNAIL_SIZE);
+  
+  return { imageUrl, thumbnailUrl };
+}
+
+/**
+ * 画像ファイルを読み込み、処理してBase64で返す（本体のみ、サムネイルなし）
+ * 背景など大きい画像用
+ */
+export async function fileToBase64WithResize(
+  file: Blob,
+  fileName?: string,
+  maxSize: number = MAX_IMAGE_SIZE
 ): Promise<string> {
   const raw = await fileToBase64(file, fileName);
-  return processImageWithChromaKey(raw);
+  return resizeImage(raw, maxSize);
 }
 
 // 画像をIndexedDBに保存
@@ -405,14 +530,15 @@ export async function addCustomDoll(
   imageFile: File
 ): Promise<DollData> {
   const id = `custom-doll-${Date.now()}`;
-  // 右下ウォーターマーク除去＋クロマキー処理
-  const base64 = await fileToBase64WithProcessing(imageFile, imageFile.name);
-  await saveImageToStorage(id, base64);
+  // 右下ウォーターマーク除去＋リサイズ＋サムネイル生成
+  const { imageUrl, thumbnailUrl } = await fileToBase64WithProcessing(imageFile, imageFile.name);
+  await saveImageToStorage(id, imageUrl);
+  await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
   
   const doll: DollData = {
     id,
     name,
-    bodyImageUrl: base64,
+    bodyImageUrl: imageUrl,
     isCustom: true,
     skinTone: 'fair',
     dimensions: {
@@ -478,12 +604,13 @@ export async function addCustomClothing(
   imageFile: File
 ): Promise<ClothingItemData> {
   const id = `custom-clothing-${Date.now()}`;
-  // 右下ウォーターマーク除去＋クロマキー処理
-  const base64 = await fileToBase64WithProcessing(imageFile, imageFile.name);
-  await saveImageToStorage(id, base64);
+  // 右下ウォーターマーク除去＋リサイズ＋サムネイル生成
+  const { imageUrl, thumbnailUrl } = await fileToBase64WithProcessing(imageFile, imageFile.name);
+  await saveImageToStorage(id, imageUrl);
+  await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
   
   // 透過処理済み画像も保存（プレビュー用）
-  const transparentBase64 = await processChromaKeyTransparent(base64);
+  const transparentBase64 = await processChromaKeyTransparent(imageUrl);
   await saveImageToStorage(`${id}_transparent`, transparentBase64);
   
   // DEFAULT_CATEGORY_MAPからデフォルト値を取得
@@ -498,7 +625,8 @@ export async function addCustomClothing(
     id,
     name,
     type,
-    imageUrl: base64,
+    imageUrl: imageUrl,
+    thumbnailUrl: thumbnailUrl,
     position: defaults.position,
     baseZIndex: mapping?.zIndex || 25,
     anchorType: defaults.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet',
@@ -683,28 +811,37 @@ export async function bulkImportFromFolder(
   
   for (const { name, file } of images) {
     try {
-      // ドール・服は右下カット＋クロマキー処理、背景はそのまま
-      const base64 = targetType === 'backgrounds' 
-        ? await fileToBase64(file)
-        : await fileToBase64WithProcessing(file, file.name);
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      await saveImageToStorage(id, base64);
       
-      // 服の場合は透過画像も保存
-      if (targetType === 'clothing') {
-        const transparentBase64 = await processChromaKeyTransparent(base64);
-        await saveImageToStorage(`${id}_transparent`, transparentBase64);
-      }
-      
-      if (targetType === 'dolls') {
-        const doll = createDollData(id, name, base64);
-        result.items.push(doll);
-      } else if (targetType === 'backgrounds') {
-        const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+      if (targetType === 'backgrounds') {
+        // 背景はリサイズのみ、サムネイルも生成
+        const imageUrl = await fileToBase64WithResize(file, file.name);
+        await saveImageToStorage(id, imageUrl);
+        const thumbnailUrl = await generateThumbnail(imageUrl, THUMBNAIL_SIZE);
+        await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+        
+        const bg: BackgroundData = { id, name, imageUrl, thumbnailUrl, isCustom: true };
         result.items.push(bg);
-      } else if (targetType === 'clothing' && clothingType) {
-        const item = createClothingData(id, name, clothingType, base64);
-        result.items.push(item);
+      } else {
+        // ドール・服は右下カット＋リサイズ＋サムネイル生成
+        const { imageUrl, thumbnailUrl } = await fileToBase64WithProcessing(file, file.name);
+        await saveImageToStorage(id, imageUrl);
+        await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+        
+        // 服の場合は透過画像も保存
+        if (targetType === 'clothing') {
+          const transparentBase64 = await processChromaKeyTransparent(imageUrl);
+          await saveImageToStorage(`${id}_transparent`, transparentBase64);
+        }
+        
+        if (targetType === 'dolls') {
+          const doll = createDollData(id, name, imageUrl);
+          result.items.push(doll);
+        } else if (targetType === 'clothing' && clothingType) {
+          const item = createClothingData(id, name, clothingType, imageUrl);
+          item.thumbnailUrl = thumbnailUrl;
+          result.items.push(item);
+        }
       }
       result.success++;
     } catch (e) {
@@ -870,35 +1007,34 @@ export async function bulkImportFromHierarchicalFolder(
     }
     
     try {
-      // ドール・服は右下カット＋クロマキー処理、背景はそのまま
-      const base64 = category.type === 'backgrounds'
-        ? await fileToBase64(file, file.name)
-        : await fileToBase64WithProcessing(file, file.name);
       const id = `custom-${category.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const name = file.name.replace(/\.[^.]+$/, '');
       
-      await saveImageToStorage(id, base64);
-      
-      switch (category.type) {
-        case 'dolls': {
-          const doll = createDollData(id, name, base64);
+      if (category.type === 'backgrounds') {
+        // 背景はリサイズのみ
+        const imageUrl = await fileToBase64WithResize(file, file.name);
+        await saveImageToStorage(id, imageUrl);
+        const thumbnailUrl = await generateThumbnail(imageUrl, THUMBNAIL_SIZE);
+        await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+        
+        const bg: BackgroundData = { id, name, imageUrl, thumbnailUrl, isCustom: true };
+        result.backgrounds.items.push(bg);
+        result.backgrounds.success++;
+      } else {
+        // ドール・服は右下カット＋リサイズ＋サムネイル生成
+        const { imageUrl, thumbnailUrl } = await fileToBase64WithProcessing(file, file.name);
+        await saveImageToStorage(id, imageUrl);
+        await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+        
+        if (category.type === 'dolls') {
+          const doll = createDollData(id, name, imageUrl);
           result.dolls.items.push(doll);
           result.dolls.success++;
-          break;
-        }
-        case 'backgrounds': {
-          const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
-          result.backgrounds.items.push(bg);
-          result.backgrounds.success++;
-          break;
-        }
-        case 'clothing': {
-          if (category.clothingType) {
-            const item = createClothingData(id, name, category.clothingType, base64);
-            result.clothing.items.push(item);
-            result.clothing.success++;
-          }
-          break;
+        } else if (category.type === 'clothing' && category.clothingType) {
+          const item = createClothingData(id, name, category.clothingType, imageUrl);
+          item.thumbnailUrl = thumbnailUrl;
+          result.clothing.items.push(item);
+          result.clothing.success++;
         }
       }
     } catch (e) {
@@ -1161,11 +1297,17 @@ export async function importPresetFromFolder(
     });
     
     try {
-      const base64 = await fileToBase64(file, file.name);
+      // 背景もリサイズ（最大1024px）
+      const base64 = await fileToBase64WithResize(file, file.name, MAX_IMAGE_SIZE);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
-      const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+      // サムネイルも生成
+      const thumbnailUrl = await generateThumbnail(base64, THUMBNAIL_SIZE);
+      const thumbId = `${id}-thumb`;
+      await saveImageToStorage(thumbId, thumbnailUrl);
+      
+      const bg: BackgroundData = { id, name, imageUrl: base64, thumbnailUrl, isCustom: true };
       result.backgrounds.items.push(bg);
       result.backgrounds.success++;
     } catch (e) {
@@ -1208,10 +1350,13 @@ export async function importPresetFromFolder(
       
       // 最初のドールを使用
       const dollFile = data.dolls[0];
-      // 右下ウォーターマーク除去＋クロマキー処理
-      const dollBase64 = await fileToBase64WithProcessing(dollFile.file, dollFile.file.name);
+      // 右下ウォーターマーク除去＋リサイズ＋サムネイル生成
+      const { imageUrl: dollBase64, thumbnailUrl: dollThumb } = await fileToBase64WithProcessing(dollFile.file, dollFile.file.name);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
+      // ドールのサムネイルも保存
+      const dollThumbId = `${dollId}-thumb`;
+      await saveImageToStorage(dollThumbId, dollThumb);
       
       const doll = createDollData(dollId, dollFile.name, dollBase64);
       
@@ -1233,27 +1378,29 @@ export async function importPresetFromFolder(
             message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
           });
           
-          // 右下ウォーターマーク除去＋クロマキー処理
-          const base64 = await fileToBase64WithProcessing(file, file.name);
+          // 右下ウォーターマーク除去＋リサイズ＋サムネイル自動生成
+          const { imageUrl: base64, thumbnailUrl: autoThumb } = await fileToBase64WithProcessing(file, file.name);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          // サムネイルがあれば読み込み（サムネイルはウォーターマークカット不要）
+          // 手動サムネイルがあれば優先、なければ自動生成を使用
           const thumbKey = `${categoryRaw}/${name}`;
           const thumbFile = data.clothingThumbs.get(thumbKey);
-          let thumbnailUrl: string | undefined;
+          let thumbnailUrl: string;
           if (thumbFile) {
-            thumbnailUrl = await fileToBase64(thumbFile, thumbFile.name);
-            const thumbId = `${id}-thumb`;
-            await saveImageToStorage(thumbId, thumbnailUrl);
-            console.log(`  サムネイル読み込み: ${thumbKey}`);
+            // 手動サムネイルもリサイズ
+            thumbnailUrl = await fileToBase64WithResize(thumbFile, thumbFile.name, THUMBNAIL_SIZE);
+            console.log(`  手動サムネイル読み込み: ${thumbKey}`);
+          } else {
+            // 自動生成サムネイルを使用
+            thumbnailUrl = autoThumb;
           }
+          const thumbId = `${id}-thumb`;
+          await saveImageToStorage(thumbId, thumbnailUrl);
           
           const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
-          // サムネイルURLを追加
-          if (thumbnailUrl) {
-            item.thumbnailUrl = thumbnailUrl;
-          }
+          // サムネイルURLを設定（常にある）
+          item.thumbnailUrl = thumbnailUrl;
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
