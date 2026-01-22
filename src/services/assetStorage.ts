@@ -65,8 +65,9 @@ function normalizeDataUrlMime(dataUrl: string, desiredMime: string | null): stri
 }
 
 // 画像の最大解像度設定（パフォーマンス最適化）
-const MAX_IMAGE_SIZE = 1024; // 本体画像の最大辺（px）
-const THUMBNAIL_SIZE = 128;  // サムネイルのサイズ（px）
+const MAX_IMAGE_SIZE = 2048;       // 服・ドール画像の最大辺（px）- 品質重視
+const MAX_BACKGROUND_SIZE = 512;   // 背景画像の最大辺（px）- 軽量化重視
+const THUMBNAIL_SIZE = 128;        // サムネイルのサイズ（px）
 
 /**
  * 画像をリサイズ（最大サイズを超える場合のみ縮小）
@@ -814,8 +815,8 @@ export async function bulkImportFromFolder(
       const id = `custom-${targetType}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       
       if (targetType === 'backgrounds') {
-        // 背景はリサイズのみ、サムネイルも生成
-        const imageUrl = await fileToBase64WithResize(file, file.name);
+        // 背景は小さめにリサイズ（軽量化）、サムネイルも生成
+        const imageUrl = await fileToBase64WithResize(file, file.name, MAX_BACKGROUND_SIZE);
         await saveImageToStorage(id, imageUrl);
         const thumbnailUrl = await generateThumbnail(imageUrl, THUMBNAIL_SIZE);
         await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
@@ -1011,8 +1012,8 @@ export async function bulkImportFromHierarchicalFolder(
       const name = file.name.replace(/\.[^.]+$/, '');
       
       if (category.type === 'backgrounds') {
-        // 背景はリサイズのみ
-        const imageUrl = await fileToBase64WithResize(file, file.name);
+        // 背景は小さめにリサイズ（軽量化）
+        const imageUrl = await fileToBase64WithResize(file, file.name, MAX_BACKGROUND_SIZE);
         await saveImageToStorage(id, imageUrl);
         const thumbnailUrl = await generateThumbnail(imageUrl, THUMBNAIL_SIZE);
         await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
@@ -1297,8 +1298,8 @@ export async function importPresetFromFolder(
     });
     
     try {
-      // 背景もリサイズ（最大1024px）
-      const base64 = await fileToBase64WithResize(file, file.name, MAX_IMAGE_SIZE);
+      // 背景は小さめにリサイズ（軽量化、最大512px）
+      const base64 = await fileToBase64WithResize(file, file.name, MAX_BACKGROUND_SIZE);
       const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(id, base64);
       
