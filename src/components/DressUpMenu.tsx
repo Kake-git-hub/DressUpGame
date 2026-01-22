@@ -23,6 +23,7 @@ interface DressUpMenuProps {
   onDragEnd?: () => void;
   onBackgroundDragMove?: (bg: BackgroundData, position: Position) => void;
   onBackgroundDragEnd?: () => void;
+  isPortrait?: boolean;
 }
 
 export function DressUpMenu({
@@ -41,12 +42,17 @@ export function DressUpMenu({
   onDragEnd,
   onBackgroundDragMove,
   onBackgroundDragEnd,
+  isPortrait = false,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
   
+  // 現在選択中のカテゴリ（縦画面用）
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  
   // スクロール用ref
   const itemListRef = useRef<HTMLDivElement>(null);
+  const categoryListRef = useRef<HTMLDivElement>(null);
 
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
@@ -82,7 +88,165 @@ export function DressUpMenu({
     return new Map(sorted.map(([key, val]) => [key, val.items]));
   }, [items]);
 
-  // 背景選択画面
+  // カテゴリ一覧（縦画面用）
+  const categories = useMemo(() => Array.from(groupedItems.keys()), [groupedItems]);
+  
+  // 選択中カテゴリのアイテム
+  const selectedCategoryItems = useMemo(() => {
+    if (!selectedCategory) return [];
+    return groupedItems.get(selectedCategory) ?? [];
+  }, [selectedCategory, groupedItems]);
+
+  // 縦画面用レイアウト
+  if (isPortrait) {
+    // 背景選択画面（縦画面）
+    if (showBackgrounds) {
+      return (
+        <div style={portraitStyles.container} data-menu="dressup-menu">
+          <div style={portraitStyles.topBar}>
+            <button 
+              style={portraitStyles.backButton} 
+              onClick={() => setShowBackgrounds(false)}
+            >
+              ←
+            </button>
+            <span style={portraitStyles.topBarTitle}>🖼️ はいけい</span>
+          </div>
+          <div style={portraitStyles.horizontalScroll} ref={itemListRef}>
+            {/* 背景なしオプション */}
+            <button
+              style={{
+                ...portraitStyles.itemButton,
+                ...(currentBackgroundId === null ? portraitStyles.itemButtonSelected : {}),
+              }}
+              onClick={() => onBackgroundChange?.(null)}
+            >
+              <div style={portraitStyles.itemImageContainer}>
+                <span style={{ fontSize: '24px' }}>✕</span>
+              </div>
+            </button>
+            {backgrounds.map(bg => (
+              <DraggableBackgroundPortrait
+                key={bg.id}
+                bg={bg}
+                isSelected={currentBackgroundId === bg.id}
+                onDrop={onBackgroundChange!}
+                dropTargetId={dropTargetId}
+                onDragMove={onBackgroundDragMove}
+                onDragEnd={onBackgroundDragEnd}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // カテゴリ内アイテム表示（縦画面）
+    if (selectedCategory) {
+      return (
+        <div style={portraitStyles.container} data-menu="dressup-menu">
+          <div style={portraitStyles.topBar}>
+            <button 
+              style={portraitStyles.backButton} 
+              onClick={() => setSelectedCategory(null)}
+            >
+              ←
+            </button>
+            <span style={portraitStyles.topBarTitle}>{selectedCategory}</span>
+            {/* 「なし」ボタン */}
+            {equippedTypes.has(selectedCategory as ClothingType) && (
+              <button
+                style={portraitStyles.removeButtonSmall}
+                onClick={() => {
+                  onItemRemove?.(selectedCategory as ClothingType);
+                  setSelectedCategory(null);
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <div style={portraitStyles.horizontalScroll} ref={itemListRef}>
+            {selectedCategoryItems.map(item => (
+              <DraggableItemPortrait
+                key={item.id}
+                item={item}
+                isEquipped={equippedIds.has(item.id)}
+                onDrop={(droppedItem) => {
+                  onItemDrop(droppedItem);
+                  setSelectedCategory(null);
+                }}
+                dropTargetId={dropTargetId}
+                onDragMove={onDragMove}
+                onDragEnd={onDragEnd}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // メインカテゴリ一覧（縦画面）
+    return (
+      <div style={portraitStyles.container} data-menu="dressup-menu">
+        <div style={portraitStyles.horizontalScroll} ref={categoryListRef}>
+          {/* ドール選択 */}
+          <div style={portraitStyles.categoryItem}>
+            <select
+              style={portraitStyles.dollSelectSmall}
+              value={currentDollId}
+              onChange={(e) => onDollChange(e.target.value)}
+              disabled={dolls.length === 0}
+            >
+              {dolls.length === 0 ? (
+                <option value="">👤</option>
+              ) : (
+                dolls.map(doll => (
+                  <option key={doll.id} value={doll.id}>
+                    {doll.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          
+          {/* 背景ボタン */}
+          {backgrounds.length > 0 && (
+            <button 
+              style={{
+                ...portraitStyles.categoryButton,
+                ...(currentBackgroundId ? portraitStyles.categoryButtonActive : {}),
+              }}
+              onClick={() => setShowBackgrounds(true)}
+            >
+              🖼️
+              {currentBackgroundId && <span style={portraitStyles.checkMark}>✓</span>}
+            </button>
+          )}
+          
+          {/* カテゴリボタン */}
+          {categories.map(category => {
+            const hasEquipped = equippedTypes.has(category as ClothingType);
+            return (
+              <button
+                key={category}
+                style={{
+                  ...portraitStyles.categoryButton,
+                  ...(hasEquipped ? portraitStyles.categoryButtonEquipped : {}),
+                }}
+                onClick={() => setSelectedCategory(category)}
+              >
+                <span style={portraitStyles.categoryLabel}>{category}</span>
+                {hasEquipped && <span style={portraitStyles.checkMark}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // 背景選択画面（横画面）
   if (showBackgrounds) {
     return (
       <div style={styles.outerContainer}>
@@ -667,3 +831,410 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.5,
   },
 };
+
+// 縦画面用サイズ
+const PORTRAIT_ITEM_SIZE = 80;
+const PORTRAIT_CATEGORY_SIZE = 56;
+
+// 縦画面用スタイル
+const portraitStyles: Record<string, CSSProperties> = {
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '140px',
+    backgroundColor: '#f8f9fa',
+    borderTop: '2px solid #e9ecef',
+    padding: '8px 0',
+    gap: '4px',
+  },
+  topBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '0 12px 4px',
+    borderBottom: '1px solid #e9ecef',
+    flexShrink: 0,
+  },
+  topBarTitle: {
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+  },
+  backButton: {
+    width: '36px',
+    height: '36px',
+    padding: 0,
+    fontSize: '18px',
+    fontWeight: 'bold',
+    color: '#666',
+    backgroundColor: '#e9ecef',
+    border: 'none',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  removeButtonSmall: {
+    width: '36px',
+    height: '36px',
+    padding: 0,
+    fontSize: '16px',
+    fontWeight: 'bold',
+    color: '#dc3545',
+    backgroundColor: '#ffe5e5',
+    border: '2px solid #dc3545',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  horizontalScroll: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: '8px',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    flex: 1,
+    padding: '4px 12px',
+    WebkitOverflowScrolling: 'touch',
+    scrollSnapType: 'x mandatory',
+  },
+  categoryItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  categoryButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: `${PORTRAIT_CATEGORY_SIZE}px`,
+    height: `${PORTRAIT_CATEGORY_SIZE}px`,
+    padding: '4px',
+    backgroundColor: 'white',
+    border: '2px solid #e9ecef',
+    borderRadius: '12px',
+    cursor: 'pointer',
+    flexShrink: 0,
+    position: 'relative',
+    scrollSnapAlign: 'start',
+  },
+  categoryButtonEquipped: {
+    border: '2px solid #ff69b4',
+    backgroundColor: '#fff5f8',
+  },
+  categoryButtonActive: {
+    border: '2px solid #28a745',
+    backgroundColor: '#d4edda',
+  },
+  categoryLabel: {
+    fontSize: '10px',
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '100%',
+  },
+  checkMark: {
+    position: 'absolute',
+    top: '-4px',
+    right: '-4px',
+    width: '16px',
+    height: '16px',
+    backgroundColor: '#ff69b4',
+    color: 'white',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '10px',
+    fontWeight: 'bold',
+  },
+  dollSelectSmall: {
+    width: `${PORTRAIT_CATEGORY_SIZE}px`,
+    height: `${PORTRAIT_CATEGORY_SIZE}px`,
+    padding: '4px',
+    fontSize: '10px',
+    borderRadius: '12px',
+    border: '2px solid #e9ecef',
+    backgroundColor: 'white',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  itemButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: `${PORTRAIT_ITEM_SIZE}px`,
+    height: `${PORTRAIT_ITEM_SIZE}px`,
+    padding: '4px',
+    backgroundColor: 'white',
+    border: '2px solid #e9ecef',
+    borderRadius: '12px',
+    cursor: 'pointer',
+    flexShrink: 0,
+    position: 'relative',
+    scrollSnapAlign: 'start',
+  },
+  itemButtonEquipped: {
+    border: '2px solid #ff69b4',
+    backgroundColor: '#fff5f8',
+  },
+  itemButtonSelected: {
+    border: '2px solid #28a745',
+    backgroundColor: '#d4edda',
+  },
+  itemDragging: {
+    boxShadow: '0 8px 20px rgba(0, 0, 0, 0.3)',
+    zIndex: 1000,
+    opacity: 0.9,
+  },
+  itemImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    pointerEvents: 'none',
+  },
+  equippedBadge: {
+    position: 'absolute',
+    top: '-4px',
+    right: '-4px',
+    width: '18px',
+    height: '18px',
+    backgroundColor: '#ff69b4',
+    color: 'white',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '11px',
+    fontWeight: 'bold',
+  },
+};
+
+// 縦画面用ドラッグ可能アイテム
+const DraggableItemPortrait = memo(function DraggableItemPortrait({
+  item,
+  isEquipped,
+  onDrop,
+  dropTargetId,
+  onDragMove,
+  onDragEnd,
+}: {
+  item: ClothingItemData;
+  isEquipped: boolean;
+  onDrop: (item: ClothingItemData) => void;
+  dropTargetId: string;
+  onDragMove?: (item: ClothingItemData, position: Position) => void;
+  onDragEnd?: () => void;
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const startPos = useRef({ x: 0, y: 0 });
+  const movedDistance = useRef(0);
+
+  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
+    const menu = document.querySelector('[data-menu="dressup-menu"]');
+    if (!menu) return false;
+    const rect = (menu as HTMLElement).getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }, []);
+
+  const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
+    const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
+    if (!targetElement) return false;
+    const rect = targetElement.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && 
+           clientY >= rect.top && clientY <= rect.bottom;
+  }, [dropTargetId]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startPos.current = { x: e.clientX, y: e.clientY };
+    setDragPos({ x: 0, y: 0 });
+    movedDistance.current = 0;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
+    setDragPos({ x: dx, y: dy });
+    if (onDragMove) {
+      onDragMove(item, { x: e.clientX, y: e.clientY });
+    }
+  }, [isDragging, item, onDragMove]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setDragPos({ x: 0, y: 0 });
+    onDragEnd?.();
+
+    // タップ（ほぼ移動なし）も装着
+    if (movedDistance.current < 10) {
+      onDrop(item);
+      return;
+    }
+
+    // メニュー領域上で指を離した場合は装着しない
+    if (isInsideMenu(e.clientX, e.clientY)) {
+      return;
+    }
+
+    if (checkIsOverTarget(e.clientX, e.clientY)) {
+      onDrop(item);
+    }
+  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd, isInsideMenu]);
+
+  return (
+    <div
+      style={{
+        ...portraitStyles.itemButton,
+        ...(isEquipped ? portraitStyles.itemButtonEquipped : {}),
+        ...(isDragging ? portraitStyles.itemDragging : {}),
+        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        touchAction: 'none',
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => {
+        setIsDragging(false);
+        setDragPos({ x: 0, y: 0 });
+        onDragEnd?.();
+      }}
+    >
+      <div style={portraitStyles.itemImageContainer}>
+        <img
+          src={item.thumbnailUrl || item.imageUrl}
+          alt={item.name}
+          style={portraitStyles.itemImage}
+          draggable={false}
+          loading="lazy"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="40">?</text></svg>';
+          }}
+        />
+        {isEquipped && (
+          <div style={portraitStyles.equippedBadge}>✓</div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+// 縦画面用背景ドラッグコンポーネント
+const DraggableBackgroundPortrait = memo(function DraggableBackgroundPortrait({
+  bg,
+  isSelected,
+  onDrop,
+  dropTargetId: _dropTargetId,
+  onDragMove,
+  onDragEnd,
+}: {
+  bg: BackgroundData;
+  isSelected: boolean;
+  onDrop: (bgId: string | null) => void;
+  dropTargetId: string;
+  onDragMove?: (bg: BackgroundData, position: Position) => void;
+  onDragEnd?: () => void;
+}) {
+  void _dropTargetId; // 縦画面ではタップで選択するため未使用
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const startPos = useRef({ x: 0, y: 0 });
+  const movedDistance = useRef(0);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startPos.current = { x: e.clientX, y: e.clientY };
+    setDragPos({ x: 0, y: 0 });
+    movedDistance.current = 0;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
+    setDragPos({ x: dx, y: dy });
+    if (onDragMove) {
+      onDragMove(bg, { x: e.clientX, y: e.clientY });
+    }
+  }, [isDragging, bg, onDragMove]);
+
+  const handlePointerUp = useCallback(() => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    setDragPos({ x: 0, y: 0 });
+    onDragEnd?.();
+
+    // タップで選択
+    onDrop(bg.id);
+  }, [isDragging, onDrop, bg.id, onDragEnd]);
+
+  return (
+    <div
+      style={{
+        ...portraitStyles.itemButton,
+        ...(isSelected ? portraitStyles.itemButtonSelected : {}),
+        ...(isDragging ? portraitStyles.itemDragging : {}),
+        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
+        cursor: isDragging ? 'grabbing' : 'grab',
+        touchAction: 'none',
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => {
+        setIsDragging(false);
+        setDragPos({ x: 0, y: 0 });
+        onDragEnd?.();
+      }}
+    >
+      <div style={portraitStyles.itemImageContainer}>
+        <img
+          src={bg.thumbnailUrl || bg.imageUrl}
+          alt={bg.name}
+          style={portraitStyles.itemImage}
+          draggable={false}
+          loading="lazy"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+          }}
+        />
+        {isSelected && (
+          <div style={portraitStyles.equippedBadge}>✓</div>
+        )}
+      </div>
+    </div>
+  );
+});

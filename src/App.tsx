@@ -151,9 +151,14 @@ function App() {
   }, [currentDollId, allDolls]);
 
   // メニュー幅はコンポーネント外で定義済み
+  // 下部メニュー高さ（縦画面用）
+  const BOTTOM_MENU_HEIGHT = 140;
 
   // キャンバスサイズ（メニュー以外の画面いっぱい）
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
+  
+  // 縦画面判定
+  const [isPortrait, setIsPortrait] = useState(false);
 
   // 画面サイズに応じてキャンバスサイズを計算（メニュー幅を除いた全体）
   // CSS変数も同時に更新してレイアウト全体を制御
@@ -162,14 +167,19 @@ function App() {
       // visualViewportを優先使用（iPad Safari対応）
       const vh = window.visualViewport?.height ?? window.innerHeight;
       const vw = window.visualViewport?.width ?? window.innerWidth;
+      
+      // 縦画面判定（幅768px以下かつ縦長）
+      const portrait = vw <= 768 && vh > vw;
+      setIsPortrait(portrait);
 
       // CSS変数に実際のビューポートサイズを設定
       document.documentElement.style.setProperty('--app-height', `${vh}px`);
       document.documentElement.style.setProperty('--app-width', `${vw}px`);
+      document.documentElement.style.setProperty('--is-portrait', portrait ? '1' : '0');
 
-      // メニューを除いた画面全体
-      const width = vw - MENU_WIDTH;
-      const height = vh;
+      // 縦画面：下部メニュー分を引く / 横画面：左メニュー分を引く
+      const width = portrait ? vw : vw - MENU_WIDTH;
+      const height = portrait ? vh - BOTTOM_MENU_HEIGHT : vh;
 
       setCanvasSize({
         width: Math.floor(width),
@@ -179,11 +189,13 @@ function App() {
 
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
+    window.addEventListener('orientationchange', updateCanvasSize);
     // visualViewportのリサイズも監視（iPad Safariのアドレスバー表示/非表示）
     window.visualViewport?.addEventListener('resize', updateCanvasSize);
     window.visualViewport?.addEventListener('scroll', updateCanvasSize);
     return () => {
       window.removeEventListener('resize', updateCanvasSize);
+      window.removeEventListener('orientationchange', updateCanvasSize);
       window.visualViewport?.removeEventListener('resize', updateCanvasSize);
       window.visualViewport?.removeEventListener('scroll', updateCanvasSize);
     };
@@ -616,7 +628,7 @@ function App() {
 
         {/* ドレスアップメニュー - アイテム調整中は非表示 */}
         {!isAdjustingItem && (
-          <section className="palette-section">
+          <section className={`palette-section ${isPortrait ? 'palette-section--portrait' : ''}`}>
             <DressUpMenu
               items={filteredClothing}
               onItemDrop={handleItemDrop}
@@ -632,10 +644,11 @@ function App() {
               onDragMove={handleDragMove}
               onDragEnd={handleDragEnd}
               onBackgroundDragEnd={handleDragEnd}
+              isPortrait={isPortrait}
             />
 
-            {/* バージョン表示（メニュー下） */}
-            <div className="version-badge">v{APP_VERSION}</div>
+            {/* バージョン表示（メニュー下、横画面のみ） */}
+            {!isPortrait && <div className="version-badge">v{APP_VERSION}</div>}
           </section>
         )}
       </main>
