@@ -1485,17 +1485,18 @@ export async function importPresetFromZip(
   
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
   
-  // ファイルをプリセット別に分類
+  // ファイルをプリセット別に分類（パスのみ保存、Blobは後で読み込み - iPad対応）
   const presetMap = new Map<string, {
-    dolls: { name: string; blob: Blob; fileNameWithExt: string }[];
-    clothing: Map<string, { name: string; blob: Blob; fileNameWithExt: string }[]>;
-    clothingThumbs: Map<string, { blob: Blob; fileNameWithExt: string }>; // サムネイル用マップ
+    dolls: { name: string; path: string; fileNameWithExt: string }[];
+    clothing: Map<string, { name: string; path: string; fileNameWithExt: string }[]>;
+    clothingThumbs: Map<string, { path: string; fileNameWithExt: string }>; // サムネイル用マップ
   }>();
-  const backgroundFiles: { name: string; blob: Blob; fileNameWithExt: string }[] = [];
+  const backgroundFiles: { name: string; path: string; fileNameWithExt: string }[] = [];
   
   console.log('=== ZIP取り込み開始 ===');
   console.log(`ZIP内ファイル数: ${Object.keys(zip.files).length}`);
   
+  // 最初はファイルパスの分類のみ（メモリ節約）
   for (const [path, file] of Object.entries(zip.files)) {
     if (file.dir) continue;
     const lowerPath = path.toLowerCase();
@@ -1515,15 +1516,13 @@ export async function importPresetFromZip(
       ? fileNameWithoutExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '') 
       : fileNameWithoutExt;
     
-    console.log(`処理中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
-    
-    const blob = await file.async('blob');
+    console.log(`分類中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
     // 背景フォルダ
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
       if (!isThumb) {
-        backgroundFiles.push({ name: baseName, blob, fileNameWithExt });
+        backgroundFiles.push({ name: baseName, path, fileNameWithExt });
         console.log(`  → 背景として追加: ${baseName}`);
       }
       continue;
@@ -1550,7 +1549,7 @@ export async function importPresetFromZip(
     const dollsIndex = subParts.findIndex(p => p.toLowerCase() === 'dolls');
     if (dollsIndex !== -1) {
       if (!isThumb) {
-        preset.dolls.push({ name: baseName, blob, fileNameWithExt });
+        preset.dolls.push({ name: baseName, path, fileNameWithExt });
         console.log(`  → ドールとして追加: ${presetId} / ${baseName}`);
       }
       continue;
@@ -1563,13 +1562,13 @@ export async function importPresetFromZip(
       if (isThumb) {
         // サムネイルの場合はthumbsマップに保存
         const thumbKey = `${category}/${baseName}`;
-        preset.clothingThumbs.set(thumbKey, { blob, fileNameWithExt });
+        preset.clothingThumbs.set(thumbKey, { path, fileNameWithExt });
         console.log(`  → サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
       } else {
         if (!preset.clothing.has(category)) {
           preset.clothing.set(category, []);
         }
-        preset.clothing.get(category)!.push({ name: baseName, blob, fileNameWithExt });
+        preset.clothing.get(category)!.push({ name: baseName, path, fileNameWithExt });
         console.log(`  → 服として追加: ${presetId} / ${category} / ${baseName}`);
       }
     }
@@ -1584,10 +1583,10 @@ export async function importPresetFromZip(
     console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種, サムネイル${data.clothingThumbs.size}枚`);
   }
   
-  // 背景を取り込み
+  // 背景を取り込み（1枚ずつ読み込み - iPad対応）
   const bgTotal = backgroundFiles.length;
   for (let i = 0; i < backgroundFiles.length; i++) {
-    const { name, blob, fileNameWithExt } = backgroundFiles[i];
+    const { name, path, fileNameWithExt } = backgroundFiles[i];
     reportProgress({ 
       phase: 'backgrounds', 
       current: i + 1, 
@@ -1596,11 +1595,20 @@ export async function importPresetFromZip(
     });
     
     try {
+      // ZIPからBlobを取得（遅延読み込み）
+      const blob = await zip.files[path].async('blob');
       const base64 = await blobToBase64(blob, fileNameWithExt);
-      const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      await saveImageToStorage(id, base64);
       
-      const bg: BackgroundData = { id, name, imageUrl: base64, isCustom: true };
+      // 背景をリサイズ（iPad対応で軽量化）
+      const resizedBase64 = await resizeImage(base64, MAX_BACKGROUND_SIZE);
+      const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await saveImageToStorage(id, resizedBase64);
+      
+      // サムネイルも生成
+      const thumbnailUrl = await generateThumbnail(resizedBase64, THUMBNAIL_SIZE);
+      await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+      
+      const bg: BackgroundData = { id, name, imageUrl: resizedBase64, thumbnailUrl, isCustom: true };
       result.backgrounds.items.push(bg);
       result.backgrounds.success++;
     } catch (e) {
@@ -1608,9 +1616,11 @@ export async function importPresetFromZip(
       result.backgrounds.failed++;
     }
     
-    // 5件ごとにUIスレッドを解放
-    if ((i + 1) % 5 === 0) {
-      await yieldToMain();
+    // 毎回UIスレッドを解放（iPad対応）
+    await yieldToMain();
+    // 3件ごとにGCを促す
+    if ((i + 1) % 3 === 0) {
+      await forceGCHint();
     }
   }
   
@@ -1623,7 +1633,7 @@ export async function importPresetFromZip(
   }
   let clothingProcessed = 0;
   
-  // 各プリセットを取り込み
+  // 各プリセットを取り込み（1つずつ読み込み - iPad対応）
   const presetEntries = Array.from(presetMap.entries());
   for (let pi = 0; pi < presetEntries.length; pi++) {
     const [presetId, data] = presetEntries[pi];
@@ -1643,9 +1653,16 @@ export async function importPresetFromZip(
       }
       
       const dollFile = data.dolls[0];
-      const dollBase64 = await blobToBase64(dollFile.blob, dollFile.fileNameWithExt);
+      // ZIPからBlobを取得（遅延読み込み）
+      const dollBlob = await zip.files[dollFile.path].async('blob');
+      // リサイズ＋サムネイル生成
+      const dollRawBase64 = await blobToBase64(dollBlob, dollFile.fileNameWithExt);
+      const dollCropped = await processImageWithChromaKey(dollRawBase64);
+      const dollBase64 = await resizeImage(dollCropped, MAX_IMAGE_SIZE);
+      const dollThumb = await generateThumbnail(dollCropped, THUMBNAIL_SIZE);
       const dollId = `custom-doll-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       await saveImageToStorage(dollId, dollBase64);
+      await saveImageToStorage(`${dollId}-thumb`, dollThumb);
       
       const doll = createDollData(dollId, dollFile.name, dollBase64);
       
@@ -1657,7 +1674,7 @@ export async function importPresetFromZip(
         const categoryClean = categoryRaw.replace(/_movable/gi, '').toLowerCase();
         categories.push(getCategoryInfo(categoryRaw));
         
-        for (const { name, blob, fileNameWithExt: clothingFileExt } of clothingFiles) {
+        for (const { name, path: clothingPath, fileNameWithExt: clothingFileExt } of clothingFiles) {
           clothingProcessed++;
           reportProgress({ 
             phase: 'clothing', 
@@ -1666,35 +1683,41 @@ export async function importPresetFromZip(
             message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
           });
           
-          const base64 = await blobToBase64(blob, clothingFileExt);
+          // ZIPからBlobを取得（遅延読み込み - iPad対応）
+          const clothingBlob = await zip.files[clothingPath].async('blob');
+          const rawBase64 = await blobToBase64(clothingBlob, clothingFileExt);
+          // 右下カット＋リサイズ＋サムネイル生成
+          const cropped = await processImageWithChromaKey(rawBase64);
+          const base64 = await resizeImage(cropped, MAX_IMAGE_SIZE);
+          const autoThumb = await generateThumbnail(cropped, THUMBNAIL_SIZE);
           const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           await saveImageToStorage(id, base64);
           
-          // サムネイルがあれば読み込み
+          // 手動サムネイルがあれば優先
           const thumbKey = `${categoryRaw}/${name}`;
           const thumbData = data.clothingThumbs.get(thumbKey);
-          let thumbnailUrl: string | undefined;
+          let thumbnailUrl: string;
           if (thumbData) {
-            thumbnailUrl = await blobToBase64(thumbData.blob, thumbData.fileNameWithExt);
-            const thumbId = `${id}-thumb`;
-            await saveImageToStorage(thumbId, thumbnailUrl);
-            console.log(`  サムネイル読み込み: ${thumbKey}`);
+            const thumbBlob = await zip.files[thumbData.path].async('blob');
+            thumbnailUrl = await blobToBase64(thumbBlob, thumbData.fileNameWithExt);
+            console.log(`  手動サムネイル読み込み: ${thumbKey}`);
+          } else {
+            thumbnailUrl = autoThumb;
           }
+          await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
           
           const item = createClothingData(id, name, categoryClean, base64, categoryRaw);
-          // サムネイルURLを追加
-          if (thumbnailUrl) {
-            item.thumbnailUrl = thumbnailUrl;
-          }
+          // サムネイルURLを設定
+          item.thumbnailUrl = thumbnailUrl;
           // ドールIDを関連付け
           item.dollId = dollId;
           clothingItems.push(item);
           
-          // 毎回UIスレッドを解放（Safari対策）
+          // 毎回UIスレッドを解放（iPad対策）
           await yieldToMain();
           
-          // 10件ごとにGCを促す（Safari大容量対策）
-          if (clothingProcessed % 10 === 0) {
+          // 5件ごとにGCを促す（iPad大容量対策）
+          if (clothingProcessed % 5 === 0) {
             await forceGCHint();
           }
         }
@@ -1717,6 +1740,8 @@ export async function importPresetFromZip(
     }
     
     await yieldToMain();
+    // プリセット間でGCを促す
+    await forceGCHint();
   }
   
   reportProgress({ phase: 'saving', current: 0, total: 1, message: 'データを保存中...' });
