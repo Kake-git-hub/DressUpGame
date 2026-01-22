@@ -553,10 +553,11 @@ function App() {
                 dollImageUrl={currentDollSafe.bodyImageUrl}
                 backgroundImageUrl={currentBackground?.imageUrl}
                 dollTransform={dollTransform}
-                menuOffset={MENU_WIDTH}
-                rightOffset={RIGHT_BUTTON_WIDTH}
+                menuOffset={isPortrait ? 0 : MENU_WIDTH}
+                rightOffset={isPortrait ? 0 : RIGHT_BUTTON_WIDTH}
                 chromaKeyEnabled={chromaKeyEnabled}
                 adjustingItemId={isAdjustingItem ? adjustingItemId : null}
+                isPortrait={isPortrait}
               />
             )}
 

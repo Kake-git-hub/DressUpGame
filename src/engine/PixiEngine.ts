@@ -25,6 +25,7 @@ export class PixiEngine {
   private edgeTrimEnabled = true; // エッジトリム有効フラグ（デフォルトON）
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
+  private isPortrait = false; // 縦画面モード
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -145,6 +146,11 @@ export class PixiEngine {
   // 右ボタン領域オフセットを設定
   setRightOffset(offset: number): void {
     this.rightOffset = offset;
+  }
+
+  // 縦画面モードを設定
+  setPortraitMode(isPortrait: boolean): void {
+    this.isPortrait = isPortrait;
   }
 
   // 利用可能な描画領域（メニューとボタンを除いた中央領域）
@@ -657,7 +663,7 @@ export class PixiEngine {
     }
   }
 
-  // スクリーンショットを取得（Data URL）- 背景領域（1:1正方形）のみキャプチャ
+  // スクリーンショットを取得（Data URL）- 横画面は1:1正方形、縦画面は画面全体
   async takeScreenshot(): Promise<string | null> {
     if (!this.app || !this.initialized || this.destroyed) {
       return null;
@@ -670,7 +676,24 @@ export class PixiEngine {
       const source = this.app.canvas as HTMLCanvasElement;
       const resolution = this.app.renderer.resolution ?? 1;
 
-      // 背景領域（1:1正方形）をキャプチャ
+      // 縦画面モード: 画面全体（縦長）をキャプチャ
+      if (this.isPortrait) {
+        const cropWidth = Math.round(this.app.screen.width * resolution);
+        const cropHeight = Math.round(this.app.screen.height * resolution);
+
+        const out = document.createElement('canvas');
+        out.width = cropWidth;
+        out.height = cropHeight;
+        const ctx = out.getContext('2d');
+        if (!ctx) {
+          return source.toDataURL('image/png');
+        }
+
+        ctx.drawImage(source, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+        return out.toDataURL('image/png');
+      }
+
+      // 横画面モード: 背景領域（1:1正方形）をキャプチャ
       if (this.backgroundArea) {
         const cropX = Math.max(0, Math.round(this.backgroundArea.x * resolution));
         const cropY = Math.max(0, Math.round(this.backgroundArea.y * resolution));

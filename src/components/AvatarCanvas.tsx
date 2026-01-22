@@ -26,6 +26,7 @@ interface AvatarCanvasProps {
   rightOffset?: number; // 右ボタン領域オフセット（右側）
   chromaKeyEnabled?: boolean; // クロマキー有効フラグ
   adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
+  isPortrait?: boolean; // 縦画面モード
   onCanvasReady?: () => void;
 }
 
@@ -42,6 +43,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   rightOffset = 60,
   chromaKeyEnabled = false,
   adjustingItemId = null,
+  isPortrait = false,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -93,6 +95,9 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
         // メニューオフセット・右オフセットを設定（背景・ドール位置調整用）
         engine.setMenuOffset(menuOffset);
         engine.setRightOffset(rightOffset);
+        
+        // 縦画面モードを設定
+        engine.setPortraitMode(isPortrait);
 
         // ドールの初期位置・スケールを設定
         if (dollTransform) {
@@ -218,6 +223,13 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       engineRef.current.drawClothing(equippedItems);
     }
   }, [chromaKeyEnabled, isReady]);
+
+  // 縦画面モードが変わったら更新
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.setPortraitMode(isPortrait);
+    }
+  }, [isPortrait, isReady]);
 
   // iPad等でバックグラウンドから復帰した時に再描画（WebGLコンテキストロスト対策）
   useEffect(() => {
