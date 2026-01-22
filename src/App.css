@@ -217,6 +217,7 @@ textarea {
     top: 0;
     width: 100%;
     height: calc(var(--app-height, 100vh) - 140px);
+    pointer-events: auto;
   }
 
   .palette-section {
@@ -254,6 +255,7 @@ textarea {
     bottom: auto;
     flex-direction: row;
     z-index: 200;
+    pointer-events: auto;
   }
 
   /* ツールボタンを右上に */
@@ -261,12 +263,14 @@ textarea {
     top: calc(8px + env(safe-area-inset-top, 0));
     right: 8px;
     z-index: 200;
+    pointer-events: auto;
   }
 
   .tool-button {
     width: 40px;
     height: 40px;
     font-size: 1rem;
+    pointer-events: auto;
   }
 
   .reset-button-fixed,
@@ -274,6 +278,7 @@ textarea {
     width: 40px;
     height: 40px;
     font-size: 1.2rem;
+    pointer-events: auto;
   }
 }
 
