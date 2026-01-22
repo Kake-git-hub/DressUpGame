@@ -76,10 +76,13 @@ void main(void)
     // 彩度（高いほど鮮やか）
     float saturation = hsv.y;
     
-    // ===== 肌色保護 =====
-    // 肌色は赤が比較的高く（R > 0.5）、彩度は中〜低め
-    // 赤みがある色は透過しない
-    float skinProtect = smoothstep(0.35, 0.55, color.r);
+    // ===== 肌色保護（強化版）=====
+    // 肌色は赤が比較的高く、緑との差が小さい
+    // 赤みがある色は強力に保護
+    float skinProtect = smoothstep(0.3, 0.45, color.r);
+    // 緑が赤より大幅に高くない場合は肌色の可能性
+    float notPureGreen = 1.0 - smoothstep(0.1, 0.3, color.g - color.r);
+    skinProtect = max(skinProtect, notPureGreen * 0.5);
     
     // ===== 純粋な緑のみを透過 =====
     float greenScore = 0.0;
@@ -101,8 +104,8 @@ void main(void)
     float pureGreen = step(0.75, color.g) * step(color.r, 0.35) * step(color.b, 0.35);
     greenScore = max(greenScore, pureGreen * 0.95);
     
-    // 肌色保護を適用（赤みがある部分はスコアを下げる）
-    greenScore = greenScore * (1.0 - skinProtect * 0.9);
+    // 肌色保護を適用（赤みがある部分は強力にスコアを下げる）
+    greenScore = greenScore * (1.0 - skinProtect * 0.95);
     
     // 白/銀色保護（明るい色で彩度が低い場合は透過しない）
     float brightness = (color.r + color.g + color.b) / 3.0;
@@ -153,9 +156,9 @@ export class ChromaKeyFilter extends Filter {
   constructor(options: ChromaKeyFilterOptions = {}) {
     const {
       keyColor = 0x00FF00, // デフォルト: 緑
-      threshold = 0.35,    // 少し厳しく（白/銀色保護）
-      smoothing = 0.25,    // エッジを滑らかに
-      spillRemoval = 0.8,
+      threshold = 0.25,    // 厳しく（肌色保護強化）
+      smoothing = 0.15,    // エッジを滑らかに
+      spillRemoval = 0.5,  // スピル除去控えめ（肌色保護）
     } = options;
 
     const glProgram = GlProgram.from({
