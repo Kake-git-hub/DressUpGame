@@ -614,6 +614,8 @@ export class PixiEngine {
   resize(width: number, height: number): void {
     if (this.app && this.initialized && !this.destroyed) {
       this.app.renderer.resize(width, height);
+      // リサイズ後に強制再描画
+      this.app.render();
     }
   }
 

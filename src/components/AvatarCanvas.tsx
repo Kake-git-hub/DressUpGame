@@ -163,7 +163,53 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       // まだ初期化中のエンジンも破棄
       engine.destroy();
     };
-  }, [width, height]); // dollImageUrlを依存配列から除外（別のuseEffectで処理）
+  }, []); // 初回のみ初期化（リサイズは別のuseEffectで処理）
+
+  // キャンバスサイズが変わったらリサイズ＆再描画
+  useEffect(() => {
+    const redrawAfterResize = async () => {
+      if (!isReady || !engineRef.current?.isInitialized()) return;
+      
+      console.log('リサイズ検出:', width, 'x', height);
+      
+      // レンダラーをリサイズ
+      engineRef.current.resize(width, height);
+      
+      // メニューオフセットを再設定
+      engineRef.current.setMenuOffset(menuOffset);
+      engineRef.current.setRightOffset(rightOffset);
+      engineRef.current.setPortraitMode(isPortrait);
+      
+      // 少し待ってから再描画（レンダラーの準備待ち）
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      if (!engineRef.current?.isInitialized()) return;
+      
+      try {
+        // 全コンテンツを再描画
+        if (backgroundImageUrl) {
+          await engineRef.current.setBackground(backgroundImageUrl);
+        }
+        await engineRef.current.drawDoll({
+          width: 200,
+          height: 300,
+          imageUrl: dollImageUrl || '',
+        });
+        const itemsToRender = adjustingItemId
+          ? equippedItems.filter(item => item.id !== adjustingItemId)
+          : equippedItems;
+        await engineRef.current.drawClothing(itemsToRender);
+        if (customFaceUrl) {
+          await engineRef.current.setCustomFace(customFaceUrl);
+        }
+        engineRef.current.forceRedraw();
+      } catch (error) {
+        console.error('リサイズ後の再描画エラー:', error);
+      }
+    };
+    
+    redrawAfterResize();
+  }, [width, height, isReady, menuOffset, rightOffset, isPortrait]);
 
   // ドール画像が変わったら更新（エンジン再初期化なし）
   useEffect(() => {
