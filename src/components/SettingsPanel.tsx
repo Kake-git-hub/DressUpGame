@@ -3,7 +3,7 @@
  * プリセット取り込み（ZIP/フォルダ）のみ対応
  * Version 0.3.0 - 個別追加機能を削除
  */
-import { useState, useRef, type CSSProperties } from 'react';
+import { useState, useRef, useCallback, type CSSProperties } from 'react';
 import type { ClothingItemData, DollData, BackgroundData } from '../types';
 import { getCategoryInfo } from '../types';
 import {
@@ -18,6 +18,10 @@ import {
   clearAllCustomData,
   type ImportProgress,
 } from '../services/assetStorage';
+
+// 開発者モード用：画像リサイズ設定
+const DEV_MAX_CLOTHING_SIZE = 2048; // 服・ドールの最大サイズ
+const DEV_MAX_BACKGROUND_SIZE = 512; // 背景の最大サイズ
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -44,6 +48,28 @@ export function SettingsPanel({
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const presetFolderInputRef = useRef<HTMLInputElement>(null);
   const presetZipInputRef = useRef<HTMLInputElement>(null);
+
+  // 開発者モード（タイトル5回タップで有効化）
+  const [devMode, setDevMode] = useState(false);
+  const titleTapCountRef = useRef(0);
+  const titleTapTimerRef = useRef<number | null>(null);
+  const [devProgress, setDevProgress] = useState<string | null>(null);
+
+  // タイトルタップで開発者モード切り替え
+  const handleTitleTap = useCallback(() => {
+    titleTapCountRef.current += 1;
+    if (titleTapCountRef.current >= 5) {
+      setDevMode(d => !d);
+      titleTapCountRef.current = 0;
+    }
+    // タイマーリセット
+    if (titleTapTimerRef.current) {
+      clearTimeout(titleTapTimerRef.current);
+    }
+    titleTapTimerRef.current = window.setTimeout(() => {
+      titleTapCountRef.current = 0;
+    }, 2000);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -204,6 +230,129 @@ export function SettingsPanel({
     }
   };
 
+  // 開発者モード: フォルダ内の画像を一括リサイズ（上書き保存）
+  const handleDevResizeFolder = async () => {
+    // File System Access API のサポートチェック
+    if (!('showDirectoryPicker' in window)) {
+      alert('このブラウザはフォルダ選択に対応していません。\nChrome または Edge を使用してください。');
+      return;
+    }
+
+    try {
+      // フォルダ選択ダイアログ
+      // @ts-expect-error showDirectoryPicker is not in types
+      const dirHandle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+      });
+
+      setDevProgress('フォルダをスキャン中...');
+
+      // 再帰的に画像ファイルを収集
+      const imageFiles: Array<{ handle: FileSystemFileHandle; path: string }> = [];
+      
+      async function scanDirectory(handle: FileSystemDirectoryHandle, path: string) {
+        // @ts-expect-error FileSystemDirectoryHandle.values() is not in types
+        for await (const entry of handle.values()) {
+          if (entry.kind === 'file') {
+            const name = entry.name.toLowerCase();
+            if (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')) {
+              imageFiles.push({ handle: entry as FileSystemFileHandle, path: `${path}/${entry.name}` });
+            }
+          } else if (entry.kind === 'directory') {
+            await scanDirectory(entry as FileSystemDirectoryHandle, `${path}/${entry.name}`);
+          }
+        }
+      }
+
+      await scanDirectory(dirHandle, dirHandle.name);
+
+      if (imageFiles.length === 0) {
+        setDevProgress(null);
+        alert('画像ファイルが見つかりませんでした');
+        return;
+      }
+
+      if (!confirm(`${imageFiles.length} 個の画像をリサイズしますか？\n服/ドール: ${DEV_MAX_CLOTHING_SIZE}px\n背景: ${DEV_MAX_BACKGROUND_SIZE}px`)) {
+        setDevProgress(null);
+        return;
+      }
+
+      let processed = 0;
+      let resized = 0;
+      let totalSavedBytes = 0;
+
+      for (const { handle, path } of imageFiles) {
+        processed++;
+        setDevProgress(`処理中... ${processed}/${imageFiles.length}\n${handle.name}`);
+
+        try {
+          const file = await handle.getFile();
+          const originalSize = file.size;
+
+          // 最大サイズを判定（パスに"background"が含まれるか）
+          const maxSize = path.toLowerCase().includes('background') 
+            ? DEV_MAX_BACKGROUND_SIZE 
+            : DEV_MAX_CLOTHING_SIZE;
+
+          // 画像を読み込み
+          const bitmap = await createImageBitmap(file);
+          const { width, height } = bitmap;
+
+          // リサイズが必要か判定
+          if (width <= maxSize && height <= maxSize) {
+            bitmap.close();
+            continue; // リサイズ不要
+          }
+
+          // アスペクト比を維持してリサイズ
+          const ratio = Math.min(maxSize / width, maxSize / height);
+          const newWidth = Math.round(width * ratio);
+          const newHeight = Math.round(height * ratio);
+
+          // Canvas でリサイズ
+          const canvas = new OffscreenCanvas(newWidth, newHeight);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            bitmap.close();
+            continue;
+          }
+          ctx.drawImage(bitmap, 0, 0, newWidth, newHeight);
+          bitmap.close();
+
+          // Blob に変換
+          const mimeType = file.type || 'image/png';
+          const blob = await canvas.convertToBlob({ 
+            type: mimeType,
+            quality: mimeType === 'image/jpeg' ? 0.85 : undefined,
+          });
+
+          // 上書き保存
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+
+          resized++;
+          totalSavedBytes += originalSize - blob.size;
+        } catch (err) {
+          console.error(`リサイズエラー: ${path}`, err);
+        }
+      }
+
+      setDevProgress(null);
+      const savedMB = (totalSavedBytes / 1024 / 1024).toFixed(1);
+      alert(`完了！\n処理: ${processed}ファイル\nリサイズ: ${resized}ファイル\n削減: ${savedMB}MB`);
+
+    } catch (error) {
+      setDevProgress(null);
+      if ((error as Error).name === 'AbortError') {
+        // ユーザーがキャンセル
+        return;
+      }
+      console.error('フォルダリサイズエラー:', error);
+      alert('エラーが発生しました');
+    }
+  };
+
   const customDolls = dolls.filter(d => d.isCustom);
   const customBackgrounds = backgrounds.filter(b => b.isCustom);
   const customClothing = clothingItems.filter(i => i.isCustom);
@@ -213,7 +362,12 @@ export function SettingsPanel({
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.panel} onClick={e => e.stopPropagation()}>
         <div style={styles.header}>
-          <h2 style={styles.title}>⚙️ せってい</h2>
+          <h2 
+            style={{...styles.title, cursor: 'pointer', userSelect: 'none'}} 
+            onClick={handleTitleTap}
+          >
+            ⚙️ せってい {devMode && '🔧'}
+          </h2>
           <button style={styles.closeButton} onClick={onClose}>✕</button>
         </div>
 
@@ -385,6 +539,38 @@ export function SettingsPanel({
               <button style={styles.clearButton} onClick={handleClearAll}>
                 🗑️ すべてのカスタムデータを削除
               </button>
+            </div>
+          )}
+
+          {/* 開発者モード */}
+          {devMode && (
+            <div style={{...styles.section, backgroundColor: '#fff3cd', border: '2px solid #ffc107'}}>
+              <h3 style={styles.sectionTitle}>🔧 開発者ツール</h3>
+              <p style={{fontSize: '11px', color: '#856404', marginBottom: '12px'}}>
+                プリセット画像を一括リサイズ（上書き保存）<br/>
+                服/ドール: {DEV_MAX_CLOTHING_SIZE}px / 背景: {DEV_MAX_BACKGROUND_SIZE}px
+              </p>
+              <button 
+                style={{
+                  ...styles.importButton,
+                  backgroundColor: '#ffc107',
+                  color: '#212529',
+                }}
+                onClick={handleDevResizeFolder}
+                disabled={!!devProgress}
+              >
+                📁 フォルダを選択してリサイズ
+              </button>
+              {devProgress && (
+                <p style={{
+                  marginTop: '12px',
+                  fontSize: '12px',
+                  color: '#856404',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {devProgress}
+                </p>
+              )}
             </div>
           )}
         </div>
