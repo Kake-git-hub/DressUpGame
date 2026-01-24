@@ -42,10 +42,10 @@ export class PixiEngine {
         width,
         height,
         backgroundAlpha: 0, // 透明背景
-        antialias: true,
+        antialias: false, // パフォーマンス優先：アンチエイリアスOFF
         preserveDrawingBuffer: true, // スクリーンショット用
-        resolution: window.devicePixelRatio || 1, // 高解像度対応
-        autoDensity: true, // 高解像度ディスプレイ自動対応
+        resolution: 1, // パフォーマンス優先：Retina無効（描画負荷1/4）
+        autoDensity: false, // 固定解像度
       });
 
       // 既に破棄されていたら処理を中止
@@ -851,8 +851,8 @@ export class PixiEngine {
         smoothing: 0.15,  // エッジのスムージング
         spillRemoval: 0.8, // スピル除去強度
       });
-      // 高解像度ディスプレイ対応
-      this.chromaKeyFilter.resolution = window.devicePixelRatio || 1;
+      // 解像度は1固定（パフォーマンス優先）
+      this.chromaKeyFilter.resolution = 1;
     }
     // エッジトリムフィルタも初期化（背景除去後のフチ線を除去）
     if (!this.edgeTrimFilter) {
@@ -860,7 +860,7 @@ export class PixiEngine {
         alphaThreshold: 0.25,  // 25%以下のアルファを除去
         edgeSoftness: 0.15,    // 滑らかな遷移
       });
-      this.edgeTrimFilter.resolution = window.devicePixelRatio || 1;
+      this.edgeTrimFilter.resolution = 1;
     }
     // コンテナのフィルターも更新
     this.updateClothingContainerFilters();
