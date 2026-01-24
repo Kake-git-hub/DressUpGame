@@ -25,8 +25,8 @@ import argparse
 # === 設定 ===
 # 服・ドール画像の最大サイズ（長辺px）
 MAX_CLOTHING_SIZE = 1024
-# 背景画像の最大サイズ（高解像度）
-MAX_BACKGROUND_SIZE = 2048
+# 背景画像の最大サイズ（1024pxで十分高画質、2048pxはiPadでクラッシュの原因に）
+MAX_BACKGROUND_SIZE = 1024
 # サムネイル画像の最大サイズ
 MAX_THUMBNAIL_SIZE = 256
 # PNG圧縮レベル (0-9, 高いほど圧縮率高いが遅い)

@@ -106,6 +106,12 @@ export class PixiEngine {
       }
       this.app = null;
     }
+    // テクスチャキャッシュをクリア（メモリ解放）
+    try {
+      Assets.reset();
+    } catch {
+      // 無視
+    }
   }
 
   // WebGLコンテキストロストのハンドリング設定
@@ -168,7 +174,13 @@ export class PixiEngine {
       return;
     }
 
-    // 既存の背景をクリア
+    // 既存の背景をクリア（テクスチャも解放してメモリ節約）
+    for (const child of this.backgroundContainer.children) {
+      if (child instanceof Sprite && child.texture) {
+        // テクスチャのソースを解放（GPUメモリ節約）
+        child.texture.destroy(true);
+      }
+    }
     this.backgroundContainer.removeChildren();
 
     if (!imageUrl) {
@@ -185,6 +197,11 @@ export class PixiEngine {
 
     try {
       const texture = await Assets.load(imageUrl);
+      
+      // パフォーマンス最適化: テクスチャのスケールモードを設定
+      // 縮小表示時の品質を維持しつつGPU負荷を軽減
+      texture.source.scaleMode = 'linear';
+      
       const bgSprite = new Sprite(texture);
 
       const area = this.getAvailableArea();
@@ -513,7 +530,14 @@ export class PixiEngine {
     }
 
     // 全描画完了後、既存の服を削除して一時コンテナの内容を移動
+    // 古いスプライトのフィルターをクリア（メモリリーク防止）
+    for (const child of this.clothingContainer.children) {
+      if (child instanceof Sprite) {
+        child.filters = null;
+      }
+    }
     this.clothingContainer.removeChildren();
+    
     while (tempContainer.children.length > 0) {
       const child = tempContainer.children[0];
       tempContainer.removeChild(child);
