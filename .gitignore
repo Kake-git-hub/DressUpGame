@@ -42,3 +42,6 @@ preset-template/backgrounds/*.webp
 preset-template/doll-*/
 preset-template/doll-chibi/
 preset-template/doll-kawaii/
+
+# Release ZIP files
+kisekae-*.zip
