@@ -68,7 +68,7 @@ function normalizeDataUrlMime(dataUrl: string, desiredMime: string | null): stri
 // iPad 10世代など古い機種でも快適に動作するよう調整
 const MAX_IMAGE_SIZE = 1024;       // 服・ドール画像の最大辺（px）- パフォーマンス重視
 const MAX_BACKGROUND_SIZE = 1024;  // 背景画像の最大辺（px）- 高解像度かつ軽量のバランス
-const THUMBNAIL_SIZE = 128;        // サムネイルのサイズ（px）
+const THUMBNAIL_SIZE = 64;         // サムネイルのサイズ（px）- 極小でメモリ節約
 
 /**
  * 画像をリサイズ（最大サイズを超える場合のみ縮小）

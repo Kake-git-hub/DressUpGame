@@ -1,11 +1,10 @@
 /**
  * PixiJS描画エンジン
  * ドールと服のレンダリングを担当
+ * フィルターなし版（パフォーマンス最優先）
  */
 import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter } from 'pixi.js';
 import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
-import { ChromaKeyFilter } from './ChromaKeyFilter';
-import { EdgeTrimFilter } from './EdgeTrimFilter';
 
 export class PixiEngine {
   private app: Application | null = null;
@@ -19,10 +18,6 @@ export class PixiEngine {
   private dollTransform: DollTransform = { x: 50, y: 50, scale: 1.0 }; // %単位、背景領域の中央
   private menuOffset = 0; // メニュー幅オフセット（左側）
   private rightOffset = 60; // 右ボタン領域のオフセット（右側）
-  private chromaKeyFilter: ChromaKeyFilter | null = null; // クロマキーフィルタ
-  private chromaKeyEnabled = false; // クロマキー有効フラグ
-  private edgeTrimFilter: EdgeTrimFilter | null = null; // エッジトリムフィルタ
-  private edgeTrimEnabled = true; // エッジトリム有効フラグ（デフォルトON）
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
   private isPortrait = false; // 縦画面モード
@@ -42,10 +37,10 @@ export class PixiEngine {
         width,
         height,
         backgroundAlpha: 0, // 透明背景
-        antialias: false, // パフォーマンス優先：アンチエイリアスOFF
+        antialias: true,
         preserveDrawingBuffer: true, // スクリーンショット用
-        resolution: 1, // パフォーマンス優先：Retina無効（描画負荷1/4）
-        autoDensity: false, // 固定解像度
+        resolution: window.devicePixelRatio || 1, // 高解像度対応
+        autoDensity: true, // 高解像度ディスプレイ自動対応
       });
 
       // 既に破棄されていたら処理を中止
@@ -78,9 +73,6 @@ export class PixiEngine {
       this.clothingContainer = new Container();
       this.clothingContainer.label = 'clothingContainer';
       this.app.stage.addChild(this.clothingContainer);
-
-      // クロマキーを常時ONにする
-      this.setChromaKeyEnabled(true);
 
       // キャンバス参照を保存（コンテキストロスト検知用）
       // WebGLコンテキストロスト対策（iPad等でバックグラウンドから復帰時）
@@ -296,17 +288,7 @@ export class PixiEngine {
         dollSprite.x = centerX;
         dollSprite.y = centerY;
 
-        // フィルタを適用（エッジトリム + クロマキー）
-        const filters = [];
-        if (this.edgeTrimEnabled && this.edgeTrimFilter) {
-          filters.push(this.edgeTrimFilter);
-        }
-        if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-          filters.push(this.chromaKeyFilter);
-        }
-        if (filters.length > 0) {
-          dollSprite.filters = filters;
-        }
+        // フィルターなし（画像は透過PNG前提）
 
         this.dollContainer.addChild(dollSprite);
         return;
@@ -547,27 +529,8 @@ export class PixiEngine {
     }
     tempContainer.destroy();
 
-    // パフォーマンス最適化：コンテナ全体にフィルターを1回だけ適用
-    // （個別スプライトに適用すると服の数だけシェーダー処理が走るため）
-    this.updateClothingContainerFilters();
-
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
-    // これにより、毎フレームのフィルター処理が不要になる
     this.cacheClothingContainer();
-  }
-
-  // 服コンテナのフィルターを更新（パフォーマンス最適化）
-  private updateClothingContainerFilters(): void {
-    if (!this.clothingContainer) return;
-
-    const filters = [];
-    if (this.edgeTrimEnabled && this.edgeTrimFilter) {
-      filters.push(this.edgeTrimFilter);
-    }
-    if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-      filters.push(this.chromaKeyFilter);
-    }
-    this.clothingContainer.filters = filters.length > 0 ? filters : null;
   }
 
   // 服コンテナをテクスチャにキャッシュ（パフォーマンス大幅改善）
@@ -840,58 +803,20 @@ export class PixiEngine {
     return this.initialized && this.app !== null && !this.destroyed;
   }
 
-  // クロマキーフィルタの有効/無効を設定
-  setChromaKeyEnabled(enabled: boolean): void {
-    this.chromaKeyEnabled = enabled;
-    if (enabled && !this.chromaKeyFilter) {
-      // フィルタを作成（RGB(0, 255, 0) のグリーンバック用）
-      this.chromaKeyFilter = new ChromaKeyFilter({
-        keyColor: 0x00FF00,
-        threshold: 0.4,   // 色の許容範囲
-        smoothing: 0.15,  // エッジのスムージング
-        spillRemoval: 0.8, // スピル除去強度
-      });
-      // 解像度は1固定（パフォーマンス優先）
-      this.chromaKeyFilter.resolution = 1;
-    }
-    // エッジトリムフィルタも初期化（背景除去後のフチ線を除去）
-    if (!this.edgeTrimFilter) {
-      this.edgeTrimFilter = new EdgeTrimFilter({
-        alphaThreshold: 0.25,  // 25%以下のアルファを除去
-        edgeSoftness: 0.15,    // 滑らかな遷移
-      });
-      this.edgeTrimFilter.resolution = 1;
-    }
-    // コンテナのフィルターも更新
-    this.updateClothingContainerFilters();
+  // フィルター関連（互換性のためダミーメソッドを残す）
+  setChromaKeyEnabled(_enabled: boolean): void {
+    // フィルター削除済み - 何もしない
   }
 
-  // エッジトリムフィルタの有効/無効を設定
-  setEdgeTrimEnabled(enabled: boolean): void {
-    this.edgeTrimEnabled = enabled;
-    // コンテナのフィルターも更新
-    this.updateClothingContainerFilters();
+  setEdgeTrimEnabled(_enabled: boolean): void {
+    // フィルター削除済み - 何もしない
   }
 
-  // クロマキーフィルタが有効かどうか
   isChromaKeyEnabled(): boolean {
-    return this.chromaKeyEnabled;
+    return false; // フィルター削除済み
   }
 
-  // クロマキーフィルタのパラメータを設定
-  setChromaKeyParams(params: { keyColor?: number; threshold?: number; smoothing?: number }): void {
-    if (!this.chromaKeyFilter) {
-      this.chromaKeyFilter = new ChromaKeyFilter(params);
-    } else {
-      if (params.keyColor !== undefined) {
-        this.chromaKeyFilter.keyColor = params.keyColor;
-      }
-      if (params.threshold !== undefined) {
-        this.chromaKeyFilter.threshold = params.threshold;
-      }
-      if (params.smoothing !== undefined) {
-        this.chromaKeyFilter.smoothing = params.smoothing;
-      }
-    }
+  setChromaKeyParams(_params: { keyColor?: number; threshold?: number; smoothing?: number }): void {
+    // フィルター削除済み - 何もしない
   }
 }
