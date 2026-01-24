@@ -210,12 +210,15 @@ export function SettingsPanel({
 
   // 共通ダウンロード処理
   const downloadFromUrl = async (url: string) => {
-    // URL検証
-    try {
-      new URL(url);
-    } catch {
-      alert('正しいURLを入力してください');
-      return;
+    // URL検証（相対パスも許可）
+    const isRelative = url.startsWith('./') || url.startsWith('/');
+    if (!isRelative) {
+      try {
+        new URL(url);
+      } catch {
+        alert('正しいURLを入力してください');
+        return;
+      }
     }
 
     setIsImporting(true);
