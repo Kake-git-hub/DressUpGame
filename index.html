@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/DressUpGame/favicon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/DressUpGame/app-icon-192.png" />
+    <link rel="shortcut icon" href="/DressUpGame/favicon.png" />
+    <link rel="apple-touch-icon" href="/DressUpGame/app-icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#ff69b4" />
+    <meta name="description" content="A fun dress-up game for kids" />
+    <title>Kids Dress-Up Game</title>
+    <script type="module" crossorigin src="/DressUpGame/assets/index-C1TeSMuS.js"></script>
+    <link rel="stylesheet" crossorigin href="/DressUpGame/assets/index-BjkqWyqH.css">
+  <link rel="manifest" href="/DressUpGame/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/DressUpGame/registerSW.js"></script></head>
+  <body>
+    <script>
+      // iPad Safari対応: CSS変数を早期設定
+      (function() {
+        var vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+        document.documentElement.style.setProperty('--app-height', vh + 'px');
+        document.documentElement.style.setProperty('--app-width', vw + 'px');
+      })();
+    </script>
+    <div id="root"></div>
+  </body>
+</html>
