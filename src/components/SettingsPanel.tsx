@@ -49,8 +49,8 @@ export function SettingsPanel({
   const presetFolderInputRef = useRef<HTMLInputElement>(null);
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
-  // URLダウンロード用
-  const PRESET_DOWNLOAD_URL = 'https://github.com/Kake-git-hub/DressUpGame/releases/download/preset-v1.0/kisekae-basic-v1.0.zip';
+  // プリセットダウンロードURL（Google Drive）
+  const PRESET_DOWNLOAD_URL = 'https://drive.google.com/file/d/1XcgEk47b3iDfGRspECLYj_LVTbwrSqWU/view?usp=sharing';
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
 
