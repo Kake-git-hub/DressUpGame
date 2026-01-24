@@ -1466,7 +1466,7 @@ export async function importPresetFromFolder(
 
 // ZIPからプリセット取り込み（進捗コールバック対応）
 export async function importPresetFromZip(
-  zipFile: File,
+  zipFile: File | Blob,
   onProgress?: ProgressCallback
 ): Promise<PresetImportResult> {
   const reportProgress = (progress: ImportProgress) => {

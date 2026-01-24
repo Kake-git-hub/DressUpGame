@@ -49,6 +49,10 @@ export function SettingsPanel({
   const presetFolderInputRef = useRef<HTMLInputElement>(null);
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
+  // URLダウンロード用
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState('');
+
   // 開発者モード（タイトル5回タップで有効化）
   const [devMode, setDevMode] = useState(false);
   const titleTapCountRef = useRef(0);
@@ -128,11 +132,8 @@ export function SettingsPanel({
     }
   };
 
-  // プリセットZIP取り込み
-  const handlePresetZipImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
+  // プリセットZIP取り込み（共通処理）
+  const processZipImport = async (file: File | Blob, sourceName: string) => {
     setIsImporting(true);
     setImportProgress({ phase: 'parsing', current: 0, total: 1, message: '準備中...' });
     try {
@@ -163,18 +164,75 @@ export function SettingsPanel({
       const clothingCount = result.presets.items.reduce((sum, p) => sum + p.clothingItems.length, 0);
       
       alert(
-        `ZIP取り込み完了！\n` +
+        `${sourceName}取り込み完了！\n` +
         `ドール: ${presetCount}体\n` +
         `背景: ${bgCount}枚\n` +
         `服: ${clothingCount}着`
       );
     } catch (error) {
       console.error('ZIP取り込みエラー:', error);
-      alert('ZIPの取り込みに失敗しました');
+      throw error;
     } finally {
       setIsImporting(false);
       setImportProgress(null);
+    }
+  };
+
+  // プリセットZIP取り込み（ファイル選択）
+  const handlePresetZipImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      await processZipImport(file, 'ZIP');
+    } catch {
+      alert('ZIPの取り込みに失敗しました');
+    } finally {
       if (presetZipInputRef.current) presetZipInputRef.current.value = '';
+    }
+  };
+
+  // URLからZIPダウンロード
+  const handleUrlDownload = async () => {
+    const url = downloadUrl.trim();
+    if (!url) {
+      alert('URLを入力してください');
+      return;
+    }
+
+    // URL検証
+    try {
+      new URL(url);
+    } catch {
+      alert('正しいURLを入力してください');
+      return;
+    }
+
+    setIsImporting(true);
+    setImportProgress({ phase: 'parsing', current: 0, total: 1, message: 'ダウンロード中...' });
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`ダウンロード失敗: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      
+      // ZIPファイルか確認
+      if (!blob.type.includes('zip') && !url.toLowerCase().endsWith('.zip')) {
+        // Content-Typeがなくても.zipならOK
+        console.warn('Content-Type is not zip, but continuing...');
+      }
+
+      await processZipImport(blob, 'ダウンロード');
+      setShowUrlInput(false);
+      setDownloadUrl('');
+    } catch (error) {
+      console.error('URLダウンロードエラー:', error);
+      alert(`ダウンロードに失敗しました\n${(error as Error).message}`);
+      setIsImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -421,7 +479,43 @@ export function SettingsPanel({
                   disabled={isImporting}
                 />
               </label>
+
+              <button
+                style={{
+                  ...styles.importButton,
+                  ...styles.importButtonUrl,
+                  ...(isImporting ? styles.buttonDisabled : {}),
+                }}
+                onClick={() => setShowUrlInput(!showUrlInput)}
+                disabled={isImporting}
+              >
+                🌐 URLから取得
+              </button>
             </div>
+
+            {/* URL入力欄 */}
+            {showUrlInput && (
+              <div style={styles.urlInputContainer}>
+                <input
+                  type="url"
+                  placeholder="https://example.com/preset.zip"
+                  value={downloadUrl}
+                  onChange={(e) => setDownloadUrl(e.target.value)}
+                  style={styles.urlInput}
+                  disabled={isImporting}
+                />
+                <button
+                  style={{
+                    ...styles.urlDownloadButton,
+                    ...(isImporting ? styles.buttonDisabled : {}),
+                  }}
+                  onClick={handleUrlDownload}
+                  disabled={isImporting || !downloadUrl.trim()}
+                >
+                  ダウンロード
+                </button>
+              </div>
+            )}
             
             {isImporting && importProgress && (
               <div style={styles.progressContainer}>
@@ -672,6 +766,35 @@ const styles: Record<string, CSSProperties> = {
   },
   importButtonZip: {
     background: 'linear-gradient(135deg, #28a745 0%, #218838 100%)',
+  },
+  importButtonUrl: {
+    background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+    border: 'none',
+  },
+  urlInputContainer: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '12px',
+    flexWrap: 'wrap',
+  },
+  urlInput: {
+    flex: 1,
+    minWidth: '200px',
+    padding: '10px 12px',
+    fontSize: '13px',
+    border: '2px solid #007bff',
+    borderRadius: '8px',
+    outline: 'none',
+  },
+  urlDownloadButton: {
+    padding: '10px 16px',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    color: 'white',
+    background: '#007bff',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
   },
   buttonDisabled: {
     background: '#ccc',
