@@ -11,6 +11,8 @@ export interface AvatarCanvasHandle {
   takeScreenshot: () => Promise<string | null>;
   setChromaKeyEnabled: (enabled: boolean) => void;
   isChromaKeyEnabled: () => boolean;
+  pauseRendering: () => void;
+  resumeRendering: () => void;
 }
 
 interface AvatarCanvasProps {
@@ -65,6 +67,16 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     },
     isChromaKeyEnabled: () => {
       return engineRef.current?.isChromaKeyEnabled() ?? false;
+    },
+    pauseRendering: () => {
+      if (engineRef.current?.isInitialized()) {
+        engineRef.current.pauseRendering();
+      }
+    },
+    resumeRendering: () => {
+      if (engineRef.current?.isInitialized()) {
+        engineRef.current.resumeRendering();
+      }
     },
   }), []);
 

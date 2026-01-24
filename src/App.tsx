@@ -276,8 +276,30 @@ function App() {
     saveEquippedItems(equippedItems);
   }, [equippedItems]);
 
-
-  // ...existing code...
+  // パフォーマンス最適化：描画安定後にレンダリングループを停止
+  // 操作がなければTickerを停止してCPU/GPU負荷を削減
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  useEffect(() => {
+    // 前回のタイマーをキャンセル
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+    }
+    
+    // レンダリングを再開（操作があった）
+    avatarCanvasRef.current?.resumeRendering();
+    
+    // 1秒後にレンダリングを一時停止
+    pauseTimerRef.current = setTimeout(() => {
+      avatarCanvasRef.current?.pauseRendering();
+    }, 1000);
+    
+    return () => {
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+      }
+    };
+  }, [equippedItems]);  // 装備が変わった時に再開→停止
 
   // アイテム調整モード（adjustingItemId === null の場合はドール調整モード）
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);

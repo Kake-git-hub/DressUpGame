@@ -26,6 +26,8 @@ export class PixiEngine {
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
   private isPortrait = false; // 縦画面モード
+  private tickerRunning = true; // Tickerが動作中かどうか
+  private clothingCached = false; // 服コンテナがキャッシュ済みか
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -548,6 +550,10 @@ export class PixiEngine {
     // パフォーマンス最適化：コンテナ全体にフィルターを1回だけ適用
     // （個別スプライトに適用すると服の数だけシェーダー処理が走るため）
     this.updateClothingContainerFilters();
+
+    // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
+    // これにより、毎フレームのフィルター処理が不要になる
+    this.cacheClothingContainer();
   }
 
   // 服コンテナのフィルターを更新（パフォーマンス最適化）
@@ -562,6 +568,47 @@ export class PixiEngine {
       filters.push(this.chromaKeyFilter);
     }
     this.clothingContainer.filters = filters.length > 0 ? filters : null;
+  }
+
+  // 服コンテナをテクスチャにキャッシュ（パフォーマンス大幅改善）
+  private cacheClothingContainer(): void {
+    if (!this.clothingContainer || !this.app) return;
+    
+    // 一旦キャッシュを解除（変更を反映するため）
+    if (this.clothingCached) {
+      this.clothingContainer.cacheAsTexture(false);
+      this.clothingCached = false;
+    }
+    
+    // 服が1枚以上ある場合のみキャッシュ
+    if (this.clothingContainer.children.length > 0) {
+      // 1フレーム描画してからキャッシュ（フィルター適用後の状態を焼き込む）
+      this.app.render();
+      this.clothingContainer.cacheAsTexture(true);
+      this.clothingCached = true;
+      console.log('服コンテナをキャッシュしました（フィルター処理軽減）');
+    }
+  }
+
+  // レンダリングループを停止（パフォーマンス最適化）
+  pauseRendering(): void {
+    if (!this.app || !this.tickerRunning) return;
+    this.app.ticker.stop();
+    this.tickerRunning = false;
+    console.log('レンダリングループを一時停止');
+  }
+
+  // レンダリングループを再開
+  resumeRendering(): void {
+    if (!this.app || this.tickerRunning) return;
+    this.app.ticker.start();
+    this.tickerRunning = true;
+    console.log('レンダリングループを再開');
+  }
+
+  // Ticker状態を取得
+  isTickerRunning(): boolean {
+    return this.tickerRunning;
   }
 
   // 服のプレースホルダーを指定コンテナに描画
