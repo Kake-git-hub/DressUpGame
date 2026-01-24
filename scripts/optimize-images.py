@@ -17,17 +17,22 @@ from PIL import Image
 
 # === 設定 ===
 # 服・ドール画像の最大サイズ（長辺px）
-MAX_CLOTHING_SIZE = 2048
+MAX_CLOTHING_SIZE = 384
 # 背景画像の最大サイズ
-MAX_BACKGROUND_SIZE = 512
+MAX_BACKGROUND_SIZE = 384
+# サムネイル画像の最大サイズ
+MAX_THUMBNAIL_SIZE = 128
 # PNG圧縮レベル (0-9, 高いほど圧縮率高いが遅い)
-PNG_COMPRESS_LEVEL = 6
+PNG_COMPRESS_LEVEL = 9
 # JPEG品質 (1-100)
-JPEG_QUALITY = 85
+JPEG_QUALITY = 80
 
 def get_max_size(file_path: Path) -> int:
     """ファイルパスから適切な最大サイズを判定"""
     path_str = str(file_path).lower()
+    file_name = file_path.name.lower()
+    if 'サムネ' in file_path.name or '_thumb' in file_name:
+        return MAX_THUMBNAIL_SIZE
     if 'background' in path_str:
         return MAX_BACKGROUND_SIZE
     return MAX_CLOTHING_SIZE

@@ -50,6 +50,7 @@ export function SettingsPanel({
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
   // URLダウンロード用
+  const DEFAULT_PRESET_URL = 'https://github.com/Kake-git-hub/DressUpGame/releases/download/preset-v1.0/kisekae-basic-v1.0.zip';
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
 
@@ -192,6 +193,11 @@ export function SettingsPanel({
     }
   };
 
+  // デフォルトURLからダウンロード（ワンクリック）
+  const handleDefaultDownload = async () => {
+    await downloadFromUrl(DEFAULT_PRESET_URL);
+  };
+
   // URLからZIPダウンロード
   const handleUrlDownload = async () => {
     const url = downloadUrl.trim();
@@ -199,7 +205,11 @@ export function SettingsPanel({
       alert('URLを入力してください');
       return;
     }
+    await downloadFromUrl(url);
+  };
 
+  // 共通ダウンロード処理
+  const downloadFromUrl = async (url: string) => {
     // URL検証
     try {
       new URL(url);
@@ -480,20 +490,33 @@ export function SettingsPanel({
                 />
               </label>
 
-              <button
-                style={{
-                  ...styles.importButton,
-                  ...styles.importButtonUrl,
-                  ...(isImporting ? styles.buttonDisabled : {}),
-                }}
-                onClick={() => setShowUrlInput(!showUrlInput)}
-                disabled={isImporting}
-              >
-                🌐 URLから取得
-              </button>
             </div>
 
-            {/* URL入力欄 */}
+            {/* 公式プリセットダウンロード */}
+            <button
+              style={{
+                ...styles.importButton,
+                ...styles.defaultDownloadButton,
+                ...(isImporting ? styles.buttonDisabled : {}),
+              }}
+              onClick={handleDefaultDownload}
+              disabled={isImporting}
+            >
+              ⬇️ 公式プリセットをダウンロード
+            </button>
+
+            {/* カスタムURL入力（折りたたみ） */}
+            <button
+              style={{
+                ...styles.toggleUrlButton,
+                ...(isImporting ? styles.buttonDisabled : {}),
+              }}
+              onClick={() => setShowUrlInput(!showUrlInput)}
+              disabled={isImporting}
+            >
+              {showUrlInput ? '▲ カスタムURLを閉じる' : '▼ カスタムURLを入力'}
+            </button>
+
             {showUrlInput && (
               <div style={styles.urlInputContainer}>
                 <input
@@ -770,6 +793,27 @@ const styles: Record<string, CSSProperties> = {
   importButtonUrl: {
     background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
     border: 'none',
+  },
+  defaultDownloadButton: {
+    width: '100%',
+    marginTop: '16px',
+    padding: '16px 20px',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    background: 'linear-gradient(135deg, #ff6b9d 0%, #c44569 100%)',
+    border: 'none',
+    boxShadow: '0 4px 15px rgba(255, 107, 157, 0.4)',
+  },
+  toggleUrlButton: {
+    width: '100%',
+    marginTop: '8px',
+    padding: '8px 12px',
+    fontSize: '12px',
+    color: '#666',
+    background: 'transparent',
+    border: '1px dashed #ccc',
+    borderRadius: '6px',
+    cursor: 'pointer',
   },
   urlInputContainer: {
     display: 'flex',
