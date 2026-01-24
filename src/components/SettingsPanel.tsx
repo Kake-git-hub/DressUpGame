@@ -50,7 +50,7 @@ export function SettingsPanel({
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
   // URLダウンロード用
-  const DEFAULT_PRESET_URL = 'https://raw.githubusercontent.com/Kake-git-hub/DressUpGame/gh-pages/kisekae-basic-v1.0.zip';
+  const PRESET_DOWNLOAD_URL = 'https://github.com/Kake-git-hub/DressUpGame/releases/download/preset-v1.0/kisekae-basic-v1.0.zip';
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
 
@@ -193,9 +193,9 @@ export function SettingsPanel({
     }
   };
 
-  // デフォルトURLからダウンロード（ワンクリック）
-  const handleDefaultDownload = async () => {
-    await downloadFromUrl(DEFAULT_PRESET_URL);
+  // 公式プリセットをブラウザでダウンロード（別タブで開く）
+  const handleOpenDownloadPage = () => {
+    window.open(PRESET_DOWNLOAD_URL, '_blank');
   };
 
   // URLからZIPダウンロード
@@ -495,18 +495,21 @@ export function SettingsPanel({
 
             </div>
 
-            {/* 公式プリセットダウンロード */}
-            <button
-              style={{
-                ...styles.importButton,
-                ...styles.defaultDownloadButton,
-                ...(isImporting ? styles.buttonDisabled : {}),
-              }}
-              onClick={handleDefaultDownload}
-              disabled={isImporting}
-            >
-              ⬇️ 公式プリセットをダウンロード
-            </button>
+            {/* 公式プリセット案内 */}
+            <div style={styles.presetGuide}>
+              <p style={styles.guideText}>
+                📦 <strong>公式プリセット</strong>をお持ちでない方：
+              </p>
+              <button
+                style={styles.downloadLinkButton}
+                onClick={handleOpenDownloadPage}
+              >
+                🌐 ダウンロードページを開く
+              </button>
+              <p style={styles.guideSubText}>
+                ダウンロード後、上の「ZIPファイル」ボタンで読み込んでください
+              </p>
+            </div>
 
             {/* カスタムURL入力（折りたたみ） */}
             <button
@@ -797,15 +800,35 @@ const styles: Record<string, CSSProperties> = {
     background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
     border: 'none',
   },
-  defaultDownloadButton: {
-    width: '100%',
+  presetGuide: {
     marginTop: '16px',
-    padding: '16px 20px',
-    fontSize: '16px',
+    padding: '16px',
+    background: 'linear-gradient(135deg, #fff5f8 0%, #ffe0eb 100%)',
+    borderRadius: '12px',
+    border: '2px dashed #ff6b9d',
+    textAlign: 'center',
+  },
+  guideText: {
+    margin: '0 0 12px 0',
+    fontSize: '14px',
+    color: '#333',
+  },
+  downloadLinkButton: {
+    display: 'inline-block',
+    padding: '12px 24px',
+    fontSize: '15px',
     fontWeight: 'bold',
+    color: '#fff',
     background: 'linear-gradient(135deg, #ff6b9d 0%, #c44569 100%)',
     border: 'none',
-    boxShadow: '0 4px 15px rgba(255, 107, 157, 0.4)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(255, 107, 157, 0.3)',
+  },
+  guideSubText: {
+    margin: '12px 0 0 0',
+    fontSize: '12px',
+    color: '#888',
   },
   toggleUrlButton: {
     width: '100%',

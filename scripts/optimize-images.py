@@ -17,11 +17,11 @@ from PIL import Image
 
 # === 設定 ===
 # 服・ドール画像の最大サイズ（長辺px）
-MAX_CLOTHING_SIZE = 384
+MAX_CLOTHING_SIZE = 1024
 # 背景画像の最大サイズ
-MAX_BACKGROUND_SIZE = 384
+MAX_BACKGROUND_SIZE = 1024
 # サムネイル画像の最大サイズ
-MAX_THUMBNAIL_SIZE = 128
+MAX_THUMBNAIL_SIZE = 256
 # PNG圧縮レベル (0-9, 高いほど圧縮率高いが遅い)
 PNG_COMPRESS_LEVEL = 9
 # JPEG品質 (1-100)
