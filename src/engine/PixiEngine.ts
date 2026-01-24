@@ -492,23 +492,13 @@ export class PixiEngine {
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-        // フィルタを適用（エッジトリム + クロマキー + カラー調整）
-        const filters = [];
-        if (this.edgeTrimEnabled && this.edgeTrimFilter) {
-          filters.push(this.edgeTrimFilter);
-        }
-        if (this.chromaKeyEnabled && this.chromaKeyFilter) {
-          filters.push(this.chromaKeyFilter);
-        }
-        // 色相フィルター（colorHueが設定されている場合）
+        // 色相フィルター（colorHueが設定されている場合のみ個別適用）
+        // ※ edgeTrim/chromaKey はコンテナ単位で適用するため、ここでは色相のみ
         const colorHue = (item as EquippedItem).colorHue ?? 0;
         if (colorHue !== 0) {
           const hueFilter = new ColorMatrixFilter();
           hueFilter.hue(colorHue, false);
-          filters.push(hueFilter);
-        }
-        if (filters.length > 0) {
-          clothingSprite.filters = filters;
+          clothingSprite.filters = [hueFilter];
         }
 
         tempContainer.addChild(clothingSprite);
@@ -530,6 +520,24 @@ export class PixiEngine {
       this.clothingContainer.addChild(child);
     }
     tempContainer.destroy();
+
+    // パフォーマンス最適化：コンテナ全体にフィルターを1回だけ適用
+    // （個別スプライトに適用すると服の数だけシェーダー処理が走るため）
+    this.updateClothingContainerFilters();
+  }
+
+  // 服コンテナのフィルターを更新（パフォーマンス最適化）
+  private updateClothingContainerFilters(): void {
+    if (!this.clothingContainer) return;
+
+    const filters = [];
+    if (this.edgeTrimEnabled && this.edgeTrimFilter) {
+      filters.push(this.edgeTrimFilter);
+    }
+    if (this.chromaKeyEnabled && this.chromaKeyFilter) {
+      filters.push(this.chromaKeyFilter);
+    }
+    this.clothingContainer.filters = filters.length > 0 ? filters : null;
   }
 
   // 服のプレースホルダーを指定コンテナに描画
@@ -783,6 +791,15 @@ export class PixiEngine {
       });
       this.edgeTrimFilter.resolution = window.devicePixelRatio || 1;
     }
+    // コンテナのフィルターも更新
+    this.updateClothingContainerFilters();
+  }
+
+  // エッジトリムフィルタの有効/無効を設定
+  setEdgeTrimEnabled(enabled: boolean): void {
+    this.edgeTrimEnabled = enabled;
+    // コンテナのフィルターも更新
+    this.updateClothingContainerFilters();
   }
 
   // クロマキーフィルタが有効かどうか
