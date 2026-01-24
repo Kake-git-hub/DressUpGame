@@ -50,7 +50,7 @@ export function SettingsPanel({
   const presetZipInputRef = useRef<HTMLInputElement>(null);
 
   // URLダウンロード用
-  const DEFAULT_PRESET_URL = './kisekae-basic-v1.0.zip';
+  const DEFAULT_PRESET_URL = 'https://kake-git-hub.github.io/DressUpGame/kisekae-basic-v1.0.zip';
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
 
