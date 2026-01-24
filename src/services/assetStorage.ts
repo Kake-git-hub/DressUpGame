@@ -1105,6 +1105,12 @@ async function forceGCHint(): Promise<void> {
 export interface PresetImportResult {
   presets: { success: number; failed: number; items: DollPreset[] };
   backgrounds: { success: number; failed: number; items: BackgroundData[] };
+  // 差分情報（オプション）
+  diff?: {
+    added: string[];      // 新規追加されたファイル名
+    removed: string[];    // 削除されたファイル名
+    unchanged: string[];  // 変更なしのファイル名
+  };
 }
 
 // ドールプリセットを保存（メタデータのみ、画像はIndexedDB）
@@ -1151,6 +1157,80 @@ export function loadDollPresets(): DollPreset[] {
   } catch {
     return [];
   }
+}
+
+// 既存アイテムの名前セットを取得（差分チェック用）
+function getExistingItemNames(): {
+  dolls: Set<string>;
+  clothing: Set<string>;
+  backgrounds: Set<string>;
+} {
+  const dolls = new Set<string>();
+  const clothing = new Set<string>();
+  const backgrounds = new Set<string>();
+  
+  // ドール
+  for (const doll of loadCustomDolls()) {
+    dolls.add(doll.name.toLowerCase());
+  }
+  
+  // 服
+  for (const item of loadCustomClothing()) {
+    clothing.add(item.name.toLowerCase());
+  }
+  
+  // 背景
+  for (const bg of loadCustomBackgrounds()) {
+    backgrounds.add(bg.name.toLowerCase());
+  }
+  
+  return { dolls, clothing, backgrounds };
+}
+
+// アイテムを名前で削除
+async function removeItemsByNames(names: string[]): Promise<void> {
+  if (names.length === 0) return;
+  
+  const lowerNames = new Set(names.map(n => n.toLowerCase()));
+  
+  // ドール削除
+  const dolls = loadCustomDolls();
+  const remainingDolls = dolls.filter(d => !lowerNames.has(d.name.toLowerCase()));
+  const removedDolls = dolls.filter(d => lowerNames.has(d.name.toLowerCase()));
+  for (const doll of removedDolls) {
+    await deleteImageFromStorage(doll.id);
+    await deleteImageFromStorage(`${doll.id}-thumb`);
+  }
+  saveCustomDolls(remainingDolls);
+  
+  // 服削除
+  const clothing = loadCustomClothing();
+  const remainingClothing = clothing.filter(c => !lowerNames.has(c.name.toLowerCase()));
+  const removedClothing = clothing.filter(c => lowerNames.has(c.name.toLowerCase()));
+  for (const item of removedClothing) {
+    await deleteImageFromStorage(item.id);
+    await deleteImageFromStorage(`${item.id}-thumb`);
+    await deleteImageFromStorage(`${item.id}_transparent`);
+  }
+  saveCustomClothing(remainingClothing);
+  
+  // 背景削除
+  const backgrounds = loadCustomBackgrounds();
+  const remainingBgs = backgrounds.filter(b => !lowerNames.has(b.name.toLowerCase()));
+  const removedBgs = backgrounds.filter(b => lowerNames.has(b.name.toLowerCase()));
+  for (const bg of removedBgs) {
+    await deleteImageFromStorage(bg.id);
+    await deleteImageFromStorage(`${bg.id}-thumb`);
+  }
+  saveCustomBackgrounds(remainingBgs);
+  
+  // プリセットも更新（削除された服を除去）
+  const presets = loadDollPresets();
+  const updatedPresets = presets.map(p => ({
+    ...p,
+    clothingItems: p.clothingItems.filter(c => !lowerNames.has(c.name.toLowerCase())),
+  })).filter(p => !lowerNames.has(p.doll.name.toLowerCase())); // ドールが削除されたプリセットも除去
+  saveDollPresets(updatedPresets);
 }
 
 // プリセットフォルダから取り込み（新形式: doll-{id}/clothing/{category}/）
@@ -1435,31 +1515,89 @@ export async function importPresetFromFolder(
     await yieldToMain();
   }
   
+  reportProgress({ phase: 'saving', current: 0, total: 1, message: '差分チェック中...' });
+  await yieldToMain();
+  
+  // 差分チェック: 新規ファイル名を収集
+  const newNames = new Set<string>();
+  for (const preset of result.presets.items) {
+    newNames.add(preset.doll.name.toLowerCase());
+    for (const item of preset.clothingItems) {
+      newNames.add(item.name.toLowerCase());
+    }
+  }
+  for (const bg of result.backgrounds.items) {
+    newNames.add(bg.name.toLowerCase());
+  }
+  
+  // 既存アイテムの名前を取得
+  const existingNames = getExistingItemNames();
+  const allExisting = new Set([
+    ...existingNames.dolls,
+    ...existingNames.clothing,
+    ...existingNames.backgrounds,
+  ]);
+  
+  // 差分を計算
+  const added: string[] = [];
+  const removed: string[] = [];
+  const unchanged: string[] = [];
+  
+  for (const name of newNames) {
+    if (!allExisting.has(name)) {
+      added.push(name);
+    } else {
+      unchanged.push(name);
+    }
+  }
+  
+  for (const name of allExisting) {
+    if (!newNames.has(name)) {
+      removed.push(name);
+    }
+  }
+  
+  console.log(`差分チェック: 追加=${added.length}, 削除=${removed.length}, 変更なし=${unchanged.length}`);
+  
+  // 削除対象があれば削除
+  if (removed.length > 0) {
+    reportProgress({ phase: 'saving', current: 0, total: 1, message: `不要なアイテムを削除中... (${removed.length}件)` });
+    await removeItemsByNames(removed);
+    await yieldToMain();
+  }
+  
   reportProgress({ phase: 'saving', current: 0, total: 1, message: 'データを保存中...' });
   await yieldToMain();
   
-  // すべてのドールと服を一括保存（全上書き）
+  // 既存データを読み込み、新規分をマージ
   const allDolls = result.presets.items.map(p => p.doll);
   const allClothing = result.presets.items.flatMap(p => p.clothingItems);
   
-  if (allDolls.length > 0) {
-    saveCustomDolls(allDolls);
+  const existingDolls = loadCustomDolls().filter(d => !newNames.has(d.name.toLowerCase()));
+  const existingClothing = loadCustomClothing().filter(c => !newNames.has(c.name.toLowerCase()));
+  const existingBgs = loadCustomBackgrounds().filter(b => !newNames.has(b.name.toLowerCase()));
+  
+  if (allDolls.length > 0 || existingDolls.length > 0) {
+    saveCustomDolls([...existingDolls, ...allDolls]);
   }
-  if (allClothing.length > 0) {
-    saveCustomClothing(allClothing);
+  if (allClothing.length > 0 || existingClothing.length > 0) {
+    saveCustomClothing([...existingClothing, ...allClothing]);
   }
   
-  // 背景を保存（全上書き）
-  if (result.backgrounds.items.length > 0) {
-    saveCustomBackgrounds(result.backgrounds.items);
+  if (result.backgrounds.items.length > 0 || existingBgs.length > 0) {
+    saveCustomBackgrounds([...existingBgs, ...result.backgrounds.items]);
   }
   
-  // プリセットを保存（全上書き）
-  if (result.presets.items.length > 0) {
-    saveDollPresets(result.presets.items);
+  const existingPresets = loadDollPresets().filter(p => 
+    !result.presets.items.some(np => np.id === p.id)
+  );
+  if (result.presets.items.length > 0 || existingPresets.length > 0) {
+    saveDollPresets([...existingPresets, ...result.presets.items]);
   }
   
-  reportProgress({ phase: 'complete', current: 1, total: 1, message: '取り込み完了！' });
+  result.diff = { added, removed, unchanged };
+  
+  reportProgress({ phase: 'complete', current: 1, total: 1, message: `取り込み完了！ (追加: ${added.length}, 削除: ${removed.length})` });
   
   return result;
 }
@@ -1744,31 +1882,95 @@ export async function importPresetFromZip(
     await forceGCHint();
   }
   
+  reportProgress({ phase: 'saving', current: 0, total: 1, message: '差分チェック中...' });
+  await yieldToMain();
+  
+  // 差分チェック: 新規ファイル名を収集
+  const newNames = new Set<string>();
+  for (const preset of result.presets.items) {
+    newNames.add(preset.doll.name.toLowerCase());
+    for (const item of preset.clothingItems) {
+      newNames.add(item.name.toLowerCase());
+    }
+  }
+  for (const bg of result.backgrounds.items) {
+    newNames.add(bg.name.toLowerCase());
+  }
+  
+  // 既存アイテムの名前を取得
+  const existingNames = getExistingItemNames();
+  const allExisting = new Set([
+    ...existingNames.dolls,
+    ...existingNames.clothing,
+    ...existingNames.backgrounds,
+  ]);
+  
+  // 差分を計算
+  const added: string[] = [];
+  const removed: string[] = [];
+  const unchanged: string[] = [];
+  
+  // 新規追加（ZIPにあって既存にない）
+  for (const name of newNames) {
+    if (!allExisting.has(name)) {
+      added.push(name);
+    } else {
+      unchanged.push(name);
+    }
+  }
+  
+  // 削除対象（既存にあってZIPにない）
+  for (const name of allExisting) {
+    if (!newNames.has(name)) {
+      removed.push(name);
+    }
+  }
+  
+  console.log(`差分チェック: 追加=${added.length}, 削除=${removed.length}, 変更なし=${unchanged.length}`);
+  
+  // 削除対象があれば削除
+  if (removed.length > 0) {
+    reportProgress({ phase: 'saving', current: 0, total: 1, message: `不要なアイテムを削除中... (${removed.length}件)` });
+    await removeItemsByNames(removed);
+    await yieldToMain();
+  }
+  
   reportProgress({ phase: 'saving', current: 0, total: 1, message: 'データを保存中...' });
   await yieldToMain();
   
-  // すべてのドールと服を一括保存（全上書き）
+  // 新規・更新アイテムのみを追加（既存は維持してマージ）
   const allDolls = result.presets.items.map(p => p.doll);
   const allClothing = result.presets.items.flatMap(p => p.clothingItems);
   
-  if (allDolls.length > 0) {
-    saveCustomDolls(allDolls);
+  // 既存データを読み込み、新規分をマージ（名前が同じものは上書き）
+  const existingDolls = loadCustomDolls().filter(d => !newNames.has(d.name.toLowerCase()));
+  const existingClothing = loadCustomClothing().filter(c => !newNames.has(c.name.toLowerCase()));
+  const existingBgs = loadCustomBackgrounds().filter(b => !newNames.has(b.name.toLowerCase()));
+  
+  if (allDolls.length > 0 || existingDolls.length > 0) {
+    saveCustomDolls([...existingDolls, ...allDolls]);
   }
-  if (allClothing.length > 0) {
-    saveCustomClothing(allClothing);
+  if (allClothing.length > 0 || existingClothing.length > 0) {
+    saveCustomClothing([...existingClothing, ...allClothing]);
   }
   
-  // 背景を保存（全上書き）
-  if (result.backgrounds.items.length > 0) {
-    saveCustomBackgrounds(result.backgrounds.items);
+  // 背景を保存（マージ）
+  if (result.backgrounds.items.length > 0 || existingBgs.length > 0) {
+    saveCustomBackgrounds([...existingBgs, ...result.backgrounds.items]);
   }
   
-  // プリセットを保存（全上書き）
-  if (result.presets.items.length > 0) {
-    saveDollPresets(result.presets.items);
+  // プリセットを保存（マージ）
+  const existingPresets = loadDollPresets().filter(p => 
+    !result.presets.items.some(np => np.id === p.id)
+  );
+  if (result.presets.items.length > 0 || existingPresets.length > 0) {
+    saveDollPresets([...existingPresets, ...result.presets.items]);
   }
   
-  reportProgress({ phase: 'complete', current: 1, total: 1, message: '取り込み完了！' });
+  // 差分情報を結果に追加
+  result.diff = { added, removed, unchanged };
+  
+  reportProgress({ phase: 'complete', current: 1, total: 1, message: `取り込み完了！ (追加: ${added.length}, 削除: ${removed.length})` });
   
   return result;
 }
