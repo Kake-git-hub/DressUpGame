@@ -494,11 +494,14 @@ export class PixiEngine {
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
         // 色相フィルター（colorHueが設定されている場合のみ個別適用）
-        // ※ edgeTrim/chromaKey はコンテナ単位で適用するため、ここでは色相のみ
         const colorHue = (item as EquippedItem).colorHue ?? 0;
         if (colorHue !== 0) {
           const hueFilter = new ColorMatrixFilter();
           hueFilter.hue(colorHue, false);
+          // 解像度をデバイスに合わせる（画質維持）
+          hueFilter.resolution = window.devicePixelRatio || 1;
+          // パディングを0にして位置ずれを防止
+          hueFilter.padding = 0;
           clothingSprite.filters = [hueFilter];
         }
 
