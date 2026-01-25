@@ -50,6 +50,9 @@ export function DressUpMenu({
   // 現在選択中のカテゴリ（縦画面用）
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
+  // 現在選択中のカテゴリ（横画面用）
+  const [selectedCategoryLandscape, setSelectedCategoryLandscape] = useState<string | null>(null);
+  
   // メニュー展開状態（縦画面用）
   const [isMenuExpanded, setIsMenuExpanded] = useState(false);
   
@@ -94,11 +97,17 @@ export function DressUpMenu({
   // カテゴリ一覧（縦画面用）
   const categories = useMemo(() => Array.from(groupedItems.keys()), [groupedItems]);
   
-  // 選択中カテゴリのアイテム
+  // 選択中カテゴリのアイテム（縦画面用）
   const selectedCategoryItems = useMemo(() => {
     if (!selectedCategory) return [];
     return groupedItems.get(selectedCategory) ?? [];
   }, [selectedCategory, groupedItems]);
+  
+  // 選択中カテゴリのアイテム（横画面用）
+  const selectedCategoryItemsLandscape = useMemo(() => {
+    if (!selectedCategoryLandscape) return [];
+    return groupedItems.get(selectedCategoryLandscape) ?? [];
+  }, [selectedCategoryLandscape, groupedItems]);
 
   // 縦画面用レイアウト
   if (isPortrait) {
@@ -340,7 +349,54 @@ export function DressUpMenu({
     );
   }
 
-  // メインメニュー（服アイテム）
+  // カテゴリ内アイテム表示（横画面）
+  if (selectedCategoryLandscape) {
+    return (
+      <div style={styles.outerContainer}>
+        <div style={styles.container}>
+          {/* 戻るボタン + カテゴリ名 */}
+          <button 
+            style={styles.backButton} 
+            onClick={() => setSelectedCategoryLandscape(null)}
+          >
+            ← {selectedCategoryLandscape}
+          </button>
+          
+          {/* カテゴリの「なし」ボタン（装備中の場合） */}
+          {equippedTypes.has(selectedCategoryLandscape as ClothingType) && (
+            <button
+              style={styles.categoryRemoveButton}
+              onClick={() => {
+                onItemRemove?.(selectedCategoryLandscape as ClothingType);
+                setSelectedCategoryLandscape(null);
+              }}
+            >
+              ✕ なし
+            </button>
+          )}
+
+          {/* スクロール可能なアイテムリスト */}
+          <div style={styles.itemList} ref={itemListRef}>
+            <div style={styles.scrollContent}>
+              {selectedCategoryItemsLandscape.map(item => (
+                <DraggableItem
+                  key={item.id}
+                  item={item}
+                  isEquipped={equippedIds.has(item.id)}
+                  onDrop={onItemDrop}
+                  dropTargetId={dropTargetId}
+                  onDragMove={onDragMove}
+                  onDragEnd={onDragEnd}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // メインメニュー（カテゴリ一覧 - 横画面）
   return (
     <div style={styles.outerContainer}>
       <div style={styles.container}>
@@ -377,38 +433,43 @@ export function DressUpMenu({
           </button>
         )}
 
-        {/* スクロール可能なアイテムリスト */}
+        {/* スクロール可能なカテゴリリスト */}
         <div style={styles.itemList} ref={itemListRef}>
           <div style={styles.scrollContent}>
-            {Array.from(groupedItems.entries()).map(([folderName, folderItems]) => (
-              <div key={folderName}>
-                {/* フォルダ名ラベル */}
-                <div style={styles.folderLabel}>{folderName}</div>
-                
-                {/* フォルダ内アイテム */}
-                {folderItems.map(item => (
-                  <DraggableItem
-                    key={item.id}
-                    item={item}
-                    isEquipped={equippedIds.has(item.id)}
-                    onDrop={onItemDrop}
-                    dropTargetId={dropTargetId}
-                    onDragMove={onDragMove}
-                    onDragEnd={onDragEnd}
-                  />
-                ))}
-
-                {/* カテゴリの「なし」ボタン */}
-                {equippedTypes.has(folderName as ClothingType) && (
-                  <button
-                    style={styles.removeButton}
-                    onClick={() => onItemRemove?.(folderName as ClothingType)}
-                  >
-                    ✕ なし
-                  </button>
-                )}
-              </div>
-            ))}
+            {categories.map(category => {
+              const categoryItems = groupedItems.get(category) ?? [];
+              const firstItem = categoryItems[0];
+              const hasEquipped = equippedTypes.has(category as ClothingType);
+              
+              return (
+                <button
+                  key={category}
+                  style={{
+                    ...styles.categoryButton,
+                    ...(hasEquipped ? styles.categoryButtonEquipped : {}),
+                  }}
+                  onClick={() => setSelectedCategoryLandscape(category)}
+                >
+                  {/* サムネイル（先頭アイテム） */}
+                  <div style={styles.categoryThumbnail}>
+                    {firstItem && (
+                      <img
+                        src={firstItem.thumbnailUrl || firstItem.imageUrl}
+                        alt={category}
+                        style={styles.categoryThumbnailImage}
+                        draggable={false}
+                        loading="lazy"
+                      />
+                    )}
+                    {hasEquipped && (
+                      <div style={styles.categoryEquippedBadge}>✓</div>
+                    )}
+                  </div>
+                  {/* カテゴリ名 */}
+                  <span style={styles.categoryButtonLabel}>{category}</span>
+                </button>
+              );
+            })}
 
             {items.length === 0 && (
               <p style={styles.emptyMessage}>
@@ -860,6 +921,80 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     marginTop: '2px',
     marginBottom: '2px',
+  },
+  categoryRemoveButton: {
+    width: '100%',
+    padding: '6px',
+    fontSize: '10px',
+    fontWeight: 'bold',
+    color: '#dc3545',
+    backgroundColor: '#ffe5e5',
+    border: '2px solid #dc3545',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    flexShrink: 0,
+    marginBottom: '4px',
+  },
+  categoryButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: '4px',
+    padding: '4px',
+    backgroundColor: 'white',
+    border: '2px solid #e9ecef',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    width: `${ITEM_SIZE}px`,
+    minHeight: `${ITEM_SIZE}px`,
+    flexShrink: 0,
+  },
+  categoryButtonEquipped: {
+    border: '2px solid #ff69b4',
+    backgroundColor: '#fff5f8',
+  },
+  categoryThumbnail: {
+    position: 'relative',
+    width: '100%',
+    height: `${ITEM_SIZE - 24}px`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: '4px',
+    backgroundColor: '#f8f9fa',
+  },
+  categoryThumbnailImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    pointerEvents: 'none',
+  },
+  categoryEquippedBadge: {
+    position: 'absolute',
+    top: '-2px',
+    right: '-2px',
+    width: '14px',
+    height: '14px',
+    backgroundColor: '#ff69b4',
+    color: 'white',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '9px',
+    fontWeight: 'bold',
+  },
+  categoryButtonLabel: {
+    fontSize: '9px',
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    width: '100%',
   },
   emptyMessage: {
     textAlign: 'center',
