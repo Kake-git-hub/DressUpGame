@@ -415,22 +415,28 @@ export function DressUpMenu({
           </select>
         </div>
 
-        {/* 背景ボタン */}
-        {backgrounds.length > 0 && (
-          <button 
-            style={{
-              ...styles.backgroundButton,
-              ...(currentBackgroundId ? styles.backgroundButtonActive : {}),
-            }}
-            onClick={() => setShowBackgrounds(true)}
-          >
-            🖼️ はいけい {currentBackgroundId ? '✓' : ''}
-          </button>
-        )}
-
         {/* スクロール可能なカテゴリリスト */}
         <div style={styles.itemList} ref={itemListRef}>
           <div style={styles.scrollContent}>
+            {/* 背景ボタン（カテゴリと同じサイズ） */}
+            {backgrounds.length > 0 && (
+              <button
+                style={{
+                  ...styles.categoryButton,
+                  ...(currentBackgroundId ? styles.categoryButtonEquipped : {}),
+                }}
+                onClick={() => setShowBackgrounds(true)}
+              >
+                <div style={styles.categoryThumbnail}>
+                  <span style={{ fontSize: '28px' }}>🖼️</span>
+                  {currentBackgroundId && (
+                    <div style={styles.categoryEquippedBadge}>✓</div>
+                  )}
+                </div>
+                <span style={styles.categoryButtonLabel}>はいけい</span>
+              </button>
+            )}
+
             {categories.map(category => {
               const categoryItems = groupedItems.get(category) ?? [];
               const firstItem = categoryItems[0];
@@ -749,24 +755,6 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: 'white',
     cursor: 'pointer',
     fontWeight: 'bold',
-  },
-  backgroundButton: {
-    width: '100%',
-    padding: '6px',
-    fontSize: '10px',
-    fontWeight: 'bold',
-    color: '#666',
-    backgroundColor: '#e9ecef',
-    border: '2px solid #dee2e6',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    flexShrink: 0,
-    marginBottom: '2px',
-  },
-  backgroundButtonActive: {
-    backgroundColor: '#d4edda',
-    borderColor: '#28a745',
-    color: '#155724',
   },
   backButton: {
     width: '100%',
