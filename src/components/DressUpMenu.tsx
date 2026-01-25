@@ -354,12 +354,12 @@ export function DressUpMenu({
     return (
       <div style={styles.outerContainer}>
         <div style={styles.container}>
-          {/* 戻るボタン + カテゴリ名 */}
+          {/* 戻るボタン */}
           <button 
             style={styles.backButton} 
             onClick={() => setSelectedCategoryLandscape(null)}
           >
-            ← {selectedCategoryLandscape}
+            ← もどる
           </button>
           
           {/* カテゴリの「なし」ボタン（装備中の場合） */}
@@ -775,8 +775,8 @@ const styles: Record<string, CSSProperties> = {
   },
   backButton: {
     width: '100%',
-    padding: '8px',
-    fontSize: '11px',
+    padding: '12px 8px',
+    fontSize: '12px',
     fontWeight: 'bold',
     color: '#666',
     backgroundColor: '#e9ecef',
@@ -784,7 +784,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: '6px',
     cursor: 'pointer',
     flexShrink: 0,
-    marginBottom: '4px',
+    marginBottom: '8px',
   },
   resetButton: {
     width: '100%',
@@ -924,8 +924,8 @@ const styles: Record<string, CSSProperties> = {
   },
   categoryRemoveButton: {
     width: '100%',
-    padding: '6px',
-    fontSize: '10px',
+    padding: '12px 8px',
+    fontSize: '12px',
     fontWeight: 'bold',
     color: '#dc3545',
     backgroundColor: '#ffe5e5',
