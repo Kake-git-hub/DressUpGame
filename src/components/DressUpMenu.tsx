@@ -306,24 +306,19 @@ export function DressUpMenu({
             ← もどる
           </button>
 
-          <div style={styles.sectionLabel}>🖼️ はいけい</div>
+          {/* 背景の「なし」ボタン（背景選択中の場合） */}
+          {currentBackgroundId !== null && (
+            <button
+              style={styles.categoryRemoveButton}
+              onClick={() => onBackgroundChange?.(null)}
+            >
+              ✕ なし
+            </button>
+          )}
 
+          {/* スクロール可能な背景リスト */}
           <div style={styles.itemList} ref={itemListRef}>
             <div style={styles.scrollContent}>
-              {/* 背景なしオプション（他と同サイズに統一） */}
-              <button
-                style={{
-                  ...styles.itemButton,
-                  ...(currentBackgroundId === null ? styles.itemButtonSelected : {}),
-                }}
-                onClick={() => onBackgroundChange?.(null)}
-              >
-                <div style={styles.itemImageContainer}>
-                  <span style={{ fontSize: '24px' }}>✕</span>
-                  <span style={styles.noneOverlayLabel}>なし</span>
-                </div>
-              </button>
-
               {backgrounds.map(bg => (
                 <DraggableBackground
                   key={bg.id}
