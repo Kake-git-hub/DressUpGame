@@ -81,6 +81,8 @@ export const DEFAULT_CATEGORY_MAP: Record<string, { label: string; emoji: string
   'face': { label: '顔パーツ', emoji: '😊', zIndex: 40, position: { x: 0, y: -80 }, anchorType: 'head', movable: true },
 };
 
+// ========== ファイル名パース関数 ==========
+
 // フォルダ名から番号とラベルを抽出
 // フォーマット1: 「レイヤー順_カテゴリ並び順_ラベル」（例: "01_02_ドレス" → layerOrder: 1, categoryOrder: 2, label: "ドレス"）
 // フォーマット2: 「番号_ラベル」（例: "1_くつした" → layerOrder: 1, categoryOrder: undefined, label: "くつした"）
@@ -118,6 +120,43 @@ export function parseFolderName(folderName: string): {
     order: undefined,
     categoryOrder: undefined,
     label: withoutSuffix,
+  };
+}
+
+// 新形式ファイル名からメタデータを抽出
+// フォーマット: 「レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名_ID」
+// 例: "12_10_アクセサリー_overlap紺色プリーツスカート_171346"
+// 例: "05_03_トップス_白いTシャツ_abc123"
+export interface ParsedClothingFileName {
+  layerOrder: number;
+  categoryOrder: number;
+  categoryName: string;
+  itemName: string;
+  allowOverlap: boolean;
+  uniqueId: string;
+}
+
+export function parseClothingFileName(fileName: string): ParsedClothingFileName | null {
+  // 拡張子を除去
+  const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+  
+  // _サムネ サフィックスを除去
+  const baseName = nameWithoutExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '');
+  
+  // フォーマット: レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名_ID
+  // 正規表現: ^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)_([^_]+)$
+  const match = baseName.match(/^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)_([^_]+)$/);
+  if (!match) {
+    return null;
+  }
+  
+  return {
+    layerOrder: parseInt(match[1], 10),
+    categoryOrder: parseInt(match[2], 10),
+    categoryName: match[3],
+    allowOverlap: !!match[4], // "overlap" があれば true
+    itemName: match[5],
+    uniqueId: match[6],
   };
 }
 

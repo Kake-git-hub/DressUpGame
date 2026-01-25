@@ -5,7 +5,7 @@
  */
 
 import type { ClothingItemData, DollData, BackgroundData, ClothingType, DollPreset, CategoryInfo } from '../types';
-import { DEFAULT_CATEGORY_MAP, getCategoryInfo, parseFolderName } from '../types';
+import { DEFAULT_CATEGORY_MAP, getCategoryInfo, parseFolderName, parseClothingFileName } from '../types';
 
 const STORAGE_KEYS = {
   CUSTOM_DOLLS: 'dressup_custom_dolls',
@@ -1254,10 +1254,16 @@ export async function importPresetFromFolder(
   const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
   
   // ファイルをプリセット別に分類
+  // 新形式: clothing直下にファイル名でメタデータを含む（12_10_カテゴリ_overlapアイテム名_ID.png）
+  // 旧形式: clothing/{カテゴリフォルダ}/画像.png
   const presetMap = new Map<string, {
     dolls: { name: string; file: File }[];
+    // 旧形式用: カテゴリフォルダ別
     clothing: Map<string, { name: string; file: File; thumbFile?: File }[]>;
     clothingThumbs: Map<string, File>; // サムネイル用マップ（ベース名 -> File）
+    // 新形式用: clothing直下のファイル（ファイル名にメタデータ含む）
+    clothingDirect: { file: File; thumbFile?: File }[];
+    clothingDirectThumbs: Map<string, File>; // 新形式サムネイル（baseNameなし拡張子なし -> File）
   }>();
   const backgroundFiles: { name: string; file: File }[] = [];
   
@@ -1319,7 +1325,13 @@ export async function importPresetFromFolder(
     const presetId = dollFolderName.toLowerCase();
     
     if (!presetMap.has(presetId)) {
-      presetMap.set(presetId, { dolls: [], clothing: new Map(), clothingThumbs: new Map() });
+      presetMap.set(presetId, { 
+        dolls: [], 
+        clothing: new Map(), 
+        clothingThumbs: new Map(),
+        clothingDirect: [],
+        clothingDirectThumbs: new Map(),
+      });
     }
     const preset = presetMap.get(presetId)!;
     
@@ -1336,24 +1348,47 @@ export async function importPresetFromFolder(
       continue;
     }
     
-    // clothing/{category} フォルダ内の画像
+    // clothing フォルダ内の画像
     const clothingIndex = subParts.findIndex(p => p.toLowerCase() === 'clothing');
-    if (clothingIndex !== -1 && clothingIndex + 1 < subParts.length) {
-      const category = subParts[clothingIndex + 1].toLowerCase();
-      // カテゴリがファイル名でないことを確認
-      if (category && !category.includes('.')) {
+    if (clothingIndex !== -1) {
+      // clothingの次のパーツを確認
+      const afterClothing = subParts.slice(clothingIndex + 1);
+      
+      // 新形式: clothing直下にファイルがある（afterClothingの最初がファイル名）
+      // 旧形式: clothing/{category}/ファイル（afterClothingの最初がカテゴリフォルダ）
+      if (afterClothing.length === 1 && afterClothing[0].includes('.')) {
+        // 新形式: clothing直下のファイル（ファイル名にメタデータ含む）
+        // ファイル名形式: 12_10_アクセサリー_overlap紺色プリーツスカート_171346.png
+        const fileNameNoExt = file.name.replace(/\.[^.]+$/, '');
+        const baseNameForKey = fileNameNoExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '');
+        
         if (isThumb) {
-          // サムネイルの場合はthumbsマップに保存
-          const thumbKey = `${category}/${baseName}`;
-          preset.clothingThumbs.set(thumbKey, file);
-          console.log(`  → サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
+          // サムネイルの場合
+          preset.clothingDirectThumbs.set(baseNameForKey, file);
+          console.log(`  → 新形式サムネイルとして追加: ${presetId} / ${baseNameForKey}_thumb`);
         } else {
           // 本体画像の場合
-          if (!preset.clothing.has(category)) {
-            preset.clothing.set(category, []);
+          preset.clothingDirect.push({ file });
+          console.log(`  → 新形式服として追加: ${presetId} / ${fileNameNoExt}`);
+        }
+      } else if (afterClothing.length >= 2) {
+        // 旧形式: clothing/{category}/ファイル
+        const category = afterClothing[0].toLowerCase();
+        // カテゴリがファイル名でないことを確認
+        if (category && !category.includes('.')) {
+          if (isThumb) {
+            // サムネイルの場合はthumbsマップに保存
+            const thumbKey = `${category}/${baseName}`;
+            preset.clothingThumbs.set(thumbKey, file);
+            console.log(`  → 旧形式サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
+          } else {
+            // 本体画像の場合
+            if (!preset.clothing.has(category)) {
+              preset.clothing.set(category, []);
+            }
+            preset.clothing.get(category)!.push({ name: baseName, file });
+            console.log(`  → 旧形式服として追加: ${presetId} / ${category} / ${baseName}`);
           }
-          preset.clothing.get(category)!.push({ name: baseName, file });
-          console.log(`  → 服として追加: ${presetId} / ${category} / ${baseName}`);
         }
       }
     }
@@ -1365,7 +1400,7 @@ export async function importPresetFromFolder(
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種, サムネイル${data.clothingThumbs.size}枚`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚`);
   }
   
   // 背景を取り込み
@@ -1402,12 +1437,15 @@ export async function importPresetFromFolder(
     await yieldToMain();
   }
   
-  // 全服の総数をカウント
+  // 全服の総数をカウント（旧形式 + 新形式）
   let totalClothingCount = 0;
   for (const [, data] of presetMap) {
+    // 旧形式
     for (const [, items] of data.clothing) {
       totalClothingCount += items.length;
     }
+    // 新形式
+    totalClothingCount += data.clothingDirect.length;
   }
   let clothingProcessed = 0;
   
@@ -1495,6 +1533,89 @@ export async function importPresetFromFolder(
           if (clothingProcessed % 10 === 0) {
             await forceGCHint();
           }
+        }
+      }
+      
+      // ========== 新形式: clothing直下のファイル（ファイル名にメタデータ含む）==========
+      for (const { file } of data.clothingDirect) {
+        clothingProcessed++;
+        reportProgress({ 
+          phase: 'clothing', 
+          current: clothingProcessed, 
+          total: totalClothingCount, 
+          message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
+        });
+        
+        // ファイル名からメタデータを抽出
+        const fileNameNoExt = file.name.replace(/\.[^.]+$/, '');
+        const parsed = parseClothingFileName(file.name);
+        
+        if (!parsed) {
+          console.warn(`新形式パース失敗: ${file.name}`);
+          continue;
+        }
+        
+        // 右下ウォーターマーク除去＋リサイズ＋サムネイル自動生成
+        const { imageUrl: base64, thumbnailUrl: autoThumb } = await fileToBase64WithProcessing(file, file.name);
+        const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        await saveImageToStorage(id, base64);
+        
+        // 手動サムネイルがあれば優先、なければ自動生成を使用
+        const thumbFile = data.clothingDirectThumbs.get(fileNameNoExt);
+        let thumbnailUrl: string;
+        if (thumbFile) {
+          // 手動サムネイルもリサイズ
+          thumbnailUrl = await fileToBase64WithResize(thumbFile, thumbFile.name, THUMBNAIL_SIZE);
+          console.log(`  新形式手動サムネイル読み込み: ${fileNameNoExt}`);
+        } else {
+          // 自動生成サムネイルを使用
+          thumbnailUrl = autoThumb;
+        }
+        const thumbId = `${id}-thumb`;
+        await saveImageToStorage(thumbId, thumbnailUrl);
+        
+        // カテゴリ情報をcategoriesに追加（重複チェック）
+        const categoryLower = parsed.categoryName.toLowerCase();
+        if (!categories.some(c => c.type === categoryLower)) {
+          categories.push(getCategoryInfo(parsed.categoryName));
+        }
+        
+        // ClothingItemDataを直接作成（新形式用）
+        const item: ClothingItemData = {
+          id,
+          name: parsed.itemName,
+          type: categoryLower,
+          imageUrl: base64,
+          thumbnailUrl,
+          position: { x: 0, y: 0 },
+          baseZIndex: parsed.layerOrder, // layerOrderをzIndexとして使用
+          anchorType: 'torso',
+          isCustom: true,
+          movable: false,
+          layerOrder: parsed.layerOrder,
+          categoryOrder: parsed.categoryOrder,
+          allowOverlap: parsed.allowOverlap,
+          dollId: dollId,
+        };
+        
+        // DEFAULT_CATEGORY_MAPからデフォルト値を取得
+        const mapping = DEFAULT_CATEGORY_MAP[categoryLower];
+        if (mapping) {
+          item.position = mapping.position;
+          item.baseZIndex = mapping.zIndex;
+          item.anchorType = mapping.anchorType as 'head' | 'neck' | 'torso' | 'hip' | 'feet';
+          item.movable = mapping.movable ?? false;
+        }
+        
+        clothingItems.push(item);
+        console.log(`  新形式服取り込み: ${parsed.itemName} (${parsed.categoryName}, layer=${parsed.layerOrder}, cat=${parsed.categoryOrder}, overlap=${parsed.allowOverlap})`);
+        
+        // 毎回UIスレッドを解放（Safari対策）
+        await yieldToMain();
+        
+        // 10件ごとにGCを促す（Safari大容量対策）
+        if (clothingProcessed % 10 === 0) {
+          await forceGCHint();
         }
       }
       
@@ -1664,10 +1785,16 @@ export async function importPresetFromZip(
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
   
   // ファイルをプリセット別に分類（パスのみ保存、Blobは後で読み込み - iPad対応）
+  // 新形式: clothing直下にファイル名でメタデータを含む（12_10_カテゴリ_overlapアイテム名_ID.png）
+  // 旧形式: clothing/{カテゴリフォルダ}/画像.png
   const presetMap = new Map<string, {
     dolls: { name: string; path: string; fileNameWithExt: string }[];
+    // 旧形式用: カテゴリフォルダ別
     clothing: Map<string, { name: string; path: string; fileNameWithExt: string }[]>;
     clothingThumbs: Map<string, { path: string; fileNameWithExt: string }>; // サムネイル用マップ
+    // 新形式用: clothing直下のファイル（ファイル名にメタデータ含む）
+    clothingDirect: { path: string; fileNameWithExt: string }[];
+    clothingDirectThumbs: Map<string, { path: string; fileNameWithExt: string }>; // 新形式サムネイル
   }>();
   const backgroundFiles: { name: string; path: string; fileNameWithExt: string }[] = [];
   
@@ -1716,7 +1843,13 @@ export async function importPresetFromZip(
     const presetId = parts[dollFolderIndex].toLowerCase();
     
     if (!presetMap.has(presetId)) {
-      presetMap.set(presetId, { dolls: [], clothing: new Map(), clothingThumbs: new Map() });
+      presetMap.set(presetId, { 
+        dolls: [], 
+        clothing: new Map(), 
+        clothingThumbs: new Map(),
+        clothingDirect: [],
+        clothingDirectThumbs: new Map(),
+      });
     }
     const preset = presetMap.get(presetId)!;
     
@@ -1733,21 +1866,43 @@ export async function importPresetFromZip(
       continue;
     }
     
-    // clothing/{category} フォルダ内
+    // clothing フォルダ内
     const clothingIndex = subParts.findIndex(p => p.toLowerCase() === 'clothing');
-    if (clothingIndex !== -1 && clothingIndex + 1 < subParts.length) {
-      const category = subParts[clothingIndex + 1].toLowerCase();
-      if (isThumb) {
-        // サムネイルの場合はthumbsマップに保存
-        const thumbKey = `${category}/${baseName}`;
-        preset.clothingThumbs.set(thumbKey, { path, fileNameWithExt });
-        console.log(`  → サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
-      } else {
-        if (!preset.clothing.has(category)) {
-          preset.clothing.set(category, []);
+    if (clothingIndex !== -1) {
+      // clothingの次のパーツを確認
+      const afterClothing = subParts.slice(clothingIndex + 1);
+      
+      // 新形式: clothing直下にファイルがある（subPartsの残りがファイル名のみ）
+      // 旧形式: clothing/{category}/ファイル（afterClothingの最初がカテゴリフォルダ）
+      if (afterClothing.length === 0) {
+        // clothing直下のファイル（新形式）
+        const fileNameNoExt = fileNameWithExt.replace(/\.[^.]+$/, '');
+        const baseNameForKey = fileNameNoExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '');
+        
+        if (isThumb) {
+          // サムネイルの場合
+          preset.clothingDirectThumbs.set(baseNameForKey, { path, fileNameWithExt });
+          console.log(`  → 新形式サムネイルとして追加: ${presetId} / ${baseNameForKey}_thumb`);
+        } else {
+          // 本体画像の場合
+          preset.clothingDirect.push({ path, fileNameWithExt });
+          console.log(`  → 新形式服として追加: ${presetId} / ${fileNameNoExt}`);
         }
-        preset.clothing.get(category)!.push({ name: baseName, path, fileNameWithExt });
-        console.log(`  → 服として追加: ${presetId} / ${category} / ${baseName}`);
+      } else {
+        // 旧形式: clothing/{category}/ファイル
+        const category = afterClothing[0].toLowerCase();
+        if (isThumb) {
+          // サムネイルの場合はthumbsマップに保存
+          const thumbKey = `${category}/${baseName}`;
+          preset.clothingThumbs.set(thumbKey, { path, fileNameWithExt });
+          console.log(`  → 旧形式サムネイルとして追加: ${presetId} / ${category} / ${baseName}_thumb`);
+        } else {
+          if (!preset.clothing.has(category)) {
+            preset.clothing.set(category, []);
+          }
+          preset.clothing.get(category)!.push({ name: baseName, path, fileNameWithExt });
+          console.log(`  → 旧形式服として追加: ${presetId} / ${category} / ${baseName}`);
+        }
       }
     }
   }
@@ -1758,7 +1913,7 @@ export async function importPresetFromZip(
   console.log(`背景ファイル: ${backgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 服カテゴリ${data.clothing.size}種, サムネイル${data.clothingThumbs.size}枚`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚`);
   }
   
   // 背景を取り込み（1枚ずつ読み込み - iPad対応）
@@ -1808,6 +1963,8 @@ export async function importPresetFromZip(
     for (const [, items] of data.clothing) {
       totalClothingCount += items.length;
     }
+    // 新形式（clothing直下）も含める
+    totalClothingCount += data.clothingDirect.length;
   }
   let clothingProcessed = 0;
   
@@ -1898,6 +2055,69 @@ export async function importPresetFromZip(
           if (clothingProcessed % 5 === 0) {
             await forceGCHint();
           }
+        }
+      }
+      
+      // 新形式の服を処理（clothing直下にファイル名でメタデータを持つ形式）
+      for (const fileInfo of data.clothingDirect) {
+        clothingProcessed++;
+        reportProgress({ 
+          phase: 'clothing', 
+          current: clothingProcessed, 
+          total: totalClothingCount, 
+          message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
+        });
+        
+        const parsed = parseClothingFileName(fileInfo.fileNameWithExt);
+        if (!parsed) {
+          console.warn(`新形式の服ファイル名をパースできません: ${fileInfo.fileNameWithExt}`);
+          continue;
+        }
+        
+        // ZIPからBlobを取得（遅延読み込み - iPad対応）
+        const clothingBlob = await zip.files[fileInfo.path].async('blob');
+        const rawBase64 = await blobToBase64(clothingBlob, fileInfo.fileNameWithExt);
+        // 右下カット＋リサイズ＋サムネイル生成
+        const cropped = await processImageWithChromaKey(rawBase64);
+        const base64 = await resizeImage(cropped, MAX_IMAGE_SIZE);
+        const autoThumb = await generateThumbnail(cropped, THUMBNAIL_SIZE);
+        const id = `custom-clothing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        await saveImageToStorage(id, base64);
+        
+        // 手動サムネイルがあれば優先
+        const thumbKey = parsed.uniqueId;
+        const thumbData = data.clothingDirectThumbs.get(thumbKey);
+        let thumbnailUrl: string;
+        if (thumbData) {
+          const thumbBlob = await zip.files[thumbData.path].async('blob');
+          thumbnailUrl = await blobToBase64(thumbBlob, thumbData.fileNameWithExt);
+          console.log(`  手動サムネイル読み込み（新形式）: ${thumbKey}`);
+        } else {
+          thumbnailUrl = autoThumb;
+        }
+        await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+        
+        // カテゴリ情報を取得・追加
+        const categoryInfo = getCategoryInfo(parsed.categoryName);
+        // カテゴリがまだなければ追加（typeで重複チェック）
+        if (!categories.some(c => c.type === categoryInfo.type)) {
+          categories.push(categoryInfo);
+        }
+        
+        // ClothingItemDataを作成
+        const item = createClothingData(id, parsed.itemName, parsed.categoryName.toLowerCase(), base64, parsed.categoryName);
+        item.thumbnailUrl = thumbnailUrl;
+        item.dollId = dollId;
+        item.layerOrder = parsed.layerOrder;
+        item.allowOverlap = parsed.allowOverlap;
+        clothingItems.push(item);
+        
+        // 毎回UIスレッドを解放（iPad対策）
+        await yieldToMain();
+        
+        // 5件ごとにGCを促す（iPad大容量対策）
+        if (clothingProcessed % 5 === 0) {
+          await forceGCHint();
         }
       }
       
