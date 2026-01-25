@@ -1550,10 +1550,12 @@ export async function importPresetFromFolder(
         const fileNameNoExt = file.name.replace(/\.[^.]+$/, '');
         const parsed = parseClothingFileName(file.name);
         
-        if (!parsed) {
-          console.warn(`新形式パース失敗: ${file.name}`);
-          continue;
-        }
+        // パースできない場合はファイル名をそのままアイテム名として使用
+        const itemName = parsed?.itemName ?? fileNameNoExt;
+        const categoryName = parsed?.categoryName ?? 'accessory';
+        const layerOrder = parsed?.layerOrder ?? 20;
+        const categoryOrder = parsed?.categoryOrder ?? 99;
+        const allowOverlap = parsed?.allowOverlap ?? false;
         
         // 右下ウォーターマーク除去＋リサイズ＋サムネイル自動生成
         const { imageUrl: base64, thumbnailUrl: autoThumb } = await fileToBase64WithProcessing(file, file.name);
@@ -1566,7 +1568,7 @@ export async function importPresetFromFolder(
         if (thumbFile) {
           // 手動サムネイルもリサイズ
           thumbnailUrl = await fileToBase64WithResize(thumbFile, thumbFile.name, THUMBNAIL_SIZE);
-          console.log(`  新形式手動サムネイル読み込み: ${fileNameNoExt}`);
+          console.log(`  手動サムネイル読み込み: ${fileNameNoExt}`);
         } else {
           // 自動生成サムネイルを使用
           thumbnailUrl = autoThumb;
@@ -1575,26 +1577,26 @@ export async function importPresetFromFolder(
         await saveImageToStorage(thumbId, thumbnailUrl);
         
         // カテゴリ情報をcategoriesに追加（重複チェック）
-        const categoryLower = parsed.categoryName.toLowerCase();
+        const categoryLower = categoryName.toLowerCase();
         if (!categories.some(c => c.type === categoryLower)) {
-          categories.push(getCategoryInfo(parsed.categoryName));
+          categories.push(getCategoryInfo(categoryName));
         }
         
-        // ClothingItemDataを直接作成（新形式用）
+        // ClothingItemDataを直接作成
         const item: ClothingItemData = {
           id,
-          name: parsed.itemName,
+          name: itemName,
           type: categoryLower,
           imageUrl: base64,
           thumbnailUrl,
           position: { x: 0, y: 0 },
-          baseZIndex: parsed.layerOrder, // layerOrderをzIndexとして使用
+          baseZIndex: layerOrder,
           anchorType: 'torso',
           isCustom: true,
           movable: false,
-          layerOrder: parsed.layerOrder,
-          categoryOrder: parsed.categoryOrder,
-          allowOverlap: parsed.allowOverlap,
+          layerOrder: layerOrder,
+          categoryOrder: categoryOrder,
+          allowOverlap: allowOverlap,
           dollId: dollId,
         };
         
@@ -1608,7 +1610,7 @@ export async function importPresetFromFolder(
         }
         
         clothingItems.push(item);
-        console.log(`  新形式服取り込み: ${parsed.itemName} (${parsed.categoryName}, layer=${parsed.layerOrder}, cat=${parsed.categoryOrder}, overlap=${parsed.allowOverlap})`);
+        console.log(`  服取り込み(clothing直下): ${itemName} (${categoryName}, layer=${layerOrder}${parsed ? '' : ' [シンプル形式]'})`);
         
         // 毎回UIスレッドを解放（Safari対策）
         await yieldToMain();
@@ -2058,7 +2060,7 @@ export async function importPresetFromZip(
         }
       }
       
-      // 新形式の服を処理（clothing直下にファイル名でメタデータを持つ形式）
+      // 服を処理（clothing直下のファイル）
       for (const fileInfo of data.clothingDirect) {
         clothingProcessed++;
         reportProgress({ 
@@ -2068,11 +2070,15 @@ export async function importPresetFromZip(
           message: `服を取り込み中... (${clothingProcessed}/${totalClothingCount})` 
         });
         
+        const fileNameNoExt = fileInfo.fileNameWithExt.replace(/\.[^.]+$/, '');
         const parsed = parseClothingFileName(fileInfo.fileNameWithExt);
-        if (!parsed) {
-          console.warn(`新形式の服ファイル名をパースできません: ${fileInfo.fileNameWithExt}`);
-          continue;
-        }
+        
+        // パースできない場合はファイル名をそのままアイテム名として使用
+        const itemName = parsed?.itemName ?? fileNameNoExt;
+        const categoryName = parsed?.categoryName ?? 'accessory';
+        const layerOrder = parsed?.layerOrder ?? 20;
+        const allowOverlap = parsed?.allowOverlap ?? false;
+        const uniqueId = parsed?.uniqueId ?? fileNameNoExt;
         
         // ZIPからBlobを取得（遅延読み込み - iPad対応）
         const clothingBlob = await zip.files[fileInfo.path].async('blob');
@@ -2085,32 +2091,33 @@ export async function importPresetFromZip(
         await saveImageToStorage(id, base64);
         
         // 手動サムネイルがあれば優先
-        const thumbKey = parsed.uniqueId;
-        const thumbData = data.clothingDirectThumbs.get(thumbKey);
+        const thumbData = data.clothingDirectThumbs.get(uniqueId);
         let thumbnailUrl: string;
         if (thumbData) {
           const thumbBlob = await zip.files[thumbData.path].async('blob');
           thumbnailUrl = await blobToBase64(thumbBlob, thumbData.fileNameWithExt);
-          console.log(`  手動サムネイル読み込み（新形式）: ${thumbKey}`);
+          console.log(`  手動サムネイル読み込み: ${uniqueId}`);
         } else {
           thumbnailUrl = autoThumb;
         }
         await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
         
         // カテゴリ情報を取得・追加
-        const categoryInfo = getCategoryInfo(parsed.categoryName);
+        const categoryInfo = getCategoryInfo(categoryName);
         // カテゴリがまだなければ追加（typeで重複チェック）
         if (!categories.some(c => c.type === categoryInfo.type)) {
           categories.push(categoryInfo);
         }
         
         // ClothingItemDataを作成
-        const item = createClothingData(id, parsed.itemName, parsed.categoryName.toLowerCase(), base64, parsed.categoryName);
+        const item = createClothingData(id, itemName, categoryName.toLowerCase(), base64, categoryName);
         item.thumbnailUrl = thumbnailUrl;
         item.dollId = dollId;
-        item.layerOrder = parsed.layerOrder;
-        item.allowOverlap = parsed.allowOverlap;
+        item.layerOrder = layerOrder;
+        item.allowOverlap = allowOverlap;
         clothingItems.push(item);
+        
+        console.log(`  服取り込み(clothing直下): ${itemName} (${categoryName}, layer=${layerOrder}${parsed ? '' : ' [シンプル形式]'})`);
         
         // 毎回UIスレッドを解放（iPad対策）
         await yieldToMain();
