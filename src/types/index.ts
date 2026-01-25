@@ -124,8 +124,10 @@ export function parseFolderName(folderName: string): {
 }
 
 // 新形式ファイル名からメタデータを抽出
-// フォーマット: 「レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名_ID」
+// フォーマット: 「レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名{_ID}」
+// IDはオプション（英数字のみの場合はID、日本語を含む場合はアイテム名の一部）
 // 例: "12_10_アクセサリー_overlap紺色プリーツスカート_171346"
+// 例: "4_2_ドレス_アナドレス" (IDなし)
 // 例: "05_03_トップス_白いTシャツ_abc123"
 export interface ParsedClothingFileName {
   layerOrder: number;
@@ -143,21 +145,36 @@ export function parseClothingFileName(fileName: string): ParsedClothingFileName 
   // _サムネ サフィックスを除去
   const baseName = nameWithoutExt.replace(/(_サムネ|_thumb|_thumbnail)$/i, '');
   
-  // フォーマット: レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名_ID
-  // 正規表現: ^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)_([^_]+)$
-  const match = baseName.match(/^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)_([^_]+)$/);
-  if (!match) {
-    return null;
+  // フォーマット: レイヤー順_カテゴリ並び順_カテゴリ名_{overlap}アイテム名{_ID}
+  // IDは英数字のみで構成される場合のみID扱い
+  
+  // まずIDあり形式をチェック（末尾が _英数字 の場合）
+  const matchWithId = baseName.match(/^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)_([a-zA-Z0-9]+)$/);
+  if (matchWithId) {
+    return {
+      layerOrder: parseInt(matchWithId[1], 10),
+      categoryOrder: parseInt(matchWithId[2], 10),
+      categoryName: matchWithId[3],
+      allowOverlap: !!matchWithId[4],
+      itemName: matchWithId[5],
+      uniqueId: matchWithId[6],
+    };
   }
   
-  return {
-    layerOrder: parseInt(match[1], 10),
-    categoryOrder: parseInt(match[2], 10),
-    categoryName: match[3],
-    allowOverlap: !!match[4], // "overlap" があれば true
-    itemName: match[5],
-    uniqueId: match[6],
-  };
+  // IDなし形式（アイテム名で終わる場合）
+  const matchWithoutId = baseName.match(/^(\d+)_(\d+)_([^_]+)_(overlap)?(.+)$/);
+  if (matchWithoutId) {
+    return {
+      layerOrder: parseInt(matchWithoutId[1], 10),
+      categoryOrder: parseInt(matchWithoutId[2], 10),
+      categoryName: matchWithoutId[3],
+      allowOverlap: !!matchWithoutId[4],
+      itemName: matchWithoutId[5],
+      uniqueId: baseName, // ファイル名全体をユニークIDとして使用
+    };
+  }
+  
+  return null;
 }
 
 // フォルダ名からカテゴリ情報を取得（なければデフォルト作成）
