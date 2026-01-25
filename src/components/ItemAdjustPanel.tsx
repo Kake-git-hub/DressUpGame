@@ -104,9 +104,14 @@ export function ItemAdjustPanel({
   const canvasLeft = (viewportWidth - canvasWidth) / 2;
   const canvasTop = (viewportHeight - canvasHeight) / 2;
 
-  // 利用可能領域の計算（PixiEngineと同じ計算、キャンバス内座標）
+  // 背景領域の計算（PixiEngineと同じ計算）
+  // 利用可能領域の中心
   const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
-  const availableX = menuOffset;
+  const availableCenterX = menuOffset + availableWidth / 2;
+  // 背景は1:1正方形で画面縦幅いっぱい
+  const bgSize = canvasHeight;
+  const bgCenterX = availableCenterX;
+  const bgCenterY = canvasHeight / 2;
 
   // 現在の調整値（ローカルステート）- アイテムモード用
   const [offsetX, setOffsetX] = useState(item?.adjustOffsetX ?? 0);
@@ -308,11 +313,9 @@ export function ItemAdjustPanel({
       const deltaY = touches[0].clientY - touchStartRef.current.y;
       
       if (isDollMode) {
-        // ドールモード: パーセンテージで移動
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const baseSize = Math.min(rect.width, rect.height);
-        const percentX = (deltaX / baseSize) * 100;
-        const percentY = (deltaY / baseSize) * 100;
+        // ドールモード: パーセンテージで移動（bgSizeを基準）
+        const percentX = (deltaX / canvasHeight) * 100;
+        const percentY = (deltaY / canvasHeight) * 100;
         const newX = Math.max(-50, Math.min(150, touchStartRef.current.offsetX + percentX));
         const newY = Math.max(-50, Math.min(150, touchStartRef.current.offsetY + percentY));
         setDollX(newX);
@@ -350,7 +353,7 @@ export function ItemAdjustPanel({
         setRotation(newRotation);
       }
     }
-  }, [isDollMode, maxOffset, touchCount]);
+  }, [isDollMode, maxOffset, touchCount, canvasHeight]);
 
   // タッチ終了
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -408,11 +411,9 @@ export function ItemAdjustPanel({
     const deltaY = e.clientY - mouseStartRef.current.y;
 
     if (isDollMode) {
-      // ドールモード: パーセンテージで移動
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const baseSize = Math.min(rect.width, rect.height);
-      const percentX = (deltaX / baseSize) * 100;
-      const percentY = (deltaY / baseSize) * 100;
+      // ドールモード: パーセンテージで移動（bgSizeを基準）
+      const percentX = (deltaX / canvasHeight) * 100;
+      const percentY = (deltaY / canvasHeight) * 100;
       const newX = Math.max(-50, Math.min(150, mouseStartRef.current.offsetX + percentX));
       const newY = Math.max(-50, Math.min(150, mouseStartRef.current.offsetY + percentY));
       setDollX(newX);
@@ -424,7 +425,7 @@ export function ItemAdjustPanel({
       setOffsetX(newOffsetX);
       setOffsetY(newOffsetY);
     }
-  }, [isDollMode, isMouseDragging, maxOffset]);
+  }, [isDollMode, isMouseDragging, maxOffset, canvasHeight]);
 
   const handleMouseUp = useCallback(() => {
     setIsMouseDragging(false);
@@ -470,18 +471,19 @@ export function ItemAdjustPanel({
     >
       {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
       {!isDollMode && transparentImageUrl && (() => {
-        // ドール中心位置を計算（PixiEngineと同じ計算: 利用可能領域内の%位置）
-        const dollCenterX = availableX + (availableWidth * dollTransform.x) / 100;
-        const dollCenterY = (canvasHeight * dollTransform.y) / 100;
+        // ドール中心位置を計算（PixiEngineと同じ計算）
+        // dollTransformのx,yは背景領域内での%位置（50%=中央）
+        const dollCenterX = bgCenterX + ((dollTransform.x - 50) / 100) * bgSize;
+        const dollCenterY = bgCenterY + ((dollTransform.y - 50) / 100) * bgSize;
         
         // アイテムの基準位置を計算（キャンバス内座標）
         let baseX: number;
         let baseY: number;
         
         if (item?.movable && ((item.offsetX ?? 0) !== 0 || (item.offsetY ?? 0) !== 0)) {
-          // movableアイテム: 中央(50%) + offset で計算（PixiEngineと同じ）
-          baseX = availableX + (availableWidth * (50 + (item.offsetX ?? 0))) / 100;
-          baseY = (canvasHeight * (50 + (item.offsetY ?? 0))) / 100;
+          // movableアイテム: bgCenter + offset で計算（PixiEngineと同じ）
+          baseX = bgCenterX + ((item.offsetX ?? 0) / 100) * bgSize;
+          baseY = bgCenterY + ((item.offsetY ?? 0) / 100) * bgSize;
         } else {
           // 通常アイテム: ドール中心
           baseX = dollCenterX;
@@ -538,8 +540,9 @@ export function ItemAdjustPanel({
 
       {/* ドールモード時：ドール画像のプレビュー */}
       {isDollMode && (() => {
-        const dollCenterX = availableX + (availableWidth * dollX) / 100;
-        const dollCenterY = (canvasHeight * dollY) / 100;
+        // ドール中心位置を計算（PixiEngineと同じ計算）
+        const dollCenterX = bgCenterX + ((dollX - 50) / 100) * bgSize;
+        const dollCenterY = bgCenterY + ((dollY - 50) / 100) * bgSize;
         
         // キャンバス内座標 → window座標に変換
         const windowX = canvasLeft + dollCenterX;
