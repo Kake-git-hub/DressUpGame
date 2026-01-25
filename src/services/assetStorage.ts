@@ -399,6 +399,7 @@ export function saveCustomBackgrounds(backgrounds: BackgroundData[]): void {
     id: b.id,
     name: b.name,
     thumbnailUrl: b.thumbnailUrl,
+    dollId: b.dollId,
     isCustom: true,
     // imageUrlは保存しない（IndexedDBから復元）
   }));
@@ -1264,8 +1265,11 @@ export async function importPresetFromFolder(
     // 新形式用: clothing直下のファイル（ファイル名にメタデータ含む）
     clothingDirect: { file: File; thumbFile?: File }[];
     clothingDirectThumbs: Map<string, File>; // 新形式サムネイル（baseNameなし拡張子なし -> File）
+    // doll-xxx/backgrounds/内の背景
+    backgrounds: { name: string; file: File }[];
   }>();
-  const backgroundFiles: { name: string; file: File }[] = [];
+  // 旧形式: トップレベルのbackgrounds/フォルダ（dollId無し）
+  const globalBackgroundFiles: { name: string; file: File }[] = [];
   
   console.log('=== プリセット取り込み開始 ===');
   console.log(`ファイル数: ${files.length}`);
@@ -1304,18 +1308,38 @@ export async function importPresetFromFolder(
     
     console.log(`処理中: ${path} (parts: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
+    // doll-{id} フォルダを探す（どの階層でもOK）
+    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
+    
     // 背景フォルダ（パス内にbackgroundsがあれば背景）
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
       if (!isThumb) {
-        backgroundFiles.push({ name: baseName, file });
-        console.log(`  → 背景として追加: ${baseName}`);
+        // doll-xxx/backgrounds/の場合はプリセット内の背景
+        if (dollFolderIndex !== -1 && bgIndex > dollFolderIndex) {
+          const dollFolderName = parts[dollFolderIndex];
+          const presetId = dollFolderName.toLowerCase();
+          if (!presetMap.has(presetId)) {
+            presetMap.set(presetId, { 
+              dolls: [], 
+              clothing: new Map(), 
+              clothingThumbs: new Map(),
+              clothingDirect: [],
+              clothingDirectThumbs: new Map(),
+              backgrounds: [],
+            });
+          }
+          presetMap.get(presetId)!.backgrounds.push({ name: baseName, file });
+          console.log(`  → プリセット背景として追加: ${presetId} / ${baseName}`);
+        } else {
+          // トップレベルのbackgrounds/フォルダ（旧形式、dollId無し）
+          globalBackgroundFiles.push({ name: baseName, file });
+          console.log(`  → グローバル背景として追加: ${baseName}`);
+        }
       }
       continue;
     }
     
-    // doll-{id} フォルダを探す（どの階層でもOK）
-    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
     if (dollFolderIndex === -1) {
       console.log(`  → スキップ（doll-フォルダなし）`);
       continue;
@@ -1331,6 +1355,7 @@ export async function importPresetFromFolder(
         clothingThumbs: new Map(),
         clothingDirect: [],
         clothingDirectThumbs: new Map(),
+        backgrounds: [],
       });
     }
     const preset = presetMap.get(presetId)!;
@@ -1397,16 +1422,16 @@ export async function importPresetFromFolder(
   reportProgress({ phase: 'parsing', current: 1, total: 1, message: 'ファイル分類完了' });
   await yieldToMain();
   
-  console.log(`背景ファイル: ${backgroundFiles.length}`);
+  console.log(`グローバル背景ファイル: ${globalBackgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚, 背景${data.backgrounds.length}枚`);
   }
   
-  // 背景を取り込み
-  const bgTotal = backgroundFiles.length;
-  for (let i = 0; i < backgroundFiles.length; i++) {
-    const { name, file } = backgroundFiles[i];
+  // グローバル背景を取り込み（dollId無し、旧形式互換）
+  const bgTotal = globalBackgroundFiles.length;
+  for (let i = 0; i < globalBackgroundFiles.length; i++) {
+    const { name, file } = globalBackgroundFiles[i];
     reportProgress({ 
       phase: 'backgrounds', 
       current: i + 1, 
@@ -1621,6 +1646,28 @@ export async function importPresetFromFolder(
         }
       }
       
+      // ========== プリセット内の背景を取り込み ==========
+      for (const { name, file } of data.backgrounds) {
+        try {
+          const base64 = await fileToBase64WithResize(file, file.name, MAX_BACKGROUND_SIZE);
+          const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          await saveImageToStorage(id, base64);
+          
+          const thumbnailUrl = await generateThumbnail(base64, THUMBNAIL_SIZE);
+          const thumbId = `${id}-thumb`;
+          await saveImageToStorage(thumbId, thumbnailUrl);
+          
+          const bg: BackgroundData = { id, name, imageUrl: base64, thumbnailUrl, isCustom: true, dollId: dollId };
+          result.backgrounds.items.push(bg);
+          result.backgrounds.success++;
+          console.log(`  背景取り込み: ${name} (dollId=${dollId})`);
+        } catch (e) {
+          console.error('Preset background import failed:', name, e);
+          result.backgrounds.failed++;
+        }
+        await yieldToMain();
+      }
+      
       const preset: DollPreset = {
         id: presetId,
         name: dollFile.name,
@@ -1797,8 +1844,11 @@ export async function importPresetFromZip(
     // 新形式用: clothing直下のファイル（ファイル名にメタデータ含む）
     clothingDirect: { path: string; fileNameWithExt: string }[];
     clothingDirectThumbs: Map<string, { path: string; fileNameWithExt: string }>; // 新形式サムネイル
+    // doll-xxx/backgrounds/内の背景
+    backgrounds: { name: string; path: string; fileNameWithExt: string }[];
   }>();
-  const backgroundFiles: { name: string; path: string; fileNameWithExt: string }[] = [];
+  // 旧形式: トップレベルのbackgrounds/フォルダ（dollId無し）
+  const globalBackgroundFiles: { name: string; path: string; fileNameWithExt: string }[] = [];
   
   console.log('=== ZIP取り込み開始 ===');
   console.log(`ZIP内ファイル数: ${Object.keys(zip.files).length}`);
@@ -1825,18 +1875,37 @@ export async function importPresetFromZip(
     
     console.log(`分類中: ${path} (dirs: ${parts.join(' > ')}, isThumb: ${isThumb})`);
     
+    // doll-{id} フォルダを探す
+    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
+    
     // 背景フォルダ
     const bgIndex = parts.findIndex(p => p.toLowerCase() === 'backgrounds');
     if (bgIndex !== -1) {
       if (!isThumb) {
-        backgroundFiles.push({ name: baseName, path, fileNameWithExt });
-        console.log(`  → 背景として追加: ${baseName}`);
+        // doll-xxx/backgrounds/の場合はプリセット内の背景
+        if (dollFolderIndex !== -1 && bgIndex > dollFolderIndex) {
+          const presetId = parts[dollFolderIndex].toLowerCase();
+          if (!presetMap.has(presetId)) {
+            presetMap.set(presetId, { 
+              dolls: [], 
+              clothing: new Map(), 
+              clothingThumbs: new Map(),
+              clothingDirect: [],
+              clothingDirectThumbs: new Map(),
+              backgrounds: [],
+            });
+          }
+          presetMap.get(presetId)!.backgrounds.push({ name: baseName, path, fileNameWithExt });
+          console.log(`  → プリセット背景として追加: ${presetId} / ${baseName}`);
+        } else {
+          // トップレベルのbackgrounds/フォルダ（旧形式、dollId無し）
+          globalBackgroundFiles.push({ name: baseName, path, fileNameWithExt });
+          console.log(`  → グローバル背景として追加: ${baseName}`);
+        }
       }
       continue;
     }
     
-    // doll-{id} フォルダを探す
-    const dollFolderIndex = parts.findIndex(p => p.toLowerCase().startsWith('doll-'));
     if (dollFolderIndex === -1) {
       console.log(`  → スキップ（doll-フォルダなし）`);
       continue;
@@ -1851,6 +1920,7 @@ export async function importPresetFromZip(
         clothingThumbs: new Map(),
         clothingDirect: [],
         clothingDirectThumbs: new Map(),
+        backgrounds: [],
       });
     }
     const preset = presetMap.get(presetId)!;
@@ -1912,16 +1982,16 @@ export async function importPresetFromZip(
   reportProgress({ phase: 'parsing', current: 1, total: 1, message: 'ファイル分類完了' });
   await yieldToMain();
   
-  console.log(`背景ファイル: ${backgroundFiles.length}`);
+  console.log(`グローバル背景ファイル: ${globalBackgroundFiles.length}`);
   console.log(`プリセット数: ${presetMap.size}`);
   for (const [id, data] of presetMap) {
-    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚`);
+    console.log(`  ${id}: ドール${data.dolls.length}体, 旧形式服カテゴリ${data.clothing.size}種, 旧形式サムネイル${data.clothingThumbs.size}枚, 新形式服${data.clothingDirect.length}着, 新形式サムネイル${data.clothingDirectThumbs.size}枚, 背景${data.backgrounds.length}枚`);
   }
   
-  // 背景を取り込み（1枚ずつ読み込み - iPad対応）
-  const bgTotal = backgroundFiles.length;
-  for (let i = 0; i < backgroundFiles.length; i++) {
-    const { name, path, fileNameWithExt } = backgroundFiles[i];
+  // グローバル背景を取り込み（1枚ずつ読み込み - iPad対応、dollId無し）
+  const bgTotal = globalBackgroundFiles.length;
+  for (let i = 0; i < globalBackgroundFiles.length; i++) {
+    const { name, path, fileNameWithExt } = globalBackgroundFiles[i];
     reportProgress({ 
       phase: 'backgrounds', 
       current: i + 1, 
@@ -2126,6 +2196,29 @@ export async function importPresetFromZip(
         if (clothingProcessed % 5 === 0) {
           await forceGCHint();
         }
+      }
+      
+      // ========== プリセット内の背景を取り込み ==========
+      for (const { name, path: bgPath, fileNameWithExt } of data.backgrounds) {
+        try {
+          const blob = await zip.files[bgPath].async('blob');
+          const base64Raw = await blobToBase64(blob, fileNameWithExt);
+          const resizedBase64 = await resizeImage(base64Raw, MAX_BACKGROUND_SIZE);
+          const id = `custom-bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          await saveImageToStorage(id, resizedBase64);
+          
+          const thumbnailUrl = await generateThumbnail(resizedBase64, THUMBNAIL_SIZE);
+          await saveImageToStorage(`${id}-thumb`, thumbnailUrl);
+          
+          const bg: BackgroundData = { id, name, imageUrl: resizedBase64, thumbnailUrl, isCustom: true, dollId: dollId };
+          result.backgrounds.items.push(bg);
+          result.backgrounds.success++;
+          console.log(`  背景取り込み: ${name} (dollId=${dollId})`);
+        } catch (e) {
+          console.error('Preset background import failed:', name, e);
+          result.backgrounds.failed++;
+        }
+        await yieldToMain();
       }
       
       const preset: DollPreset = {

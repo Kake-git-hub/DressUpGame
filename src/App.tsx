@@ -248,6 +248,16 @@ function App() {
     });
   }, [allClothing, currentDollId]);
 
+  // 現在のドールに紐付けられた背景のみフィルタ
+  const filteredBackgrounds = useMemo(() => {
+    return allBackgrounds.filter(bg => {
+      // dollIdがない（デフォルト）背景は全ドールで表示
+      if (!bg.dollId) return true;
+      // dollIdがある場合は現在のドールのみ
+      return bg.dollId === currentDollId;
+    });
+  }, [allBackgrounds, currentDollId]);
+
   // アイテムをスケーリング
   const activeDimensions = currentDoll?.dimensions ?? FALLBACK_DOLL_DIMENSIONS;
 
@@ -661,7 +671,7 @@ function App() {
               currentDollId={currentDollId}
               onDollChange={handleDollChange}
               dropTargetId="avatar-canvas"
-              backgrounds={allBackgrounds}
+              backgrounds={filteredBackgrounds}
               currentBackgroundId={currentBackgroundId}
               onBackgroundChange={handleBackgroundChange}
               onDragMove={handleDragMove}

@@ -271,6 +271,7 @@ export interface BackgroundData {
   author?: string;
   createdAt?: string;
   isCustom?: boolean;
+  dollId?: string; // 紐付けられたドールID（プリセット取り込み時に設定）
 }
 
 // ドールの定義（関節情報付き）
