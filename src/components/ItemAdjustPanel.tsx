@@ -97,31 +97,47 @@ export function ItemAdjustPanel({
   // ドール調整モードかどうか
   const isDollMode = item === null;
 
+  // キャンバス位置の状態管理（レイアウト安定後に計算）
+  const [canvasPosition, setCanvasPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  
   // キャンバス位置の計算（avatar-sectionのCSS配置と一致させる）
-  // avatar-sectionは position: fixed; top: env(safe-area-inset-top); 
-  // height: calc(app-height - safe-area-inset-top); の中で中央配置
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  // レイアウト変更後に再計算するためuseEffectで管理
+  useEffect(() => {
+    // DOMリフロー完了を待つためにrequestAnimationFrameを使用
+    const updateCanvasPosition = () => {
+      const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      
+      const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
+      let left: number;
+      let top: number;
+      
+      if (avatarSection) {
+        // avatar-sectionの実際の位置からキャンバス位置を計算
+        const sectionRect = avatarSection.getBoundingClientRect();
+        left = sectionRect.left + (sectionRect.width - canvasWidth) / 2;
+        top = sectionRect.top + (sectionRect.height - canvasHeight) / 2;
+      } else {
+        // フォールバック：画面中央と仮定
+        left = (viewportWidth - canvasWidth) / 2;
+        top = (viewportHeight - canvasHeight) / 2;
+      }
+      
+      setCanvasPosition({ left, top });
+    };
+    
+    // 初回マウント時と依存値変更時に位置を計算
+    // requestAnimationFrameでレイアウト完了を待つ
+    const rafId = requestAnimationFrame(() => {
+      // 2フレーム待ってレイアウトを安定させる
+      requestAnimationFrame(updateCanvasPosition);
+    });
+    
+    return () => cancelAnimationFrame(rafId);
+  }, [canvasWidth, canvasHeight]);
   
-  // safe-area-inset-topを取得（実際のDOM要素から計算）
-  // env()はCSS内でのみ使えるので、document.bodyのcomputedStyleからpadding-topなどで推測するか、
-  // または実際のavatar-sectionの位置を取得する
-  // シンプルにするため、safe-area-insetは通常のPCブラウザでは0と仮定
-  // 実際のキャンバス位置はDOM要素から取得するのが最も正確
-  const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
-  let canvasLeft: number;
-  let canvasTop: number;
-  
-  if (avatarSection) {
-    // avatar-sectionの実際の位置からキャンバス位置を計算
-    const sectionRect = avatarSection.getBoundingClientRect();
-    canvasLeft = sectionRect.left + (sectionRect.width - canvasWidth) / 2;
-    canvasTop = sectionRect.top + (sectionRect.height - canvasHeight) / 2;
-  } else {
-    // フォールバック：画面中央と仮定
-    canvasLeft = (viewportWidth - canvasWidth) / 2;
-    canvasTop = (viewportHeight - canvasHeight) / 2;
-  }
+  const canvasLeft = canvasPosition.left;
+  const canvasTop = canvasPosition.top;
 
   // 背景領域の計算（PixiEngineと同じ計算）
   // 利用可能領域の中心
