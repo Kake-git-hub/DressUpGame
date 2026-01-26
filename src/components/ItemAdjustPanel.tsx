@@ -97,51 +97,51 @@ export function ItemAdjustPanel({
   // ドール調整モードかどうか
   const isDollMode = item === null;
 
-  // キャンバス位置の状態管理（レイアウト安定後に計算）
-  const [canvasPosition, setCanvasPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  // キャンバス位置を計算する関数
+  const getCanvasPosition = useCallback(() => {
+    // 実際のcanvas要素を直接取得（最も正確）
+    const canvas = document.querySelector('#avatar-canvas canvas') as HTMLCanvasElement | null;
+    
+    if (canvas) {
+      const canvasRect = canvas.getBoundingClientRect();
+      return { left: canvasRect.left, top: canvasRect.top };
+    }
+    
+    // フォールバック：avatar-sectionから計算
+    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    
+    const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
+    
+    if (avatarSection) {
+      const sectionRect = avatarSection.getBoundingClientRect();
+      return {
+        left: sectionRect.left + (sectionRect.width - canvasWidth) / 2,
+        top: sectionRect.top + (sectionRect.height - canvasHeight) / 2,
+      };
+    }
+    
+    return {
+      left: (viewportWidth - canvasWidth) / 2,
+      top: (viewportHeight - canvasHeight) / 2,
+    };
+  }, [canvasWidth, canvasHeight]);
+
+  // キャンバス位置の状態管理（初期値を同期的に計算）
+  const [canvasPosition, setCanvasPosition] = useState<{ left: number; top: number }>(getCanvasPosition);
   
-  // キャンバス位置の計算（実際のcanvas要素から直接取得）
-  // レイアウト変更後に再計算するためuseEffectで管理
+  // レイアウト変更後に位置を再計算
   useEffect(() => {
     // DOMリフロー完了を待つためにrequestAnimationFrameを使用
-    const updateCanvasPosition = () => {
-      // 実際のcanvas要素を直接取得（最も正確）
-      const canvas = document.querySelector('#avatar-canvas canvas') as HTMLCanvasElement | null;
-      
-      if (canvas) {
-        const canvasRect = canvas.getBoundingClientRect();
-        setCanvasPosition({ left: canvasRect.left, top: canvasRect.top });
-      } else {
-        // フォールバック：avatar-sectionから計算
-        const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-        
-        const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
-        let left: number;
-        let top: number;
-        
-        if (avatarSection) {
-          const sectionRect = avatarSection.getBoundingClientRect();
-          left = sectionRect.left + (sectionRect.width - canvasWidth) / 2;
-          top = sectionRect.top + (sectionRect.height - canvasHeight) / 2;
-        } else {
-          left = (viewportWidth - canvasWidth) / 2;
-          top = (viewportHeight - canvasHeight) / 2;
-        }
-        
-        setCanvasPosition({ left, top });
-      }
-    };
-    
-    // 初回マウント時と依存値変更時に位置を計算
-    // requestAnimationFrameでレイアウト完了を待つ
     const rafId = requestAnimationFrame(() => {
       // 2フレーム待ってレイアウトを安定させる
-      requestAnimationFrame(updateCanvasPosition);
+      requestAnimationFrame(() => {
+        setCanvasPosition(getCanvasPosition());
+      });
     });
     
     return () => cancelAnimationFrame(rafId);
-  }, [canvasWidth, canvasHeight]);
+  }, [canvasWidth, canvasHeight, getCanvasPosition]);
   
   const canvasLeft = canvasPosition.left;
   const canvasTop = canvasPosition.top;
