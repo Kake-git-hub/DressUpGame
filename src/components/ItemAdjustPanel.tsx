@@ -100,30 +100,37 @@ export function ItemAdjustPanel({
   // キャンバス位置の状態管理（レイアウト安定後に計算）
   const [canvasPosition, setCanvasPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   
-  // キャンバス位置の計算（avatar-sectionのCSS配置と一致させる）
+  // キャンバス位置の計算（実際のcanvas要素から直接取得）
   // レイアウト変更後に再計算するためuseEffectで管理
   useEffect(() => {
     // DOMリフロー完了を待つためにrequestAnimationFrameを使用
     const updateCanvasPosition = () => {
-      const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      // 実際のcanvas要素を直接取得（最も正確）
+      const canvas = document.querySelector('#avatar-canvas canvas') as HTMLCanvasElement | null;
       
-      const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
-      let left: number;
-      let top: number;
-      
-      if (avatarSection) {
-        // avatar-sectionの実際の位置からキャンバス位置を計算
-        const sectionRect = avatarSection.getBoundingClientRect();
-        left = sectionRect.left + (sectionRect.width - canvasWidth) / 2;
-        top = sectionRect.top + (sectionRect.height - canvasHeight) / 2;
+      if (canvas) {
+        const canvasRect = canvas.getBoundingClientRect();
+        setCanvasPosition({ left: canvasRect.left, top: canvasRect.top });
       } else {
-        // フォールバック：画面中央と仮定
-        left = (viewportWidth - canvasWidth) / 2;
-        top = (viewportHeight - canvasHeight) / 2;
+        // フォールバック：avatar-sectionから計算
+        const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+        
+        const avatarSection = document.querySelector('.avatar-section') as HTMLElement | null;
+        let left: number;
+        let top: number;
+        
+        if (avatarSection) {
+          const sectionRect = avatarSection.getBoundingClientRect();
+          left = sectionRect.left + (sectionRect.width - canvasWidth) / 2;
+          top = sectionRect.top + (sectionRect.height - canvasHeight) / 2;
+        } else {
+          left = (viewportWidth - canvasWidth) / 2;
+          top = (viewportHeight - canvasHeight) / 2;
+        }
+        
+        setCanvasPosition({ left, top });
       }
-      
-      setCanvasPosition({ left, top });
     };
     
     // 初回マウント時と依存値変更時に位置を計算
