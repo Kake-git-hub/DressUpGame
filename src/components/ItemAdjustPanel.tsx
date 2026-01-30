@@ -97,17 +97,22 @@ export function ItemAdjustPanel({
   // ドール調整モードかどうか
   const isDollMode = item === null;
 
-  // キャンバス位置を計算する関数
-  const getCanvasPosition = useCallback(() => {
+  // キャンバス情報を計算する関数（位置とサイズ）
+  const getCanvasInfo = useCallback(() => {
     // 実際のcanvas要素を直接取得（最も正確）
     const canvas = document.querySelector('#avatar-canvas canvas') as HTMLCanvasElement | null;
     
     if (canvas) {
       const canvasRect = canvas.getBoundingClientRect();
-      return { left: canvasRect.left, top: canvasRect.top };
+      return { 
+        left: canvasRect.left, 
+        top: canvasRect.top,
+        width: canvasRect.width,
+        height: canvasRect.height,
+      };
     }
     
-    // フォールバック：avatar-sectionから計算
+    // フォールバック：渡されたサイズを使用
     const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     
@@ -118,42 +123,49 @@ export function ItemAdjustPanel({
       return {
         left: sectionRect.left + (sectionRect.width - canvasWidth) / 2,
         top: sectionRect.top + (sectionRect.height - canvasHeight) / 2,
+        width: canvasWidth,
+        height: canvasHeight,
       };
     }
     
     return {
       left: (viewportWidth - canvasWidth) / 2,
       top: (viewportHeight - canvasHeight) / 2,
+      width: canvasWidth,
+      height: canvasHeight,
     };
   }, [canvasWidth, canvasHeight]);
 
-  // キャンバス位置の状態管理（初期値を同期的に計算）
-  const [canvasPosition, setCanvasPosition] = useState<{ left: number; top: number }>(getCanvasPosition);
+  // キャンバス情報の状態管理（初期値を同期的に計算）
+  const [canvasInfo, setCanvasInfo] = useState(getCanvasInfo);
   
-  // レイアウト変更後に位置を再計算
+  // レイアウト変更後に情報を再計算
   useEffect(() => {
     // DOMリフロー完了を待つためにrequestAnimationFrameを使用
     const rafId = requestAnimationFrame(() => {
       // 2フレーム待ってレイアウトを安定させる
       requestAnimationFrame(() => {
-        setCanvasPosition(getCanvasPosition());
+        setCanvasInfo(getCanvasInfo());
       });
     });
     
     return () => cancelAnimationFrame(rafId);
-  }, [canvasWidth, canvasHeight, getCanvasPosition]);
+  }, [canvasWidth, canvasHeight, getCanvasInfo]);
   
-  const canvasLeft = canvasPosition.left;
-  const canvasTop = canvasPosition.top;
+  const canvasLeft = canvasInfo.left;
+  const canvasTop = canvasInfo.top;
+  // 実際のcanvasサイズを使用（プロップスではなく実測値）
+  const actualCanvasWidth = canvasInfo.width;
+  const actualCanvasHeight = canvasInfo.height;
 
   // 背景領域の計算（PixiEngineと同じ計算）
-  // 利用可能領域の中心
-  const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
+  // 実際のキャンバスサイズを使用
+  const availableWidth = Math.max(0, actualCanvasWidth - menuOffset - rightOffset);
   const availableCenterX = menuOffset + availableWidth / 2;
   // 背景は1:1正方形で画面縦幅いっぱい
-  const bgSize = canvasHeight;
+  const bgSize = actualCanvasHeight;
   const bgCenterX = availableCenterX;
-  const bgCenterY = canvasHeight / 2;
+  const bgCenterY = actualCanvasHeight / 2;
 
   // 現在の調整値（ローカルステート）- アイテムモード用
   const [offsetX, setOffsetX] = useState(item?.adjustOffsetX ?? 0);
@@ -276,8 +288,8 @@ export function ItemAdjustPanel({
     onCloseRef.current();
   }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust, colorHue]);
 
-  // 位置の範囲（キャンバスサイズの50%まで）
-  const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
+  // 位置の範囲（実際のキャンバスサイズの50%まで）
+  const maxOffset = Math.min(actualCanvasWidth, actualCanvasHeight) * 0.5;
 
   // 全リセット
   const handleResetAll = useCallback(() => {
@@ -355,9 +367,9 @@ export function ItemAdjustPanel({
       const deltaY = touches[0].clientY - touchStartRef.current.y;
       
       if (isDollMode) {
-        // ドールモード: パーセンテージで移動（bgSizeを基準）
-        const percentX = (deltaX / canvasHeight) * 100;
-        const percentY = (deltaY / canvasHeight) * 100;
+        // ドールモード: パーセンテージで移動（bgSize=actualCanvasHeightを基準）
+        const percentX = (deltaX / actualCanvasHeight) * 100;
+        const percentY = (deltaY / actualCanvasHeight) * 100;
         const newX = Math.max(-50, Math.min(150, touchStartRef.current.offsetX + percentX));
         const newY = Math.max(-50, Math.min(150, touchStartRef.current.offsetY + percentY));
         setDollX(newX);
@@ -395,7 +407,7 @@ export function ItemAdjustPanel({
         setRotation(newRotation);
       }
     }
-  }, [isDollMode, maxOffset, touchCount, canvasHeight]);
+  }, [isDollMode, maxOffset, touchCount, actualCanvasHeight]);
 
   // タッチ終了
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -453,9 +465,9 @@ export function ItemAdjustPanel({
     const deltaY = e.clientY - mouseStartRef.current.y;
 
     if (isDollMode) {
-      // ドールモード: パーセンテージで移動（bgSizeを基準）
-      const percentX = (deltaX / canvasHeight) * 100;
-      const percentY = (deltaY / canvasHeight) * 100;
+      // ドールモード: パーセンテージで移動（bgSize=actualCanvasHeightを基準）
+      const percentX = (deltaX / actualCanvasHeight) * 100;
+      const percentY = (deltaY / actualCanvasHeight) * 100;
       const newX = Math.max(-50, Math.min(150, mouseStartRef.current.offsetX + percentX));
       const newY = Math.max(-50, Math.min(150, mouseStartRef.current.offsetY + percentY));
       setDollX(newX);
@@ -467,7 +479,7 @@ export function ItemAdjustPanel({
       setOffsetX(newOffsetX);
       setOffsetY(newOffsetY);
     }
-  }, [isDollMode, isMouseDragging, maxOffset, canvasHeight]);
+  }, [isDollMode, isMouseDragging, maxOffset, actualCanvasHeight]);
 
   const handleMouseUp = useCallback(() => {
     setIsMouseDragging(false);
@@ -570,7 +582,7 @@ export function ItemAdjustPanel({
                 src={transparentImageUrl}
                 alt="調整プレビュー"
                 style={{
-                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
@@ -609,7 +621,7 @@ export function ItemAdjustPanel({
                 src={dollImageUrl}
                 alt="ドールプレビュー"
                 style={{
-                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
