@@ -158,14 +158,22 @@ export function ItemAdjustPanel({
   const actualCanvasWidth = canvasInfo.width;
   const actualCanvasHeight = canvasInfo.height;
 
+  // Pixi(論理座標) → CSSピクセル 変換用スケール
+  // 調整値(adjustOffsetX/Y)はPixiの論理座標系で保存されるため、
+  // 入力(タッチ/マウス=CSSピクセル)と表示(CSS)の両方で変換して整合性を取る。
+  const canvasScaleX = canvasWidth > 0 ? actualCanvasWidth / canvasWidth : 1;
+  const canvasScaleY = canvasHeight > 0 ? actualCanvasHeight / canvasHeight : 1;
+  const invCanvasScaleX = canvasScaleX !== 0 ? 1 / canvasScaleX : 1;
+  const invCanvasScaleY = canvasScaleY !== 0 ? 1 / canvasScaleY : 1;
+
   // 背景領域の計算（PixiEngineと同じ計算）
-  // 実際のキャンバスサイズを使用
-  const availableWidth = Math.max(0, actualCanvasWidth - menuOffset - rightOffset);
+  // ※ここはPixi(論理座標)で計算する
+  const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
   const availableCenterX = menuOffset + availableWidth / 2;
   // 背景は1:1正方形で画面縦幅いっぱい
-  const bgSize = actualCanvasHeight;
+  const bgSize = canvasHeight;
   const bgCenterX = availableCenterX;
-  const bgCenterY = actualCanvasHeight / 2;
+  const bgCenterY = canvasHeight / 2;
 
   // 現在の調整値（ローカルステート）- アイテムモード用
   const [offsetX, setOffsetX] = useState(item?.adjustOffsetX ?? 0);
@@ -288,8 +296,9 @@ export function ItemAdjustPanel({
     onCloseRef.current();
   }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust, colorHue]);
 
-  // 位置の範囲（実際のキャンバスサイズの50%まで）
-  const maxOffset = Math.min(actualCanvasWidth, actualCanvasHeight) * 0.5;
+  // 位置の範囲（論理キャンバスサイズの50%まで）
+  // ※調整値はPixiの論理座標で保存される
+  const maxOffset = Math.min(canvasWidth, canvasHeight) * 0.5;
 
   // 全リセット
   const handleResetAll = useCallback(() => {
@@ -365,19 +374,23 @@ export function ItemAdjustPanel({
       // 一本指: 位置移動
       const deltaX = touches[0].clientX - touchStartRef.current.x;
       const deltaY = touches[0].clientY - touchStartRef.current.y;
+
+      // 入力はCSSピクセルなので、論理座標(Pixi)に変換
+      const logicalDeltaX = deltaX * invCanvasScaleX;
+      const logicalDeltaY = deltaY * invCanvasScaleY;
       
       if (isDollMode) {
-        // ドールモード: パーセンテージで移動（bgSize=actualCanvasHeightを基準）
-        const percentX = (deltaX / actualCanvasHeight) * 100;
-        const percentY = (deltaY / actualCanvasHeight) * 100;
+        // ドールモード: パーセンテージで移動（bgSize=canvasHeightを基準）
+        const percentX = (logicalDeltaX / canvasHeight) * 100;
+        const percentY = (logicalDeltaY / canvasHeight) * 100;
         const newX = Math.max(-50, Math.min(150, touchStartRef.current.offsetX + percentX));
         const newY = Math.max(-50, Math.min(150, touchStartRef.current.offsetY + percentY));
         setDollX(newX);
         setDollY(newY);
       } else {
-        // アイテムモード: ピクセルで移動
-        const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetX + deltaX));
-        const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetY + deltaY));
+        // アイテムモード: 論理ピクセルで移動
+        const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetX + logicalDeltaX));
+        const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, touchStartRef.current.offsetY + logicalDeltaY));
         setOffsetX(newOffsetX);
         setOffsetY(newOffsetY);
       }
@@ -407,7 +420,7 @@ export function ItemAdjustPanel({
         setRotation(newRotation);
       }
     }
-  }, [isDollMode, maxOffset, touchCount, actualCanvasHeight]);
+  }, [isDollMode, maxOffset, touchCount, canvasHeight, invCanvasScaleX, invCanvasScaleY]);
 
   // タッチ終了
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -464,22 +477,26 @@ export function ItemAdjustPanel({
     const deltaX = e.clientX - mouseStartRef.current.x;
     const deltaY = e.clientY - mouseStartRef.current.y;
 
+    // 入力はCSSピクセルなので、論理座標(Pixi)に変換
+    const logicalDeltaX = deltaX * invCanvasScaleX;
+    const logicalDeltaY = deltaY * invCanvasScaleY;
+
     if (isDollMode) {
-      // ドールモード: パーセンテージで移動（bgSize=actualCanvasHeightを基準）
-      const percentX = (deltaX / actualCanvasHeight) * 100;
-      const percentY = (deltaY / actualCanvasHeight) * 100;
+      // ドールモード: パーセンテージで移動（bgSize=canvasHeightを基準）
+      const percentX = (logicalDeltaX / canvasHeight) * 100;
+      const percentY = (logicalDeltaY / canvasHeight) * 100;
       const newX = Math.max(-50, Math.min(150, mouseStartRef.current.offsetX + percentX));
       const newY = Math.max(-50, Math.min(150, mouseStartRef.current.offsetY + percentY));
       setDollX(newX);
       setDollY(newY);
     } else {
       // アイテムモード
-      const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetX + deltaX));
-      const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetY + deltaY));
+      const newOffsetX = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetX + logicalDeltaX));
+      const newOffsetY = Math.max(-maxOffset, Math.min(maxOffset, mouseStartRef.current.offsetY + logicalDeltaY));
       setOffsetX(newOffsetX);
       setOffsetY(newOffsetY);
     }
-  }, [isDollMode, isMouseDragging, maxOffset, actualCanvasHeight]);
+  }, [isDollMode, isMouseDragging, maxOffset, canvasHeight, invCanvasScaleX, invCanvasScaleY]);
 
   const handleMouseUp = useCallback(() => {
     setIsMouseDragging(false);
@@ -548,9 +565,9 @@ export function ItemAdjustPanel({
         baseX += offsetX;
         baseY += offsetY;
         
-        // キャンバス内座標 → window座標に変換
-        const windowX = canvasLeft + baseX;
-        const windowY = canvasTop + baseY;
+        // キャンバス内座標(Pixi:論理) → window座標(CSSピクセル)に変換
+        const windowX = canvasLeft + baseX * canvasScaleX;
+        const windowY = canvasTop + baseY * canvasScaleY;
 
         return (
           <>
@@ -598,9 +615,9 @@ export function ItemAdjustPanel({
         const dollCenterX = bgCenterX + ((dollX - 50) / 100) * bgSize;
         const dollCenterY = bgCenterY + ((dollY - 50) / 100) * bgSize;
         
-        // キャンバス内座標 → window座標に変換
-        const windowX = canvasLeft + dollCenterX;
-        const windowY = canvasTop + dollCenterY;
+        // キャンバス内座標(Pixi:論理) → window座標(CSSピクセル)に変換
+        const windowX = canvasLeft + dollCenterX * canvasScaleX;
+        const windowY = canvasTop + dollCenterY * canvasScaleY;
 
         return (
           <div
