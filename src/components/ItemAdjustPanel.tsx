@@ -600,10 +600,13 @@ export function ItemAdjustPanel({
                 alt="調整プレビュー"
                 style={{
                   // PixiEngineと同じスケール計算:
-                  // 高さ = canvasHeight * heightRatio（actualCanvasHeightはCSSピクセル実測値）
-                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  // Pixi: baseScale = maxHeight / 1024, sprite.scale = baseScale * dollScale * adjustScale
+                  // CSS: 画像は自然サイズで表示、transformでbaseScale * dollScale * adjustScaleを適用
+                  // ただし、transformのscaleは外側のdivで適用済み（dollScale * adjustScale）
+                  // なので、imgにはbaseScale相当のサイズ制限のみ必要
+                  // → maxHeightで制限するのが最もシンプル
+                  maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
-                  objectFit: 'contain',
                 }}
               />
             </div>
@@ -641,9 +644,9 @@ export function ItemAdjustPanel({
                 alt="ドールプレビュー"
                 style={{
                   // PixiEngineと同じスケール計算
-                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  // baseScale = maxHeight / 1024, transformでdollScaleを適用
+                  maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
-                  objectFit: 'contain',
                 }}
               />
             ) : (

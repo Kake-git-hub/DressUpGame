@@ -280,7 +280,10 @@ export class PixiEngine {
         // 縦画面モードではメニューバー分を考慮して小さめに
         const heightRatio = this.isPortrait ? 0.75 : 0.9;
         const maxHeight = this.app.screen.height * heightRatio;
-        const baseScale = maxHeight / texture.height;
+        // 基準高さを固定値にして、ドールと服のスケールを統一
+        // ※インポート時に最大1024pxにリサイズされるため、1024を基準にする
+        const REFERENCE_HEIGHT = 1024;
+        const baseScale = maxHeight / REFERENCE_HEIGHT;
         dollSprite.scale.set(baseScale * dollScale);
 
         // 位置を設定
@@ -479,7 +482,10 @@ export class PixiEngine {
         // 縦画面モードではメニューバー分を考慮して小さめに
         const heightRatio = this.isPortrait ? 0.75 : 0.9;
         const maxHeight = this.app.screen.height * heightRatio;
-        const baseScale = maxHeight / texture.height;
+        // 基準高さを固定値にして、ドールと服のスケールを統一
+        // ※インポート時に最大1024pxにリサイズされるため、1024を基準にする
+        const REFERENCE_HEIGHT = 1024;
+        const baseScale = maxHeight / REFERENCE_HEIGHT;
         // 調整スケールを適用
         clothingSprite.scale.set(baseScale * s * adjustScale);
 
