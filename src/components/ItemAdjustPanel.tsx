@@ -100,7 +100,7 @@ export function ItemAdjustPanel({
   // キャンバス情報を計算する関数（位置とサイズ）
   const getCanvasInfo = useCallback(() => {
     // 実際のcanvas要素を直接取得（最も正確）
-    const canvas = document.querySelector('#avatar-canvas canvas') as HTMLCanvasElement | null;
+    const canvas = document.querySelector('#avatar-canvas') as HTMLCanvasElement | null;
     
     if (canvas) {
       const canvasRect = canvas.getBoundingClientRect();
