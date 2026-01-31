@@ -599,7 +599,10 @@ export function ItemAdjustPanel({
                 src={transparentImageUrl}
                 alt="調整プレビュー"
                 style={{
-                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  // PixiEngineと同じスケール計算:
+                  // Pixi: maxHeight = canvasHeight * heightRatio, baseScale = maxHeight / texture.height
+                  // CSS表示: height = maxHeight * canvasScaleY（論理→CSSピクセル変換）
+                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9) * canvasScaleY}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
@@ -638,7 +641,10 @@ export function ItemAdjustPanel({
                 src={dollImageUrl}
                 alt="ドールプレビュー"
                 style={{
-                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
+                  // PixiEngineと同じスケール計算:
+                  // Pixi: maxHeight = canvasHeight * heightRatio
+                  // CSS表示: height = maxHeight * canvasScaleY（論理→CSSピクセル変換）
+                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9) * canvasScaleY}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
