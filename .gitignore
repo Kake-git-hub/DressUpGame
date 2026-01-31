@@ -31,6 +31,9 @@ coverage/
 # Local preset artifacts (do not commit)
 preset-template.zip
 
+# Local preset backups (do not commit)
+preset-original/
+
 # Local icon source (do not commit)
 public/app-icon.png
 

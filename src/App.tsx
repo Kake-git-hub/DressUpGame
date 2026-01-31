@@ -177,8 +177,9 @@ function App() {
       document.documentElement.style.setProperty('--app-width', `${vw}px`);
       document.documentElement.style.setProperty('--is-portrait', portrait ? '1' : '0');
 
-      // 縦画面：下部メニュー分を引く / 横画面：左メニュー分を引く
-      const width = portrait ? vw : vw - MENU_WIDTH;
+      // キャンバスは常に「ビューポート全幅」。
+      // 左メニュー/右ボタン領域の差し引きは PixiEngine (menuOffset/rightOffset) 側で一元的に扱う。
+      const width = vw;
       const height = portrait ? vh - BOTTOM_MENU_HEIGHT : vh;
 
       setCanvasSize({
