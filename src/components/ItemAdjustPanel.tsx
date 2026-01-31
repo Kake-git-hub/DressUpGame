@@ -600,9 +600,8 @@ export function ItemAdjustPanel({
                 alt="調整プレビュー"
                 style={{
                   // PixiEngineと同じスケール計算:
-                  // Pixi: maxHeight = canvasHeight * heightRatio, baseScale = maxHeight / texture.height
-                  // CSS表示: height = maxHeight * canvasScaleY（論理→CSSピクセル変換）
-                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9) * canvasScaleY}px`,
+                  // 高さ = canvasHeight * heightRatio（actualCanvasHeightはCSSピクセル実測値）
+                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
@@ -641,10 +640,8 @@ export function ItemAdjustPanel({
                 src={dollImageUrl}
                 alt="ドールプレビュー"
                 style={{
-                  // PixiEngineと同じスケール計算:
-                  // Pixi: maxHeight = canvasHeight * heightRatio
-                  // CSS表示: height = maxHeight * canvasScaleY（論理→CSSピクセル変換）
-                  height: `${canvasHeight * (isPortrait ? 0.75 : 0.9) * canvasScaleY}px`,
+                  // PixiEngineと同じスケール計算
+                  height: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                   objectFit: 'contain',
                 }}
