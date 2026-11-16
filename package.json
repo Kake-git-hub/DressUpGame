@@ -13,7 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "content:migrate": "tsx tools/content/migrate-preset.ts"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -40,6 +41,7 @@
     "jsdom": "^27.4.0",
     "prettier": "^3.7.4",
     "sharp": "^0.34.5",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",

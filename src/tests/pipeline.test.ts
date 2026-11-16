@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { alphaBBox, isFullyOpaque } from '../pipeline/alpha';
 import { removeBorderBackground } from '../pipeline/removeBackground';
+import { removeCornerSpeck } from '../pipeline/removeCornerSpeck';
 
 type Rgba = [number, number, number, number];
 
@@ -87,5 +88,41 @@ describe('removeBorderBackground', () => {
     const px = image(600, 600, GREEN);
     expect(removeBorderBackground(px, 600, 600)).toBe(true);
     expect(alphaBBox(px, 600, 600)).toBeNull();
+  });
+});
+
+describe('removeCornerSpeck', () => {
+  it('右下の小さな離れた塊を消す', () => {
+    const px = image(400, 400, CLEAR);
+    rect(px, 400, 100, 100, 150, 200, RED); // 本体
+    rect(px, 400, 330, 340, 40, 40, GREEN); // 右下のマーク
+    expect(removeCornerSpeck(px, 400, 400)).toBe(true);
+    expect(at(px, 400, 350, 360)[3]).toBe(0);
+    expect(at(px, 400, 150, 150)).toEqual([255, 0, 0, 255]);
+  });
+  it('右下まで続く絵柄は消さない', () => {
+    const px = image(400, 400, CLEAR);
+    rect(px, 400, 100, 100, 290, 290, RED); // 本体が右下の領域に入り込む
+    expect(removeCornerSpeck(px, 400, 400)).toBe(false);
+    expect(at(px, 400, 380, 380)).toEqual([255, 0, 0, 255]);
+  });
+  it('右下にあっても 80px より大きい塊は消さない', () => {
+    const px = image(400, 400, CLEAR);
+    rect(px, 400, 290, 300, 100, 90, RED);
+    expect(removeCornerSpeck(px, 400, 400)).toBe(false);
+    expect(at(px, 400, 300, 310)[3]).toBe(255);
+  });
+  it('右下以外の小さな塊（アクセサリーなど）は消さない', () => {
+    const px = image(400, 400, CLEAR);
+    rect(px, 400, 20, 20, 30, 30, RED);
+    rect(px, 400, 200, 330, 30, 30, RED);
+    expect(removeCornerSpeck(px, 400, 400)).toBe(false);
+    expect(at(px, 400, 30, 30)[3]).toBe(255);
+    expect(at(px, 400, 210, 340)[3]).toBe(255);
+  });
+  it('右下に何も無ければ何もしない', () => {
+    const px = image(400, 400, CLEAR);
+    rect(px, 400, 100, 100, 50, 50, RED);
+    expect(removeCornerSpeck(px, 400, 400)).toBe(false);
   });
 });

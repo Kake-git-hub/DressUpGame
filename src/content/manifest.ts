@@ -29,6 +29,9 @@ export interface ManifestItem {
   category: string; // ManifestCategory.id
   image: ManifestImage;
   thumb: string;
+  // カテゴリの値と違うときだけ持つ（同じカテゴリでも重ね順が違う服がある）
+  layer?: number;
+  overlap?: boolean;
 }
 
 export interface ManifestBackground {
@@ -131,13 +134,16 @@ function doll(v: unknown, path: string): ManifestDoll {
     const r = rec(it, p);
     const category = str(r.category, `${p}.category`);
     if (!categoryIds.has(category)) fail(`${p}.category`, 'categories にある id');
-    return {
+    const item: ManifestItem = {
       id: str(r.id, `${p}.id`),
       name: str(r.name, `${p}.name`),
       category,
       image: image(r.image, `${p}.image`),
       thumb: str(r.thumb, `${p}.thumb`),
     };
+    if (r.layer !== undefined) item.layer = num(r.layer, `${p}.layer`);
+    if (r.overlap !== undefined) item.overlap = bool(r.overlap, `${p}.overlap`);
+    return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);
   const backgrounds = arr(o.backgrounds, `${path}.backgrounds`).map((b, i) => background(b, `${path}.backgrounds[${i}]`));

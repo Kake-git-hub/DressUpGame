@@ -39,6 +39,18 @@ describe('parseManifest', () => {
   it('正しい一覧は同じ内容で返る', () => {
     expect(parseManifest(JSON.parse(JSON.stringify(valid())))).toEqual(valid());
   });
+  it('アイテムごとの layer / overlap の上書きを保つ', () => {
+    const m = mutate((c) => {
+      c.dolls[0].items[0].layer = 5;
+      c.dolls[0].items[0].overlap = true;
+    });
+    const item = parseManifest(m).dolls[0].items[0];
+    expect(item.layer).toBe(5);
+    expect(item.overlap).toBe(true);
+  });
+  it('layer の上書きが数値でなければ Error', () => {
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].layer = '5')))).toThrow();
+  });
   it('余分なキーは無視する', () => {
     const m = mutate((c) => {
       c.extra = 1;

@@ -4,6 +4,7 @@
  * （取り込み処理が右下160pxを消すため、絵柄はその範囲を避けて置く）
  */
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import JSZip from 'jszip';
 import sharp from 'sharp';
 
@@ -35,16 +36,34 @@ async function png(rect: Rect | null, background?: string): Promise<Buffer> {
   return base.composite([{ input: patch, left: rect.left, top: rect.top }]).png().toBuffer();
 }
 
+// テスト用プリセットの中身（パス → PNG）
+async function presetFiles(): Promise<Array<[string, Buffer]>> {
+  return [
+    // ドール: 中央に 384x800 の肌色
+    ['doll-test/dolls/doll.png', await png({ left: 320, top: 112, width: 384, height: 800, color: '#ffe0c0' })],
+    // トップス: y=240〜520
+    ['doll-test/clothing/04_1_トップス/red.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#ff0000' })],
+    ['doll-test/clothing/04_1_トップス/blue.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#0000ff' })],
+    // ボトムス: y=520〜800
+    ['doll-test/clothing/03_2_ボトムス/green.png', await png({ left: 292, top: 520, width: 440, height: 280, color: '#00a000' })],
+    // 背景: 全面
+    ['doll-test/backgrounds/bg.png', await png(null, '#ffff80')],
+  ];
+}
+
+export { png as makePng };
+
+// フォルダとして書き出す（移行スクリプトの入力）
+export async function writePresetDir(dir: string): Promise<void> {
+  for (const [rel, data] of await presetFiles()) {
+    const file = path.join(dir, rel);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, data);
+  }
+}
+
 export async function makePreset(outPath: string): Promise<void> {
   const zip = new JSZip();
-  // ドール: 中央に 384x800 の肌色
-  zip.file('doll-test/dolls/doll.png', await png({ left: 320, top: 112, width: 384, height: 800, color: '#ffe0c0' }));
-  // トップス: y=240〜520
-  zip.file('doll-test/clothing/04_1_トップス/red.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#ff0000' }));
-  zip.file('doll-test/clothing/04_1_トップス/blue.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#0000ff' }));
-  // ボトムス: y=520〜800
-  zip.file('doll-test/clothing/03_2_ボトムス/green.png', await png({ left: 292, top: 520, width: 440, height: 280, color: '#00a000' }));
-  // 背景: 全面
-  zip.file('doll-test/backgrounds/bg.png', await png(null, '#ffff80'));
+  for (const [rel, data] of await presetFiles()) zip.file(rel, data);
   await fs.writeFile(outPath, await zip.generateAsync({ type: 'nodebuffer' }));
 }
