@@ -476,13 +476,9 @@ test('メニューの並び: カテゴリは並び順どおり、サムネイル
   expect(Math.max(...size)).toBe(192);
 });
 
-test('一度開いた後は、オフラインでも開けて、まだ着ていない服も着られる', async ({ page, context }) => {
+test('初めて開いた 1 回だけで、オフラインでも開けて、まだ着ていない服も着られる', async ({ page, context }) => {
   await openApp(page);
-  await page.evaluate(() => navigator.serviceWorker.ready);
-  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30_000 });
-  // サービスワーカーが有効な状態で開き直し、先読みが終わるのを待つ
-  await page.reload();
-  await openApp(page);
+  // 開き直さずに、先読みが終わるのを待つ
   await page.waitForFunction(() => document.documentElement.dataset.prefetch === 'test', null, { timeout: 60_000 });
 
   await context.setOffline(true);

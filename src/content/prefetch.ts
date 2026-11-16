@@ -46,3 +46,22 @@ export async function prefetchUrls(
   await Promise.all(Array.from({ length: Math.min(options.concurrency ?? 4, queue.length) }, worker));
   return { ok, failed };
 }
+
+// サービスワーカーがこのページの通信を扱い始めるまで待つ。
+// 初めて開いたときは準備に時間がかかるので、それより前に先読みしてもキャッシュに入らない。
+// 戻り値: 制御されていれば true（時間切れ・非対応は false）
+export function waitForServiceWorkerControl(timeoutMs: number): Promise<boolean> {
+  const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined;
+  if (!sw) return Promise.resolve(false);
+  if (sw.controller) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (controlled: boolean) => {
+      clearTimeout(timer);
+      sw.removeEventListener('controllerchange', onChange);
+      resolve(controlled);
+    };
+    const onChange = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    sw.addEventListener('controllerchange', onChange);
+  });
+}

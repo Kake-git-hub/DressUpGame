@@ -1,8 +1,8 @@
 /**
  * 先読み（オフライン用にキャッシュへ入れる）のテスト
  */
-import { describe, it, expect, vi } from 'vitest';
-import { prefetchUrls, contentUrlsForDoll } from '../content/prefetch';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { prefetchUrls, contentUrlsForDoll, waitForServiceWorkerControl } from '../content/prefetch';
 import type { BackgroundData, ClothingItemData, DollData } from '../types';
 
 const geo = { canvasW: 1024, canvasH: 1024, box: { x: 0, y: 0, w: 1024, h: 1024 } };
@@ -70,5 +70,52 @@ describe('contentUrlsForDoll', () => {
       'own.jpg',
       'shared.jpg',
     ]);
+  });
+});
+
+describe('waitForServiceWorkerControl', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // navigator.serviceWorker の代役
+  function fakeServiceWorker(controller: object | null) {
+    const target = new EventTarget();
+    const sw = Object.assign(target, { controller });
+    vi.stubGlobal('navigator', { serviceWorker: sw });
+    return sw;
+  }
+
+  it('すでに制御されていれば、すぐ true', async () => {
+    fakeServiceWorker({});
+    await expect(waitForServiceWorkerControl(1000)).resolves.toBe(true);
+  });
+
+  it('制御が始まるまで待ってから true（それまでは終わらない）', async () => {
+    const sw = fakeServiceWorker(null);
+    let done = false;
+    const waiting = waitForServiceWorkerControl(10_000).then((v) => {
+      done = true;
+      return v;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    sw.controller = {};
+    sw.dispatchEvent(new Event('controllerchange'));
+    await expect(waiting).resolves.toBe(true);
+  });
+
+  it('時間内に制御が始まらなければ false', async () => {
+    vi.useFakeTimers();
+    fakeServiceWorker(null);
+    const waiting = waitForServiceWorkerControl(5000);
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(waiting).resolves.toBe(false);
+  });
+
+  it('サービスワーカーが使えない環境では、すぐ false', async () => {
+    vi.stubGlobal('navigator', {});
+    await expect(waitForServiceWorkerControl(1000)).resolves.toBe(false);
   });
 });

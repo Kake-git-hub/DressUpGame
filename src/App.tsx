@@ -12,7 +12,7 @@ import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData } from './content/legacyCleanup';
-import { contentUrlsForDoll, prefetchUrls } from './content/prefetch';
+import { contentUrlsForDoll, prefetchUrls, waitForServiceWorkerControl } from './content/prefetch';
 import {
   loadDollTransform,
   saveDollTransform,
@@ -41,6 +41,8 @@ cleanupLegacyData();
 const CONTENT_URL = resolveContentUrl(window.location.search, window.location.href);
 // 画面が出てから先読みを始めるまでの待ち時間（最初の表示を邪魔しない）
 const PREFETCH_DELAY_MS = 3000;
+// サービスワーカーの準備を待つ上限（初回は本体のダウンロードが終わるまでかかる）
+const SERVICE_WORKER_WAIT_MS = 60_000;
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -104,11 +106,13 @@ function App() {
   useEffect(() => {
     if (loadState !== 'ready' || !currentDoll) return;
     let cancelled = false;
-    const timer = setTimeout(() => {
-      prefetchUrls(contentUrlsForDoll(CONTENT_URL, currentDoll, allClothing, allBackgrounds)).then(() => {
-        // 完了の目印（オフライン動作のテストが待ち合わせに使う）
-        if (!cancelled) document.documentElement.dataset.prefetch = currentDoll.id;
-      });
+    const timer = setTimeout(async () => {
+      // キャッシュに入るよう、サービスワーカーの準備を待ってから始める
+      await waitForServiceWorkerControl(SERVICE_WORKER_WAIT_MS);
+      if (cancelled) return;
+      await prefetchUrls(contentUrlsForDoll(CONTENT_URL, currentDoll, allClothing, allBackgrounds));
+      // 完了の目印（オフライン動作のテストが待ち合わせに使う）
+      if (!cancelled) document.documentElement.dataset.prefetch = currentDoll.id;
     }, PREFETCH_DELAY_MS);
     return () => {
       cancelled = true;
