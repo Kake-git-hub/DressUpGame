@@ -60,10 +60,10 @@ const fakeText: TextAi = {
   },
 };
 
-function call(method: string, url: string, body?: unknown, host = 'localhost:5173'): Promise<ApiResponse> {
+function call(method: string, url: string, body?: unknown, host = 'localhost:5173', origin?: string): Promise<ApiResponse> {
   const u = new URL(url, 'http://x');
   const data = body === undefined ? Buffer.alloc(0) : Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
-  return api.handle({ method, path: u.pathname, query: u.searchParams, host, body: data });
+  return api.handle({ method, path: u.pathname, query: u.searchParams, host, origin, body: data });
 }
 async function ok<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await call(method, url, body);
@@ -100,6 +100,11 @@ describe('基本', () => {
   it('Host が外部なら 403', async () => {
     expect((await call('GET', '/api/status', undefined, 'evil.example.com')).status).toBe(403);
     expect((await call('GET', '/api/status', undefined, '127.0.0.1:5173')).status).toBe(200);
+  });
+  it('ほかのサイトからの呼び出し（Origin が別）は 403。同じ PC の画面からは通る', async () => {
+    expect((await call('POST', '/api/publish', {}, 'localhost:5173', 'https://evil.example.com')).status).toBe(403);
+    expect((await call('GET', '/api/status', undefined, 'localhost:5173', 'null')).status).toBe(403);
+    expect((await call('GET', '/api/status', undefined, 'localhost:5173', 'http://localhost:5173')).status).toBe(200);
   });
   it('素材フォルダの中身を返す。フォルダの外は 400、無いファイルは 404', async () => {
     const res = await call('GET', '/content/manifest.json');

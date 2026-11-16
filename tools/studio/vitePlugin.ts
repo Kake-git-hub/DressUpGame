@@ -78,7 +78,7 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
             res.end(JSON.stringify({ error: '画像が大きすぎます（上限 30 MB）' }));
             return;
           }
-          const result = await api.handle({ method: req.method ?? 'GET', path: apiPath, query: url.searchParams, host: req.headers.host ?? '', body });
+          const result = await api.handle({ method: req.method ?? 'GET', path: apiPath, query: url.searchParams, host: req.headers.host ?? '', origin: req.headers.origin, body });
           res.statusCode = result.status;
           res.setHeader('content-type', result.type);
           res.setHeader('cache-control', 'no-store');

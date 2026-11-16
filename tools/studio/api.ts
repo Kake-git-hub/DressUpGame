@@ -30,6 +30,7 @@ export interface ApiRequest {
   path: string; // 例: /api/items
   query: URLSearchParams;
   host: string; // Host ヘッダー
+  origin?: string; // Origin ヘッダー（ブラウザが付ける。別のサイトからの呼び出しを見分ける）
   body: Buffer;
 }
 export interface ApiResponse {
@@ -89,9 +90,18 @@ export class StudioApi {
 
   async handle(req: ApiRequest): Promise<ApiResponse> {
     try {
-      const host = req.host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
-      if (!(this.options.allowedHosts ?? ['localhost', '127.0.0.1', '::1']).includes(host)) {
-        throw new HttpError(403, 'この PC からの接続だけ受け付けます');
+      const allowed = this.options.allowedHosts ?? ['localhost', '127.0.0.1', '::1'];
+      const hostName = (value: string) => value.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+      if (!allowed.includes(hostName(req.host))) throw new HttpError(403, 'この PC からの接続だけ受け付けます');
+      // ほかのサイトを開いているブラウザから、この PC の API を勝手に呼ばれないようにする
+      if (req.origin) {
+        let originHost: string | null = null;
+        try {
+          originHost = hostName(new URL(req.origin).host);
+        } catch {
+          // 読めない Origin は別のサイト扱い
+        }
+        if (!originHost || !allowed.includes(originHost)) throw new HttpError(403, 'ほかのサイトからの呼び出しは受け付けません');
       }
       if (req.path.startsWith('/content/')) return await this.serveContent(req.path.slice('/content/'.length));
       return await this.route(req);

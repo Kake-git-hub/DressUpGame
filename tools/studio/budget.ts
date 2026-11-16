@@ -23,6 +23,7 @@ export class Budget {
   readonly limits: BudgetLimits;
   private readonly file: string;
   private readonly today: () => string;
+  private queue: Promise<unknown> = Promise.resolve(); // 同時に来た spend を 1 つずつ処理する
   constructor(file: string, limits: BudgetLimits, today: () => string = () => new Date().toISOString().slice(0, 10)) {
     this.file = file;
     this.limits = limits;
@@ -55,11 +56,15 @@ export class Budget {
   }
 
   // 画像を 1 枚作る直前に呼ぶ。上限に達していたら Error（数は増えない）
-  async spend(): Promise<void> {
-    const ledger = await this.load();
-    if (ledger.images >= this.limits.perDay) throw new BudgetError(`今日の上限 ${this.limits.perDay} 枚に達しました`);
-    ledger.images++;
-    await fs.mkdir(path.dirname(this.file), { recursive: true });
-    await fs.writeFile(this.file, JSON.stringify(ledger) + '\n');
+  spend(): Promise<void> {
+    const run = this.queue.then(async () => {
+      const ledger = await this.load();
+      if (ledger.images >= this.limits.perDay) throw new BudgetError(`今日の上限 ${this.limits.perDay} 枚に達しました`);
+      ledger.images++;
+      await fs.mkdir(path.dirname(this.file), { recursive: true });
+      await fs.writeFile(this.file, JSON.stringify(ledger) + '\n');
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
   }
 }
