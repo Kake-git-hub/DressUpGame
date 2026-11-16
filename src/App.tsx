@@ -33,7 +33,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.9.6';
+const APP_VERSION = '0.9.7';
 
 // E2Eテスト時はPixiJSを無効化するフラグ
 const isTestMode = typeof window !== 'undefined' && window.location.search.includes('test=true');
