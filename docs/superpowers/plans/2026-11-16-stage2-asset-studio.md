@@ -1,5 +1,7 @@
 # 段階 2: 素材スタジオ Implementation Plan
 
+> **この計画は置き換え済み（2026-11-16）。** 作者の決定で前提が変わったため、実際に行った内容と結果は `2026-11-16-studio.md` にある。この文書は経緯として残す。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** PC で `npm run studio` を実行すると開く制作画面を作る。AI が作った画像を入れると、切り抜き・ドールへの位置合わせ・サムネイル作成まで自動で行い、カテゴリと名前を決めて保存・公開できる。
