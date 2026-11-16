@@ -22,7 +22,8 @@ const style: CSSProperties = {
   opacity: 0.8,
   pointerEvents: 'none',
   filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.4))',
-  zIndex: 100,
+  // キャンバス(.avatar-section: 1)より上、メニュー(.palette-section: 10)やボタンより下
+  zIndex: 5,
 };
 
 export const DragPreviewLayer = forwardRef<DragPreviewHandle>(function DragPreviewLayer(_props, ref) {

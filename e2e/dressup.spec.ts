@@ -302,6 +302,12 @@ test('ドラッグ中、プレビューは指の位置に付いてくる', async
   expect(box).not.toBeNull();
   expect(Math.abs(box!.x + box!.width / 2 - 700)).toBeLessThanOrEqual(2);
   expect(Math.abs(box!.y + box!.height / 2 - 300)).toBeLessThanOrEqual(2);
+  // メニューやボタンより下に描く（メニュー上の操作を隠さない）
+  const z = await page.evaluate(() => ({
+    preview: Number(getComputedStyle(document.querySelector('[data-testid="drag-preview"]')!).zIndex),
+    menu: Number(getComputedStyle(document.querySelector('.palette-section')!).zIndex),
+  }));
+  expect(z.preview).toBeLessThan(z.menu);
   await page.mouse.up();
 });
 
@@ -318,4 +324,24 @@ test('服を着ていないとき、調整ボタンでドールを動かせる',
   await expect
     .poll(async () => (await canvasPixel(page, DOLL_X - 100, TOP_Y))[3], { timeout: 20_000 })
     .toBe(0);
+});
+
+test('服の画像が読めなかった起動では、保存済みの服装を上書きしない', async ({ page }) => {
+  await importPreset(page);
+  // 画像が見つからない服だけを着ていた、という保存データを置く（読み込み失敗と同じ結果になる）
+  const saved = JSON.stringify([{ id: 'missing-item', equipOrder: 0, adjustScale: 1.2 }]);
+  await page.evaluate((v) => localStorage.setItem('dressup_outfit', v), saved);
+  await page.reload();
+  await page.waitForSelector('.app');
+  await waitForMenu(page);
+  await page.waitForTimeout(1000);
+  expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).toBe(saved);
+
+  // 自分で着せ替えたら、その時点の服装で保存される
+  await dragItemToDoll(page, 'トップス', 0);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expect
+    .poll(async () => JSON.parse((await page.evaluate(() => localStorage.getItem('dressup_outfit'))) ?? '[]').length)
+    .toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).not.toContain('missing-item');
 });

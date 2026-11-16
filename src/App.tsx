@@ -255,9 +255,18 @@ function App() {
     setOutfitRestored(true);
   }, [assetsLoaded, outfitRestored, allClothing, canvasSize.height, restoreEquipped]);
 
-  // 装備変更時に保存（復元が済むまでは保存しない＝保存データを空で上書きしない）
+  // 装備変更時に保存。
+  // 復元直後の状態は保存しない: 画像の読み込みに失敗した起動で、
+  // 欠けた（または空の）服装が保存済みデータを上書きしてしまうのを防ぐ。
+  // 復元後に装備が変わったとき（＝ユーザーの操作）だけ保存する。
+  const outfitBaselineRef = useRef<typeof equippedItems | null>(null);
   useEffect(() => {
     if (!outfitRestored) return;
+    if (outfitBaselineRef.current === null) {
+      outfitBaselineRef.current = equippedItems;
+      return;
+    }
+    if (outfitBaselineRef.current === equippedItems) return;
     saveOutfit(equippedItems);
   }, [equippedItems, outfitRestored]);
 
