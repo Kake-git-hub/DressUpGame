@@ -16,7 +16,13 @@ class MockApplication {
   };
   renderer = {
     resize: vi.fn(),
+    resolution: 1,
   };
+  ticker = {
+    start: vi.fn(),
+    stop: vi.fn(),
+  };
+  render = vi.fn();
 
   async init() {
     return Promise.resolve();
@@ -75,33 +81,13 @@ class MockSprite {
   filters: unknown[] | null = null;
   anchor = { set: vi.fn() };
   scale = { set: vi.fn() };
-
-  constructor(_texture?: unknown) {}
 }
 
-class MockFilter {
-  resources: any;
-
-  constructor(options: any) {
-    // PixiのFilterが内部的にresources.*.uniformsへまとめる挙動を最低限再現
-    const chroma = options?.resources?.chromaKeyUniforms ?? null;
-    if (chroma && typeof chroma === 'object') {
-      const uniforms: Record<string, any> = {};
-      for (const [key, val] of Object.entries<any>(chroma)) {
-        if (val && typeof val === 'object' && 'value' in val) {
-          uniforms[key] = (val as any).value;
-        }
-      }
-      this.resources = { chromaKeyUniforms: { uniforms } };
-    } else {
-      this.resources = options?.resources ?? {};
-    }
-  }
+class MockColorMatrixFilter {
+  resolution = 1;
+  padding = 0;
+  hue = vi.fn();
 }
-
-const MockGlProgram = {
-  from: vi.fn(() => ({})),
-};
 
 const MockAssets = {
   load: vi.fn(async () => ({
@@ -117,8 +103,7 @@ vi.mock('pixi.js', () => ({
   Graphics: MockGraphics,
   Sprite: MockSprite,
   Assets: MockAssets,
-  Filter: MockFilter,
-  GlProgram: MockGlProgram,
+  ColorMatrixFilter: MockColorMatrixFilter,
   Text: vi.fn(),
   TextStyle: vi.fn(),
 }));

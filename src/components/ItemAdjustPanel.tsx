@@ -214,14 +214,12 @@ export function ItemAdjustPanel({
   // プレビュー用の透過処理済み画像URL
   const [transparentImageUrl, setTransparentImageUrl] = useState<string | null>(null);
 
-  // アイテムが変わったら透過画像を取得
+  // 透過画像を取得（調整対象が変わるとパネルごと作り直されるので、初期値のnullに戻す処理は不要）
   useEffect(() => {
     if (item?.id && item?.imageUrl) {
       getTransparentImage(item.id, item.imageUrl)
         .then(setTransparentImageUrl)
         .catch(() => setTransparentImageUrl(item.imageUrl)); // フォールバック
-    } else {
-      setTransparentImageUrl(null);
     }
   }, [item?.id, item?.imageUrl]);
 
@@ -240,34 +238,18 @@ export function ItemAdjustPanel({
   } | null>(null);
   const [touchCount, setTouchCount] = useState(0);
 
-  // アイテムが変わったらリセット
-  useEffect(() => {
-    if (item) {
-      setOffsetX(item.adjustOffsetX ?? 0);
-      setOffsetY(item.adjustOffsetY ?? 0);
-      setScale(item.adjustScale ?? 1.0);
-      setRotation(item.adjustRotation ?? 0);
-      setLayerAdjust(item.layerAdjust ?? 0);
-      setColorHue(item.colorHue ?? 0);
-    }
-  }, [item?.id, item?.adjustOffsetX, item?.adjustOffsetY, item?.adjustScale, item?.adjustRotation, item?.layerAdjust, item?.colorHue]);
-
-  // ドールTransformが変わったらローカルステートも更新
-  useEffect(() => {
-    setDollX(dollTransform.x);
-    setDollY(dollTransform.y);
-    setDollScale(dollTransform.scale);
-  }, [dollTransform.x, dollTransform.y, dollTransform.scale]);
+  // ローカルの調整値は初期値として props から取り込む。
+  // 調整対象が変わるときは親が key を変えてパネルごと作り直す。
 
   // onAdjustをrefで保持（依存配列から除外するため）
   const onAdjustRef = useRef(onAdjust);
-  onAdjustRef.current = onAdjust;
-
   const onDollTransformChangeRef = useRef(onDollTransformChange);
-  onDollTransformChangeRef.current = onDollTransformChange;
-
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onAdjustRef.current = onAdjust;
+    onDollTransformChangeRef.current = onDollTransformChange;
+    onCloseRef.current = onClose;
+  });
 
   // アイテム調整値は「完了」ボタンで親に反映（リアルタイム反映を廃止し高速化）
 

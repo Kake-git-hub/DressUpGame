@@ -46,8 +46,8 @@ describe('outfitStorage', () => {
       equipOrder: 123,
       adjustOffsetX: -123.456789012345,
       adjustOffsetY: 234.567890123456,
-      adjustScale: 1.2345678901234567,
-      adjustRotation: -179.12345678901234,
+      adjustScale: 1.234567890123456,
+      adjustRotation: -179.1234567890123,
       layerAdjust: 100,
       colorHue: -180,
     };

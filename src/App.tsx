@@ -624,6 +624,7 @@ function App() {
       {/* アイテム/ドール調整オーバーレイ（画面全体） */}
       {isAdjustingItem && (
         <ItemAdjustPanel
+          key={adjustingItemId ?? 'doll'}
           item={adjustingItem}
           onAdjust={handleItemAdjust}
           onClose={handleAdjustClose}

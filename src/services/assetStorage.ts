@@ -441,7 +441,12 @@ export function saveCustomClothing(items: ClothingItemData[]): void {
 export function loadCustomClothing(): ClothingItemData[] {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_CLOTHING);
-    const parsed = data ? (JSON.parse(data) as any[]) : [];
+    // 保存データは古い形式で数値が文字列になっていることがある
+    type StoredClothing = Omit<ClothingItemData, 'baseZIndex' | 'layerOrder'> & {
+      baseZIndex: number | string;
+      layerOrder?: number | string;
+    };
+    const parsed = data ? (JSON.parse(data) as StoredClothing[]) : [];
     // レガシーデータの型揺れ（文字列→数値）や欠落を最低限補正
     return parsed.map((i) => {
       const baseZIndex = typeof i.baseZIndex === 'string' ? Number(i.baseZIndex) : i.baseZIndex;
@@ -510,7 +515,7 @@ export async function restoreClothingImages(items: ClothingItemData[]): Promise<
       if (imageData) {
         // サムネイルがある場合は復元
         let thumbnailUrl: string | undefined;
-        if ((item as any).hasThumbnail) {
+        if ((item as ClothingItemData & { hasThumbnail?: boolean }).hasThumbnail) {
           const thumbData = await getImageFromStorage(`${item.id}-thumb`);
           if (thumbData) {
             thumbnailUrl = thumbData;
@@ -1083,8 +1088,8 @@ export type ProgressCallback = (progress: ImportProgress) => void;
 function yieldToMain(): Promise<void> {
   return new Promise(resolve => {
     // Safariはメモリ管理が厳しいので長めの待機
-    if ('requestIdleCallback' in window) {
-      (window as any).requestIdleCallback(resolve, { timeout: 100 });
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => resolve(), { timeout: 100 });
     } else {
       // Safari向け: 少し長めのsetTimeoutでGCの機会を与える
       setTimeout(resolve, 16);
@@ -1134,11 +1139,20 @@ export function loadDollPresets(): DollPreset[] {
     const data = localStorage.getItem(STORAGE_KEYS.DOLL_PRESETS);
     if (!data) return [];
     
-    const metaList = JSON.parse(data);
+    interface StoredPreset {
+      id: string;
+      name: string;
+      dollId: string;
+      dollName: string;
+      dollBodyImageUrl: string;
+      clothingIds: string[];
+      categories?: CategoryInfo[];
+    }
+    const metaList = JSON.parse(data) as StoredPreset[];
     const allDolls = loadCustomDolls();
     const allClothing = loadCustomClothing();
     
-    return metaList.map((meta: any) => {
+    return metaList.map((meta) => {
       const doll = allDolls.find(d => d.id === meta.dollId) || {
         id: meta.dollId,
         name: meta.dollName,
@@ -1146,8 +1160,8 @@ export function loadDollPresets(): DollPreset[] {
         isCustom: true,
       };
       const clothingItems = meta.clothingIds
-        .map((id: string) => allClothing.find(c => c.id === id))
-        .filter(Boolean);
+        .map((id) => allClothing.find(c => c.id === id))
+        .filter((c): c is ClothingItemData => c !== undefined);
       
       return {
         id: meta.id,
