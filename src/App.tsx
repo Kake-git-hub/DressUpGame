@@ -277,10 +277,7 @@ function App() {
   const savedEquipped = useMemo(() => loadEquippedItems(), []);
 
   // 着せ替え状態管理フック（保存された装備を渡す）
-  const { equipItem, unequipItem, getEquippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear, savedEquipped);
-
-  // 装備中のアイテム
-  const equippedItems = getEquippedItems();
+  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear, savedEquipped);
 
   // 装備変更時に保存
   useEffect(() => {

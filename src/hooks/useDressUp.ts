@@ -2,7 +2,7 @@
  * 着せ替え状態を管理するカスタムフック
  * Custom hook for managing dress-up state
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
 
 // 初期状態を作成
@@ -49,8 +49,8 @@ export interface UseDressUpReturn {
   unequipItem: (type: ClothingType) => void;
   // 指定タイプの装備アイテムを取得
   getEquippedItem: (type: ClothingType) => EquippedItem | null;
-  // 装備中のアイテム一覧を取得（レンダリング順）
-  getEquippedItems: () => EquippedItem[];
+  // 装備中のアイテム一覧（レンダリング順）。装備が変わらない限り同じ配列参照を返す
+  equippedItems: EquippedItem[];
   // 全ての服を脱がせる（下着は残す）
   resetAll: () => void;
   // 下着も含めて全て脱がせる
@@ -126,7 +126,7 @@ export function useDressUp(
   // layerOrder（フォルダ名の番号）を最優先でソート（小さい方が下＝先に描画）
   // layerAdjust（一時的なレイヤー調整）を加算して最終レイヤー値を決定
   // layerOrderがない場合はbaseZIndexを使用、最後にequipOrderで安定ソート
-  const getEquippedItems = useCallback((): EquippedItem[] => {
+  const equippedItems = useMemo((): EquippedItem[] => {
     return [...state.equippedItems].sort((a, b) => {
       // layerOrderがある場合はそれを最優先、layerAdjustを加算
       const aLayer = (a.layerOrder ?? a.baseZIndex ?? 0) + (a.layerAdjust ?? 0);
@@ -191,7 +191,7 @@ export function useDressUp(
     equipItem,
     unequipItem,
     getEquippedItem,
-    getEquippedItems,
+    equippedItems,
     resetAll,
     resetAllIncludingUnderwear,
     updateItemAdjustment,

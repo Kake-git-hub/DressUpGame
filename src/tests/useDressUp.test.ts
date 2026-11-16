@@ -62,7 +62,7 @@ describe('useDressUp', () => {
     expect(result.current.getEquippedItem('top')).toBeNull();
     expect(result.current.getEquippedItem('bottom')).toBeNull();
     expect(result.current.getEquippedItem('dress')).toBeNull();
-    expect(result.current.getEquippedItems()).toHaveLength(0);
+    expect(result.current.equippedItems).toHaveLength(0);
   });
 
   it('デフォルト下着付きで初期化できる', () => {
@@ -71,7 +71,7 @@ describe('useDressUp', () => {
     // 下着が装備されている
     expect(result.current.getEquippedItem('underwear_top')).not.toBeNull();
     expect(result.current.getEquippedItem('underwear_bottom')).not.toBeNull();
-    expect(result.current.getEquippedItems()).toHaveLength(2);
+    expect(result.current.equippedItems).toHaveLength(2);
   });
 
   it('服を着せることができる（equipItem）', () => {
@@ -85,7 +85,7 @@ describe('useDressUp', () => {
     const equipped = result.current.getEquippedItem('top');
     expect(equipped).not.toBeNull();
     expect(equipped?.id).toBe('top-1');
-    expect(result.current.getEquippedItems()).toHaveLength(1);
+    expect(result.current.equippedItems).toHaveLength(1);
   });
 
   it('複数の服を着せることができる', () => {
@@ -99,7 +99,7 @@ describe('useDressUp', () => {
 
     expect(result.current.getEquippedItem('top')).not.toBeNull();
     expect(result.current.getEquippedItem('bottom')).not.toBeNull();
-    expect(result.current.getEquippedItems()).toHaveLength(2);
+    expect(result.current.equippedItems).toHaveLength(2);
   });
 
   it('同じタイプの服を着せると置き換わる', () => {
@@ -127,7 +127,7 @@ describe('useDressUp', () => {
     // 新しいトップスに置き換わる
     const equipped = result.current.getEquippedItem('top');
     expect(equipped?.id).toBe('top-2');
-    expect(result.current.getEquippedItems()).toHaveLength(1);
+    expect(result.current.equippedItems).toHaveLength(1);
   });
 
   it('服を脱がせることができる（unequipItem）', () => {
@@ -144,7 +144,7 @@ describe('useDressUp', () => {
     });
 
     expect(result.current.getEquippedItem('top')).toBeNull();
-    expect(result.current.getEquippedItems()).toHaveLength(0);
+    expect(result.current.equippedItems).toHaveLength(0);
   });
 
   it('全ての服を脱がせても下着は残る（resetAll）', () => {
@@ -162,7 +162,7 @@ describe('useDressUp', () => {
     });
 
     // 下着だけ残る
-    expect(result.current.getEquippedItems()).toHaveLength(2);
+    expect(result.current.equippedItems).toHaveLength(2);
     expect(result.current.getEquippedItem('underwear_top')).not.toBeNull();
     expect(result.current.getEquippedItem('underwear_bottom')).not.toBeNull();
   });
@@ -186,7 +186,7 @@ describe('useDressUp', () => {
       result.current.equipItem(highZIndexItem);       // accessory: baseZIndex 30
     });
 
-    const equipped = result.current.getEquippedItems();
+    const equipped = result.current.equippedItems;
 
     // baseZIndex順にソートされている
     expect(equipped[0].type).toBe('bottom');    // 10
@@ -218,5 +218,25 @@ describe('useDressUp', () => {
     const equipped = result.current.getEquippedItem('top');
     // 後から着せたtop2になっている
     expect(equipped?.id).toBe('top-2');
+  });
+  it('再レンダリングしても equippedItems の参照が変わらない', () => {
+    const { result, rerender } = renderHook(() => useDressUp(mockClothingItems));
+    act(() => result.current.equipItem(mockClothingItems[0]));
+    const first = result.current.equippedItems;
+    rerender();
+    expect(result.current.equippedItems).toBe(first);
+  });
+
+  it('equippedItems は layerOrder + layerAdjust、同値なら equipOrder の順', () => {
+    const upper: ClothingItemData = { ...mockClothingItems[0], id: 'upper', type: 'upper', layerOrder: 4 };
+    const lower: ClothingItemData = { ...mockClothingItems[1], id: 'lower', type: 'lower', layerOrder: 3 };
+    const same: ClothingItemData = { ...mockClothingItems[2], id: 'same', type: 'same', layerOrder: 4 };
+    const { result } = renderHook(() => useDressUp([upper, lower, same]));
+    act(() => result.current.equipItem(upper));
+    act(() => result.current.equipItem(lower));
+    act(() => result.current.equipItem(same));
+    expect(result.current.equippedItems.map((i) => i.id)).toEqual(['lower', 'upper', 'same']);
+    act(() => result.current.updateItemAdjustment('lower', { layerAdjust: 100 }));
+    expect(result.current.equippedItems.map((i) => i.id)).toEqual(['upper', 'same', 'lower']);
   });
 });
