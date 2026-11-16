@@ -59,25 +59,24 @@ export interface UseDressUpReturn {
   updateItemAdjustment: (itemId: string, adjustment: ItemAdjustment) => void;
   // 最後に着せたアイテムを取得
   getLastEquippedItem: () => EquippedItem | null;
+  // 保存された装備で丸ごと置き換える
+  restoreEquipped: (items: EquippedItem[]) => void;
 }
 
 export function useDressUp(
   initialItems: ClothingItemData[] = [],
-  defaultUnderwear: ClothingItemData[] = [],
-  savedEquipped: EquippedItem[] = []
+  defaultUnderwear: ClothingItemData[] = []
 ): UseDressUpReturn {
-  const [state, setState] = useState<DressUpState>(() => {
-    // 保存された装備があればそれを使用
-    if (savedEquipped.length > 0) {
-      const maxEquipOrder = Math.max(...savedEquipped.map(i => i.equipOrder), 0);
-      return {
-        equippedItems: savedEquipped,
-        availableItems: initialItems,
-        equipCounter: maxEquipOrder + 1,
-      };
-    }
-    return createInitialState(initialItems, defaultUnderwear);
-  });
+  const [state, setState] = useState<DressUpState>(() => createInitialState(initialItems, defaultUnderwear));
+
+  // 保存された装備で丸ごと置き換える（起動時の復元用）
+  const restoreEquipped = useCallback((items: EquippedItem[]) => {
+    setState((prev) => ({
+      ...prev,
+      equippedItems: items,
+      equipCounter: Math.max(prev.equipCounter, ...items.map((i) => i.equipOrder + 1)),
+    }));
+  }, []);
 
   // 服を着せる（同じタイプの服は置き換え、ただしallowOverlap=trueのアイテムは重複可能）
   const equipItem = useCallback((item: ClothingItemData) => {
@@ -196,5 +195,6 @@ export function useDressUp(
     resetAllIncludingUnderwear,
     updateItemAdjustment,
     getLastEquippedItem,
+    restoreEquipped,
   };
 }

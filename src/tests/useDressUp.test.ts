@@ -239,4 +239,19 @@ describe('useDressUp', () => {
     act(() => result.current.updateItemAdjustment('lower', { layerAdjust: 100 }));
     expect(result.current.equippedItems.map((i) => i.id)).toEqual(['upper', 'same', 'lower']);
   });
+  it('restoreEquipped は着ている服を丸ごと置き換える', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems));
+    act(() => result.current.equipItem(mockClothingItems[0]));
+    act(() => result.current.restoreEquipped([{ ...mockClothingItems[1], equipOrder: 7, adjustScale: 1.5 }]));
+    expect(result.current.equippedItems.map((i) => i.id)).toEqual(['bottom-1']);
+    expect(result.current.equippedItems[0].adjustScale).toBe(1.5);
+  });
+
+  it('restoreEquipped 後に着せた服は、復元した服より後の equipOrder になる', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems));
+    act(() => result.current.restoreEquipped([{ ...mockClothingItems[1], equipOrder: 7 }]));
+    act(() => result.current.equipItem(mockClothingItems[0]));
+    const top = result.current.equippedItems.find((i) => i.id === 'top-1');
+    expect(top?.equipOrder).toBe(8);
+  });
 });

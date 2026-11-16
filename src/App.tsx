@@ -20,8 +20,6 @@ import {
   restoreClothingImages,
 } from './services/assetStorage';
 import {
-  saveEquippedItems,
-  loadEquippedItems,
   loadDollTransform,
   saveDollTransform,
   saveCurrentDollId,
@@ -29,6 +27,7 @@ import {
   saveCurrentBackgroundId,
   loadCurrentBackgroundId,
 } from './services/stateStorage';
+import { saveOutfit, loadOutfit, fromSavedOutfit } from './services/outfitStorage';
 import type { ClothingItemData, DollData, DollDimensions, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
@@ -134,6 +133,9 @@ function App() {
   // 服アイテム一覧（デフォルト + カスタム）
   const [allClothing, setAllClothing] = useState<ClothingItemData[]>(DEFAULT_CLOTHING);
 
+  // 保存済みアセットの読み込みが終わったか（装備の復元と保存の開始条件）
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+
   // 保存されたドールID・背景IDを復元
   const savedDollId = loadCurrentDollId();
   const savedBackgroundId = loadCurrentBackgroundId();
@@ -221,6 +223,8 @@ function App() {
         setAllClothing([...DEFAULT_CLOTHING, ...restoredClothing]);
       } catch (error) {
         console.error('カスタムデータ読み込みエラー:', error);
+      } finally {
+        setAssetsLoaded(true);
       }
     };
 
@@ -273,16 +277,27 @@ function App() {
     return DEFAULT_UNDERWEAR.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
   }, [activeDimensions, canvasSize.height, currentDoll]);
 
-  // 保存された装備アイテム（初期化時に1回だけ読み込み）
-  const savedEquipped = useMemo(() => loadEquippedItems(), []);
+  // 着せ替え状態管理フック
+  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp(scaledItems, scaledUnderwear);
 
-  // 着せ替え状態管理フック（保存された装備を渡す）
-  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment } = useDressUp(scaledItems, scaledUnderwear, savedEquipped);
+  // 保存された装備（ID・調整値のみ）を、アセット読み込み完了後に1回だけ復元する
+  const savedOutfitRef = useRef(loadOutfit());
+  const [outfitRestored, setOutfitRestored] = useState(false);
 
-  // 装備変更時に保存
   useEffect(() => {
-    saveEquippedItems(equippedItems);
-  }, [equippedItems]);
+    if (!assetsLoaded || outfitRestored) return;
+    // ドール選択が確定する前でも復元できるよう、全アイテムから探す
+    const available = allClothing.map(item => scaleItemPosition(item, undefined, canvasSize.height));
+    const restored = fromSavedOutfit(savedOutfitRef.current, available);
+    if (restored.length > 0) restoreEquipped(restored);
+    setOutfitRestored(true);
+  }, [assetsLoaded, outfitRestored, allClothing, canvasSize.height, restoreEquipped]);
+
+  // 装備変更時に保存（復元が済むまでは保存しない＝保存データを空で上書きしない）
+  useEffect(() => {
+    if (!outfitRestored) return;
+    saveOutfit(equippedItems);
+  }, [equippedItems, outfitRestored]);
 
   // パフォーマンス最適化：描画安定後にレンダリングループを停止
   // 操作がなければTickerを停止してCPU/GPU負荷を削減

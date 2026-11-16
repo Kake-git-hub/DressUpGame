@@ -2,10 +2,9 @@
  * アプリ状態の永続化サービス
  * ブラウザを離れても状態を維持
  */
-import type { DollTransform, EquippedItem } from '../types';
+import type { DollTransform } from '../types';
 
 const STORAGE_KEYS = {
-  EQUIPPED_ITEMS: 'dressup_equipped_items',
   DOLL_TRANSFORM: 'dressup_doll_transform',
   CURRENT_DOLL_ID: 'dressup_current_doll_id',
   CURRENT_BACKGROUND_ID: 'dressup_current_background_id',
@@ -35,27 +34,6 @@ function checkAndMigrateVersion(): void {
 
 // 初期化時にバージョンチェック
 checkAndMigrateVersion();
-
-// 装備アイテムを保存
-export function saveEquippedItems(items: EquippedItem[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS.EQUIPPED_ITEMS, JSON.stringify(items));
-  } catch (error) {
-    console.error('装備アイテム保存エラー:', error);
-  }
-}
-
-// 装備アイテムを読み込み
-export function loadEquippedItems(): EquippedItem[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.EQUIPPED_ITEMS);
-    if (!data) return [];
-    return JSON.parse(data) as EquippedItem[];
-  } catch (error) {
-    console.error('装備アイテム読み込みエラー:', error);
-    return [];
-  }
-}
 
 // ドール位置を保存
 export function saveDollTransform(transform: DollTransform): void {

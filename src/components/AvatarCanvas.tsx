@@ -223,14 +223,25 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     redrawAfterResize();
   }, [width, height, isReady, menuOffset, rightOffset, isPortrait]);
 
+  // 非同期の描画が終わったら必ず1フレーム描く
+  // （描画ループは操作がないと停止しているので、ここで描かないと画面に反映されない）
+  const redrawWhenDone = (work: Promise<unknown>) => {
+    const engine = engineRef.current;
+    work
+      .then(() => engine?.forceRedraw())
+      .catch((error) => console.error('描画エラー:', error));
+  };
+
   // ドール画像が変わったら更新（エンジン再初期化なし）
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.drawDoll({
-        width: 200,
-        height: 300,
-        imageUrl: dollImageUrl || '',
-      });
+      redrawWhenDone(
+        engineRef.current.drawDoll({
+          width: 200,
+          height: 300,
+          imageUrl: dollImageUrl || '',
+        })
+      );
     }
   }, [dollImageUrl, isReady]);
 
@@ -241,21 +252,21 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       const itemsToRender = adjustingItemId
         ? equippedItems.filter(item => item.id !== adjustingItemId)
         : equippedItems;
-      engineRef.current.drawClothing(itemsToRender);
+      redrawWhenDone(engineRef.current.drawClothing(itemsToRender));
     }
   }, [equippedItems, adjustingItemId, isReady]);
 
   // カスタム顔が変わったら更新
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.setCustomFace(customFaceUrl ?? null);
+      redrawWhenDone(engineRef.current.setCustomFace(customFaceUrl ?? null));
     }
   }, [customFaceUrl, isReady]);
 
   // 背景が変わったら更新
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.setBackground(backgroundImageUrl ?? null);
+      redrawWhenDone(engineRef.current.setBackground(backgroundImageUrl ?? null));
     }
   }, [backgroundImageUrl, isReady]);
 
@@ -264,12 +275,17 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     if (isReady && engineRef.current?.isInitialized() && dollTransform) {
       engineRef.current.setDollTransform(dollTransform);
       // ドールと服を再描画
-      engineRef.current.drawDoll({
-        width: 200,
-        height: 300,
-        imageUrl: dollImageUrl || '',
-      });
-      engineRef.current.drawClothing(equippedItems);
+      const engine = engineRef.current;
+      redrawWhenDone(
+        Promise.all([
+          engine.drawDoll({
+            width: 200,
+            height: 300,
+            imageUrl: dollImageUrl || '',
+          }),
+          engine.drawClothing(equippedItems),
+        ])
+      );
     }
   }, [dollTransform, isReady]);
 
@@ -278,7 +294,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     if (isReady && engineRef.current?.isInitialized()) {
       engineRef.current.setChromaKeyEnabled(chromaKeyEnabled);
       // 服を再描画してフィルタを適用
-      engineRef.current.drawClothing(equippedItems);
+      redrawWhenDone(engineRef.current.drawClothing(equippedItems));
     }
   }, [chromaKeyEnabled, isReady]);
 
