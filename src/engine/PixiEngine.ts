@@ -811,21 +811,4 @@ export class PixiEngine {
   isInitialized(): boolean {
     return this.initialized && this.app !== null && !this.destroyed;
   }
-
-  // フィルター関連（互換性のためダミーメソッドを残す）
-  setChromaKeyEnabled(_enabled: boolean): void {
-    // フィルター削除済み - 何もしない
-  }
-
-  setEdgeTrimEnabled(_enabled: boolean): void {
-    // フィルター削除済み - 何もしない
-  }
-
-  isChromaKeyEnabled(): boolean {
-    return false; // フィルター削除済み
-  }
-
-  setChromaKeyParams(_params: { keyColor?: number; threshold?: number; smoothing?: number }): void {
-    // フィルター削除済み - 何もしない
-  }
 }

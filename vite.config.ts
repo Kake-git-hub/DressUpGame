@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'app-icon-192.png', 'app-icon-512.png', 'assets/**/*'],
+      includeAssets: ['favicon.png', 'app-icon-192.png', 'app-icon-512.png'],
       manifest: {
         name: 'Kids Dress-Up Game',
         short_name: 'DressUp',
@@ -40,7 +40,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,gif,webp,woff,woff2}'],
-        globIgnores: ['app-icon.png'], // 元ファイル（大きすぎる）を除外
+        globIgnores: ['**/app-icon.png'], // 元ファイル（大きすぎる）を除外
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.(png|jpg|jpeg|gif|webp|svg)$/i,

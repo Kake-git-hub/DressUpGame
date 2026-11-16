@@ -6,7 +6,7 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DrawingCanvas, EraserCanvas, DragPreviewLayer } from './components';
+import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer } from './components';
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
@@ -65,32 +65,8 @@ const FALLBACK_DOLL_DIMENSIONS: DollDimensions = {
 // 基準ドールサイズ（アイテムのposition値はこのサイズ基準）
 const REFERENCE_DOLL_SIZE = { width: 200, height: 300 };
 
-// デフォルトの下着（ユーザーが設定から追加）
-const DEFAULT_UNDERWEAR: ClothingItemData[] = [];
-// 注: デフォルト下着画像を使う場合は以下のようにpublic/assets/clothing/に配置
-// {
-//   id: 'underwear-top-default',
-//   name: '白いキャミソール',
-//   type: 'underwear_top',
-//   imageUrl: `${BASE_PATH}assets/clothing/underwear-top.png`,
-//   position: { x: 0, y: -30 },
-//   baseZIndex: 0,
-//   anchorType: 'torso',
-// },
-
 // デフォルトの服アイテムデータ（ユーザーが設定から追加）
 const DEFAULT_CLOTHING: ClothingItemData[] = [];
-// 注: デフォルト服画像を使う場合はpublic/assets/clothing/に配置して以下のように定義
-// 例:
-// {
-//   id: 'top-1',
-//   name: '青いTシャツ',
-//   type: 'top',
-//   imageUrl: `${BASE_PATH}assets/clothing/top-1.png`,
-//   position: { x: 0, y: -30 },
-//   baseZIndex: 20,
-//   anchorType: 'torso',
-// },
 
 // アイテムの位置をドールサイズに合わせてスケーリング
 function scaleItemPosition(
@@ -113,17 +89,9 @@ function scaleItemPosition(
 function App() {
   // キャンバスへの参照
   const avatarCanvasRef = useRef<AvatarCanvasHandle>(null);
-  const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   
   // 設定画面の表示状態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  // お絵描きモード（現在未使用）
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
-  // 消しゴムモード（現在未使用）
-  const [isEraserMode, setIsEraserMode] = useState(false);
-  // クロマキー（グリーンバック透過）常時ON
-  const chromaKeyEnabled = true;
-
   // ドール一覧（デフォルト + カスタム）
   const [allDolls, setAllDolls] = useState<DollData[]>(DEFAULT_DOLLS);
 
@@ -271,14 +239,8 @@ function App() {
     return filteredClothing.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
   }, [filteredClothing, activeDimensions, canvasSize.height, currentDoll]);
 
-  // スケーリングされた下着
-  const scaledUnderwear = useMemo(() => {
-    if (!currentDoll) return [];
-    return DEFAULT_UNDERWEAR.map(item => scaleItemPosition(item, activeDimensions, canvasSize.height));
-  }, [activeDimensions, canvasSize.height, currentDoll]);
-
   // 着せ替え状態管理フック
-  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp(scaledItems, scaledUnderwear);
+  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp(scaledItems);
 
   // 保存された装備（ID・調整値のみ）を、アセット読み込み完了後に1回だけ復元する
   const savedOutfitRef = useRef(loadOutfit());
@@ -598,36 +560,15 @@ function App() {
                 dollTransform={dollTransform}
                 menuOffset={isPortrait ? 0 : MENU_WIDTH}
                 rightOffset={isPortrait ? 0 : RIGHT_BUTTON_WIDTH}
-                chromaKeyEnabled={chromaKeyEnabled}
                 adjustingItemId={isAdjustingItem ? adjustingItemId : null}
                 isPortrait={isPortrait}
               />
             )}
-
-            {/* お絵描きキャンバス */}
-            <DrawingCanvas
-              width={canvasSize.width}
-              height={canvasSize.height}
-              isActive={isDrawingMode}
-              onClose={() => setIsDrawingMode(false)}
-              canvasRef={drawingCanvasRef}
-            />
-
-            {/* 消しゴムキャンバス */}
-            <EraserCanvas
-              width={canvasSize.width}
-              height={canvasSize.height}
-              isActive={isEraserMode}
-              onClose={() => setIsEraserMode(false)}
-            />
-
-            {/* 消しゴムマスクはPixiEngine側で処理 */}
-
           </section>
         )}
 
         {/* ツールボタン（調整モードでないとき表示）- avatar-sectionの外に配置 */}
-        {currentDollSafe && !isAdjustingItem && !isDrawingMode && !isEraserMode && (
+        {currentDollSafe && !isAdjustingItem && (
           <div className="tool-buttons">
             <button
               className="tool-button"

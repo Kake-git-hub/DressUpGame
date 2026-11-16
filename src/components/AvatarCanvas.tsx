@@ -9,8 +9,6 @@ import type { DollConfig, EquippedItem, DollTransform } from '../types';
 // 外部から呼び出せるメソッド
 export interface AvatarCanvasHandle {
   takeScreenshot: () => Promise<string | null>;
-  setChromaKeyEnabled: (enabled: boolean) => void;
-  isChromaKeyEnabled: () => boolean;
   pauseRendering: () => void;
   resumeRendering: () => void;
 }
@@ -26,7 +24,6 @@ interface AvatarCanvasProps {
   dollTransform?: DollTransform; // ドールの位置・スケール
   menuOffset?: number; // メニュー幅オフセット（左側）
   rightOffset?: number; // 右ボタン領域オフセット（右側）
-  chromaKeyEnabled?: boolean; // クロマキー有効フラグ
   adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
   isPortrait?: boolean; // 縦画面モード
   onCanvasReady?: () => void;
@@ -43,7 +40,6 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   dollTransform,
   menuOffset = 0,
   rightOffset = 60,
-  chromaKeyEnabled = false,
   adjustingItemId = null,
   isPortrait = false,
   onCanvasReady,
@@ -59,14 +55,6 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
         return engineRef.current.takeScreenshot();
       }
       return null;
-    },
-    setChromaKeyEnabled: (enabled: boolean) => {
-      if (engineRef.current?.isInitialized()) {
-        engineRef.current.setChromaKeyEnabled(enabled);
-      }
-    },
-    isChromaKeyEnabled: () => {
-      return engineRef.current?.isChromaKeyEnabled() ?? false;
     },
     pauseRendering: () => {
       if (engineRef.current?.isInitialized()) {
@@ -288,15 +276,6 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       );
     }
   }, [dollTransform, isReady]);
-
-  // クロマキー有効フラグが変わったら服を再描画
-  useEffect(() => {
-    if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.setChromaKeyEnabled(chromaKeyEnabled);
-      // 服を再描画してフィルタを適用
-      redrawWhenDone(engineRef.current.drawClothing(equippedItems));
-    }
-  }, [chromaKeyEnabled, isReady]);
 
   // 縦画面モードが変わったら更新
   useEffect(() => {
