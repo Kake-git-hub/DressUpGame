@@ -29,11 +29,24 @@ export interface LoadedContent {
   backgrounds: BackgroundData[];
 }
 
+// 応答を待つ上限。つながらない回線で「よみこみちゅう」のまま止まらないようにする
+const FETCH_TIMEOUT_MS = 15_000;
+
 // 取得・検証に失敗したら Error
 export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<LoadedContent> {
-  const response = await fetchImpl(new URL('manifest.json', baseUrl).href);
-  if (!response.ok) throw new Error(`一覧ファイルを取得できませんでした（HTTP ${response.status}）`);
-  const manifest = parseManifest(await response.json());
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let body: unknown;
+  try {
+    const response = await fetchImpl(new URL('manifest.json', baseUrl).href, { signal: controller.signal });
+    if (!response.ok) throw new Error(`一覧ファイルを取得できませんでした（HTTP ${response.status}）`);
+    body = await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+  const manifest = parseManifest(body);
+  // ドールが無いと何も表示できないので、読み込み失敗として扱う
+  if (manifest.dolls.length === 0) throw new Error('一覧ファイルにドールがありません');
   const url = (file: string) => new URL(file, baseUrl).href;
 
   const toBackground = (bg: ManifestBackground, dollId?: string): BackgroundData => ({

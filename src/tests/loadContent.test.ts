@@ -125,6 +125,23 @@ describe('loadContent', () => {
     await expect(loadContent(BASE, okFetch('{broken'))).rejects.toThrow();
   });
 
+  it('ドールが 1 体も無い一覧なら Error（空の画面にしない）', async () => {
+    await expect(loadContent(BASE, okFetch({ version: 1, dolls: [], backgrounds: [] }))).rejects.toThrow();
+  });
+
+  it('応答が返ってこなければ、時間切れで Error', async () => {
+    vi.useFakeTimers();
+    const hang = vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      })
+    ) as unknown as typeof fetch;
+    const result = expect(loadContent(BASE, hang)).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await result;
+    vi.useRealTimers();
+  });
+
   it('形の違う一覧なら Error', async () => {
     await expect(loadContent(BASE, okFetch({ version: 2 }))).rejects.toThrow();
   });

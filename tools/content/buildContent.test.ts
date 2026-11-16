@@ -43,6 +43,9 @@ beforeAll(async () => {
   await fs.writeFile(path.join(clothing, '12_10_アクセサリー_overlap_リボン.png'), flat);
   // 規則に合わない名前
   await fs.writeFile(path.join(clothing, 'なまえだけ.png'), flat);
+  // ファイル名方式で、名前が同じ・末尾の ID だけ違う 2 点
+  await fs.writeFile(path.join(clothing, '4_1_トップス_おそろい_abc1.png'), flat);
+  await fs.writeFile(path.join(clothing, '4_1_トップス_おそろい_abc2.png'), flat);
   // 重ね着可・自由配置のフォルダ
   await fs.mkdir(path.join(clothing, '11_9_かざり_movable_overlap'), { recursive: true });
   await fs.writeFile(path.join(clothing, '11_9_かざり_movable_overlap/star.png'), flat);
@@ -77,10 +80,10 @@ describe('buildContent', () => {
   it('一覧ファイルが検証を通り、件数が合う', () => {
     expect(manifest.dolls).toHaveLength(1);
     expect(doll().id).toBe('test');
-    expect(doll().items).toHaveLength(9); // red, blue, opaque, big, green, flat red, リボン, なまえだけ, star
+    expect(doll().items).toHaveLength(11); // red, blue, opaque, big, green, flat red, リボン, なまえだけ, star, おそろい×2
     expect(doll().backgrounds).toHaveLength(1);
     expect(manifest.backgrounds).toHaveLength(1);
-    expect(report).toMatchObject({ dolls: 1, items: 9, backgrounds: 2 });
+    expect(report).toMatchObject({ dolls: 1, items: 11, backgrounds: 2 });
   });
 
   it('服は切り抜かれ、box が元の位置を指す', async () => {
@@ -184,5 +187,31 @@ describe('buildContent', () => {
     const empty = path.join(root, 'empty');
     await fs.mkdir(empty, { recursive: true });
     await expect(buildContent(empty, path.join(root, 'out3'))).rejects.toThrow();
+  });
+
+  it('ファイル名の末尾の ID は、アイテムの ID に入る（後から同名の服を足しても変わらない）', () => {
+    const ids = doll().items.map((i) => i.id);
+    expect(ids).toContain('test/トップス/おそろい_abc1');
+    expect(ids).toContain('test/トップス/おそろい_abc2');
+  });
+
+  it('アプリが読めない一覧になる場合は、書き出さずに Error', async () => {
+    const bad = path.join(root, 'bad');
+    // 大文字小文字だけ違うフォルダ → ドールの id が重複する
+    for (const name of ['doll-a', 'DOLL-a']) {
+      await fs.mkdir(path.join(bad, name, 'dolls'), { recursive: true });
+      await fs.writeFile(path.join(bad, name, 'dolls/d.png'), await makePng({ left: 10, top: 10, width: 50, height: 50, color: '#ffe0c0' }));
+    }
+    const out = path.join(root, 'bad-out');
+    await expect(buildContent(bad, out)).rejects.toThrow();
+    await expect(fs.access(path.join(out, 'manifest.json'))).rejects.toThrow();
+  });
+
+  it('関係ないフォルダを出力先にしたら、中身を消さずに Error', async () => {
+    const other = path.join(root, 'other');
+    await fs.mkdir(path.join(other, 'files'), { recursive: true });
+    await fs.writeFile(path.join(other, 'files/keep.txt'), 'important');
+    await expect(buildContent(presetDir, other)).rejects.toThrow();
+    expect(await fs.readFile(path.join(other, 'files/keep.txt'), 'utf-8')).toBe('important');
   });
 });

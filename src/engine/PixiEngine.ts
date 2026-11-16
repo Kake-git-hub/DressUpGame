@@ -44,6 +44,10 @@ export class PixiEngine {
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
   private tickerRunning = true; // Tickerが動作中かどうか
   private clothingCached = false; // 服コンテナがキャッシュ済みか
+  // 描画の通し番号。画像の読み込み中に次の描画が始まったら、古いほうは捨てる
+  private dollDrawId = 0;
+  private clothingDrawId = 0;
+  private backgroundDrawId = 0;
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -52,6 +56,9 @@ export class PixiEngine {
     }
 
     try {
+      // 画像はページ本体から取得する（ワーカー経由だと、Safari でサービスワーカーの
+      // キャッシュを通らずオフラインで読めない恐れがある）
+      Assets.setPreferences({ preferWorkers: false });
       this.app = new Application();
       await this.app.init({
         canvas,
@@ -194,6 +201,7 @@ export class PixiEngine {
     this.backgroundContainer.removeChildren();
 
     if (!imageUrl) {
+      this.backgroundDrawId++; // 読み込み中の背景があれば無効にする
       // 背景なしでもスクリーンショット用に背景領域を設定（1:1正方形）
       const area = this.getAvailableArea();
       const bgSize = this.app.screen.height;
@@ -206,7 +214,10 @@ export class PixiEngine {
     }
 
     try {
+      const drawId = ++this.backgroundDrawId;
       const texture = await Assets.load(imageUrl);
+      // 読み込み中に別の背景が指定されたら、こちらは捨てる
+      if (drawId !== this.backgroundDrawId || this.destroyed || !this.backgroundContainer) return;
       
       // パフォーマンス最適化: テクスチャのスケールモードを設定
       // 縮小表示時の品質を維持しつつGPU負荷を軽減
@@ -276,6 +287,7 @@ export class PixiEngine {
 
     // 既存のドールをクリア
     this.dollContainer.removeChildren();
+    const drawId = ++this.dollDrawId;
 
     // 背景領域の中心を基準にドール位置を計算
     const bgCenter = this.getBackgroundCenter();
@@ -288,6 +300,9 @@ export class PixiEngine {
     if (config.imageUrl && config.imageUrl.length > 0) {
       try {
         const texture = await Assets.load(config.imageUrl);
+        // 読み込み中に別のドールの描画が始まったら、こちらは捨てる（二重に表示しない）
+        if (drawId !== this.dollDrawId || this.destroyed || !this.dollContainer) return;
+        this.dollContainer.removeChildren();
         // 縮小時の画質向上：リニア補間を使用
         texture.source.scaleMode = 'linear';
         const dollSprite = new Sprite(texture);
@@ -451,10 +466,12 @@ export class PixiEngine {
       return { item, texture: null, error: null };
     });
 
+    const drawId = ++this.clothingDrawId;
     const loadedItems = await Promise.all(loadPromises);
 
-    // 破棄チェック（ロード中に破棄された場合）
-    if (this.destroyed || !this.clothingContainer) {
+    // 破棄チェック（ロード中に破棄された場合）。
+    // 読み込み中に次の描画が始まった場合も捨てる（遅れて届いた古い服装で上書きしない）
+    if (this.destroyed || !this.clothingContainer || drawId !== this.clothingDrawId) {
       tempContainer.destroy({ children: true });
       return;
     }

@@ -18,6 +18,10 @@ const LEGACY_KEYS = [
 ];
 const LEGACY_DATABASE = 'DressUpAssets';
 
+const DATABASE_MARKER_KEY = 'dressup_legacy_db_deleted';
+
+// 旧方式の小さな状態を消す。ID の付け方が変わったので、残すと新しい素材と食い違う。
+// アプリの状態を読む前に呼ぶ。
 export function cleanupLegacyData(): void {
   try {
     if (localStorage.getItem(MARKER_KEY) !== null) return;
@@ -25,11 +29,16 @@ export function cleanupLegacyData(): void {
     localStorage.setItem(MARKER_KEY, '1');
   } catch (error) {
     console.error('旧データの削除エラー:', error);
-    return;
   }
+}
+
+// 画像を保存していた IndexedDB（数十MB）を削除する。
+// 新しい素材が読めると分かってから呼ぶ（読めないうちに消すと、何も残らなくなる）。
+export function deleteLegacyDatabase(): void {
   try {
-    // 画像を保存していた IndexedDB（数十MB）を削除する
+    if (localStorage.getItem(DATABASE_MARKER_KEY) !== null) return;
     indexedDB.deleteDatabase(LEGACY_DATABASE);
+    localStorage.setItem(DATABASE_MARKER_KEY, '1');
   } catch (error) {
     console.error('旧データベースの削除エラー:', error);
   }

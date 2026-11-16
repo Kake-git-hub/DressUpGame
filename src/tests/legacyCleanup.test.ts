@@ -2,7 +2,7 @@
  * 旧方式のデータ削除のテスト
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cleanupLegacyData } from '../content/legacyCleanup';
+import { cleanupLegacyData, deleteLegacyDatabase } from '../content/legacyCleanup';
 
 describe('cleanupLegacyData', () => {
   const deleteDatabase = vi.fn();
@@ -26,8 +26,9 @@ describe('cleanupLegacyData', () => {
     for (const key of ['dressup_custom_clothing', 'dressup_custom_dolls', 'dressup_custom_backgrounds', 'dressup_doll_presets', 'dressup_outfit', 'dressup_current_doll_id']) {
       expect(localStorage.getItem(key)).toBeNull();
     }
-    expect(deleteDatabase).toHaveBeenCalledWith('DressUpAssets');
     expect(localStorage.getItem('dressup_content_v1')).not.toBeNull();
+    // 画像のデータベースは、新しい素材が読めると分かるまで消さない
+    expect(deleteDatabase).not.toHaveBeenCalled();
   });
 
   it('ドールの位置と倍率は残す', () => {
@@ -38,18 +39,23 @@ describe('cleanupLegacyData', () => {
 
   it('2 回目以降は何も消さない', () => {
     cleanupLegacyData();
-    deleteDatabase.mockClear();
     localStorage.setItem('dressup_outfit', '[{"id":"a","equipOrder":0}]');
     localStorage.setItem('dressup_current_doll_id', 'アニメ');
     cleanupLegacyData();
     expect(localStorage.getItem('dressup_outfit')).toBe('[{"id":"a","equipOrder":0}]');
     expect(localStorage.getItem('dressup_current_doll_id')).toBe('アニメ');
-    expect(deleteDatabase).not.toHaveBeenCalled();
   });
 
-  it('IndexedDB が使えなくても落ちない', () => {
+  it('deleteLegacyDatabase: 旧データベースを 1 回だけ削除する', () => {
+    deleteLegacyDatabase();
+    expect(deleteDatabase).toHaveBeenCalledTimes(1);
+    expect(deleteDatabase).toHaveBeenCalledWith('DressUpAssets');
+    deleteLegacyDatabase();
+    expect(deleteDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteLegacyDatabase: IndexedDB が使えなくても落ちない', () => {
     vi.stubGlobal('indexedDB', undefined);
-    expect(() => cleanupLegacyData()).not.toThrow();
-    expect(localStorage.getItem('dressup_content_v1')).not.toBeNull();
+    expect(() => deleteLegacyDatabase()).not.toThrow();
   });
 });

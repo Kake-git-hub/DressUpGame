@@ -418,6 +418,22 @@ test.describe('素材の取得に失敗したとき', () => {
     await expectPixel(page, DOLL_X, TOP_Y, SKIN); // 読めなかった服は表示されないだけ
   });
 
+  test('読み込みの遅い服の後に別の服を着せると、後から着せた服が残る', async ({ page }) => {
+    const manifest = await (await page.request.get('/DressUpGame/e2e-content/manifest.json')).json();
+    const red = manifest.dolls[0].items.find((i: { name: string }) => i.name === 'red');
+    await page.route(`**/e2e-content/${red.image.file}`, async (route) => {
+      await new Promise((r) => setTimeout(r, 2500));
+      await route.continue();
+    });
+    await page.goto(APP_URL);
+    await openApp(page);
+    await dragItemToDoll(page, 'トップス', 'red'); // 画像が届くまで 2.5 秒かかる
+    await dragItemToDoll(page, 'トップス', 'blue'); // すぐ着替える
+    await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+    await page.waitForTimeout(3500); // 遅れて届いた red が上書きしないこと
+    expect(near(await canvasPixel(page, DOLL_X, TOP_Y), BLUE)).toBe(true);
+  });
+
   test('一覧から消えた服は、その 1 枚だけ外れる', async ({ page }) => {
     await openApp(page);
     await dragItemToDoll(page, 'トップス', 'red');

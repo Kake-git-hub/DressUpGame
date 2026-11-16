@@ -14,6 +14,7 @@ import { alphaBBox, isFullyOpaque } from '../../src/pipeline/alpha.ts';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { removeBorderBackground } from '../../src/pipeline/removeBackground.ts';
 import { removeCornerSpeck } from '../../src/pipeline/removeCornerSpeck.ts';
+import { parseManifest } from '../../src/content/manifest.ts';
 import type {
   Manifest,
   ManifestBackground,
@@ -150,6 +151,7 @@ function uniqueId(base: string, used: Set<string>): string {
 interface ClothingSource {
   file: string;
   name: string;
+  idName: string; // ID に使う名前（ファイル名に ID が付いていれば、それを含む）
   categoryId: string;
   label: string;
   layer: number;
@@ -171,6 +173,7 @@ async function clothingSources(clothingDir: string): Promise<ClothingSource[]> {
       sources.push({
         file: path.join(clothingDir, folder, file),
         name: stem(file),
+        idName: stem(file),
         categoryId: parsed.label.toLowerCase(),
         label: parsed.label,
         layer: parsed.order ?? mapping?.zIndex ?? 25,
@@ -186,9 +189,13 @@ async function clothingSources(clothingDir: string): Promise<ClothingSource[]> {
   for (const file of top.files.filter(isImage)) {
     const parsed = parseClothingFileName(file);
     const label = parsed?.categoryName ?? FALLBACK.category;
+    const name = (parsed?.itemName ?? stem(file)).replace(/^_+/, '') || stem(file);
+    // ファイル名の末尾に ID があれば ID に含める（同じ名前の服を後から足しても、既存の ID が変わらない）
+    const explicitId = parsed && parsed.uniqueId !== stem(file) ? parsed.uniqueId : null;
     sources.push({
       file: path.join(clothingDir, file),
-      name: (parsed?.itemName ?? stem(file)).replace(/^_+/, ''),
+      name,
+      idName: explicitId ? `${name}_${explicitId}` : name,
       categoryId: label.toLowerCase(),
       label,
       layer: parsed?.layerOrder ?? FALLBACK.layer,
@@ -245,7 +252,7 @@ async function buildDoll(dollDir: string, dollId: string, writer: Writer, warnin
       categories.set(src.categoryId, category);
     }
     const item: ManifestItem = {
-      id: uniqueId(`${dollId}/${src.categoryId}/${src.name}`, usedIds),
+      id: uniqueId(`${dollId}/${src.categoryId}/${src.idName}`, usedIds),
       name: src.name,
       category: src.categoryId,
       image: cut.image,
@@ -270,8 +277,14 @@ export async function buildContent(presetDir: string, outDir: string): Promise<B
   const dollDirs = (await list(presetDir)).dirs.filter((d) => /^doll-/i.test(d));
   if (dollDirs.length === 0) throw new Error(`${presetDir} に doll-* フォルダがありません`);
 
-  // 出力先の manifest.json と files/ だけを作り直す（README などは残す）
+  // 出力先の manifest.json と files/ だけを作り直す（README などは残す）。
+  // 関係ないフォルダの files/ を消さないよう、空か、前回の出力があるフォルダだけを受け付ける
   await fs.mkdir(outDir, { recursive: true });
+  const existing = await list(outDir);
+  const hasContent = existing.dirs.some((d) => d !== '.git') || existing.files.some((f) => !/^(README\.md|\.nojekyll|\.gitignore)$/i.test(f));
+  if (hasContent && !existing.files.includes('manifest.json')) {
+    throw new Error(`${outDir} は素材の出力先ではないようです（manifest.json がありません）。空のフォルダか、前回の出力先を指定してください`);
+  }
   await fs.rm(path.join(outDir, 'files'), { recursive: true, force: true });
   await fs.rm(path.join(outDir, 'manifest.json'), { force: true });
   await fs.mkdir(path.join(outDir, 'files'), { recursive: true });
@@ -287,6 +300,8 @@ export async function buildContent(presetDir: string, outDir: string): Promise<B
   const shared = await backgrounds(path.join(presetDir, 'backgrounds'), 'bg', writer, warnings);
 
   const manifest: Manifest = { version: 1, dolls, backgrounds: shared };
+  // アプリが読めない一覧は書き出さない（書き出すと、全端末で読み込みに失敗する）
+  parseManifest(JSON.parse(JSON.stringify(manifest)));
   await fs.writeFile(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 1) + '\n');
   return {
     dolls: dolls.length,

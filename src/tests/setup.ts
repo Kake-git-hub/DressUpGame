@@ -90,6 +90,7 @@ class MockColorMatrixFilter {
 }
 
 const MockAssets = {
+  setPreferences: vi.fn(),
   load: vi.fn(async () => ({
     width: 512,
     height: 1024,

@@ -11,7 +11,8 @@ import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { loadContent, resolveContentUrl } from './content/loadContent';
-import { cleanupLegacyData } from './content/legacyCleanup';
+import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
+import { resolveStartState } from './content/startState';
 import { contentUrlsForDoll, prefetchUrls, waitForServiceWorkerControl } from './content/prefetch';
 import {
   loadDollTransform,
@@ -21,7 +22,7 @@ import {
   saveCurrentBackgroundId,
   loadCurrentBackgroundId,
 } from './services/stateStorage';
-import { saveOutfit, loadOutfit, fromSavedOutfit } from './services/outfitStorage';
+import { saveOutfit, loadOutfit } from './services/outfitStorage';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
@@ -136,10 +137,16 @@ function App() {
         setAllDolls(content.dolls);
         setAllBackgrounds(content.backgrounds);
         setAllClothing(content.clothing);
-        // 一覧から無くなった服は、その1枚だけ外れる
-        const restored = fromSavedOutfit(savedOutfitRef.current ?? [], content.clothing);
-        if (restored.length > 0) restoreEquipped(restored);
+        // 保存されていたドール・背景・服装を、いまの素材と突き合わせて決める
+        const start = resolveStartState(content, loadCurrentDollId(), loadCurrentBackgroundId(), savedOutfitRef.current ?? []);
+        setCurrentDollId(start.dollId);
+        saveCurrentDollId(start.dollId);
+        setCurrentBackgroundId(start.backgroundId);
+        saveCurrentBackgroundId(start.backgroundId);
+        if (start.outfit.length > 0) restoreEquipped(start.outfit);
         setLoadState('ready');
+        // 新しい素材が読めたので、旧方式の画像データベースを片付ける
+        deleteLegacyDatabase();
       })
       .catch((error) => {
         if (cancelled) return;
@@ -333,8 +340,14 @@ function App() {
       setCurrentDollId(dollId);
       saveCurrentDollId(dollId);
       resetAll();
+      // 前のドール専用の背景は外す（共通の背景はそのまま）
+      const bg = allBackgrounds.find((b) => b.id === currentBackgroundId);
+      if (bg?.dollId && bg.dollId !== dollId) {
+        setCurrentBackgroundId(null);
+        saveCurrentBackgroundId(null);
+      }
     },
-    [resetAll]
+    [resetAll, allBackgrounds, currentBackgroundId]
   );
 
   // ドール位置・スケール調整（デフォルトは背景中央）
