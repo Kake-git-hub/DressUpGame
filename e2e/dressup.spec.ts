@@ -361,7 +361,7 @@ test('調整: プレビューで置いた位置と、確定後の位置が一致
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 
   await page.locator('.tool-button').first().click();
-  const preview = page.locator('.item-adjust-overlay img[alt="調整プレビュー"]');
+  const preview = page.getByTestId('adjust-preview');
   await expect(preview).toBeVisible();
   await page.mouse.move(DOLL_X, DOLL_Y);
   await page.mouse.down();
@@ -507,4 +507,47 @@ test('初めて開いた 1 回だけで、オフラインでも開けて、ま�
   await page.mouse.click(at.x, at.y);
   await expectPixel(page, DOLL_X, BG_Y, BG);
   await context.setOffline(false);
+});
+
+/** 画面（キャンバスの上に重なる調整プレビューを含む）の 1 画素を読む */
+async function screenPixel(page: Page, x: number, y: number): Promise<Rgba> {
+  const shot = await page.screenshot({ clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1 } });
+  const { data } = await sharp(shot).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return [data[0], data[1], data[2], data[3]];
+}
+
+test('色スライダー: 動かすと調整中の表示がその場で変わり、確定後も同じ色', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  expect(near(await screenPixel(page, DOLL_X, TOP_Y), RED)).toBe(true);
+
+  // 色相 120 度: 赤 → 緑（PixiJS の色相行列どおり）
+  const HUE_GREEN: Rgba = [0, 255, 0, 255];
+  await page.locator('.hue-slider-vertical').fill('120');
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), HUE_GREEN, 12), { timeout: 5000, message: '調整中の表示が緑になる' })
+    .toBe(true);
+
+  // 途中の値でも追従する（240 度: 赤 → 青）
+  await page.locator('.hue-slider-vertical').fill('-120');
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), [0, 0, 255, 255], 12), { timeout: 5000, message: '調整中の表示が青になる' })
+    .toBe(true);
+
+  await page.locator('.hue-slider-vertical').fill('120');
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expect
+    .poll(async () => near(await canvasPixel(page, DOLL_X, TOP_Y), HUE_GREEN, 12), { timeout: 10_000, message: '確定後も緑' })
+    .toBe(true);
+
+  // もう一度調整を開くと、選んだ色のまま表示される
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), HUE_GREEN, 12), { timeout: 5000, message: '開き直しても緑' })
+    .toBe(true);
 });
