@@ -587,6 +587,9 @@ export function ItemAdjustPanel({
                   // ただし、transformのscaleは外側のdivで適用済み（dollScale * adjustScale）
                   // なので、imgにはbaseScale相当のサイズ制限のみ必要
                   // → maxHeightで制限するのが最もシンプル
+                  // inline のままだと画像の下に文字用の余白が付き、
+                  // 中心がその半分だけ上にずれる（確定時の数pxのずれの原因）
+                  display: 'block',
                   maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                 }}
@@ -627,6 +630,9 @@ export function ItemAdjustPanel({
                 style={{
                   // PixiEngineと同じスケール計算
                   // baseScale = maxHeight / 1024, transformでdollScaleを適用
+                  // inline のままだと画像の下に文字用の余白が付き、
+                  // 中心がその半分だけ上にずれる（確定時の数pxのずれの原因）
+                  display: 'block',
                   maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
                   width: 'auto',
                 }}

@@ -345,3 +345,61 @@ test('服の画像が読めなかった起動では、保存済みの服装を�
     .toBe(1);
   expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).not.toContain('missing-item');
 });
+
+/** #avatar-canvas 上で、指定色の領域の中心を求める（CSSピクセル） */
+async function colorCenter(page: Page, color: Rgba): Promise<{ x: number; y: number }> {
+  return page.evaluate((c) => {
+    const src = document.querySelector('#avatar-canvas') as HTMLCanvasElement;
+    const rect = src.getBoundingClientRect();
+    const out = document.createElement('canvas');
+    out.width = src.width;
+    out.height = src.height;
+    const ctx = out.getContext('2d')!;
+    ctx.drawImage(src, 0, 0);
+    const d = ctx.getImageData(0, 0, out.width, out.height).data;
+    let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+    for (let y = 0; y < out.height; y++) {
+      for (let x = 0; x < out.width; x++) {
+        const i = (y * out.width + x) * 4;
+        if (Math.abs(d[i] - c[0]) <= 8 && Math.abs(d[i + 1] - c[1]) <= 8 && Math.abs(d[i + 2] - c[2]) <= 8 && d[i + 3] > 250) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return {
+      x: rect.left + (((minX + maxX + 1) / 2) / src.width) * rect.width,
+      y: rect.top + (((minY + maxY + 1) / 2) / src.height) * rect.height,
+    };
+  }, color);
+}
+
+test('調整: プレビューで置いた位置と、確定後の位置が一致する（ずれ 1px 未満）', async ({ page }) => {
+  await importPreset(page);
+  await dragItemToDoll(page, 'トップス', 0);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+
+  await page.locator('.tool-button').first().click();
+  const preview = page.locator('.item-adjust-overlay img[alt="調整プレビュー"]');
+  await expect(preview).toBeVisible();
+  await page.mouse.move(DOLL_X, DOLL_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + 73, DOLL_Y + 41, { steps: 5 });
+  await page.mouse.up();
+
+  // プレビュー画像（1024x1024 全体）の中で、赤い矩形(x=292〜732, y=240〜520)の中心がある位置
+  const box = (await preview.boundingBox())!;
+  const previewCenter = {
+    x: box.x + (512 / 1024) * box.width,
+    y: box.y + (380 / 1024) * box.height,
+  };
+
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X + 73, TOP_Y + 41, RED);
+  const committed = await colorCenter(page, RED);
+
+  expect(Math.abs(committed.x - previewCenter.x)).toBeLessThan(1);
+  expect(Math.abs(committed.y - previewCenter.y)).toBeLessThan(1);
+});
