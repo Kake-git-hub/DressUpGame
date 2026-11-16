@@ -28,9 +28,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], viewport: { width: 1180, height: 820 } },
     },
   ],
-  webServer: {
-    command: 'npx vite preview --port 4173 --strictPort',
-    url: 'http://localhost:4173/DressUpGame/',
-    reuseExistingServer: true,
-  },
+  webServer: [
+    {
+      command: 'npx vite preview --port 4173 --strictPort',
+      url: 'http://localhost:4173/DressUpGame/',
+      reuseExistingServer: true,
+    },
+    {
+      // スタジオ: 空の素材フォルダから始める（毎回作り直す）
+      command: 'rm -rf node_modules/.tmp/studio-e2e && npx vite --config vite.studio.config.ts --port 4174 --strictPort --open false',
+      url: 'http://127.0.0.1:4174/api/status',
+      reuseExistingServer: false,
+      env: { CONTENT_DIR: 'node_modules/.tmp/studio-e2e', STUDIO_CREATE: '1', ANTHROPIC_API_KEY: '', GEMINI_API_KEY: '' },
+    },
+  ],
 });

@@ -130,7 +130,8 @@ const REGION_RULES: { match: RegExp; parts: PartName[]; grow: [number, number, n
   // grow = [左右, 上, 下] ではなく [左, 上, 右, 下] へ広げる量（ドールの高さに対する割合）
   { match: /ぼうし|帽子|hat|かんむり|ティアラ/i, parts: ['head'], grow: [0.12, 0.2, 0.12, 0.02] },
   { match: /かみ|髪|ヘア|hair/i, parts: ['head', 'torso'], grow: [0.12, 0.06, 0.12, 0.05] },
-  { match: /かお|顔|face|メイク|めがね/i, parts: ['head'], grow: [0.03, 0.03, 0.03, 0.03] },
+  // 「かお」には髪型も入るので、髪と同じ広さにする
+  { match: /かお|顔|face|メイク|めがね/i, parts: ['head', 'torso'], grow: [0.12, 0.06, 0.12, 0.05] },
   { match: /てぶくろ|手袋|glove/i, parts: ['armLeft', 'armRight', 'handLeft', 'handRight'], grow: [0.04, 0.04, 0.04, 0.04] },
   { match: /くつした|ソックス|タイツ|sock/i, parts: ['legs', 'feet'], grow: [0.05, 0.03, 0.05, 0.02] },
   { match: /くつ|靴|shoe|ブーツ/i, parts: ['feet', 'legs'], grow: [0.06, -0.3, 0.06, 0.02] },

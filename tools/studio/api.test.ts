@@ -14,7 +14,6 @@ import { StudioApi } from './api.ts';
 import type { ApiResponse } from './api.ts';
 import { Budget } from './budget.ts';
 
-const FIXTURES = path.join(import.meta.dirname, 'fixtures');
 let dir: string;
 let api: StudioApi;
 let budget: Budget;
