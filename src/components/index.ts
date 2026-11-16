@@ -16,3 +16,5 @@ export { DollControlPanel } from './DollControlPanel';
 export { ItemAdjustPanel } from './ItemAdjustPanel';
 export { DrawingCanvas } from './DrawingCanvas';
 export { EraserCanvas } from './EraserCanvas';
+export { DragPreviewLayer } from './DragPreviewLayer';
+export type { DragPreviewHandle } from './DragPreviewLayer';

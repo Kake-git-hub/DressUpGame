@@ -270,3 +270,52 @@ test('着ている服の保存は 1 枚 300 バイト以下', async ({ page }) =
   expect(entries.length).toBe(2);
   expect((saved ?? '').length / entries.length).toBeLessThanOrEqual(300);
 });
+
+test('ドラッグが pointercancel で終わるとプレビューが消え、服は着ない', async ({ page }) => {
+  await importPreset(page);
+  await openCategory(page, 'トップス');
+  const from = await itemCenter(page, 0);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
+  const preview = page.getByTestId('drag-preview');
+  await expect(preview).toBeVisible();
+
+  // 着信やシステムジェスチャーで中断されたときと同じイベントを送る
+  await page.locator('.palette-section img').first().evaluate((img) => {
+    img.parentElement?.parentElement?.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+  });
+  await expect(preview).toBeHidden();
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+});
+
+test('ドラッグ中、プレビューは指の位置に付いてくる', async ({ page }) => {
+  await importPreset(page);
+  await openCategory(page, 'トップス');
+  const from = await itemCenter(page, 0);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(700, 300, { steps: 4 });
+  const box = await page.getByTestId('drag-preview').boundingBox();
+  expect(box).not.toBeNull();
+  expect(Math.abs(box!.x + box!.width / 2 - 700)).toBeLessThanOrEqual(2);
+  expect(Math.abs(box!.y + box!.height / 2 - 300)).toBeLessThanOrEqual(2);
+  await page.mouse.up();
+});
+
+test('服を着ていないとき、調整ボタンでドールを動かせる', async ({ page }) => {
+  await importPreset(page);
+  await page.locator('.tool-button').first().click();
+  await expect(page.locator('.item-adjust-overlay')).toBeVisible();
+  await page.mouse.move(DOLL_X, DOLL_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + ADJUST_DX, DOLL_Y, { steps: 6 });
+  await page.mouse.up();
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, SKIN);
+  await expect
+    .poll(async () => (await canvasPixel(page, DOLL_X - 100, TOP_Y))[3], { timeout: 20_000 })
+    .toBe(0);
+});

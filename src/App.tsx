@@ -6,8 +6,8 @@
  * GitHub Pages（無料）で画像配信
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DrawingCanvas, EraserCanvas } from './components';
-import type { AvatarCanvasHandle } from './components';
+import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DrawingCanvas, EraserCanvas, DragPreviewLayer } from './components';
+import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
@@ -432,30 +432,31 @@ function App() {
       if (!currentDoll) return;
       const scaledItem = scaledItems.find(i => i.id === item.id) || item;
       equipItem(scaledItem);
-      setDraggingPreview(null);
+      dragPreviewRef.current?.hide();
     },
     [equipItem, scaledItems, currentDoll]
   );
 
   // アイテムドラッグ中のコールバック（全アイテム対象）
   const handleDragMove = useCallback((item: ClothingItemData, position: Position) => {
-    if (!avatarSectionRef.current) return;
+    const preview = dragPreviewRef.current;
+    if (!preview || !avatarSectionRef.current) return;
     const rect = avatarSectionRef.current.getBoundingClientRect();
-    // ドラッグ位置がavatar-section内かチェック
+    // ドラッグ位置がavatar-section内のときだけ表示
     if (
       position.x >= rect.left &&
       position.x <= rect.right &&
       position.y >= rect.top &&
       position.y <= rect.bottom
     ) {
-      setDraggingPreview({ item, position });
+      preview.move(item.thumbnailUrl || item.imageUrl, position.x, position.y);
     } else {
-      setDraggingPreview(null);
+      preview.hide();
     }
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    setDraggingPreview(null);
+    dragPreviewRef.current?.hide();
   }, []);
 
   // 服を脱がせる処理（「なし」選択時）
@@ -498,11 +499,8 @@ function App() {
 
   const currentDollSafe = currentDoll ?? (allDolls[0] ?? null);
 
-  // movableアイテムのドラッグ中プレビュー用
-  const [draggingPreview, setDraggingPreview] = useState<{
-    item: ClothingItemData;
-    position: Position;
-  } | null>(null);
+  // ドラッグ中プレビュー（再レンダリングなしで動かす）
+  const dragPreviewRef = useRef<DragPreviewHandle>(null);
   const avatarSectionRef = useRef<HTMLElement>(null);
 
   // 現在の背景
@@ -625,30 +623,6 @@ function App() {
 
             {/* 消しゴムマスクはPixiEngine側で処理 */}
 
-            {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
-            {draggingPreview && avatarSectionRef.current && (() => {
-              const rect = avatarSectionRef.current.getBoundingClientRect();
-              const left = draggingPreview.position.x - rect.left;
-              const top = draggingPreview.position.y - rect.top;
-              return (
-                <img
-                  src={draggingPreview.item.thumbnailUrl || draggingPreview.item.imageUrl}
-                  alt={draggingPreview.item.name}
-                  style={{
-                    position: 'absolute',
-                    left: left,
-                    top: top,
-                    transform: 'translate(-50%, -50%)',
-                    maxWidth: '120px',
-                    maxHeight: '120px',
-                    opacity: 0.8,
-                    pointerEvents: 'none',
-                    filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.4))',
-                    zIndex: 100,
-                  }}
-                />
-              );
-            })()}
           </section>
         )}
 
@@ -722,6 +696,9 @@ function App() {
           isPortrait={isPortrait}
         />
       )}
+
+      {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
+      <DragPreviewLayer ref={dragPreviewRef} />
 
       {/* 設定パネル */}
       <SettingsPanel
