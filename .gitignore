@@ -48,3 +48,6 @@ preset-template/doll-kawaii/
 
 # Release ZIP files
 kisekae-*.zip
+
+# スタジオの記録（画像生成の枚数など）
+.studio

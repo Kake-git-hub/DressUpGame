@@ -40,7 +40,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,gif,webp,woff,woff2}'],
-        globIgnores: ['**/app-icon.png'], // 元ファイル（大きすぎる）を除外
+        // 元のアイコン（大きすぎる）と、スタジオ（遊ぶ側には要らない）を除外
+        globIgnores: ['**/app-icon.png', '**/studio*'],
         runtimeCaching: [
           {
             // 素材の一覧: オンラインなら最新、つながらなければ前回のもの
@@ -66,4 +67,8 @@ export default defineConfig({
     })
   ],
   base: '/DressUpGame/',
+  build: {
+    // スタジオは別ページ。開いたときだけ読み込まれる
+    rollupOptions: { input: { main: 'index.html', studio: 'studio.html' } },
+  },
 })
