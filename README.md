@@ -102,7 +102,7 @@ AI が作った画像（ドールが単色のシルエット、背景も単色�
 | `ANTHROPIC_API_KEY` | Claude API のキー（品目の企画と検品） |
 | `GEMINI_API_KEY` | Gemini API のキー（画像生成） |
 | `STUDIO_DAILY_IMAGE_LIMIT` / `STUDIO_RUN_IMAGE_LIMIT` | 画像生成の上限（1 日 / 1 回の実行）。既定は 60 枚 / 30 枚 |
-| `STUDIO_CLAUDE_MODEL` / `STUDIO_GEMINI_MODEL` | 使うモデル。既定は `claude-opus-5-5` / `gemini-2.5-flash-image` |
+| `STUDIO_CLAUDE_MODEL` / `STUDIO_GEMINI_MODEL` | 使うモデル。既定は `claude-opus-5-5` / `gemini-nano-banana-2.1` |
 
 スタジオはゲームとは別のページで、遊ぶ側の読み込みには含まれません。公開サイト上では API が無いため動きません（サーバーへの設置は今後の段階）。計画と結果は `docs/superpowers/plans/2026-11-16-studio.md` を参照してください。
 

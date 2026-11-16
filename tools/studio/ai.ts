@@ -75,60 +75,59 @@ export function createClaude(apiKey: string, model: string): TextAi {
   };
 }
 
-interface GeminiPart {
-  text?: string;
-  inlineData?: { mimeType?: string; data?: string };
-  inline_data?: { mime_type?: string; data?: string };
+interface GeminiBlock {
+  type?: string;
+  data?: string;
 }
-interface GeminiResponse {
-  candidates?: { content?: { parts?: GeminiPart[] }; finishReason?: string }[];
-  promptFeedback?: { blockReason?: string };
+interface GeminiInteraction {
+  steps?: { type?: string; content?: GeminiBlock[] }[];
+  output_image?: GeminiBlock; // SDK が付ける近道。REST の返答に入っていれば使う
+  status?: string;
   error?: { message?: string };
 }
 
 /**
- * Gemini の画像生成（REST）。
- * 注意: この形は公式の説明を開発環境から確認できないまま書いている（HANDOFF の「確かめられていないこと」）。
- * モデル名は環境変数 STUDIO_GEMINI_MODEL で変えられる。
+ * Gemini の画像生成（Interactions API、REST）。
+ * 形は公式の説明（https://ai.google.dev/gemini-api/docs/image-generation、2026-11-16 確認）に合わせた:
+ *   POST /v1beta/interactions、input に画像と文章を並べ、response_format で正方形の画像だけを求める。
+ * 実際のキーではまだ呼んでいない。モデル名は環境変数 STUDIO_GEMINI_MODEL で変えられる。
  */
 export function createGemini(apiKey: string, model: string, fetchImpl: typeof fetch = fetch): ImageAi {
   return {
     async generate(input: { prompt: string; images: Buffer[] }): Promise<Buffer> {
       const body = {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              ...input.images.map((data) => ({ inlineData: { mimeType: 'image/png', data: data.toString('base64') } })),
-              { text: input.prompt },
-            ],
-          },
+        model,
+        input: [
+          ...input.images.map((data) => ({ type: 'image', mime_type: 'image/png', data: data.toString('base64') })),
+          { type: 'text', text: input.prompt },
         ],
-        generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '1:1' } },
+        response_format: { type: 'image', aspect_ratio: '1:1', image_size: '2K' },
       };
       let response: Response;
       try {
-        response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        response = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/interactions', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey, 'api-revision': '2026-05-20' },
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(180_000),
         });
       } catch (error) {
         throw new AiError(`Gemini API に接続できませんでした（${(error as Error).message}）`);
       }
-      const json = (await response.json().catch(() => ({}))) as GeminiResponse;
+      const json = (await response.json().catch(() => ({}))) as GeminiInteraction;
       if (!response.ok) {
         if (response.status === 429) throw new AiError('Gemini API の利用制限に達しました。少し待ってからやり直してください', 429);
         if (response.status === 401 || response.status === 403) throw new AiError('Gemini API のキーが正しくありません（GEMINI_API_KEY）', 500);
         throw new AiError(`Gemini API のエラー（${response.status}）: ${json.error?.message ?? '詳細なし'}`);
       }
-      for (const part of json.candidates?.[0]?.content?.parts ?? []) {
-        const data = part.inlineData?.data ?? part.inline_data?.data;
-        if (data) return Buffer.from(data, 'base64');
+      // 最後に出てきた画像を使う
+      let data = json.output_image?.data;
+      for (const step of json.steps ?? []) {
+        if (step.type !== 'model_output') continue;
+        for (const block of step.content ?? []) if (block.type === 'image' && block.data) data = block.data;
       }
-      const reason = json.promptFeedback?.blockReason ?? json.candidates?.[0]?.finishReason ?? '理由なし';
-      throw new AiError(`Gemini API が画像を返しませんでした（${reason}）`, 422, true);
+      if (data) return Buffer.from(data, 'base64');
+      throw new AiError(`Gemini API が画像を返しませんでした（${json.status ?? '理由なし'}）`, 422, true);
     },
   };
 }
@@ -136,6 +135,6 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
   return {
     text: env.ANTHROPIC_API_KEY ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
-    image: env.GEMINI_API_KEY ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-2.5-flash-image') : null,
+    image: env.GEMINI_API_KEY ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1') : null,
   };
 }

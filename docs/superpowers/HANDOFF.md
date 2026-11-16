@@ -13,7 +13,7 @@
 | 公開中の版 | v0.10.1（`main` = コミット `352d416`）。https://kake-git-hub.github.io/DressUpGame/ |
 | 作業ブランチ | `claude/friendly-fermi-pgp3jg`（v0.11.0。スタジオを追加。**`main` には未マージ**） |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`）。ドール 2 体・服 91 点・背景 20 枚、15 MB。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 239 件、E2E 29 件。すべて通過。ESLint エラー 0 |
+| テスト | ユニット 241 件、E2E 29 件。すべて通過。ESLint エラー 0 |
 
 完了した段階:
 
@@ -32,7 +32,7 @@
 作者から「決めることはすべておすすめで進めてよい」と指示があり（2026-11-16）、スタジオは `2026-11-16-studio.md` の 1 章のとおり決めて実装した。
 
 1. **作者に PC で動かしてもらう**（`npm run studio`）。手持ちの画像で切り抜きの出来を見てもらい、公開まで通す。
-2. **API キーを置いて、最初の試行（10〜20 点）で合格率を測る**。Gemini の呼び出し（`tools/studio/ai.ts`）は、公式の説明を確認できないまま書いたので、最初にエラーが出る可能性が高い。エラーの内容をもらって直す。Claude API を触るときは `claude-api` スキルを読む。
+2. **API キーを置いて、最初の試行（10〜20 点）で合格率を測る**。Gemini の呼び出し（`tools/studio/ai.ts`）は、公式の説明（Interactions API）に合わせて書き直したが、本物のキーでは未確認。Claude API を触るときは `claude-api` スキルを読む。
 3. 合格率を見て、指示文（`tools/studio/generate.ts` の `itemPrompt`）・作り直し回数（`MAX_ATTEMPTS`）・部分拡大の要否を決める。
 4. 問題が無ければ、作者の「マージして」で `main` へ。
 5. そのあと: サーバーへの設置と有料化の設計（別の設計書。置き場所は `2026-11-16-studio.md` の 1 章に候補）。ロードマップの残り（描画の Canvas 2D 置き換え → 操作の改善 → 説明書の統合）。
@@ -77,8 +77,9 @@
 - ユニットテスト: `npx vitest run`　型: `npx tsc -b`　lint: `npx eslint .`
 - E2E: `npm run build` のあと `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test`（クラウド環境では、導入済みの Chromium を使うためにこの環境変数が必要。`npm run test:e2e` はビルドも行う）。
 - 実物の素材でアプリを見る: 素材リポジトリを `dist/real-content` にコピーし、`npx vite preview --port 4173` で `/DressUpGame/?content=real-content/` を開く（`?content=` は同じオリジンの相対パスだけ受け付ける）。
-- クラウド環境からは `kake-git-hub.github.io` が開けない（ネットワーク制限）。公開後の確認は作者に頼む。
+- クラウド環境は、このリポジトリ用の環境「DressUpGame」を使う（公開サイト `kake-git-hub.github.io` と Gemini の説明 `ai.google.dev`・`aistudio.google.com` を開ける。開始時に `npm ci` と、隣への素材リポジトリの取得を自動で行う）。既定の環境では公開サイトを開けない。
+- 公開サイトの確認: Playwright で `https://kake-git-hub.github.io/DressUpGame/` を開き、`.version-badge` の版数と画面を見る。
 - 素材リポジトリを触るには、セッションに `Kake-git-hub/DressUpGame-content` を追加して取得する必要がある（読むだけなら、公開リポジトリなので `git clone` できる）。
 - スタジオを実物の素材で見る: 素材リポジトリの `manifest.json` と `files/` を別のフォルダにコピーし、`CONTENT_DIR=<そのフォルダ> npx vite --config vite.studio.config.ts --port 5199 --open false` で `/DressUpGame/studio.html` を開く。
-- クラウド環境からは `ai.google.dev`（Gemini の説明）も開けなかった。API キーも無いので、自動生成はテスト用の偽物でしか動かしていない。
+- API キーが無いので、自動生成はテスト用の偽物でしか動かしていない。キーを環境に保存してもらえば（安全な入力フォームを出せる）、クラウド環境で最初の試行ができる。
 - コミットメッセージの訂正: コミット `0cfd7d9` の本文にある `e3f9d0f^` は誤り。削除した旧プリセットが最後に残っているのは `a3c7b62`。
