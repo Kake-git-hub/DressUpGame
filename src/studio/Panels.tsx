@@ -148,7 +148,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
         </label>
         <label>
           品目数
-          <input type="number" min={1} max={status.budget.perRun / status.budget.maxAttempts} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+          <input type="number" min={1} max={Math.floor(status.budget.perRun / status.budget.maxAttempts)} value={count} onChange={(e) => setCount(Number(e.target.value))} />
         </label>
         <div className="checks">
           カテゴリ（選ばなければ全部）:
@@ -219,9 +219,9 @@ function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo
         }
         return (
           <ItemCard
-            key={i}
+            key={`${i}-${c.attempts}`}
             doll={doll}
-            source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i), sourceUrl: api.jobImageUrl(id, i, 'source'), warnings: c.warnings, notes: c.notes }}
+            source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), warnings: c.warnings, notes: c.notes }}
             onDiscard={() => hide(i)}
             onSaved={() => { hide(i); void onChanged(); }}
             onRedo={() => { hide(i); onRedo(c.item as PlannedItem); }}
@@ -356,7 +356,8 @@ export function Library({ doll, onChanged }: Common) {
       <p className="hint">「重ね順」は大きいほど手前。「並び順」はメニューでの順番（小さいほど先）。</p>
       {categories.map((c) => {
         const items = doll.items.filter((i) => i.category === c.id);
-        const set = (change: Partial<typeof c>) => void guard(() => api.saveCategory(doll.id, { ...c, ...change }));
+        // 変えた項目だけを送る（続けて別の項目を変えても、前の変更が戻らない）
+        const set = (change: Partial<Omit<typeof c, 'id'>>) => void guard(() => api.updateCategory(doll.id, c.id, change));
         return (
           <div key={c.id} className="category" data-testid={`category-${c.id}`}>
             <div className="row">

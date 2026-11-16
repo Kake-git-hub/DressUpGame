@@ -42,6 +42,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,gif,webp,woff,woff2}'],
         // 元のアイコン（大きすぎる）と、スタジオ（遊ぶ側には要らない）を除外
         globIgnores: ['**/app-icon.png', '**/studio*'],
+        // スタジオのページを開いたとき、ゲームの画面を返さない
+        navigateFallbackDenylist: [/\/studio\.html/],
         runtimeCaching: [
           {
             // 素材の一覧: オンラインなら最新、つながらなければ前回のもの

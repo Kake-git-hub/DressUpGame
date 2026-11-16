@@ -116,12 +116,14 @@ const objective = (s: Sums) => s.inside - s.outside - s.bgOnDoll;
  * 長辺 128px に縮めて全体を探し、256 → 512 → 等倍と細かくしていく。
  */
 export function alignToDoll(input: AlignInput): Alignment {
-  const identity: Alignment = { scale: 1, dx: 0, dy: 0, score: 0 };
+  const toDoll = input.dollWidth / input.width;
+  // 動かさないときの置き方: 幅を合わせ、縦は中央（正方形どうしなら 0）
+  const restDy = Math.round((input.dollHeight - input.height * toDoll) / 2);
+  const identity: Alignment = { scale: 1, dx: 0, dy: restDy, score: 0 };
   let dollCount = 0;
   for (let i = 0; i < input.doll.length; i++) dollCount += input.doll[i];
   let silCount = 0;
   for (let i = 0; i < input.silhouette.length; i++) silCount += input.silhouette[i];
-  const toDoll = input.dollWidth / input.width;
   if (dollCount === 0 || silCount * toDoll * toDoll < dollCount * MIN_SILHOUETTE_SHARE) return identity;
 
   const sizes = [128, 256, 512, input.dollWidth].filter((n, i, all) => n <= input.dollWidth && all.indexOf(n) === i);
@@ -172,7 +174,7 @@ export function alignToDoll(input: AlignInput): Alignment {
   const found = measure(full, best.scale, best.ox, best.oy);
   const still = measure(full, 1, 0, 0);
   if ((objective(found) - objective(still)) / dollCount < MIN_IMPROVEMENT) {
-    return { scale: 1, dx: 0, dy: 0, score: quality(still) };
+    return { scale: 1, dx: 0, dy: restDy, score: quality(still) };
   }
   // 中心基準のずれを、左上基準（p × toDoll × scale + (dx, dy)）に直す
   const scale = Math.round(best.scale * 1000) / 1000;

@@ -8,9 +8,11 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export class AiError extends Error {
   readonly status: number;
-  constructor(message: string, status = 502) {
+  readonly retryable: boolean; // 同じ依頼をもう一度出す意味があるか（画像が返らなかった、など）
+  constructor(message: string, status = 502, retryable = false) {
     super(message);
     this.status = status;
+    this.retryable = retryable;
   }
 }
 
@@ -126,7 +128,7 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
         if (data) return Buffer.from(data, 'base64');
       }
       const reason = json.promptFeedback?.blockReason ?? json.candidates?.[0]?.finishReason ?? '理由なし';
-      throw new AiError(`Gemini API が画像を返しませんでした（${reason}）`, 422);
+      throw new AiError(`Gemini API が画像を返しませんでした（${reason}）`, 422, true);
     },
   };
 }

@@ -94,10 +94,10 @@ export function Studio() {
       {error && <p className="error">{error}</p>}
       <main>
         {activeTab === 'doll' && <DollPanel doll={doll} onChanged={reload} onAdded={(id) => { setDollId(id); setTab('doll'); void reload(); }} />}
-        {doll && activeTab === 'add' && <AddItems doll={doll} onChanged={reload} />}
-        {doll && activeTab === 'generate' && <Generate doll={doll} status={status} onChanged={reload} />}
-        {doll && activeTab === 'backgrounds' && <Backgrounds doll={doll} manifest={manifest} status={status} onChanged={reload} />}
-        {doll && activeTab === 'library' && <Library doll={doll} onChanged={reload} />}
+        {doll && activeTab === 'add' && <AddItems key={doll.id} doll={doll} onChanged={reload} />}
+        {doll && activeTab === 'generate' && <Generate key={doll.id} doll={doll} status={status} onChanged={reload} />}
+        {doll && activeTab === 'backgrounds' && <Backgrounds key={doll.id} doll={doll} manifest={manifest} status={status} onChanged={reload} />}
+        {doll && activeTab === 'library' && <Library key={doll.id} doll={doll} onChanged={reload} />}
       </main>
       {publishing && <Publish status={status} onClose={() => { setPublishing(false); void reload(); }} />}
     </div>

@@ -169,11 +169,23 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   const planned = item.colors.map(hexToRgb).filter((c): c is Rgb => c !== null);
   const avoid: Rgb[] = []; // 前回、服と近すぎた色
   let feedback: string | null = null;
-  candidate.status = 'working';
   const maxAttempts = ctx.maxAttempts ?? MAX_ATTEMPTS;
+  // 前の回の結果。作り直しが失敗したり、何も残らなかったりしたときは、こちらを残す
+  let kept: { png: Buffer; source: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
+  const keepEarlier = (reason: string) => {
+    if (!kept) return false;
+    candidate.png = kept.png;
+    candidate.source = kept.source;
+    candidate.warnings = kept.warnings;
+    candidate.notes = [...kept.notes, `作り直しは採用しませんでした（${reason}）`];
+    candidate.status = 'flagged';
+    return true;
+  };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     candidate.attempts = attempt;
+    candidate.status = 'working'; // 作り直し中は、前の回の画像を候補として見せない
+    let result;
     try {
       const keys = chooseKeyColors([...planned, ...avoid]);
       const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
@@ -182,25 +194,40 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         prompt: itemPrompt(item, label, ctx.data.style, keys.silhouette, keys.background, feedback, ctx.styleRefs.length),
         images: [silhouette, ...ctx.styleRefs],
       });
-      const result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette });
-      candidate.png = await rgbaToPng(result.rgba, result.width, result.height);
-      candidate.source = await rgbaToPng(result.source, result.width, result.height);
-      candidate.warnings = [...result.warnings];
-      candidate.notes = [];
-
-      // 数値の検品
-      const problems: string[] = result.warnings.map((w) => w.message);
-      const region = ctx.data.regions[item.category];
-      if (region && !result.warnings.some((w) => w.code === 'empty')) {
-        const share = shareInsideRegion(result.rgba, result.width, result.height, region);
-        if (share < MIN_REGION_SHARE) problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
-      }
+      result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette });
       if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
+    } catch (error) {
+      const message = (error as Error).message;
+      if (keepEarlier(message)) return;
+      candidate.notes = [message];
+      candidate.status = 'failed';
+      // 上限・キーの誤りなど、やり直しても同じ結果になるものは打ち切る
+      if (!(error instanceof AiError) || !error.retryable) return;
+      feedback = null;
+      continue;
+    }
 
-      // 見た目の検品（数値で問題が無いときだけ。問題があれば、どうせ作り直す）
-      if (problems.length === 0) {
+    const empty = result.warnings.some((w) => w.code === 'empty');
+    if (empty && keepEarlier('服が見つかりませんでした')) return;
+    candidate.png = await rgbaToPng(result.rgba, result.width, result.height);
+    candidate.source = await rgbaToPng(result.source, result.width, result.height);
+    candidate.warnings = [...result.warnings];
+    candidate.notes = [];
+
+    // 数値の検品
+    const problems: string[] = result.warnings.map((w) => w.message);
+    const region = ctx.data.regions[item.category];
+    if (region && !empty) {
+      const share = shareInsideRegion(result.rgba, result.width, result.height, region);
+      if (share < MIN_REGION_SHARE) problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
+    }
+
+    // 見た目の検品（数値で問題が無いときだけ。問題があれば、どうせ作り直す）
+    if (problems.length === 0) {
+      let verdict: { ok: boolean; reason: string };
+      try {
         const preview = await renderPreview(ctx.template, [result.rgba]);
-        const verdict = await ctx.text.json<{ ok: boolean; reason: string }>({
+        verdict = await ctx.text.json<{ ok: boolean; reason: string }>({
           system: 'You are a strict quality inspector for a children\'s dress-up game. Reply with JSON only.',
           prompt: [
             'The image shows a doll wearing one automatically cut-out item.',
@@ -212,24 +239,23 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
           images: [preview],
           schema: INSPECT_SCHEMA,
         });
-        if (verdict.ok) {
-          candidate.status = 'passed';
-          return;
-        }
-        problems.push(verdict.reason || '見た目の検品で不合格でした');
+      } catch (error) {
+        // 検品そのものができなかった。できた画像は残し、人に見てもらう（作り直しても検品はまた失敗する）
+        candidate.notes = [`見た目の検品ができませんでした（${(error as Error).message}）`];
+        candidate.status = 'flagged';
+        return;
       }
-      candidate.notes = problems;
-      candidate.status = 'flagged';
-      feedback = problems.join(' / ');
-    } catch (error) {
-      candidate.notes = [(error as Error).message];
-      // 画像が 1 枚もできていなければ失敗、前の回の画像が残っていれば「注意あり」のまま
-      candidate.status = candidate.png ? 'flagged' : 'failed';
-      // 上限・キーの誤りなど、やり直しても同じ結果になるものは打ち切る
-      if (!(error instanceof AiError) || error.status !== 422) return;
-      feedback = null;
+      if (verdict.ok) {
+        candidate.status = 'passed';
+        return;
+      }
+      problems.push(verdict.reason || '見た目の検品で不合格でした');
     }
+    candidate.notes = problems;
+    kept = { png: candidate.png, source: candidate.source, warnings: candidate.warnings, notes: problems };
+    feedback = problems.join(' / ');
   }
+  candidate.status = candidate.png ? 'flagged' : 'failed';
 }
 
 const BACKGROUND_PLAN_SCHEMA = {

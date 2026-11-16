@@ -20,14 +20,11 @@ function readBody(req: IncomingMessage): Promise<Buffer | null> {
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY) {
-        resolve(null);
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
+      // 大きすぎるときは、ためずに読み捨てる（接続を切ると、理由を返せない）
+      if (size > MAX_BODY) chunks.length = 0;
+      else chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('end', () => resolve(size > MAX_BODY ? null : Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }

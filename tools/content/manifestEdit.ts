@@ -201,6 +201,29 @@ export class ContentStore {
     });
   }
 
+  // カテゴリの一部の項目だけを変える
+  updateCategory(dollId: string, categoryId: string, change: Partial<Omit<ManifestCategory, 'id'>>): Promise<ManifestCategory> {
+    return this.change((manifest) => {
+      const category = ContentStore.doll(manifest, dollId).categories.find((c) => c.id === categoryId);
+      if (!category) throw new ContentError(`カテゴリ「${categoryId}」がありません`, 404);
+      if (change.label !== undefined) category.label = checkPlainName(change.label, 'カテゴリ名');
+      if (change.layer !== undefined) category.layer = change.layer;
+      if (change.menuOrder !== undefined) category.menuOrder = change.menuOrder;
+      if (change.overlap !== undefined) category.overlap = change.overlap;
+      if (change.movable !== undefined) category.movable = change.movable;
+      return category;
+    });
+  }
+
+  // 新しいカテゴリを作る。同じ id があれば Error（既存の設定を上書きしない）
+  async createCategory(dollId: string, category: ManifestCategory): Promise<ManifestCategory> {
+    const manifest = await this.read();
+    if (ContentStore.doll(manifest, dollId).categories.some((c) => c.id === category.id)) {
+      throw new ContentError(`カテゴリ「${category.label}」はすでにあります`, 409);
+    }
+    return this.upsertCategory(dollId, category);
+  }
+
   reorderCategories(dollId: string, order: { id: string; layer: number; menuOrder: number }[]): Promise<void> {
     return this.change((manifest) => {
       const doll = ContentStore.doll(manifest, dollId);
@@ -295,34 +318,30 @@ export class ContentStore {
     });
   }
 
-  // 一覧から参照されていない files/ の画像を消す。消した名前を返す
-  async removeUnusedFiles(): Promise<string[]> {
-    const removed: string[] = [];
-    await this.change(async (manifest) => {
-      const used = new Set<string>();
-      const add = (file: string) => used.add(path.basename(file));
-      for (const b of manifest.backgrounds) { add(b.file); add(b.thumb); }
-      for (const doll of manifest.dolls) {
-        add(doll.image.file);
-        for (const i of doll.items) { add(i.image.file); add(i.thumb); }
-        for (const b of doll.backgrounds) { add(b.file); add(b.thumb); }
-      }
-      const filesDir = path.join(this.dir, 'files');
-      for (const name of await fs.readdir(filesDir).catch(() => [] as string[])) {
-        if (used.has(name)) continue;
-        await fs.rm(path.join(filesDir, name), { force: true });
-        removed.push(name);
-      }
-    });
-    return removed.sort();
+  // 一覧から参照されていない files/ の画像（このツールが書いた、ハッシュ名のファイルだけ）
+  private async unusedFiles(): Promise<string[]> {
+    const text = JSON.stringify(await this.read());
+    const entries = await fs.readdir(path.join(this.dir, 'files'), { withFileTypes: true }).catch(() => []);
+    return entries
+      .filter((e) => e.isFile() && /^[0-9a-f]{16}\.(webp|jpg)$/.test(e.name) && !text.includes(`files/${e.name}`))
+      .map((e) => e.name)
+      .sort();
   }
 
-  // 一覧から参照されていない画像の数（公開前の表示用）
+  // 使われていない画像を消す。消した名前を返す。ほかの変更と重ならないよう、順番待ちに入れる
+  removeUnusedFiles(): Promise<string[]> {
+    const run = this.queue.then(async () => {
+      const names = await this.unusedFiles();
+      for (const name of names) await fs.rm(path.join(this.dir, 'files', name), { force: true });
+      return names;
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  // 使われていない画像の数（公開前の表示用）
   async countUnusedFiles(): Promise<number> {
-    const manifest = await this.read();
-    const text = JSON.stringify(manifest);
-    const names = await fs.readdir(path.join(this.dir, 'files')).catch(() => [] as string[]);
-    return names.filter((n) => !text.includes(`files/${n}`)).length;
+    return (await this.unusedFiles()).length;
   }
 
   // 型紙など、スタジオだけが使うデータ（studio/<名前>.json）
@@ -332,6 +351,16 @@ export class ContentStore {
     } catch {
       return fallback;
     }
+  }
+  // 読む → 変える → 書く、を 1 つずつ順に行う
+  updateStudioData<T>(name: string, fallback: T, update: (current: T) => T): Promise<T> {
+    const run = this.queue.then(async () => {
+      const next = update(await this.readStudioData(name, fallback));
+      await this.writeStudioData(name, next);
+      return next;
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
   }
   async writeStudioData(name: string, value: unknown): Promise<void> {
     if (!/^[a-z0-9-]+$/.test(name)) throw new ContentError('名前が正しくありません');

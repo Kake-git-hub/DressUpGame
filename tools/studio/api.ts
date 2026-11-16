@@ -6,9 +6,11 @@
  */
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
@@ -116,8 +118,15 @@ export class StudioApi {
   }
 
   private async serveContent(rel: string): Promise<ApiResponse> {
-    const decoded = decodeURIComponent(rel);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(rel);
+    } catch {
+      throw new HttpError(400, 'パスが正しくありません');
+    }
     if (decoded.split(/[\\/]/).includes('..') || path.isAbsolute(decoded)) throw new HttpError(400, 'パスが正しくありません');
+    // 配るのは、一覧と画像と型紙だけ（.git などは出さない）
+    if (!/^(manifest\.json$|files\/|studio\/)/.test(decoded)) throw new HttpError(404, 'ファイルがありません');
     const file = path.join(this.store.dir, decoded);
     try {
       return { status: 200, type: MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream', body: await fs.readFile(file) };
@@ -160,8 +169,8 @@ export class StudioApi {
   private async templateData(doll: ManifestDoll): Promise<TemplateData> {
     const all = await this.store.readStudioData<Record<string, TemplateData>>('templates', {});
     const template = await this.dollTemplate(doll);
-    let data = all[doll.id];
-    if (!data) {
+    let data: TemplateData | undefined = all[doll.id];
+    if (!data || !data.parts || !data.regions) {
       const parts = estimateBodyParts(template.mask, template.canvasW, template.canvasH);
       if (!parts) throw new HttpError(500, 'ドールの画像が全部透明です');
       data = { parts, regions: {}, style: '', styleRefs: [] };
@@ -173,7 +182,12 @@ export class StudioApi {
   }
 
   private async git(...args: string[]): Promise<string> {
-    const { stdout, stderr } = await run('git', ['-C', this.store.dir, ...args], { maxBuffer: 16 * 1024 * 1024 });
+    // 認証を求められても端末で止まらないようにし、時間も区切る
+    const { stdout, stderr } = await run('git', ['-C', this.store.dir, ...args], {
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 120_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
     return (stdout + stderr).trim();
   }
   private async gitStatus(): Promise<{ isRepo: boolean; branch: string | null; changedFiles: number }> {
@@ -253,8 +267,14 @@ export class StudioApi {
       case 'PUT /api/categories': {
         const b = this.body<{ dollId: string; category: { id?: string; label: string; layer: number; menuOrder: number; overlap: boolean; movable: boolean } }>(req);
         if (!b.category || typeof b.category.label !== 'string') throw new HttpError(400, 'category を指定してください');
-        // 新しいカテゴリの id は、名前を小文字にしたもの
-        return json(await this.store.upsertCategory(b.dollId, { ...b.category, id: b.category.id ?? b.category.label.toLowerCase() }));
+        if (b.category.id !== undefined) return json(await this.store.upsertCategory(b.dollId, { ...b.category, id: b.category.id }));
+        // 新しいカテゴリの id は、名前を小文字にしたもの。同じものがあれば上書きせずに断る
+        return json(await this.store.createCategory(b.dollId, { ...b.category, id: b.category.label.toLowerCase() }));
+      }
+      case 'PATCH /api/categories': {
+        const b = this.body<{ dollId: string; id: string; change: { label?: string; layer?: number; menuOrder?: number; overlap?: boolean; movable?: boolean } }>(req);
+        if (typeof b.change !== 'object' || b.change === null) throw new HttpError(400, 'change を指定してください');
+        return json(await this.store.updateCategory(b.dollId, b.id, b.change));
       }
       case 'POST /api/categories/order': {
         const b = this.body<{ dollId: string; order: { id: string; layer: number; menuOrder: number }[] }>(req);
@@ -284,13 +304,27 @@ export class StudioApi {
         const b = this.body<{ dollId: string; template: TemplateData }>(req);
         const { doll } = await this.doll(b.dollId);
         const t = b.template;
-        if (!t || typeof t.parts !== 'object' || typeof t.regions !== 'object' || typeof t.style !== 'string' || !Array.isArray(t.styleRefs)) {
+        const current = await this.templateData(doll);
+        const isBox = (v: unknown): v is Box =>
+          typeof v === 'object' && v !== null && (['x', 'y', 'w', 'h'] as const).every((k) => Number.isFinite((v as Box)[k])) && (v as Box).w > 0 && (v as Box).h > 0;
+        const pick = (b: Box): Box => ({ x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) });
+        if (!t || typeof t.parts !== 'object' || t.parts === null || typeof t.regions !== 'object' || t.regions === null || typeof t.style !== 'string' || !Array.isArray(t.styleRefs)) {
           throw new HttpError(400, '型紙の形が正しくありません');
         }
-        const all = await this.store.readStudioData<Record<string, TemplateData>>('templates', {});
-        all[doll.id] = { parts: t.parts, regions: t.regions, style: t.style.slice(0, 2000), styleRefs: t.styleRefs.filter((id) => doll.items.some((i) => i.id === id)).slice(0, 3) };
-        await this.store.writeStudioData('templates', all);
-        return json(all[doll.id]);
+        const parts = { ...current.parts };
+        for (const key of Object.keys(parts) as (keyof typeof parts)[]) {
+          if (!isBox(t.parts[key])) throw new HttpError(400, `部位「${key}」の位置と大きさを、数値で入力してください（幅と高さは 1 以上）`);
+          parts[key] = pick(t.parts[key]);
+        }
+        const regions: Record<string, Box | null> = {};
+        for (const c of doll.categories) {
+          const r = t.regions[c.id];
+          if (r !== null && r !== undefined && !isBox(r)) throw new HttpError(400, `カテゴリ「${c.label}」の範囲を、数値で入力してください（幅と高さは 1 以上）`);
+          regions[c.id] = r ? pick(r) : null;
+        }
+        const saved: TemplateData = { parts, regions, style: t.style.slice(0, 2000), styleRefs: t.styleRefs.filter((id) => doll.items.some((i) => i.id === id)).slice(0, 3) };
+        await this.store.updateStudioData<Record<string, TemplateData>>('templates', {}, (all) => ({ ...all, [doll.id]: saved }));
+        return json(saved);
       }
       case 'GET /api/silhouette': {
         const { doll } = await this.doll(this.param(req, 'doll'));
@@ -304,7 +338,9 @@ export class StudioApi {
         const theme = typeof b.theme === 'string' ? b.theme.trim().slice(0, 400) : '';
         if (!theme) throw new HttpError(400, 'テーマを入力してください');
         const count = Math.floor(Number(b.count));
-        if (!(count >= 1 && count <= MAX_ITEMS_PER_PLAN)) throw new HttpError(400, `品目数は 1〜${MAX_ITEMS_PER_PLAN} で指定してください`);
+        // 1 回の実行の上限に収まる数まで（案を作ったのに、生成で断られることが無いように）
+        const most = Math.max(1, Math.min(MAX_ITEMS_PER_PLAN, Math.floor(this.options.budget.limits.perRun / MAX_ATTEMPTS)));
+        if (!(count >= 1 && count <= most)) throw new HttpError(400, `品目数は 1〜${most} で指定してください`);
         const data = await this.templateData(doll);
         const items = await planItems(text, doll, { theme, count, categories: b.categories, style: data.style });
         return json({ items, maxImages: items.length * MAX_ATTEMPTS });
@@ -387,7 +423,9 @@ export class StudioApi {
         const log: string[] = [];
         if (removed.length > 0) log.push(`使われていない画像を ${removed.length} 個消しました`);
         try {
-          await this.git('add', '-A');
+          // 素材として書いたものだけを対象にする
+          const targets = ['manifest.json', 'files', 'studio'].filter((name) => existsSync(path.join(this.store.dir, name)));
+          await this.git('add', '-A', '--', ...targets);
           if (await this.git('status', '--porcelain')) {
             const message = typeof b.message === 'string' && b.message.trim() ? b.message.trim().slice(0, 200) : 'スタジオから素材を更新';
             log.push(await this.git('commit', '-m', message));

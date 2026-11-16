@@ -98,6 +98,17 @@ describe('alignToDoll', () => {
     expect(Math.abs(a.dy + 8)).toBeLessThanOrEqual(2);
   });
 
+  it('縦長の元画像は、動かさないとき縦の中央に置く', () => {
+    // 幅 N・高さ 1.5N の画像の中央に、ドールと同じ形がある
+    const h = N * 1.5;
+    const silhouette = new Uint8Array(N * h);
+    const background = new Uint8Array(N * h).fill(1);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (doll[y * N + x]) { silhouette[(y + N / 4) * N + x] = 1; background[(y + N / 4) * N + x] = 0; }
+    const a = alignToDoll({ silhouette, background, width: N, height: h, doll, dollWidth: N, dollHeight: N });
+    expect(a).toMatchObject({ scale: 1, dx: 0, dy: -N / 4 });
+    expect(a.score).toBeGreaterThan(0.95);
+  });
+
   it('1 回の位置合わせが 3 秒以内に終わる', () => {
     const big = 1024;
     const m = new Uint8Array(big * big);

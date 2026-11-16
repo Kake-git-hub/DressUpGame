@@ -13,7 +13,7 @@
 | 公開中の版 | v0.10.1（`main` = コミット `352d416`）。https://kake-git-hub.github.io/DressUpGame/ |
 | 作業ブランチ | `claude/friendly-fermi-pgp3jg`（v0.11.0。スタジオを追加。**`main` には未マージ**） |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`）。ドール 2 体・服 91 点・背景 20 枚、15 MB。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 231 件、E2E 29 件。すべて通過。ESLint エラー 0 |
+| テスト | ユニット 239 件、E2E 29 件。すべて通過。ESLint エラー 0 |
 
 完了した段階:
 

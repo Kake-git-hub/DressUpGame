@@ -83,6 +83,7 @@ export const api = {
   updateItem: (change: { id: string; name?: string; category?: string }) => send<ManifestItem>('PATCH', '/items', change),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
+  updateCategory: (dollId: string, id: string, change: Partial<Omit<ManifestCategory, 'id'>>) => send<ManifestCategory>('PATCH', '/categories', { dollId, id, change }),
   deleteCategory: (dollId: string, id: string) => request('DELETE', `/categories?${q({ doll: dollId, id })}`),
   addBackground: async (dollId: string | null, name: string, file: Blob) =>
     (await (await request('POST', `/backgrounds?${q({ doll: dollId, name })}`, file)).json()) as ManifestBackground,
@@ -95,7 +96,8 @@ export const api = {
   startJob: (dollId: string, items: PlannedItem[]) => send<{ id: string }>('POST', '/jobs', { dollId, items }),
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
-  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' = 'png') => `${API_BASE}/jobs/image?${q({ id, index, kind })}`,
+  // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）
+  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
   publish: (message: string) => send<{ log: string }>('POST', '/publish', { message }),
 };
 

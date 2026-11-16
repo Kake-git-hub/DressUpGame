@@ -112,6 +112,10 @@ describe('基本', () => {
     expect(JSON.parse(res.body.toString()).dolls).toHaveLength(1);
     expect((await call('GET', '/content/..%2F.usage.json')).status).toBe(400);
     expect((await call('GET', '/content/files/none.webp')).status).toBe(404);
+    expect((await call('GET', '/content/%E0')).status).toBe(400);
+    await fs.mkdir(path.join(dir, 'content/.git'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'content/.git/config'), 'x');
+    expect((await call('GET', '/content/.git/config')).status).toBe(404);
   });
   it('無い API は 404、JSON でない本文は 400', async () => {
     expect((await call('GET', '/api/none')).status).toBe(404);
@@ -135,6 +139,10 @@ describe('ドールと型紙', () => {
     expect(saved.style).toBe('アニメ調、太い線');
     expect((await ok<{ style: string }>('GET', `/api/template?doll=${dollId}`)).style).toBe('アニメ調、太い線');
     expect((await call('PUT', '/api/template', { dollId, template: { style: 1 } })).status).toBe(400);
+    // 壊れた値は保存されず、型紙は読めるまま
+    expect((await call('PUT', '/api/template', { dollId, template: { ...t, parts: null } })).status).toBe(400);
+    expect((await call('PUT', '/api/template', { dollId, template: { ...t, parts: { ...(t as unknown as { parts: object }).parts, head: { x: 0, y: 0, w: 0, h: 5 } } } })).status).toBe(400);
+    expect((await call('GET', `/api/template?doll=${dollId}`)).status).toBe(200);
   });
   it('基準画像: 体の中心が指定色、隅が背景色', async () => {
     const res = await call('GET', `/api/silhouette?doll=${dollId}&color=ff00ff&bg=00ffff`);
@@ -175,6 +183,12 @@ describe('服の追加', () => {
   it('カテゴリと背景', async () => {
     await ok('PUT', '/api/categories', { dollId, category: { label: 'かばん', layer: 12, menuOrder: 11, overlap: true, movable: false } });
     await ok('POST', '/api/categories/order', { dollId, order: [{ id: 'かばん', layer: 3, menuOrder: 0 }] });
+    // 同じ名前の「新しいカテゴリ」は、既存の設定を上書きせずに断る
+    expect((await call('PUT', '/api/categories', { dollId, category: { label: 'ドレス', layer: 11, menuOrder: 11, overlap: false, movable: false } })).status).toBe(409);
+    // 一部の項目だけを変えられる
+    await ok('PATCH', '/api/categories', { dollId, id: 'ドレス', change: { overlap: true } });
+    const dress = (await ok<{ dolls: { categories: { id: string; layer: number; overlap: boolean }[] }[] }>('GET', '/api/content')).dolls[0].categories.find((c) => c.id === 'ドレス');
+    expect(dress).toMatchObject({ layer: 4, overlap: true });
     expect((await call('PUT', '/api/categories', { dollId, category: { label: 'x', layer: 'a', menuOrder: 0, overlap: false, movable: false } })).status).toBe(400);
     await ok('DELETE', `/api/categories?doll=${dollId}&id=かばん`);
     const bg = await ok<{ id: string }>('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
@@ -198,7 +212,7 @@ describe('テーマからの自動生成', () => {
     expect(p.items.map((i) => i.name)).toEqual(['あかいシャツ', 'みどりのシャツ']);
     expect(p.maxImages).toBe(4);
     expect((await call('POST', '/api/plan', { dollId, theme: ' ', count: 3 })).status).toBe(400);
-    expect((await call('POST', '/api/plan', { dollId, theme: 'x', count: 99 })).status).toBe(400);
+    expect((await call('POST', '/api/plan', { dollId, theme: 'x', count: 6 })).status).toBe(400); // 1 回の上限 10 枚 ÷ 2 回 = 5 点まで
   });
   it('生成: 候補ができ、合格し、採用するまで一覧には入らない', async () => {
     const p = await plan();
@@ -231,6 +245,46 @@ describe('テーマからの自動生成', () => {
     expect(imageCalls[1].prompt).toMatch(/そでが欠けています/);
     expect(await budget.usedToday()).toBe(2);
   }, 60_000);
+  it('作り直しのあいだは「作成中」になり、作り直しが何も残さなければ前の回の画像を残す', async () => {
+    verdicts = [{ ok: false, reason: 'そでが欠けています' }];
+    const statuses: string[] = [];
+    let calls = 0;
+    let jobId = '';
+    makeApi({
+      text: fakeText,
+      image: {
+        async generate(input) {
+          calls++;
+          if (calls === 2) {
+            statuses.push((await ok<JobView>('GET', `/api/jobs?id=${jobId}`)).candidates[0].status);
+            return sharp({ create: { width: 600, height: 600, channels: 3, background: '#ffffff' } }).png().toBuffer(); // 何も描かれていない
+          }
+          return fakeImage.generate(input);
+        },
+      },
+    });
+    jobId = (await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A red shirt.', colors: ['#c81e28'] }] })).id;
+    await api.waitForJob(jobId);
+    expect(statuses).toEqual(['working']);
+    const c = (await ok<JobView>('GET', `/api/jobs?id=${jobId}`)).candidates[0];
+    expect(c).toMatchObject({ status: 'flagged', attempts: 2, hasImage: true });
+    expect(c.notes[0]).toBe('そでが欠けています');
+    expect(c.notes[1]).toMatch(/作り直しは採用しませんでした/);
+    const kept = (await call('GET', `/api/jobs/image?id=${jobId}&index=0`)).body as Buffer;
+    expect((await sharp(kept).stats()).channels[3].max).toBe(255); // 1 回目の服が残っている
+  }, 60_000);
+  it('見た目の検品ができなかったら、画像は残し、作り直さない（もう 1 枚ぶん使わない）', async () => {
+    makeApi({ text: { json: async <T,>(input: { prompt: string; schema: Record<string, unknown> }) => {
+      if ('ok' in ((input.schema.properties ?? {}) as object)) throw new AiError('Claude API がこの依頼を受け付けませんでした', 422);
+      return fakeText.json<T>(input as Parameters<TextAi['json']>[0]);
+    } }, image: fakeImage });
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A red shirt.', colors: ['#c81e28'] }] });
+    await api.waitForJob(id);
+    const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
+    expect(c).toMatchObject({ status: 'flagged', attempts: 1, hasImage: true });
+    expect(c.notes[0]).toMatch(/検品ができませんでした/);
+    expect(await budget.usedToday()).toBe(1);
+  }, 60_000);
   it('画像生成が失敗したら、候補は「失敗」になり、理由が残る', async () => {
     makeApi({ text: fakeText, image: { generate: async () => { throw new AiError('Gemini API のキーが正しくありません', 500); } } });
     const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A shirt.', colors: [] }] });
@@ -240,14 +294,14 @@ describe('テーマからの自動生成', () => {
     expect(c.notes[0]).toMatch(/キー/);
   });
   it('上限: 1 回の実行の上限を超える品目数は、始める前に 429', async () => {
-    makeApi(undefined, { perDay: 20, perRun: 3 });
     const items = (await plan()).items;
+    makeApi(undefined, { perDay: 20, perRun: 3 });
     expect(await errorOf(call('POST', '/api/jobs', { dollId, items }))).toMatchObject({ status: 429, error: expect.stringMatching(/最大 3 枚/) });
     expect(imageCalls).toHaveLength(0);
   });
   it('上限: 今日の上限を超えたら、それ以上は作らない', async () => {
-    makeApi(undefined, { perDay: 4, perRun: 4 });
     const item = (await plan()).items[0];
+    makeApi(undefined, { perDay: 4, perRun: 4 });
     const first = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [item, { ...item, name: 'べつ' }] });
     await api.waitForJob(first.id);
     expect(await budget.usedToday()).toBe(2);

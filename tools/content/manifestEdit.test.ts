@@ -151,6 +151,13 @@ describe('ContentStore', () => {
     expect(await exists(first.image.file)).toBe(false);
     expect(await exists((await store.read()).dolls[0].image.file)).toBe(true);
   });
+  it('removeUnusedFiles は、自分が書いた画像以外（フォルダ、.gitkeep など）には触らない', async () => {
+    await fs.mkdir(path.join(dir, 'files/sub'));
+    await fs.writeFile(path.join(dir, 'files/.gitkeep'), '');
+    await store.removeUnusedFiles();
+    expect(await exists('files/sub')).toBe(true);
+    expect(await exists('files/.gitkeep')).toBe(true);
+  });
 
   it('同時に来た追加でも、全部が一覧に残る', async () => {
     await Promise.all([1, 2, 3, 4].map((n) => store.addItem(dollId, { ...item(`ふく${n}`), rgba: canvas([n * 50, 100, 40, 40]) })));
