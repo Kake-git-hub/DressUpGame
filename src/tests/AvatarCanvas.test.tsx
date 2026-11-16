@@ -41,6 +41,9 @@ describe('AvatarCanvas', () => {
         imageUrl: '/images/top-1.png',
         position: { x: 0, y: 0 },
         baseZIndex: 20,
+        canvasW: 1024,
+        canvasH: 1024,
+        box: { x: 0, y: 0, w: 1024, h: 1024 },
         equipOrder: 0,
       },
     ];

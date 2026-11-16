@@ -17,7 +17,6 @@
     "content:migrate": "tsx tools/content/migrate-preset.ts"
   },
   "dependencies": {
-    "jszip": "^3.10.1",
     "pixi.js": "^8.14.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
@@ -27,7 +26,6 @@
     "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
-    "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

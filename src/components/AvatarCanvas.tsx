@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
-import type { DollConfig, EquippedItem, DollTransform } from '../types';
+import type { DollConfig, DollData, EquippedItem, DollTransform } from '../types';
 
 // 外部から呼び出せるメソッド
 export interface AvatarCanvasHandle {
@@ -16,37 +16,48 @@ export interface AvatarCanvasHandle {
 interface AvatarCanvasProps {
   width?: number;
   height?: number;
-  dollConfig?: DollConfig;
   equippedItems: EquippedItem[];
-  customFaceUrl?: string;
-  dollImageUrl?: string; // ドールベース画像のURL
+  doll?: DollData | null; // 表示するドール
   backgroundImageUrl?: string; // 背景画像のURL
   dollTransform?: DollTransform; // ドールの位置・スケール
   menuOffset?: number; // メニュー幅オフセット（左側）
   rightOffset?: number; // 右ボタン領域オフセット（右側）
   adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
-  isPortrait?: boolean; // 縦画面モード
   onCanvasReady?: () => void;
+}
+
+function toDollConfig(doll: DollData | null | undefined): DollConfig {
+  return {
+    width: 200,
+    height: 300,
+    imageUrl: doll?.bodyImageUrl ?? '',
+    canvasW: doll?.canvasW,
+    canvasH: doll?.canvasH,
+    box: doll?.box,
+  };
 }
 
 export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(function AvatarCanvas({
   width = 400,
   height = 500,
-  dollConfig,
   equippedItems,
-  customFaceUrl,
-  dollImageUrl,
+  doll,
   backgroundImageUrl,
   dollTransform,
   menuOffset = 0,
   rightOffset = 60,
   adjustingItemId = null,
-  isPortrait = false,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PixiEngine | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  // 非同期の再描画から参照する、最新の props
+  const latest = useRef({ equippedItems, doll, backgroundImageUrl, adjustingItemId });
+  useEffect(() => {
+    latest.current = { equippedItems, doll, backgroundImageUrl, adjustingItemId };
+  });
 
   // 外部に公開するメソッド
   useImperativeHandle(ref, () => ({
@@ -68,6 +79,15 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     },
   }), []);
 
+  // 背景・ドール・服をすべて描き直す
+  const redrawAll = async (engine: PixiEngine) => {
+    const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting } = latest.current;
+    await engine.setBackground(bg ?? null);
+    await engine.drawDoll(toDollConfig(currentDoll));
+    await engine.drawClothing(adjusting ? items.filter((item) => item.id !== adjusting) : items);
+    engine.forceRedraw();
+  };
+
   // PixiJS初期化
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,73 +95,29 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
     // キャンセルフラグ（StrictModeでのクリーンアップ用）
     let cancelled = false;
-
-    // 新しいエンジンインスタンスを作成
     const engine = new PixiEngine();
 
     const initEngine = async () => {
       try {
         await engine.init(canvas, width, height);
-
-        // キャンセルされていたら処理を中止
         if (cancelled) {
           engine.destroy();
           return;
         }
-
-        // 成功した場合のみrefに保存
         engineRef.current = engine;
-
-        // メニューオフセット・右オフセットを設定（背景・ドール位置調整用）
         engine.setMenuOffset(menuOffset);
         engine.setRightOffset(rightOffset);
-        
-        // 縦画面モードを設定
-        engine.setPortraitMode(isPortrait);
-
-        // ドールの初期位置・スケールを設定
         if (dollTransform) {
           engine.setDollTransform(dollTransform);
         }
-
-        // ドールを描画（画像URLまたはプレースホルダー）
-        await engine.drawDoll(
-          dollConfig ?? {
-            width: 200,
-            height: 300,
-            imageUrl: dollImageUrl || '',
-          }
-        );
-
+        await engine.drawDoll(toDollConfig(latest.current.doll));
         setIsReady(true);
-
-        // コールバック呼び出し
         onCanvasReady?.();
 
-        // コンテキストロスト時の再描画コールバックを設定
-        engine.setContextLostCallback(async () => {
-          // キャンセルされていたら処理を中止
+        // WebGLコンテキスト復元時は全体を描き直す
+        engine.setContextLostCallback(() => {
           if (cancelled || !engineRef.current?.isInitialized()) return;
-          
-          // 全コンテンツを再描画
-          console.log('WebGLコンテキスト復元：再描画開始');
-          try {
-            if (backgroundImageUrl) {
-              await engineRef.current.setBackground(backgroundImageUrl);
-            }
-            await engineRef.current.drawDoll({
-              width: 200,
-              height: 300,
-              imageUrl: dollImageUrl || '',
-            });
-            await engineRef.current.drawClothing(equippedItems);
-            if (customFaceUrl) {
-              await engineRef.current.setCustomFace(customFaceUrl);
-            }
-            engineRef.current.forceRedraw();
-          } catch (error) {
-            console.error('WebGLコンテキスト復元時の再描画エラー:', error);
-          }
+          redrawAll(engineRef.current).catch((error) => console.error('WebGLコンテキスト復元時の再描画エラー:', error));
         });
       } catch (error) {
         console.error('PixiJS初期化エラー:', error);
@@ -151,65 +127,36 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
     initEngine();
 
-    // クリーンアップ
     return () => {
       cancelled = true;
       setIsReady(false);
-      // engineRefに保存されているエンジンを破棄
       if (engineRef.current) {
         engineRef.current.destroy();
         engineRef.current = null;
       }
-      // まだ初期化中のエンジンも破棄
       engine.destroy();
     };
-  }, []); // 初回のみ初期化（リサイズは別のuseEffectで処理）
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 初回のみ初期化（リサイズや中身の変化は別の effect で反映する）
+  }, []);
 
   // キャンバスサイズが変わったらリサイズ＆再描画
   useEffect(() => {
-    const redrawAfterResize = async () => {
-      if (!isReady || !engineRef.current?.isInitialized()) return;
-      
-      console.log('リサイズ検出:', width, 'x', height);
-      
-      // レンダラーをリサイズ
-      engineRef.current.resize(width, height);
-      
-      // メニューオフセットを再設定
-      engineRef.current.setMenuOffset(menuOffset);
-      engineRef.current.setRightOffset(rightOffset);
-      engineRef.current.setPortraitMode(isPortrait);
-      
-      // 少し待ってから再描画（レンダラーの準備待ち）
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      if (!engineRef.current?.isInitialized()) return;
-      
-      try {
-        // 全コンテンツを再描画
-        if (backgroundImageUrl) {
-          await engineRef.current.setBackground(backgroundImageUrl);
-        }
-        await engineRef.current.drawDoll({
-          width: 200,
-          height: 300,
-          imageUrl: dollImageUrl || '',
-        });
-        const itemsToRender = adjustingItemId
-          ? equippedItems.filter(item => item.id !== adjustingItemId)
-          : equippedItems;
-        await engineRef.current.drawClothing(itemsToRender);
-        if (customFaceUrl) {
-          await engineRef.current.setCustomFace(customFaceUrl);
-        }
-        engineRef.current.forceRedraw();
-      } catch (error) {
-        console.error('リサイズ後の再描画エラー:', error);
-      }
+    const engine = engineRef.current;
+    if (!isReady || !engine?.isInitialized()) return;
+    let cancelled = false;
+    engine.resize(width, height);
+    engine.setMenuOffset(menuOffset);
+    engine.setRightOffset(rightOffset);
+    // 少し待ってから再描画（レンダラーの準備待ち）
+    const timer = setTimeout(() => {
+      if (cancelled || !engine.isInitialized()) return;
+      redrawAll(engine).catch((error) => console.error('リサイズ後の再描画エラー:', error));
+    }, 50);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
     };
-    
-    redrawAfterResize();
-  }, [width, height, isReady, menuOffset, rightOffset, isPortrait]);
+  }, [width, height, isReady, menuOffset, rightOffset]);
 
   // 非同期の描画が終わったら必ず1フレーム描く
   // （描画ループは操作がないと停止しているので、ここで描かないと画面に反映されない）
@@ -220,18 +167,12 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       .catch((error) => console.error('描画エラー:', error));
   };
 
-  // ドール画像が変わったら更新（エンジン再初期化なし）
+  // ドールが変わったら更新（エンジン再初期化なし）
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      redrawWhenDone(
-        engineRef.current.drawDoll({
-          width: 200,
-          height: 300,
-          imageUrl: dollImageUrl || '',
-        })
-      );
+      redrawWhenDone(engineRef.current.drawDoll(toDollConfig(doll)));
     }
-  }, [dollImageUrl, isReady]);
+  }, [doll, isReady]);
 
   // 装備アイテムが変わったら再描画
   useEffect(() => {
@@ -244,13 +185,6 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     }
   }, [equippedItems, adjustingItemId, isReady]);
 
-  // カスタム顔が変わったら更新
-  useEffect(() => {
-    if (isReady && engineRef.current?.isInitialized()) {
-      redrawWhenDone(engineRef.current.setCustomFace(customFaceUrl ?? null));
-    }
-  }, [customFaceUrl, isReady]);
-
   // 背景が変わったら更新
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
@@ -260,93 +194,49 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
   // ドールの位置・スケールが変わったら更新
   useEffect(() => {
-    if (isReady && engineRef.current?.isInitialized() && dollTransform) {
-      engineRef.current.setDollTransform(dollTransform);
-      // ドールと服を再描画
-      const engine = engineRef.current;
+    const engine = engineRef.current;
+    if (isReady && engine?.isInitialized() && dollTransform) {
+      engine.setDollTransform(dollTransform);
       redrawWhenDone(
         Promise.all([
-          engine.drawDoll({
-            width: 200,
-            height: 300,
-            imageUrl: dollImageUrl || '',
-          }),
-          engine.drawClothing(equippedItems),
+          engine.drawDoll(toDollConfig(latest.current.doll)),
+          engine.drawClothing(latest.current.equippedItems),
         ])
       );
     }
   }, [dollTransform, isReady]);
 
-  // 縦画面モードが変わったら更新
-  useEffect(() => {
-    if (isReady && engineRef.current?.isInitialized()) {
-      engineRef.current.setPortraitMode(isPortrait);
-    }
-  }, [isPortrait, isReady]);
-
   // iPad等でバックグラウンドから復帰した時に再描画（WebGLコンテキストロスト対策）
   useEffect(() => {
-    // 再描画処理（共通）
-    const redrawAll = async () => {
-      if (!isReady || !engineRef.current?.isInitialized()) return;
-      
+    if (!isReady) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const redraw = () => {
+      if (timer) clearTimeout(timer);
       // 少し待ってから再描画（WebGL復帰待ち）
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
-      if (!engineRef.current?.isInitialized()) return;
-      
-      console.log('画面復帰：再描画開始');
-      try {
-        if (backgroundImageUrl) {
-          await engineRef.current.setBackground(backgroundImageUrl);
-        }
-        await engineRef.current.drawDoll({
-          width: 200,
-          height: 300,
-          imageUrl: dollImageUrl || '',
-        });
-        await engineRef.current.drawClothing(equippedItems);
-        if (customFaceUrl) {
-          await engineRef.current.setCustomFace(customFaceUrl);
-        }
-        engineRef.current.forceRedraw();
-      } catch (error) {
-        console.error('画面復帰時の再描画エラー:', error);
-      }
+      timer = setTimeout(() => {
+        const engine = engineRef.current;
+        if (!engine?.isInitialized()) return;
+        redrawAll(engine).catch((error) => console.error('画面復帰時の再描画エラー:', error));
+      }, 150);
     };
-
-    // visibilitychange（Chrome/Firefox用）
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        redrawAll();
-      }
+      if (document.visibilityState === 'visible') redraw();
     };
-
-    // pageshow（Safari bfcache対策）
+    // Safari bfcache から復元された場合
     const handlePageShow = (event: PageTransitionEvent) => {
-      // persisted=true はbfcacheから復元された場合
-      if (event.persisted) {
-        console.log('Safari bfcache復元検出');
-        redrawAll();
-      }
+      if (event.persisted) redraw();
     };
-
-    // focus（Safari追加対策：別アプリから戻った時）
-    const handleFocus = () => {
-      // Safariでは別アプリから戻った時にvisibilitychangeが発火しないことがある
-      redrawAll();
-    };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pageshow', handlePageShow);
-    window.addEventListener('focus', handleFocus);
-    
+    // Safari は別アプリから戻った時に visibilitychange が発火しないことがある
+    window.addEventListener('focus', redraw);
     return () => {
+      if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pageshow', handlePageShow);
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', redraw);
     };
-  }, [isReady, backgroundImageUrl, dollImageUrl, equippedItems, customFaceUrl]);
+  }, [isReady]);
 
   return (
     <canvas

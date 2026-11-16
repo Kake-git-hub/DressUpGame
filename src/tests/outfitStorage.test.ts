@@ -20,6 +20,9 @@ const item = (id: string): ClothingItemData => ({
   imageUrl: `/images/${id}.png`,
   position: { x: 0, y: 0 },
   baseZIndex: 10,
+  canvasW: 1024,
+  canvasH: 1024,
+  box: { x: 0, y: 0, w: 1024, h: 1024 },
 });
 
 describe('outfitStorage', () => {

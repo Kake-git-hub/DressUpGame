@@ -3,6 +3,10 @@
  * Types for the dress-up game
  */
 
+import type { Box } from '../pipeline/alpha';
+
+export type { Box };
+
 // 位置を表す型
 export interface Position {
   x: number;
@@ -244,6 +248,10 @@ export interface ClothingItemData {
   categoryOrder?: number;
   // 重複装備可能フラグ（フォルダ名に_overlapがあると有効）
   allowOverlap?: boolean;
+  // 切り抜く前の元キャンバスの大きさと、その中での画像の位置
+  canvasW: number;
+  canvasH: number;
+  box: Box;
 }
 
 // 装備中のアイテム（動的zIndex付き）
@@ -293,6 +301,10 @@ export interface DollData {
   dimensions?: DollDimensions;
   // 関節データ（Vtuber連携用）
   joints?: JointData;
+  // 切り抜く前の元キャンバスの大きさと、その中での画像の位置
+  canvasW: number;
+  canvasH: number;
+  box: Box;
 }
 
 // 着せ替え状態
@@ -315,6 +327,10 @@ export interface DollConfig {
   width: number;
   height: number;
   imageUrl: string;
+  // 切り抜く前の元キャンバスの大きさと、その中での画像の位置
+  canvasW?: number;
+  canvasH?: number;
+  box?: Box;
 }
 
 // インポート用のアイテムデータ形式

@@ -1,13 +1,9 @@
 /**
- * E2Eテスト: 取り込み → 着せる → 調整 → 再読み込みで復元 → 写真
- * テスト用プリセット（e2e/fixtures/makePreset.ts）を毎回生成して使う
+ * E2Eテスト: 着せる → 調整 → 再読み込みで復元 → 写真
+ * テスト用の素材は e2e/globalSetup.ts が dist/e2e-content に用意する
  */
 import { test, expect, type Page } from '@playwright/test';
-import os from 'node:os';
-import path from 'node:path';
-import fs from 'node:fs/promises';
 import sharp from 'sharp';
-import { makePreset } from './fixtures/makePreset';
 
 type Rgba = [number, number, number, number];
 
@@ -32,20 +28,12 @@ const BLUE: Rgba = [0, 0, 255, 255];
 const GREEN: Rgba = [0, 160, 0, 255];
 const BG: Rgba = [255, 255, 128, 255];
 
-let presetPath = '';
-
-test.beforeAll(async () => {
-  presetPath = path.join(os.tmpdir(), `dressup-e2e-preset-${process.pid}.zip`);
-  await makePreset(presetPath);
-});
-
-test.afterAll(async () => {
-  await fs.rm(presetPath, { force: true });
-});
+// テスト用の素材を読む起動 URL
+const APP_URL = '/DressUpGame/?content=e2e-content/';
 
 test.beforeEach(async ({ page }) => {
   page.on('dialog', (d) => d.accept());
-  await page.goto('/DressUpGame/');
+  await page.goto(APP_URL);
   await page.waitForSelector('.app');
 });
 
@@ -88,17 +76,8 @@ async function waitForMenu(page: Page): Promise<void> {
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
 }
 
-/** 設定からテスト用ZIPを取り込み、メニューにカテゴリが出るまで待つ */
-async function importPreset(page: Page): Promise<void> {
-  await page.click('.settings-button');
-  await page.setInputFiles('input[accept=".zip"]', presetPath);
-  await page.waitForFunction(
-    () => (localStorage.getItem('dressup_custom_clothing') ?? '').length > 10,
-    null,
-    { timeout: 60_000 }
-  );
-  await page.reload();
-  await page.waitForSelector('.app');
+/** メニューとドールが出るまで待つ */
+async function openApp(page: Page): Promise<void> {
   await waitForMenu(page);
 }
 
@@ -113,16 +92,16 @@ async function backToCategories(page: Page): Promise<void> {
   await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible();
 }
 
-async function itemCenter(page: Page, index: number): Promise<{ x: number; y: number }> {
-  const box = await page.locator('.palette-section img').nth(index).boundingBox();
-  if (!box) throw new Error(`item ${index} not found`);
+async function itemCenter(page: Page, name: string): Promise<{ x: number; y: number }> {
+  const box = await page.locator(`.palette-section img[alt="${name}"]`).first().boundingBox();
+  if (!box) throw new Error(`item ${name} not found`);
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** カテゴリを開いて index 番目のアイテムをドールへドラッグし、カテゴリ一覧へ戻る */
-async function dragItemToDoll(page: Page, category: string, index: number): Promise<void> {
+/** カテゴリを開いて、名前で指定したアイテムをドールへドラッグし、カテゴリ一覧へ戻る */
+async function dragItemToDoll(page: Page, category: string, name: string): Promise<void> {
   await openCategory(page, category);
-  const from = await itemCenter(page, index);
+  const from = await itemCenter(page, name);
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
@@ -131,12 +110,12 @@ async function dragItemToDoll(page: Page, category: string, index: number): Prom
 }
 
 test('取り込み → 着せる → 着替え → 再読み込みで復元', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
-  await dragItemToDoll(page, 'トップス', 1); // 同カテゴリは入れ替え
+  await dragItemToDoll(page, 'トップス', 'blue'); // 同カテゴリは入れ替え
   await expectPixel(page, DOLL_X, TOP_Y, BLUE);
-  await dragItemToDoll(page, 'ボトムス', 0);
+  await dragItemToDoll(page, 'ボトムス', 'green');
   await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
 
   await page.reload();
@@ -146,17 +125,17 @@ test('取り込み → 着せる → 着替え → 再読み込みで復元', as
 });
 
 test('タップだけでは着ない（現状の動作）', async ({ page }) => {
-  await importPreset(page);
+  await openApp(page);
   await openCategory(page, 'トップス');
-  const at = await itemCenter(page, 0);
+  const at = await itemCenter(page, 'red');
   await page.mouse.click(at.x, at.y);
   await page.waitForTimeout(800);
   expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
 });
 
 test('「なし」で脱げる', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await openCategory(page, 'トップス');
   await page.locator('.palette-section button', { hasText: 'なし' }).click();
@@ -164,8 +143,8 @@ test('「なし」で脱げる', async ({ page }) => {
 });
 
 test('調整: 動かして完了すると位置が変わり、再読み込み後も保たれる', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 
   await page.locator('.tool-button').first().click();
@@ -185,12 +164,12 @@ test('調整: 動かして完了すると位置が変わり、再読み込み後
 });
 
 test('背景を選ぶと背景色が出て、リセットで服と背景が外れる', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 
   await openCategory(page, 'はいけい');
-  const at = await itemCenter(page, 0);
+  const at = await itemCenter(page, 'bg');
   await page.mouse.click(at.x, at.y); // 背景はタップで適用
   await expectPixel(page, DOLL_X, BG_Y, BG);
   await backToCategories(page);
@@ -203,8 +182,8 @@ test('背景を選ぶと背景色が出て、リセットで服と背景が外�
 });
 
 test('写真: ダウンロードされる PNG が空でない', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 
   const [download] = await Promise.all([
@@ -220,8 +199,8 @@ test('写真: ダウンロードされる PNG が空でない', async ({ page })
 });
 
 test('ドラッグ中に服の再描画と保存が起きない', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await page.waitForTimeout(1500); // 着せた直後の処理が落ち着くのを待つ
 
@@ -240,7 +219,7 @@ test('ドラッグ中に服の再描画と保存が起きない', async ({ page 
   });
 
   await openCategory(page, 'トップス');
-  const from = await itemCenter(page, 1);
+  const from = await itemCenter(page, 'blue');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= 40; i++) {
@@ -259,9 +238,9 @@ test('ドラッグ中に服の再描画と保存が起きない', async ({ page 
 });
 
 test('着ている服の保存は 1 枚 300 バイト以下', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
-  await dragItemToDoll(page, 'ボトムス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await dragItemToDoll(page, 'ボトムス', 'green');
   await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
   await page.waitForTimeout(500);
   const saved = await page.evaluate(() => localStorage.getItem('dressup_outfit'));
@@ -272,9 +251,9 @@ test('着ている服の保存は 1 枚 300 バイト以下', async ({ page }) =
 });
 
 test('ドラッグが pointercancel で終わるとプレビューが消え、服は着ない', async ({ page }) => {
-  await importPreset(page);
+  await openApp(page);
   await openCategory(page, 'トップス');
-  const from = await itemCenter(page, 0);
+  const from = await itemCenter(page, 'red');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
@@ -282,7 +261,7 @@ test('ドラッグが pointercancel で終わるとプレビューが消え、�
   await expect(preview).toBeVisible();
 
   // 着信やシステムジェスチャーで中断されたときと同じイベントを送る
-  await page.locator('.palette-section img').first().evaluate((img) => {
+  await page.locator('.palette-section img[alt="red"]').evaluate((img) => {
     img.parentElement?.parentElement?.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
   });
   await expect(preview).toBeHidden();
@@ -292,9 +271,9 @@ test('ドラッグが pointercancel で終わるとプレビューが消え、�
 });
 
 test('ドラッグ中、プレビューは指の位置に付いてくる', async ({ page }) => {
-  await importPreset(page);
+  await openApp(page);
   await openCategory(page, 'トップス');
-  const from = await itemCenter(page, 0);
+  const from = await itemCenter(page, 'red');
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(700, 300, { steps: 4 });
@@ -312,7 +291,7 @@ test('ドラッグ中、プレビューは指の位置に付いてくる', async
 });
 
 test('服を着ていないとき、調整ボタンでドールを動かせる', async ({ page }) => {
-  await importPreset(page);
+  await openApp(page);
   await page.locator('.tool-button').first().click();
   await expect(page.locator('.item-adjust-overlay')).toBeVisible();
   await page.mouse.move(DOLL_X, DOLL_Y);
@@ -327,7 +306,7 @@ test('服を着ていないとき、調整ボタンでドールを動かせる',
 });
 
 test('服の画像が読めなかった起動では、保存済みの服装を上書きしない', async ({ page }) => {
-  await importPreset(page);
+  await openApp(page);
   // 画像が見つからない服だけを着ていた、という保存データを置く（読み込み失敗と同じ結果になる）
   const saved = JSON.stringify([{ id: 'missing-item', equipOrder: 0, adjustScale: 1.2 }]);
   await page.evaluate((v) => localStorage.setItem('dressup_outfit', v), saved);
@@ -338,7 +317,7 @@ test('服の画像が読めなかった起動では、保存済みの服装を�
   expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).toBe(saved);
 
   // 自分で着せ替えたら、その時点の服装で保存される
-  await dragItemToDoll(page, 'トップス', 0);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await expect
     .poll(async () => JSON.parse((await page.evaluate(() => localStorage.getItem('dressup_outfit'))) ?? '[]').length)
@@ -377,8 +356,8 @@ async function colorCenter(page: Page, color: Rgba): Promise<{ x: number; y: num
 }
 
 test('調整: プレビューで置いた位置と、確定後の位置が一致する（ずれ 1px 未満）', async ({ page }) => {
-  await importPreset(page);
-  await dragItemToDoll(page, 'トップス', 0);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 
   await page.locator('.tool-button').first().click();
@@ -389,12 +368,9 @@ test('調整: プレビューで置いた位置と、確定後の位置が一致
   await page.mouse.move(DOLL_X + 73, DOLL_Y + 41, { steps: 5 });
   await page.mouse.up();
 
-  // プレビュー画像（1024x1024 全体）の中で、赤い矩形(x=292〜732, y=240〜520)の中心がある位置
+  // プレビュー画像は切り抜き済みの服そのものなので、その中心が赤い矩形の中心
   const box = (await preview.boundingBox())!;
-  const previewCenter = {
-    x: box.x + (512 / 1024) * box.width,
-    y: box.y + (380 / 1024) * box.height,
-  };
+  const previewCenter = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X + 73, TOP_Y + 41, RED);
@@ -402,4 +378,95 @@ test('調整: プレビューで置いた位置と、確定後の位置が一致
 
   expect(Math.abs(committed.x - previewCenter.x)).toBeLessThan(1);
   expect(Math.abs(committed.y - previewCenter.y)).toBeLessThan(1);
+});
+
+test('設定ボタンは無い（取り込みは廃止）', async ({ page }) => {
+  await openApp(page);
+  await expect(page.locator('.settings-button')).toHaveCount(0);
+  await expect(page.locator('.version-badge')).toContainText('v');
+});
+
+test('一覧ファイルが取れないとき、案内と「もういちど」が出て、押すと復帰する', async ({ page }) => {
+  let failing = true;
+  await page.route('**/e2e-content/manifest.json', (route) => (failing ? route.abort() : route.continue()));
+  await page.goto(APP_URL);
+  await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
+  failing = false;
+  await page.getByRole('button', { name: 'もういちど' }).click();
+  await waitForMenu(page);
+});
+
+test('一覧ファイルが壊れていても、落ちずに案内が出る', async ({ page }) => {
+  await page.route('**/e2e-content/manifest.json', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"version":1,"dolls":"x"}' }));
+  await page.goto(APP_URL);
+  await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
+});
+
+test('画像 1 枚が 404 でも、他の服は着られる', async ({ page }) => {
+  const manifest = await (await page.request.get('/DressUpGame/e2e-content/manifest.json')).json();
+  const red = manifest.dolls[0].items.find((i: { name: string }) => i.name === 'red');
+  await page.route(`**/e2e-content/${red.image.file}`, (route) => route.fulfill({ status: 404, body: '' }));
+  await page.goto(APP_URL);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red'); // 画像が無い服
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN); // 読めなかった服は表示されないだけ
+});
+
+test('一覧から消えた服は、その 1 枚だけ外れる', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  // 一覧から red を取り除いて配信する
+  await page.route('**/e2e-content/manifest.json', async (route) => {
+    const response = await route.fetch();
+    const manifest = await response.json();
+    manifest.dolls[0].items = manifest.dolls[0].items.filter((i: { name: string }) => i.name !== 'red');
+    await route.fulfill({ response, json: manifest });
+  });
+  await page.reload();
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+});
+
+test('旧方式のデータは初回起動で消え、2 回目以降は服装を消さない', async ({ page }) => {
+  await openApp(page);
+  // 旧版から更新した直後の状態を作る
+  await page.evaluate(() => {
+    localStorage.removeItem('dressup_content_v1');
+    localStorage.setItem('dressup_custom_clothing', '[{"id":"custom-clothing-1"}]');
+    localStorage.setItem('dressup_outfit', '[{"id":"custom-clothing-1","equipOrder":0}]');
+  });
+  await page.reload();
+  await openApp(page);
+  expect(await page.evaluate(() => localStorage.getItem('dressup_custom_clothing'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).toBeNull();
+
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await page.reload();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+});
+
+test('縦長の画面では「よこにしてね」が出る', async ({ page }) => {
+  await openApp(page);
+  await expect(page.getByTestId('rotate-notice')).toBeHidden();
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.getByTestId('rotate-notice')).toBeVisible();
+  await expect(page.getByTestId('rotate-notice')).toContainText('よこにしてね');
+  await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+  await expect(page.getByTestId('rotate-notice')).toBeHidden();
+});
+
+test('メニューの並び: カテゴリは並び順どおり、サムネイルは切り抜いた服', async ({ page }) => {
+  await openApp(page);
+  const labels = await page.locator('.palette-section button').allInnerTexts();
+  const names = labels.map((l) => l.split('\n').pop()?.trim());
+  expect(names.indexOf('トップス')).toBeLessThan(names.indexOf('ボトムス'));
+  await openCategory(page, 'トップス');
+  const thumb = page.locator('.palette-section img[alt="red"]');
+  const size = await thumb.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]);
+  expect(Math.max(...size)).toBe(192);
 });

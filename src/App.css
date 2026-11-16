@@ -199,107 +199,6 @@ textarea {
   }
 }
 
-/* スマートフォン縦向き対応 */
-@media (max-width: 768px) and (orientation: portrait) {
-  .app {
-    padding: 0;
-    pointer-events: none;
-  }
-
-  .app-main {
-    flex-direction: column;
-    justify-content: flex-start;
-    padding: 0;
-    pointer-events: none;
-    height: calc(var(--app-height, 100vh) - 140px);
-    overflow: hidden;
-  }
-
-  .avatar-section {
-    position: relative;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: hidden;
-  }
-
-  .avatar-section canvas {
-    pointer-events: auto;
-  }
-
-  .palette-section,
-  .palette-section--portrait {
-    position: fixed;
-    bottom: calc(40px + env(safe-area-inset-bottom, 0));
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: auto;
-    z-index: 100;
-    padding: 0;
-    pointer-events: auto !important;
-  }
-
-  .app-footer {
-    display: none;
-  }
-
-  /* ボタンを左上に移動 */
-  .bottom-right-buttons {
-    position: fixed;
-    top: calc(8px + env(safe-area-inset-top, 0));
-    left: 8px;
-    right: auto;
-    bottom: auto;
-    flex-direction: row;
-    z-index: 200;
-    pointer-events: auto;
-  }
-
-  /* ツールボタンを右上に */
-  .tool-buttons {
-    position: fixed;
-    top: calc(8px + env(safe-area-inset-top, 0));
-    right: 8px;
-    left: auto;
-    bottom: auto;
-    z-index: 200;
-    pointer-events: auto;
-  }
-
-  .tool-button {
-    width: 40px;
-    height: 40px;
-    font-size: 1rem;
-    pointer-events: auto;
-  }
-
-  .reset-button-fixed,
-  .settings-button {
-    width: 40px;
-    height: 40px;
-    font-size: 1.2rem;
-    pointer-events: auto;
-  }
-
-  /* 調整パネルは縦画面でもクリック可能に */
-  .item-adjust-overlay {
-    pointer-events: auto;
-  }
-
-  .item-adjust-top-buttons {
-    pointer-events: auto;
-  }
-
-  .item-adjust-done-btn-small,
-  .item-adjust-reset-btn-small,
-  .item-adjust-front-btn {
-    pointer-events: auto;
-  }
-}
-
 /* タッチデバイス対応 */
 @media (pointer: coarse) {
   .reset-button {
@@ -959,4 +858,59 @@ textarea {
 .eraser-done-btn:hover {
   transform: scale(1.1);
   box-shadow: 0 4px 12px rgba(40, 167, 69, 0.5);
+}
+
+/* 読み込み中・読み込み失敗の案内 */
+.status-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  font-size: 22px;
+  font-weight: bold;
+  color: #7a4a6a;
+  text-align: center;
+  padding: 24px;
+}
+
+.status-screen button {
+  min-width: 180px;
+  min-height: 56px;
+  padding: 12px 28px;
+  font-size: 20px;
+  font-weight: bold;
+  color: white;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border: none;
+  border-radius: 28px;
+  cursor: pointer;
+}
+
+/* 横画面専用: 縦に持ったときの案内 */
+.rotate-notice {
+  display: none;
+}
+
+@media (orientation: portrait) {
+  .rotate-notice {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: #fff0f6;
+    color: #7a4a6a;
+    font-size: 28px;
+    font-weight: bold;
+  }
+
+  .rotate-notice span:first-child {
+    font-size: 72px;
+  }
 }

@@ -1,11 +1,10 @@
 /**
- * E2Eテスト用の小さなプリセットZIPを生成する
+ * テスト用の小さなプリセット（フォルダ）を生成する
  * 画像はすべて 1024x1024 のPNG
  * （取り込み処理が右下160pxを消すため、絵柄はその範囲を避けて置く）
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import JSZip from 'jszip';
 import sharp from 'sharp';
 
 const SIZE = 1024;
@@ -60,10 +59,4 @@ export async function writePresetDir(dir: string): Promise<void> {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, data);
   }
-}
-
-export async function makePreset(outPath: string): Promise<void> {
-  const zip = new JSZip();
-  for (const [rel, data] of await presetFiles()) zip.file(rel, data);
-  await fs.writeFile(outPath, await zip.generateAsync({ type: 'nodebuffer' }));
 }

@@ -15,6 +15,9 @@ const mockClothingItems: ClothingItemData[] = [
     imageUrl: '/images/top-1.png',
     position: { x: 0, y: 0 },
     baseZIndex: 20,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
   },
   {
     id: 'bottom-1',
@@ -23,6 +26,9 @@ const mockClothingItems: ClothingItemData[] = [
     imageUrl: '/images/bottom-1.png',
     position: { x: 0, y: 0 },
     baseZIndex: 10,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
   },
   {
     id: 'dress-1',
@@ -31,6 +37,9 @@ const mockClothingItems: ClothingItemData[] = [
     imageUrl: '/images/dress-1.png',
     position: { x: 0, y: 0 },
     baseZIndex: 15,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
   },
 ];
 
@@ -43,6 +52,9 @@ const mockUnderwear: ClothingItemData[] = [
     imageUrl: '/images/underwear-top.png',
     position: { x: 0, y: 0 },
     baseZIndex: 0,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
   },
   {
     id: 'underwear-bottom-1',
@@ -51,6 +63,9 @@ const mockUnderwear: ClothingItemData[] = [
     imageUrl: '/images/underwear-bottom.png',
     position: { x: 0, y: 0 },
     baseZIndex: 1,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
   },
 ];
 
@@ -112,6 +127,9 @@ describe('useDressUp', () => {
       imageUrl: '/images/top-2.png',
       position: { x: 0, y: 0 },
       baseZIndex: 20,
+      canvasW: 1024,
+      canvasH: 1024,
+      box: { x: 0, y: 0, w: 1024, h: 1024 },
     };
 
     // 最初のトップスを着せる
@@ -177,6 +195,9 @@ describe('useDressUp', () => {
       imageUrl: '/images/accessory-1.png',
       position: { x: 0, y: 0 },
       baseZIndex: 30,
+      canvasW: 1024,
+      canvasH: 1024,
+      box: { x: 0, y: 0, w: 1024, h: 1024 },
     };
 
     // 異なる順で着せる
@@ -205,6 +226,9 @@ describe('useDressUp', () => {
       imageUrl: '/images/top-2.png',
       position: { x: 0, y: 0 },
       baseZIndex: 20,
+      canvasW: 1024,
+      canvasH: 1024,
+      box: { x: 0, y: 0, w: 1024, h: 1024 },
     };
 
     // top1を着せて、top2で置き換え

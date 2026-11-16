@@ -7,10 +7,9 @@
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
 import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
-import type { EquippedItem, DollTransform } from '../types';
+import type { Box, DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
-import { getTransparentImage } from '../services/assetStorage';
 
 /**
  * PixiJSのColorMatrixFilter.hue()と同じ行列を生成
@@ -55,10 +54,8 @@ interface ItemAdjustPanelProps {
   // メニュー・ボタン領域のオフセット
   menuOffset?: number;
   rightOffset?: number;
-  // ドール画像URL（ドール調整モードのプレビュー用）
-  dollImageUrl?: string;
-  // 縦画面モード
-  isPortrait?: boolean;
+  // ドール（ドール調整モードのプレビュー用）
+  doll?: DollData | null;
 }
 
 // タッチポイントの型
@@ -81,6 +78,35 @@ function getAngle(touch1: TouchPoint, touch2: TouchPoint): number {
   return (Math.atan2(dy, dx) * 180) / Math.PI;
 }
 
+// 切り抜き画像を、元キャンバスの中での位置に置いて表示する。
+// 外枠が元キャンバス全体の大きさなので、外枠の中心＝元キャンバスの中心（PixiEngine の原点と同じ）。
+function PlacedImage({ src, alt, canvasW, canvasH, box, unit }: {
+  src: string;
+  alt: string;
+  canvasW: number;
+  canvasH: number;
+  box: Box;
+  unit: number;
+}) {
+  return (
+    <div style={{ position: 'relative', width: `${canvasW * unit}px`, height: `${canvasH * unit}px` }}>
+      <img
+        src={src}
+        alt={alt}
+        draggable={false}
+        style={{
+          position: 'absolute',
+          display: 'block',
+          left: `${box.x * unit}px`,
+          top: `${box.y * unit}px`,
+          width: `${box.w * unit}px`,
+          height: `${box.h * unit}px`,
+        }}
+      />
+    </div>
+  );
+}
+
 export function ItemAdjustPanel({
   item,
   onAdjust,
@@ -91,8 +117,7 @@ export function ItemAdjustPanel({
   onDollTransformChange,
   menuOffset = 0,
   rightOffset = 0,
-  dollImageUrl,
-  isPortrait = false,
+  doll,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -166,6 +191,9 @@ export function ItemAdjustPanel({
   const invCanvasScaleX = canvasScaleX !== 0 ? 1 / canvasScaleX : 1;
   const invCanvasScaleY = canvasScaleY !== 0 ? 1 / canvasScaleY : 1;
 
+  // 元キャンバスの 1px が画面上で何 CSS px になるか（PixiEngine: 表示高さ × 0.9 ÷ 1024）
+  const previewUnit = (actualCanvasHeight * 0.9) / 1024;
+
   // 背景領域の計算（PixiEngineと同じ計算）
   // ※ここはPixi(論理座標)で計算する
   const availableWidth = Math.max(0, canvasWidth - menuOffset - rightOffset);
@@ -210,18 +238,6 @@ export function ItemAdjustPanel({
   const [dollX, setDollX] = useState(dollTransform.x);
   const [dollY, setDollY] = useState(dollTransform.y);
   const [dollScale, setDollScale] = useState(dollTransform.scale);
-
-  // プレビュー用の透過処理済み画像URL
-  const [transparentImageUrl, setTransparentImageUrl] = useState<string | null>(null);
-
-  // 透過画像を取得（調整対象が変わるとパネルごと作り直されるので、初期値のnullに戻す処理は不要）
-  useEffect(() => {
-    if (item?.id && item?.imageUrl) {
-      getTransparentImage(item.id, item.imageUrl)
-        .then(setTransparentImageUrl)
-        .catch(() => setTransparentImageUrl(item.imageUrl)); // フォールバック
-    }
-  }, [item?.id, item?.imageUrl]);
 
   // タッチ状態
   const touchStartRef = useRef<{
@@ -523,7 +539,7 @@ export function ItemAdjustPanel({
       style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
     >
       {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
-      {!isDollMode && transparentImageUrl && (() => {
+      {!isDollMode && item && (() => {
         // ドール中心位置を計算（PixiEngineと同じ計算）
         // dollTransformのx,yは背景領域内での%位置（50%=中央）
         const dollCenterX = bgCenterX + ((dollTransform.x - 50) / 100) * bgSize;
@@ -577,22 +593,13 @@ export function ItemAdjustPanel({
                 filter: `url(#${hueFilterId})`,
               }}
             >
-              <img
-                src={transparentImageUrl}
+              <PlacedImage
+                src={item.imageUrl}
                 alt="調整プレビュー"
-                style={{
-                  // PixiEngineと同じスケール計算:
-                  // Pixi: baseScale = maxHeight / 1024, sprite.scale = baseScale * dollScale * adjustScale
-                  // CSS: 画像は自然サイズで表示、transformでbaseScale * dollScale * adjustScaleを適用
-                  // ただし、transformのscaleは外側のdivで適用済み（dollScale * adjustScale）
-                  // なので、imgにはbaseScale相当のサイズ制限のみ必要
-                  // → maxHeightで制限するのが最もシンプル
-                  // inline のままだと画像の下に文字用の余白が付き、
-                  // 中心がその半分だけ上にずれる（確定時の数pxのずれの原因）
-                  display: 'block',
-                  maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
-                  width: 'auto',
-                }}
+                canvasW={item.canvasW}
+                canvasH={item.canvasH}
+                box={item.box}
+                unit={previewUnit}
               />
             </div>
           </>
@@ -623,19 +630,14 @@ export function ItemAdjustPanel({
               filter: 'drop-shadow(0 0 8px rgba(255,105,180,0.6))',
             }}
           >
-            {dollImageUrl ? (
-              <img
-                src={dollImageUrl}
+            {doll ? (
+              <PlacedImage
+                src={doll.bodyImageUrl}
                 alt="ドールプレビュー"
-                style={{
-                  // PixiEngineと同じスケール計算
-                  // baseScale = maxHeight / 1024, transformでdollScaleを適用
-                  // inline のままだと画像の下に文字用の余白が付き、
-                  // 中心がその半分だけ上にずれる（確定時の数pxのずれの原因）
-                  display: 'block',
-                  maxHeight: `${actualCanvasHeight * (isPortrait ? 0.75 : 0.9)}px`,
-                  width: 'auto',
-                }}
+                canvasW={doll.canvasW}
+                canvasH={doll.canvasH}
+                box={doll.box}
+                unit={previewUnit}
               />
             ) : (
               /* ドール画像がない場合は十字線 */

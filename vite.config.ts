@@ -16,7 +16,7 @@ export default defineConfig({
         theme_color: '#ff69b4',
         background_color: '#ffffff',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'landscape',
         scope: '/DressUpGame/',
         start_url: '/DressUpGame/',
         icons: [

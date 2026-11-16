@@ -4,7 +4,29 @@
  * フィルターなし版（パフォーマンス最優先）
  */
 import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter } from 'pixi.js';
-import type { ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
+import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
+
+// ドール・服の表示高さ（画面の高さに対する割合）
+const HEIGHT_RATIO = 0.9;
+
+interface Placed {
+  canvasW?: number;
+  canvasH?: number;
+  box?: Box;
+}
+
+// スプライトの原点を「切り抜く前の元キャンバスの中心」に合わせる。
+// 切り抜き情報が無い画像は、画像全体を元キャンバスとみなす（＝画像の中心）。
+function setCanvasOrigin(sprite: Sprite, placed: Placed, texture: { width: number; height: number }): void {
+  const canvasW = placed.canvasW ?? texture.width;
+  const canvasH = placed.canvasH ?? texture.height;
+  const box = placed.box ?? { x: 0, y: 0, w: texture.width, h: texture.height };
+  // 配信画像は box と同じ大きさ。違う場合に備えてテクスチャ基準に換算する
+  const sx = texture.width / box.w;
+  const sy = texture.height / box.h;
+  sprite.anchor.set(0);
+  sprite.pivot.set((canvasW / 2 - box.x) * sx, (canvasH / 2 - box.y) * sy);
+}
 
 export class PixiEngine {
   private app: Application | null = null;
@@ -20,7 +42,6 @@ export class PixiEngine {
   private rightOffset = 60; // 右ボタン領域のオフセット（右側）
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
-  private isPortrait = false; // 縦画面モード
   private tickerRunning = true; // Tickerが動作中かどうか
   private clothingCached = false; // 服コンテナがキャッシュ済みか
 
@@ -148,11 +169,6 @@ export class PixiEngine {
     this.rightOffset = offset;
   }
 
-  // 縦画面モードを設定
-  setPortraitMode(isPortrait: boolean): void {
-    this.isPortrait = isPortrait;
-  }
-
   // 利用可能な描画領域（メニューとボタンを除いた中央領域）
   private getAvailableArea(): { x: number; width: number; centerX: number } {
     if (!this.app) return { x: 0, width: 0, centerX: 0 };
@@ -277,17 +293,15 @@ export class PixiEngine {
         const dollSprite = new Sprite(texture);
 
         // キャンバスに収まるようにスケーリング（高さの90%に合わせてから、ドールスケールを適用）
-        // 縦画面モードではメニューバー分を考慮して小さめに
-        const heightRatio = this.isPortrait ? 0.75 : 0.9;
-        const maxHeight = this.app.screen.height * heightRatio;
+        const maxHeight = this.app.screen.height * HEIGHT_RATIO;
         // 基準高さを固定値にして、ドールと服のスケールを統一
         // ※インポート時に最大1024pxにリサイズされるため、1024を基準にする
         const REFERENCE_HEIGHT = 1024;
         const baseScale = maxHeight / REFERENCE_HEIGHT;
         dollSprite.scale.set(baseScale * dollScale);
 
-        // 位置を設定
-        dollSprite.anchor.set(0.5);
+        // 位置を設定（切り抜き画像を、元キャンバスの中心が原点になるように置く）
+        setCanvasOrigin(dollSprite, config, texture);
         dollSprite.x = centerX;
         dollSprite.y = centerY;
 
@@ -479,9 +493,7 @@ export class PixiEngine {
         const clothingSprite = new Sprite(texture);
 
         // 服のサイズをドールと同じスケーリング
-        // 縦画面モードではメニューバー分を考慮して小さめに
-        const heightRatio = this.isPortrait ? 0.75 : 0.9;
-        const maxHeight = this.app.screen.height * heightRatio;
+        const maxHeight = this.app.screen.height * HEIGHT_RATIO;
         // 基準高さを固定値にして、ドールと服のスケールを統一
         // ※インポート時に最大1024pxにリサイズされるため、1024を基準にする
         const REFERENCE_HEIGHT = 1024;
@@ -489,8 +501,8 @@ export class PixiEngine {
         // 調整スケールを適用
         clothingSprite.scale.set(baseScale * s * adjustScale);
 
-        // アンカーを中央に
-        clothingSprite.anchor.set(0.5);
+        // 切り抜き画像を、元キャンバスの中心が原点になるように置く
+        setCanvasOrigin(clothingSprite, item, texture);
 
         // 位置を設定
         clothingSprite.x = itemX;
@@ -755,23 +767,6 @@ export class PixiEngine {
 
       const source = this.app.canvas as HTMLCanvasElement;
       const resolution = this.app.renderer.resolution ?? 1;
-
-      // 縦画面モード: 画面全体（縦長）をキャプチャ
-      if (this.isPortrait) {
-        const cropWidth = Math.round(this.app.screen.width * resolution);
-        const cropHeight = Math.round(this.app.screen.height * resolution);
-
-        const out = document.createElement('canvas');
-        out.width = cropWidth;
-        out.height = cropHeight;
-        const ctx = out.getContext('2d');
-        if (!ctx) {
-          return source.toDataURL('image/png');
-        }
-
-        ctx.drawImage(source, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-        return out.toDataURL('image/png');
-      }
 
       // 横画面モード: 背景領域（1:1正方形）をキャプチャ
       if (this.backgroundArea) {
