@@ -133,8 +133,10 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
 }
 
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
+  // STUDIO_ANTHROPIC_API_KEY は、ANTHROPIC_API_KEY という名前を別の用途に使っている環境（Claude Code のクラウド環境など）向け
+  const claudeKey = env.STUDIO_ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY;
   return {
-    text: env.ANTHROPIC_API_KEY ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
+    text: claudeKey ? createClaude(claudeKey, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
     image: env.GEMINI_API_KEY ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1') : null,
   };
 }
