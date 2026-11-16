@@ -31,8 +31,8 @@ export interface AiClients {
   image: ImageAi | null;
 }
 
-export function createClaude(model: string): TextAi {
-  const client = new Anthropic(); // ANTHROPIC_API_KEY を読む
+export function createClaude(apiKey: string, model: string): TextAi {
+  const client = new Anthropic({ apiKey });
   return {
     async json<T>(input: { system: string; prompt: string; images?: Buffer[]; schema: Record<string, unknown> }): Promise<T> {
       const content: Anthropic.Beta.BetaContentBlockParam[] = [
@@ -135,7 +135,7 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
 
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
   return {
-    text: env.ANTHROPIC_API_KEY ? createClaude(env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
+    text: env.ANTHROPIC_API_KEY ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
     image: env.GEMINI_API_KEY ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-2.5-flash-image') : null,
   };
 }
