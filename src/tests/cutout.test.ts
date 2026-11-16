@@ -147,6 +147,17 @@ describe('cutOutClothing', () => {
   });
 });
 
+describe('cutOutClothing（かけら）', () => {
+  it('数画素の消し残りは消え、小さくても形のある飾りは残る', () => {
+    const px = sample();
+    rect(px, 4, 4, 1, 2, [120, 200, 110, 255]); // 背景の中の 2 画素
+    rect(px, 50, 70, 4, 4, [30, 40, 200, 255]); // 16 画素の飾り
+    cutOutClothing(px, W, H, detect(px));
+    expect(alpha(px, 4, 4)).toBe(0);
+    expect(alpha(px, 51, 71)).toBeGreaterThan(0);
+  });
+});
+
 describe('closeColorRatio', () => {
   it('黒シルエットに紺の服だと 0.5 を超える', () => {
     const px = sample(MAGENTA, BLACK, NAVY);

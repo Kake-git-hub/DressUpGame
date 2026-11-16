@@ -6,12 +6,11 @@
  *
  * フォルダ名・ファイル名の規則は、これまでのアプリ内取り込みと同じ。
  */
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { alphaBBox, isFullyOpaque } from '../../src/pipeline/alpha.ts';
-import type { Box } from '../../src/pipeline/alpha.ts';
+import { isFullyOpaque } from '../../src/pipeline/alpha.ts';
+import { FileWriter as Writer, MAX_SIZE, encodeBackground, encodeCutout, uniqueId } from './encode.ts';
 import { removeBorderBackground } from '../../src/pipeline/removeBackground.ts';
 import { removeCornerSpeck } from '../../src/pipeline/removeCornerSpeck.ts';
 import { parseManifest } from '../../src/content/manifest.ts';
@@ -38,8 +37,6 @@ export interface BuildReport {
   warnings: string[];
 }
 
-const MAX_SIZE = 1024; // 長辺がこれを超える画像だけ縮小する（表示の基準）
-const THUMB_SIZE = 192;
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 const THUMB_SUFFIX = /(_サムネ|_thumb|_thumbnail)$/i;
 // 規則に合わない名前の服の行き先（これまでの取り込みと同じ値）
@@ -60,19 +57,6 @@ async function list(dir: string): Promise<{ dirs: string[]; files: string[] }> {
   }
 }
 
-class Writer {
-  private readonly filesDir: string;
-  constructor(outDir: string) {
-    this.filesDir = path.join(outDir, 'files');
-  }
-  // 内容のハッシュを名前にして書く。戻り値は manifest からの相対パス
-  async write(data: Buffer, ext: string): Promise<string> {
-    const name = `${createHash('sha1').update(data).digest('hex').slice(0, 16)}.${ext}`;
-    await fs.writeFile(path.join(this.filesDir, name), data);
-    return `files/${name}`;
-  }
-}
-
 interface Cutout {
   image: ManifestImage;
   thumb: string;
@@ -90,42 +74,11 @@ async function cutout(file: string, writer: Writer): Promise<Cutout | null> {
   const notes: string[] = [];
   if (isFullyOpaque(data) && removeBorderBackground(data, width, height)) notes.push('背景を自動で透明にしました');
   if (removeCornerSpeck(data, width, height)) notes.push('右下の小さな塊を消しました');
-  const box: Box | null = alphaBBox(data, width, height);
-  if (!box) return null;
-
-  const cropped = sharp(data, { raw: { width, height, channels: 4 } }).extract({
-    left: box.x,
-    top: box.y,
-    width: box.w,
-    height: box.h,
-  });
-  const main = await cropped.clone().webp({ lossless: true, effort: 6 }).toBuffer();
-  const thumb = await cropped
-    .clone()
-    .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: 85, alphaQuality: 100 })
-    .toBuffer();
-  return {
-    image: { file: await writer.write(main, 'webp'), canvasW: width, canvasH: height, box },
-    thumb: await writer.write(thumb, 'webp'),
-    notes,
-  };
+  const encoded = await encodeCutout(data, width, height, writer);
+  return encoded ? { ...encoded, notes } : null;
 }
 
-async function background(file: string, id: string, writer: Writer): Promise<ManifestBackground> {
-  const base = sharp(file).flatten({ background: '#ffffff' });
-  const main = await base
-    .clone()
-    .resize({ width: MAX_SIZE, height: MAX_SIZE, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 85, mozjpeg: true })
-    .toBuffer();
-  const thumb = await base
-    .clone()
-    .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 80, mozjpeg: true })
-    .toBuffer();
-  return { id, name: stem(path.basename(file)), file: await writer.write(main, 'jpg'), thumb: await writer.write(thumb, 'jpg') };
-}
+const background = (file: string, id: string, writer: Writer) => encodeBackground(file, id, stem(path.basename(file)), writer);
 
 async function backgrounds(dir: string, idPrefix: string, writer: Writer, warnings: string[]): Promise<ManifestBackground[]> {
   const result: ManifestBackground[] = [];
@@ -138,13 +91,6 @@ async function backgrounds(dir: string, idPrefix: string, writer: Writer, warnin
     }
   }
   return result;
-}
-
-function uniqueId(base: string, used: Set<string>): string {
-  let id = base;
-  for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
-  used.add(id);
-  return id;
 }
 
 // 服 1 点ぶんの、名前から読み取った情報
