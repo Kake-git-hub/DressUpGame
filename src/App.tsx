@@ -12,6 +12,7 @@ import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData } from './content/legacyCleanup';
+import { contentUrlsForDoll, prefetchUrls } from './content/prefetch';
 import {
   loadDollTransform,
   saveDollTransform,
@@ -35,6 +36,11 @@ const RIGHT_BUTTON_WIDTH = 60;
 
 // 旧方式（アプリ内取り込み）のデータを、状態を読む前に片付ける
 cleanupLegacyData();
+
+// 素材の置き場所
+const CONTENT_URL = resolveContentUrl(window.location.search, window.location.href);
+// 画面が出てから先読みを始めるまでの待ち時間（最初の表示を邪魔しない）
+const PREFETCH_DELAY_MS = 3000;
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -94,6 +100,22 @@ function App() {
     };
   }, []);
 
+  // 現在のドールの素材を先読みして、オフラインでも遊べるようにする
+  useEffect(() => {
+    if (loadState !== 'ready' || !currentDoll) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      prefetchUrls(contentUrlsForDoll(CONTENT_URL, currentDoll, allClothing, allBackgrounds)).then(() => {
+        // 完了の目印（オフライン動作のテストが待ち合わせに使う）
+        if (!cancelled) document.documentElement.dataset.prefetch = currentDoll.id;
+      });
+    }, PREFETCH_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [loadState, currentDoll, allClothing, allBackgrounds]);
+
   // 着せ替え状態管理フック（選べる服の絞り込みはメニュー側で行う）
   const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp();
 
@@ -104,7 +126,7 @@ function App() {
   // 配信された素材の一覧を読み込む
   useEffect(() => {
     let cancelled = false;
-    loadContent(resolveContentUrl(window.location.search, window.location.href))
+    loadContent(CONTENT_URL)
       .then((content) => {
         if (cancelled) return;
         setAllDolls(content.dolls);

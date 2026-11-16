@@ -386,49 +386,54 @@ test('設定ボタンは無い（取り込みは廃止）', async ({ page }) => 
   await expect(page.locator('.version-badge')).toContainText('v');
 });
 
-test('一覧ファイルが取れないとき、案内と「もういちど」が出て、押すと復帰する', async ({ page }) => {
-  let failing = true;
-  await page.route('**/e2e-content/manifest.json', (route) => (failing ? route.abort() : route.continue()));
-  await page.goto(APP_URL);
-  await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
-  failing = false;
-  await page.getByRole('button', { name: 'もういちど' }).click();
-  await waitForMenu(page);
-});
+// 通信を差し替えるテスト。サービスワーカー経由の通信は差し替えられないので、無効にして実行する
+test.describe('素材の取得に失敗したとき', () => {
+  test.use({ serviceWorkers: 'block' });
 
-test('一覧ファイルが壊れていても、落ちずに案内が出る', async ({ page }) => {
-  await page.route('**/e2e-content/manifest.json', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"version":1,"dolls":"x"}' }));
-  await page.goto(APP_URL);
-  await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
-});
-
-test('画像 1 枚が 404 でも、他の服は着られる', async ({ page }) => {
-  const manifest = await (await page.request.get('/DressUpGame/e2e-content/manifest.json')).json();
-  const red = manifest.dolls[0].items.find((i: { name: string }) => i.name === 'red');
-  await page.route(`**/e2e-content/${red.image.file}`, (route) => route.fulfill({ status: 404, body: '' }));
-  await page.goto(APP_URL);
-  await openApp(page);
-  await dragItemToDoll(page, 'トップス', 'red'); // 画像が無い服
-  await dragItemToDoll(page, 'ボトムス', 'green');
-  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
-  await expectPixel(page, DOLL_X, TOP_Y, SKIN); // 読めなかった服は表示されないだけ
-});
-
-test('一覧から消えた服は、その 1 枚だけ外れる', async ({ page }) => {
-  await openApp(page);
-  await dragItemToDoll(page, 'トップス', 'red');
-  await dragItemToDoll(page, 'ボトムス', 'green');
-  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
-  // 一覧から red を取り除いて配信する
-  await page.route('**/e2e-content/manifest.json', async (route) => {
-    const response = await route.fetch();
-    const manifest = await response.json();
-    manifest.dolls[0].items = manifest.dolls[0].items.filter((i: { name: string }) => i.name !== 'red');
-    await route.fulfill({ response, json: manifest });
+  test('一覧ファイルが取れないとき、案内と「もういちど」が出て、押すと復帰する', async ({ page }) => {
+    let failing = true;
+    await page.route('**/e2e-content/manifest.json', (route) => (failing ? route.abort() : route.continue()));
+    await page.goto(APP_URL);
+    await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
+    failing = false;
+    await page.getByRole('button', { name: 'もういちど' }).click();
+    await waitForMenu(page);
   });
-  await page.reload();
-  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
-  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+
+  test('一覧ファイルが壊れていても、落ちずに案内が出る', async ({ page }) => {
+    await page.route('**/e2e-content/manifest.json', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"version":1,"dolls":"x"}' }));
+    await page.goto(APP_URL);
+    await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
+  });
+
+  test('画像 1 枚が 404 でも、他の服は着られる', async ({ page }) => {
+    const manifest = await (await page.request.get('/DressUpGame/e2e-content/manifest.json')).json();
+    const red = manifest.dolls[0].items.find((i: { name: string }) => i.name === 'red');
+    await page.route(`**/e2e-content/${red.image.file}`, (route) => route.fulfill({ status: 404, body: '' }));
+    await page.goto(APP_URL);
+    await openApp(page);
+    await dragItemToDoll(page, 'トップス', 'red'); // 画像が無い服
+    await dragItemToDoll(page, 'ボトムス', 'green');
+    await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+    await expectPixel(page, DOLL_X, TOP_Y, SKIN); // 読めなかった服は表示されないだけ
+  });
+
+  test('一覧から消えた服は、その 1 枚だけ外れる', async ({ page }) => {
+    await openApp(page);
+    await dragItemToDoll(page, 'トップス', 'red');
+    await dragItemToDoll(page, 'ボトムス', 'green');
+    await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+    // 一覧から red を取り除いて配信する
+    await page.route('**/e2e-content/manifest.json', async (route) => {
+      const response = await route.fetch();
+      const manifest = await response.json();
+      manifest.dolls[0].items = manifest.dolls[0].items.filter((i: { name: string }) => i.name !== 'red');
+      await route.fulfill({ response, json: manifest });
+    });
+    await page.reload();
+    await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+    expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+  });
 });
 
 test('旧方式のデータは初回起動で消え、2 回目以降は服装を消さない', async ({ page }) => {
@@ -469,4 +474,25 @@ test('メニューの並び: カテゴリは並び順どおり、サムネイル
   const thumb = page.locator('.palette-section img[alt="red"]');
   const size = await thumb.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]);
   expect(Math.max(...size)).toBe(192);
+});
+
+test('一度開いた後は、オフラインでも開けて、まだ着ていない服も着られる', async ({ page, context }) => {
+  await openApp(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30_000 });
+  // サービスワーカーが有効な状態で開き直し、先読みが終わるのを待つ
+  await page.reload();
+  await openApp(page);
+  await page.waitForFunction(() => document.documentElement.dataset.prefetch === 'test', null, { timeout: 60_000 });
+
+  await context.setOffline(true);
+  await page.reload();
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'blue');
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+  await openCategory(page, 'はいけい');
+  const at = await itemCenter(page, 'bg');
+  await page.mouse.click(at.x, at.y);
+  await expectPixel(page, DOLL_X, BG_Y, BG);
+  await context.setOffline(false);
 });

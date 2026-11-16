@@ -43,14 +43,22 @@ export default defineConfig({
         globIgnores: ['**/app-icon.png'], // 元ファイル（大きすぎる）を除外
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/.*\.(png|jpg|jpeg|gif|webp|svg)$/i,
+            // 素材の一覧: オンラインなら最新、つながらなければ前回のもの
+            urlPattern: /\/(DressUpGame-content|e2e-content)\/manifest\.json$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'content-manifest',
+              networkTimeoutSeconds: 4,
+            }
+          },
+          {
+            // 素材の画像: ファイル名に内容のハッシュが入っているので、一度取れば変わらない
+            urlPattern: /\/(DressUpGame-content|e2e-content)\/files\//,
             handler: 'CacheFirst',
             options: {
-              cacheName: 'images-cache',
-              expiration: {
-                maxEntries: 200,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
-              }
+              cacheName: 'content-files',
+              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 3000 }
             }
           }
         ]
