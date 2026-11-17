@@ -94,7 +94,11 @@ interface GeminiInteraction {
  *   POST /v1beta/interactions、input に画像と文章を並べ、response_format で正方形の画像だけを求める。
  * 実際のキーではまだ呼んでいない。モデル名は環境変数 STUDIO_GEMINI_MODEL で変えられる。
  */
-export function createGemini(apiKey: string, model: string, fetchImpl: typeof fetch = fetch): ImageAi {
+export type ImageSize = '1K' | '2K' | '4K';
+export const IMAGE_SIZES: ImageSize[] = ['1K', '2K', '4K'];
+
+// 画像の大きさは値段に効く。ドールのキャンバスは 1024px なので、既定は 1K
+export function createGemini(apiKey: string, model: string, fetchImpl: typeof fetch = fetch, imageSize: ImageSize = '1K'): ImageAi {
   return {
     async generate(input: { prompt: string; images: Buffer[] }): Promise<Buffer> {
       const body = {
@@ -103,7 +107,7 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
           ...input.images.map((data) => ({ type: 'image', mime_type: 'image/png', data: data.toString('base64') })),
           { type: 'text', text: input.prompt },
         ],
-        response_format: { type: 'image', aspect_ratio: '1:1', image_size: '2K' },
+        response_format: { type: 'image', aspect_ratio: '1:1', image_size: imageSize },
       };
       let response: Response;
       try {
@@ -142,6 +146,8 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
   return {
     text: env.ANTHROPIC_API_KEY ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
-    image: env.GEMINI_API_KEY ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1') : null,
+    image: env.GEMINI_API_KEY
+      ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1', fetch, IMAGE_SIZES.find((s) => s === env.STUDIO_GEMINI_IMAGE_SIZE?.toUpperCase()) ?? '1K')
+      : null,
   };
 }

@@ -48,7 +48,8 @@ export interface Candidate {
   notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
 }
 
-export const MAX_ATTEMPTS = 2; // 1 品目あたり、作り直しを含めた生成回数の上限
+// 1 品目あたりの生成回数の既定（1 = 自動の作り直しなし。値段を抑える）。STUDIO_MAX_ATTEMPTS で変えられる
+export const MAX_ATTEMPTS = 1;
 const MIN_REGION_SHARE = 0.8;
 
 const hexToRgb = (hex: string): Rgb | null => {
@@ -218,7 +219,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     return true;
   };
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  // 断られて説明文を書き直したときは、回数の上限とは別に 1 回だけやり直す（断られた依頼は画像ができていない）
+  for (let attempt = 1; attempt <= maxAttempts + (rewritten ? 1 : 0); attempt++) {
     candidate.attempts = attempt;
     candidate.status = 'working'; // 作り直し中は、前の回の画像を候補として見せない
     let result;
@@ -235,7 +237,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     } catch (error) {
       const message = (error as Error).message;
       // 内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す
-      if (error instanceof AiError && error.blocked && !rewritten && attempt < maxAttempts) {
+      if (error instanceof AiError && error.blocked && !rewritten) {
         rewritten = true;
         try {
           const before = item.description;

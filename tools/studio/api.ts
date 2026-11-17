@@ -48,6 +48,7 @@ export interface StudioOptions {
   budget: Budget;
   allowedHosts?: string[]; // 既定は localhost と 127.0.0.1
   concurrency?: number;
+  maxAttempts?: number; // 1 品目あたりの生成回数（作り直しを含む）。既定は MAX_ATTEMPTS
 }
 
 class HttpError extends Error {
@@ -223,7 +224,7 @@ export class StudioApi {
         return json({
           contentDir: this.store.dir,
           ai: { text: !!this.options.ai.text, image: !!this.options.ai.image },
-          budget: { usedToday: await this.options.budget.usedToday(), ...this.options.budget.limits, maxAttempts: MAX_ATTEMPTS },
+          budget: { usedToday: await this.options.budget.usedToday(), ...this.options.budget.limits, maxAttempts: this.maxAttempts },
           git: { ...(await this.gitStatus()), unusedFiles: await this.store.countUnusedFiles() },
         });
       case 'GET /api/content':
@@ -362,10 +363,10 @@ export class StudioApi {
         if (!theme) throw new HttpError(400, 'テーマを入力してください');
         const count = Math.floor(Number(b.count));
         // 1 回の実行の上限に収まる数まで（案を作ったのに、生成で断られることが無いように）
-        const most = Math.max(1, Math.min(MAX_ITEMS_PER_PLAN, Math.floor(this.options.budget.limits.perRun / MAX_ATTEMPTS)));
+        const most = Math.max(1, Math.min(MAX_ITEMS_PER_PLAN, Math.floor(this.options.budget.limits.perRun / this.maxAttempts)));
         if (!(count >= 1 && count <= most)) throw new HttpError(400, `品目数は 1〜${most} で指定してください`);
         const items = await planItems(text, doll, { theme, count, categories: b.categories, style: findStyle(b.styleId).prompt });
-        return json({ items, maxImages: items.length * MAX_ATTEMPTS });
+        return json({ items, maxImages: items.length * this.maxAttempts });
       }
       case 'POST /api/jobs': {
         const b = this.body<{ dollId: string; items: PlannedItem[]; styleId?: string }>(req);
@@ -377,7 +378,7 @@ export class StudioApi {
           if (typeof i.name !== 'string' || !i.name.trim() || typeof i.description !== 'string' || !i.description.trim()) throw new HttpError(400, '品目の名前と説明を入力してください');
           return { category: i.category, name: i.name.trim(), description: i.description.slice(0, 1000), colors: Array.isArray(i.colors) ? i.colors.filter((c) => typeof c === 'string').slice(0, 6) : [] };
         });
-        await this.options.budget.check(items.length * MAX_ATTEMPTS);
+        await this.options.budget.check(items.length * this.maxAttempts);
         const template = await this.dollTemplate(doll);
         const data = await this.templateData(doll);
         const style = findStyle(b.styleId).prompt;
@@ -387,7 +388,7 @@ export class StudioApi {
           : null;
         const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) => {
           const usesCloseup = touchesHandsOrFeet(data.regions[(c as Candidate).item.category] ?? null, data);
-          return generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, closeup: usesCloseup ? closeup : null }, c as Candidate);
+          return generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, closeup: usesCloseup ? closeup : null, maxAttempts: this.maxAttempts }, c as Candidate);
         });
         return json({ id: job.id });
       }
@@ -466,6 +467,10 @@ export class StudioApi {
       default:
         throw new HttpError(404, `${key} はありません`);
     }
+  }
+
+  private get maxAttempts(): number {
+    return Math.max(1, Math.min(3, Math.floor(this.options.maxAttempts ?? MAX_ATTEMPTS)));
   }
 
   private requireAi(): { text: NonNullable<AiClients['text']>; image: NonNullable<AiClients['image']> } {

@@ -78,9 +78,10 @@ const errorOf = async (res: Promise<ApiResponse>) => {
   return { status: r.status, error: (JSON.parse(r.body.toString()) as { error: string }).error };
 };
 
-function makeApi(ai = { text: fakeText as TextAi | null, image: fakeImage as ImageAi | null }, limits = { perDay: 20, perRun: 10 }) {
+// 作り直しの動きを確かめるため、テストでは既定（1 回）ではなく 2 回までにする
+function makeApi(ai = { text: fakeText as TextAi | null, image: fakeImage as ImageAi | null }, limits = { perDay: 20, perRun: 10 }, maxAttempts: number | null = 2) {
   budget = new Budget(path.join(dir, '.usage.json'), limits);
-  api = new StudioApi({ contentDir: path.join(dir, 'content'), ai, budget });
+  api = new StudioApi({ contentDir: path.join(dir, 'content'), ai, budget, maxAttempts: maxAttempts ?? undefined }); // null = 既定
 }
 
 beforeEach(async () => {
@@ -357,6 +358,23 @@ describe('テーマからの自動生成', () => {
     expect(c).toMatchObject({ status: 'flagged', attempts: 1, hasImage: true });
     expect(c.notes[0]).toMatch(/検品ができませんでした/);
     expect(await budget.usedToday()).toBe(1);
+  }, 60_000);
+  it('既定では作り直さない: 検品で不合格でも 1 枚だけで「注意あり」になる。断られたときの書き直しは 1 回だけ行う', async () => {
+    makeApi(undefined, undefined, null);
+    expect((await ok<{ budget: { maxAttempts: number } }>('GET', '/api/status')).budget.maxAttempts).toBe(1);
+    verdicts = [{ ok: false, reason: 'そでが欠けています' }];
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A red shirt.', colors: ['#c81e28'] }] });
+    await api.waitForJob(id);
+    const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
+    expect(c).toMatchObject({ status: 'flagged', attempts: 1, hasImage: true, notes: ['そでが欠けています'] });
+    expect(imageCalls).toHaveLength(1);
+
+    let calls = 0;
+    makeApi({ text: fakeText, image: { generate: async (input) => (++calls === 1 ? Promise.reject(new AiError('断りました', 422, false, true)) : fakeImage.generate(input)) } }, undefined, null);
+    const second = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'b', description: 'An Elsa dress.', colors: ['#c81e28'] }] });
+    await api.waitForJob(second.id);
+    expect((await ok<JobView>('GET', `/api/jobs?id=${second.id}`)).candidates[0]).toMatchObject({ status: 'passed', attempts: 2 });
+    expect(calls).toBe(2);
   }, 60_000);
   it('画像生成が失敗したら、候補は「失敗」になり、理由が残る', async () => {
     makeApi({ text: fakeText, image: { generate: async () => { throw new AiError('Gemini API のキーが正しくありません', 500); } } });

@@ -47,6 +47,7 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
           perDay: positive(env.STUDIO_DAILY_IMAGE_LIMIT, 60),
           perRun: positive(env.STUDIO_RUN_IMAGE_LIMIT, 30),
         }),
+        maxAttempts: positive(env.STUDIO_MAX_ATTEMPTS, 1),
       });
       if (!fs.existsSync(path.join(contentDir, 'manifest.json'))) {
         if (env.STUDIO_CREATE === '1') {

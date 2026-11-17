@@ -17,7 +17,7 @@ describe('createGemini', () => {
     expect(seen!.headers['x-goog-api-key']).toBe('KEY');
     expect(seen!.body.model).toBe('gemini-nano-banana-2.1');
     expect(seen!.body.input).toEqual([{ type: 'image', mime_type: 'image/png', data: Buffer.from('ref').toString('base64') }, { type: 'text', text: 'a hat' }]);
-    expect(seen!.body.response_format).toEqual({ type: 'image', aspect_ratio: '1:1', image_size: '2K' });
+    expect(seen!.body.response_format).toEqual({ type: 'image', aspect_ratio: '1:1', image_size: '1K' }); // 既定は 1K（値段を抑える）
   });
   it('画像が無い返答は、やり直せるエラー。キーの誤りと利用制限は、やり直さない', async () => {
     const none = await createGemini('k', 'm', reply(200, { steps: [{ type: 'model_output', content: [{ type: 'text', text: 'no' }] }] })).generate({ prompt: 'x', images: [] }).catch((e: AiError) => e);
