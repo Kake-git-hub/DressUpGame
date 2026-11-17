@@ -19,6 +19,7 @@ let api: StudioApi;
 let budget: Budget;
 let dollId: string;
 let imageCalls: { prompt: string; images: Buffer[] }[];
+let textCalls: { system: string; prompt: string }[];
 let verdicts: { ok: boolean; reason: string }[];
 
 // 人型（頭・胴・腕・脚）の透過画像
@@ -46,8 +47,10 @@ const fakeImage: ImageAi = {
   },
 };
 const fakeText: TextAi = {
-  async json<T>(input: { prompt: string; schema: Record<string, unknown> }): Promise<T> {
+  async json<T>(input: { system?: string; prompt: string; schema: Record<string, unknown> }): Promise<T> {
+    textCalls?.push({ system: input.system ?? '', prompt: input.prompt });
     const props = (input.schema.properties ?? {}) as Record<string, unknown>;
+    if (!('items' in props) && 'description' in props) return { description: 'A plain blue dress with ribbons.' } as T;
     if ('ok' in props) return (verdicts.shift() ?? { ok: true, reason: 'よくできています' }) as T;
     if (/Number of backgrounds/.test(input.prompt)) return { items: [{ name: 'うみべ', description: 'A calm beach.' }, { name: 'おしろ', description: 'A castle hall.' }] } as T;
     return {
@@ -83,6 +86,7 @@ function makeApi(ai = { text: fakeText as TextAi | null, image: fakeImage as Ima
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-'));
   imageCalls = [];
+  textCalls = [];
   verdicts = [];
   makeApi();
   await api.store.init();
@@ -134,10 +138,13 @@ describe('ドールと型紙', () => {
     expect(t.regions['アクセサリー']).toBeNull();
   });
   it('型紙を保存できる。形が違えば 400', async () => {
-    const t = await ok<{ style: string }>('GET', `/api/template?doll=${dollId}`);
-    const saved = await ok<{ style: string }>('PUT', '/api/template', { dollId, template: { ...t, style: 'アニメ調、太い線' } });
-    expect(saved.style).toBe('アニメ調、太い線');
-    expect((await ok<{ style: string }>('GET', `/api/template?doll=${dollId}`)).style).toBe('アニメ調、太い線');
+    const t = await ok<{ parts: Record<string, { x: number; y: number; w: number; h: number }> }>('GET', `/api/template?doll=${dollId}`);
+    const head = { ...t.parts.head, y: t.parts.head.y + 3 };
+    // 以前の型紙の絵柄の項目は、送られてきても保存しない
+    const saved = await ok<Record<string, unknown> & typeof t>('PUT', '/api/template', { dollId, template: { ...t, parts: { ...t.parts, head }, style: 'x', styleRefs: [] } });
+    expect(saved.parts.head).toEqual(head);
+    expect(Object.keys(saved).sort()).toEqual(['parts', 'regions']);
+    expect((await ok<typeof t>('GET', `/api/template?doll=${dollId}`)).parts.head).toEqual(head);
     expect((await call('PUT', '/api/template', { dollId, template: { style: 1 } })).status).toBe(400);
     // 壊れた値は保存されず、型紙は読めるまま
     expect((await call('PUT', '/api/template', { dollId, template: { ...t, parts: null } })).status).toBe(400);
@@ -214,6 +221,53 @@ describe('テーマからの自動生成', () => {
     expect((await call('POST', '/api/plan', { dollId, theme: ' ', count: 3 })).status).toBe(400);
     expect((await call('POST', '/api/plan', { dollId, theme: 'x', count: 6 })).status).toBe(400); // 1 回の上限 10 枚 ÷ 2 回 = 5 点まで
   });
+  it('企画: 既にある素材の一覧は渡さず、キャラクター名などを書かないよう指示し、選んだ絵柄を渡す', async () => {
+    await ok('POST', '/api/items', { dollId, category: 'トップス', name: 'もとからあるふく', png: (await sharp({ create: { width: 1024, height: 1024, channels: 4, background: '#c81e28' } }).png().toBuffer()).toString('base64') });
+    await ok('POST', '/api/plan', { dollId, theme: 'うみ', count: 1, styleId: 'pastel' });
+    const prompt = textCalls[0].prompt;
+    expect(prompt).not.toMatch(/もとからあるふく/);
+    expect(prompt).toMatch(/Never mention the name of any real or fictional character/);
+    expect(prompt).toMatch(/pastel colours/);
+  });
+  it('生成: 選んだ絵柄を画像 AI に渡す。手足にかかる品目（くつ）には手と足の拡大図を添え、どこにでも付く品目には添えない', async () => {
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', {
+      dollId,
+      styleId: 'real',
+      items: [
+        { category: 'アクセサリー', name: 'a', description: 'A red shirt.', colors: ['#c81e28'] },
+        { category: 'くつ', name: 'b', description: 'Red shoes.', colors: ['#c81e28'] },
+      ],
+    });
+    await api.waitForJob(id);
+    const shirt = imageCalls.find((c) => c.prompt.includes('red shirt'))!;
+    const shoes = imageCalls.find((c) => c.prompt.includes('Red shoes'))!;
+    expect(shirt.prompt).toMatch(/Semi-realistic/);
+    expect(shirt.images).toHaveLength(1);
+    expect(shirt.prompt).not.toMatch(/close-ups/);
+    expect(shoes.images).toHaveLength(2);
+    expect(shoes.prompt).toMatch(/close-ups of the same mannequin's hands and feet/);
+  }, 60_000);
+  it('画像 AI に内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す', async () => {
+    let calls = 0;
+    makeApi({
+      text: fakeText,
+      image: {
+        async generate(input) {
+          calls++;
+          if (calls === 1) throw new AiError('Gemini API が内容の決まりにより断りました', 422, false, true);
+          return fakeImage.generate(input);
+        },
+      },
+    });
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'An Elsa dress.', colors: ['#c81e28'] }] });
+    await api.waitForJob(id);
+    const c = (await ok<JobView & { candidates: { item: { description: string } }[] }>('GET', `/api/jobs?id=${id}`)).candidates[0];
+    expect(calls).toBe(2);
+    expect(c).toMatchObject({ status: 'passed', attempts: 2, hasImage: true });
+    expect(c.item.description).toBe('A plain blue dress with ribbons.');
+    expect(c.notes[0]).toMatch(/書き直しました.*An Elsa dress/);
+    expect(imageCalls[0].prompt).toMatch(/plain blue dress/);
+  }, 60_000);
   it('生成: 候補ができ、合格し、採用するまで一覧には入らない', async () => {
     const p = await plan();
     const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: p.items });

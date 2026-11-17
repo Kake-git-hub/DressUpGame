@@ -9,11 +9,11 @@ import type { Status } from './api';
 import { AddItems, Backgrounds, DollPanel, Generate, Library } from './Panels';
 
 const TABS = [
-  ['doll', 'ドールと型紙'],
-  ['add', '服を追加'],
   ['generate', 'テーマから作る'],
-  ['backgrounds', '背景'],
+  ['add', '画像から追加'],
   ['library', '一覧'],
+  ['backgrounds', '背景'],
+  ['doll', 'ドールの範囲'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -26,7 +26,7 @@ export function Studio() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dollId, setDollId] = useState('');
-  const [tab, setTab] = useState<Tab>('add');
+  const [tab, setTab] = useState<Tab>('generate');
   const [publishing, setPublishing] = useState(false);
 
   const apply = useCallback((result: [Status, Manifest] | string) => {
@@ -96,7 +96,7 @@ export function Studio() {
         {activeTab === 'doll' && <DollPanel doll={doll} onChanged={reload} onAdded={(id) => { setDollId(id); setTab('doll'); void reload(); }} />}
         {doll && activeTab === 'add' && <AddItems key={doll.id} doll={doll} onChanged={reload} />}
         {doll && activeTab === 'generate' && <Generate key={doll.id} doll={doll} status={status} onChanged={reload} />}
-        {doll && activeTab === 'backgrounds' && <Backgrounds key={doll.id} doll={doll} manifest={manifest} status={status} onChanged={reload} />}
+        {doll && activeTab === 'backgrounds' && <Backgrounds key={doll.id} doll={doll} manifest={manifest} onChanged={reload} />}
         {doll && activeTab === 'library' && <Library key={doll.id} doll={doll} onChanged={reload} />}
       </main>
       {publishing && <Publish status={status} onClose={() => { setPublishing(false); void reload(); }} />}

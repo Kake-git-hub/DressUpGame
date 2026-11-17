@@ -27,8 +27,6 @@ export interface ProcessResult {
 export interface TemplateData {
   parts: Record<string, Box>;
   regions: Record<string, Box | null>;
-  style: string;
-  styleRefs: string[];
 }
 export interface PlannedItem {
   category: string;
@@ -92,9 +90,9 @@ export const api = {
   template: (dollId: string) => get<TemplateData>(`/template?${q({ doll: dollId })}`),
   saveTemplate: (dollId: string, template: TemplateData) => send<TemplateData>('PUT', '/template', { dollId, template }),
   silhouetteUrl: (dollId: string, color: string, bg: string) => `${API_BASE}/silhouette?${q({ doll: dollId, color: color.replace('#', ''), bg: bg.replace('#', '') })}`,
-  plan: (input: { dollId: string; theme: string; count: number; categories: string[] }) => send<{ items: PlannedItem[]; maxImages: number }>('POST', '/plan', input),
-  startJob: (dollId: string, items: PlannedItem[]) => send<{ id: string }>('POST', '/jobs', { dollId, items }),
-  startBackgroundJob: (input: { dollId: string | null; theme: string; count: number }) => send<{ id: string }>('POST', '/background-jobs', input),
+  plan: (input: { dollId: string; theme: string; count: number; categories: string[]; styleId: string }) => send<{ items: PlannedItem[]; maxImages: number }>('POST', '/plan', input),
+  startJob: (dollId: string, items: PlannedItem[], styleId: string) => send<{ id: string }>('POST', '/jobs', { dollId, items, styleId }),
+  startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）
   jobImageUrl: (id: string, index: number, kind: 'png' | 'source' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,

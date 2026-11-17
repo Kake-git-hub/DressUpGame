@@ -6,6 +6,7 @@ import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
 import type { Job, PlannedItem, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
+import { STYLE_PRESETS, findStyle } from './stylePresets';
 import type { CardSource } from './ItemCard';
 
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : String(e));
@@ -19,6 +20,8 @@ interface Common {
 /* ---------- 服を追加（手持ちの画像） ---------- */
 
 export function AddItems({ doll, onChanged }: Common) {
+  const [color, setColor] = useState('#00ff00');
+  const [bg, setBg] = useState('#ffffff');
   const [cards, setCards] = useState<CardSource[]>([]);
   const [busy, setBusy] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
@@ -59,6 +62,15 @@ export function AddItems({ doll, onChanged }: Common) {
         画像を選ぶ（複数可。ここにドロップもできます）
         <input type="file" accept="image/*" multiple data-testid="add-files" onChange={(e) => { void addFiles([...(e.target.files ?? [])]); e.target.value = ''; }} />
       </label>
+      <details>
+        <summary>AI に渡す基準画像（ほかの AI で手作業で作るとき用）</summary>
+        <div className="row">
+          <label>シルエット <input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
+          <label>背景 <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} /></label>
+          <a className="button" href={api.silhouetteUrl(doll.id, color, bg)} download={`${doll.name}-シルエット.png`} data-testid="silhouette-link">ダウンロード</a>
+        </div>
+        <p className="hint">服に使う色から遠い色を選んでください（緑の服ならマゼンタ）。黒は暗い服の影と区別できないので避けます。「テーマから作る」では、品目ごとに自動で選びます。</p>
+      </details>
       {busy > 0 && <p data-testid="add-busy">処理中…（残り {busy} 枚）</p>}
       {errors.map((e, i) => (
         <p key={i} className="error">{e}</p>
@@ -99,40 +111,83 @@ const STATUS_LABEL = { waiting: '待ち', working: '作成中…', passed: '合�
 
 /* ---------- テーマから作る ---------- */
 
+const BACKGROUND = '__background'; // 「作るもの」で背景を選んだとき
+const remember = {
+  get: (key: string): string | null => {
+    try {
+      return localStorage.getItem(`studio.${key}`);
+    } catch {
+      return null;
+    }
+  },
+  set: (key: string, value: string) => {
+    try {
+      localStorage.setItem(`studio.${key}`, value);
+    } catch {
+      // 保存できなくても動く
+    }
+  },
+};
+
+interface StartedJob {
+  id: string;
+  kind: 'items' | 'backgrounds';
+  styleId: string;
+  owner: string | null; // 背景を採用したときの持ち主（null = 全部のドールで使う）
+}
+
 export function Generate({ doll, status, onChanged }: Common & { status: Status }) {
+  const categories = [...doll.categories].sort((a, b) => a.menuOrder - b.menuOrder);
   const [theme, setTheme] = useState('');
-  const [count, setCount] = useState(6);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [plan, setPlan] = useState<PlannedItem[] | null>(null);
+  const [styleId, setStyleId] = useState(() => findStyle(remember.get('style')).id);
+  const [target, setTarget] = useState(() => {
+    const saved = remember.get(`target.${doll.id}`);
+    return saved && (saved === BACKGROUND || doll.categories.some((c) => c.id === saved)) ? saved : (categories[0]?.id ?? BACKGROUND);
+  });
+  const [count, setCount] = useState(1);
+  const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jobIds, setJobIds] = useState<string[]>([]);
+  const [jobs, setJobs] = useState<StartedJob[]>([]);
   const available = status.ai.text && status.ai.image;
+  const isBackground = target === BACKGROUND;
+  const most = isBackground ? Math.min(10, status.budget.perRun) : Math.max(1, Math.floor(status.budget.perRun / status.budget.maxAttempts));
+  const maxImages = isBackground ? count * 2 : count * status.budget.maxAttempts;
 
-  const makePlan = async () => {
+  const chooseStyle = (id: string) => {
+    setStyleId(id);
+    remember.set('style', id);
+  };
+  const chooseTarget = (id: string) => {
+    setTarget(id);
+    remember.set(`target.${doll.id}`, id);
+  };
+  const guard = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
-      setPlan((await api.plan({ dollId: doll.id, theme, count, categories })).items);
+      await fn();
     } catch (e) {
       setError(message(e));
     }
     setBusy(false);
   };
-  const start = async (items: PlannedItem[]) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const { id } = await api.startJob(doll.id, items);
-      setJobIds((list) => [id, ...list]);
-      setPlan(null);
-      void onChanged();
-    } catch (e) {
-      setError(message(e));
-    }
-    setBusy(false);
+  const startItems = async (items: PlannedItem[], style: string) => {
+    const { id } = await api.startJob(doll.id, items, style);
+    setJobs((list) => [{ id, kind: 'items', styleId: style, owner: doll.id }, ...list]);
+    void onChanged();
   };
-  const edit = (index: number, change: Partial<PlannedItem>) => setPlan((list) => list!.map((item, i) => (i === index ? { ...item, ...change } : item)));
+  const make = () =>
+    guard(async () => {
+      if (isBackground) {
+        const { id } = await api.startBackgroundJob({ dollId: doll.id, theme, count, styleId });
+        setJobs((list) => [{ id, kind: 'backgrounds', styleId, owner: shared ? null : doll.id }, ...list]);
+        void onChanged();
+        return;
+      }
+      const { items } = await api.plan({ dollId: doll.id, theme, count, categories: [target], styleId });
+      await startItems(items, styleId);
+    });
 
   return (
     <section>
@@ -141,59 +196,67 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
           自動生成を使うには、スタジオのサーバーを起動する PC の環境変数に ANTHROPIC_API_KEY（Claude）と GEMINI_API_KEY（Gemini）を設定してください。キーは画面には入力しません。
         </p>
       )}
-      <div className="form">
+      <div className="form generate-form">
         <label>
           テーマ
           <input value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" data-testid="theme" />
         </label>
-        <label>
-          品目数
-          <input type="number" min={1} max={Math.floor(status.budget.perRun / status.budget.maxAttempts)} value={count} onChange={(e) => setCount(Number(e.target.value))} />
-        </label>
-        <div className="checks">
-          カテゴリ（選ばなければ全部）:
-          {doll.categories.map((c) => (
-            <label key={c.id}>
-              <input type="checkbox" checked={categories.includes(c.id)} onChange={(e) => setCategories((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} />
-              {c.label}
-            </label>
+        <div className="chips" role="radiogroup" aria-label="絵柄">
+          <span className="chips-label">絵柄</span>
+          {STYLE_PRESETS.map((s) => (
+            <button key={s.id} type="button" role="radio" aria-checked={styleId === s.id} className={styleId === s.id ? 'chip on' : 'chip'} onClick={() => chooseStyle(s.id)} data-testid={`style-${s.id}`}>
+              {s.label}
+            </button>
           ))}
         </div>
-        <button className="primary" onClick={() => void makePlan()} disabled={busy || !available || !theme.trim()}>
-          {busy && !plan ? '考え中…' : '品目の案を作る'}
-        </button>
+        <div className="chips" role="radiogroup" aria-label="作るもの">
+          <span className="chips-label">作るもの</span>
+          {categories.map((c) => (
+            <button key={c.id} type="button" role="radio" aria-checked={target === c.id} className={target === c.id ? 'chip on' : 'chip'} onClick={() => chooseTarget(c.id)} data-testid={`target-${c.id}`}>
+              {c.label}
+            </button>
+          ))}
+          <button type="button" role="radio" aria-checked={isBackground} className={isBackground ? 'chip on' : 'chip'} onClick={() => chooseTarget(BACKGROUND)} data-testid="target-background">
+            背景
+          </button>
+        </div>
+        {isBackground && (
+          <label>
+            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> 全部のドールで使う背景にする（外すと「{doll.name}」専用）
+          </label>
+        )}
+        <div className="row">
+          <label>
+            枚数
+            <input type="number" min={1} max={most} value={count} onChange={(e) => setCount(Math.max(1, Math.min(most, Math.floor(Number(e.target.value)) || 1)))} data-testid="count" />
+          </label>
+          <button className="primary" onClick={() => void make()} disabled={busy || !available || !theme.trim()} data-testid="make">
+            {busy ? '準備中…' : '作る'}
+          </button>
+          <span className="hint">
+            画像の生成は最大 {maxImages} 枚（作り直し・書き直しを含む）。今日は {status.budget.usedToday} / {status.budget.perDay} 枚を使用済み。
+          </span>
+        </div>
       </div>
       {error && <p className="error">{error}</p>}
-      {plan && (
-        <div className="plan" data-testid="plan">
-          <h3>品目の案（直せます）</h3>
-          {plan.map((item, i) => (
-            <div key={i} className="plan-row">
-              <select value={item.category} onChange={(e) => edit(i, { category: e.target.value })}>
-                {doll.categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.label}</option>
-                ))}
-              </select>
-              <input value={item.name} onChange={(e) => edit(i, { name: e.target.value })} />
-              <textarea value={item.description} onChange={(e) => edit(i, { description: e.target.value })} rows={2} />
-              <span className="swatches">
-                {item.colors.map((c) => (
-                  <i key={c} style={{ background: c }} />
-                ))}
-              </span>
-              <button onClick={() => setPlan((list) => list!.filter((_, k) => k !== i))}>外す</button>
-            </div>
-          ))}
-          <p>
-            画像生成は最大 <b>{plan.length * status.budget.maxAttempts}</b> 枚（{plan.length} 点 × 作り直しを含めて {status.budget.maxAttempts} 回まで）。今日は {status.budget.usedToday} / {status.budget.perDay} 枚を使用済み。
-          </p>
-          <button className="primary" onClick={() => void start(plan)} disabled={busy || plan.length === 0}>この内容で作る</button>
-        </div>
+      {jobs.map((job) =>
+        job.kind === 'items' ? (
+          <JobCards key={job.id} id={job.id} doll={doll} onChanged={onChanged} onRedo={(item) => void guard(() => startItems([item], job.styleId))} />
+        ) : (
+          <BackgroundJob key={job.id} id={job.id} owner={job.owner} onChanged={onChanged} />
+        ),
       )}
-      {jobIds.map((id) => (
-        <JobCards key={id} id={id} doll={doll} onChanged={onChanged} onRedo={(item) => void start([item])} />
-      ))}
     </section>
+  );
+}
+
+// AI に渡した説明文（英語）。うまくいかないときの手がかりに
+function Instruction({ text }: { text: string }) {
+  return (
+    <details className="instruction">
+      <summary>AI への指示</summary>
+      {text}
+    </details>
   );
 }
 
@@ -211,38 +274,81 @@ function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo
         if (hidden.includes(i)) return null;
         if (!c.hasImage || c.status === 'working' || c.status === 'waiting') {
           return (
-            <p key={i} className={c.status === 'failed' ? 'error' : ''}>
-              {c.item.name}: {STATUS_LABEL[c.status]} {c.notes.join(' / ')}
-              {c.status === 'failed' && <button onClick={() => { hide(i); onRedo(c.item as PlannedItem); }}>作り直す</button>}
-            </p>
+            <div key={i}>
+              <p className={c.status === 'failed' ? 'error' : ''}>
+                {c.item.name}: {STATUS_LABEL[c.status]} {c.notes.join(' / ')}
+                {c.status === 'failed' && <button onClick={() => { hide(i); onRedo(c.item as PlannedItem); }}>作り直す</button>}
+              </p>
+              <Instruction text={c.item.description} />
+            </div>
           );
         }
         return (
-          <ItemCard
-            key={`${i}-${c.attempts}`}
-            doll={doll}
-            source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), warnings: c.warnings, notes: c.notes }}
-            onDiscard={() => hide(i)}
-            onSaved={() => { hide(i); void onChanged(); }}
-            onRedo={() => { hide(i); onRedo(c.item as PlannedItem); }}
-          />
+          <div key={`${i}-${c.attempts}`}>
+            <ItemCard
+              doll={doll}
+              source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), warnings: c.warnings, notes: c.notes }}
+              onDiscard={() => hide(i)}
+              onSaved={() => { hide(i); void onChanged(); }}
+              onRedo={() => { hide(i); onRedo(c.item as PlannedItem); }}
+            />
+            <Instruction text={c.item.description} />
+          </div>
         );
       })}
     </div>
   );
 }
 
+function BackgroundJob({ id, owner, onChanged }: { id: string; owner: string | null; onChanged: () => void | Promise<void> }) {
+  const job = useJob(id);
+  const [adopted, setAdopted] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!job) return <p>準備中…</p>;
+  const adopt = async (i: number, name: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const blob = await (await fetch(api.jobImageUrl(job.id, i))).blob();
+      await api.addBackground(owner, name, blob);
+      setAdopted((a) => [...a, i]);
+      await onChanged();
+    } catch (e) {
+      setError(message(e));
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="job" data-testid="background-job">
+      <h3>{job.done ? '背景の候補' : '背景を作成中…'}</h3>
+      {error && <p className="error">{error}</p>}
+      <div className="thumbs">
+        {job.candidates.map((c, i) =>
+          adopted.includes(i) ? null : (
+            <figure key={i}>
+              {c.hasImage ? <img src={api.jobImageUrl(job.id, i, 'png', c.attempts)} alt={c.item.name} /> : <div className="placeholder">{STATUS_LABEL[c.status]}</div>}
+              <figcaption>{c.item.name} {c.notes.join(' / ')}</figcaption>
+              <Instruction text={c.item.description} />
+              {c.hasImage && (
+                <button disabled={busy} onClick={() => void adopt(i, c.item.name)}>
+                  採用
+                </button>
+              )}
+            </figure>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- 背景 ---------- */
 
-export function Backgrounds({ doll, manifest, status, onChanged }: Common & { manifest: Manifest; status: Status }) {
+export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: Manifest }) {
   const [shared, setShared] = useState(false);
-  const [theme, setTheme] = useState('');
-  const [count, setCount] = useState(3);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [adopted, setAdopted] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const job = useJob(jobId);
   const owner = shared ? null : doll.id;
   const guard = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -259,6 +365,7 @@ export function Backgrounds({ doll, manifest, status, onChanged }: Common & { ma
 
   return (
     <section>
+      <p className="hint">AI で背景を作るときは「テーマから作る」で「背景」を選びます。ここでは手持ちの画像の追加と、背景の整理ができます。</p>
       <label>
         <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> 全部のドールで使う背景として追加する（外すと「{doll.name}」専用）
       </label>
@@ -278,49 +385,7 @@ export function Backgrounds({ doll, manifest, status, onChanged }: Common & { ma
           }}
         />
       </label>
-      <div className="form">
-        <label>
-          テーマから作る
-          <input value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのなかのおしろ" />
-        </label>
-        <label>
-          枚数
-          <input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Number(e.target.value))} />
-        </label>
-        <button
-          onClick={() => void guard(async () => { setAdopted([]); setJobId((await api.startBackgroundJob({ dollId: doll.id, theme, count })).id); })}
-          disabled={busy || !theme.trim() || !(status.ai.text && status.ai.image)}
-        >
-          作る（最大 {count} 枚）
-        </button>
-      </div>
       {error && <p className="error">{error}</p>}
-      {job && (
-        <div className="thumbs">
-          {job.candidates.map((c, i) =>
-            adopted.includes(i) ? null : (
-              <figure key={i}>
-                {c.hasImage ? <img src={api.jobImageUrl(job.id, i)} alt={c.item.name} /> : <div className="placeholder">{STATUS_LABEL[c.status]}</div>}
-                <figcaption>{c.item.name} {c.notes.join(' / ')}</figcaption>
-                {c.hasImage && (
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      void guard(async () => {
-                        const blob = await (await fetch(api.jobImageUrl(job.id, i))).blob();
-                        await api.addBackground(owner, c.item.name, blob);
-                        setAdopted((a) => [...a, i]);
-                      })
-                    }
-                  >
-                    採用
-                  </button>
-                )}
-              </figure>
-            ),
-          )}
-        </div>
-      )}
       <h3>いまの背景（{list.length} 枚）</h3>
       <div className="thumbs" data-testid="bg-list">
         {list.map((b) => (
@@ -431,8 +496,6 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
   const [loaded, setLoaded] = useState<{ dollId: string; data: TemplateData } | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [color, setColor] = useState('#00ff00');
-  const [bg, setBg] = useState('#ffffff');
   const dollId = doll?.id;
   // 別のドールの型紙は見せない
   const template = loaded && loaded.dollId === dollId ? loaded.data : null;
@@ -472,8 +535,8 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
 
   return (
     <section>
-      <div className="form">
-        <b>ドールを追加</b>
+      <details className="form" open={!doll}>
+        <summary>ドールを追加</summary>
         <label>
           なまえ
           <input value={name} onChange={(e) => setName(e.target.value)} data-testid="doll-name" />
@@ -482,8 +545,8 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
           背景が透明な画像（PNG・WebP）
           <input type="file" accept="image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} data-testid="doll-file" />
         </label>
-        <button className="primary" onClick={() => void add()} disabled={!name.trim() || !file} data-testid="doll-add">追加して型紙を作る</button>
-      </div>
+        <button className="primary" onClick={() => void add()} disabled={!name.trim() || !file} data-testid="doll-add">追加して範囲を作る</button>
+      </details>
       {error && <p className="error" data-testid="doll-error">{error}</p>}
       {doll && template && (
         <div className="template" data-testid="template">
@@ -497,8 +560,8 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
             <p className="hint">青 = 体の部位、だいだいの点線 = カテゴリごとの「あるはずの範囲」。数値はキャンバス（{doll.image.canvasW}px）での位置。</p>
           </div>
           <div className="template-side">
-            <h3>型紙: {doll.name}</h3>
-            <p className="hint">輪郭から自動で推定しました。ずれていれば直して保存してください（x, y, 幅, 高さ）。</p>
+            <h3>範囲: {doll.name}</h3>
+            <p className="hint">輪郭から自動で推定しました。ずれていれば直して保存してください（x, y, 幅, 高さ）。体の部位は、服を部位ごとにドールへ合わせるときにも使います。</p>
             <h4>体の部位</h4>
             {Object.entries(template.parts).map(([k, b]) => (
               <div key={k} className="row" onMouseEnter={() => setFocus(`part:${k}`)} onMouseLeave={() => setFocus(null)}>
@@ -519,32 +582,12 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
                 </div>
               );
             })}
-            <h4>絵柄</h4>
-            <label>
-              絵柄の説明（自動生成のたびに AI に渡す）
-              <textarea rows={3} value={template.style} onChange={(e) => change({ ...template, style: e.target.value })} placeholder="例: アニメ調。はっきりした黒い線、やわらかい影、明るい色" data-testid="template-style" />
-            </label>
-            <label>
-              絵柄の見本にする服（3 点まで）
-              <select multiple size={5} value={template.styleRefs} onChange={(e) => change({ ...template, styleRefs: [...e.target.selectedOptions].map((o) => o.value).slice(0, 3) })}>
-                {doll.items.map((i) => (
-                  <option key={i.id} value={i.id}>{i.category} / {i.name}</option>
-                ))}
-              </select>
-            </label>
             <div className="row">
               <button className="primary" data-testid="template-save" onClick={() => void api.saveTemplate(doll.id, template).then((t) => { setTemplate(t); setSaved(true); void onChanged(); }, (e) => setError(message(e)))}>
-                型紙を保存
+                範囲を保存
               </button>
               {saved && <span data-testid="template-saved">保存しました</span>}
             </div>
-            <h4>AI に渡す基準画像（手で生成するとき用）</h4>
-            <div className="row">
-              <label>シルエット <input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>
-              <label>背景 <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} /></label>
-              <a className="button" href={api.silhouetteUrl(doll.id, color, bg)} download={`${doll.name}-シルエット.png`} data-testid="silhouette-link">ダウンロード</a>
-            </div>
-            <p className="hint">服に使う色から遠い色を選んでください（緑の服ならマゼンタ）。黒は暗い服の影と区別できないので避けます。自動生成では、品目ごとに自動で選びます。</p>
           </div>
         </div>
       )}

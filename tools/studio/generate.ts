@@ -24,9 +24,11 @@ import { renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
 export interface TemplateData {
   parts: BodyParts;
   regions: Record<string, Box | null>; // カテゴリ ID → あるはずの範囲。null = どこでもよい
-  style: string; // 絵柄の説明
-  styleRefs: string[]; // 絵柄の見本にするアイテムの ID
 }
+
+// キャラクター名などで断られないための、どの依頼にも付ける決まり
+const NO_NAMES =
+  'Never mention the name of any real or fictional character, film, anime, game, franchise, brand, designer or celebrity, and do not describe an outfit as "like" or "inspired by" one. Describe only the generic look (shape, colours, materials, decorations).';
 
 export interface PlannedItem {
   category: string; // カテゴリ ID
@@ -90,7 +92,6 @@ const PLAN_SCHEMA = {
 export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string }): Promise<PlannedItem[]> {
   const categories = doll.categories.filter((c) => !input.categories?.length || input.categories.includes(c.id));
   if (categories.length === 0) throw new AiError('カテゴリが選ばれていません', 400);
-  const existing = doll.items.map((i) => `${i.category}: ${i.name}`).join('\n') || '(none)';
   const result = await text.json<{ items: PlannedItem[] }>({
     system:
       'You plan clothing and accessory items for a paper-doll dress-up game played by young children in Japan. ' +
@@ -99,15 +100,16 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
     prompt: [
       `Theme: ${input.theme}`,
       `Number of items to plan: ${input.count}`,
-      `Art style of the game: ${input.style || 'not specified'}`,
+      `Art style: ${input.style || 'not specified'}`,
       'Allowed categories (use the id exactly as written):',
       ...categories.map((c) => `- ${c.id}`),
-      'Items that already exist (do not duplicate these):',
-      existing,
+      '',
+      NO_NAMES,
+      'If the theme itself names a character or a work, design an original item that only borrows the general mood and colours.',
       '',
       'For each item give:',
       '- category: one of the allowed ids. Spread the items across categories so that complete outfits can be made, unless the theme asks for something specific.',
-      '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this plan and different from existing names.',
+      '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this plan.',
       '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
       '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
     ].join('\n'),
@@ -131,16 +133,19 @@ const INSPECT_SCHEMA = {
   additionalProperties: false,
 };
 
-function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, refs: number): string {
+function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, closeup: boolean): string {
   return [
     `The first image is a mannequin template: a flat ${colorName(silhouette)} silhouette of a doll on a flat ${colorName(background)} background.`,
-    refs > 0 ? `The other ${refs} image(s) show existing items of the same game. Match their art style, line quality and level of detail, but do not copy their design.` : '',
+    closeup
+      ? 'The second image shows close-ups of the same mannequin\'s hands and feet in their real colours (from left to right: the hand on the left side of the template, the hand on the right side, the feet). ' +
+        'Use it only to see the exact shape of the fingers and toes so that the item fits them precisely. Do not copy it into the result and do not paint skin colour on the mannequin.'
+      : '',
     `Draw exactly one item on the mannequin: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
     'Strict rules:',
     '- Keep the mannequin exactly as it is: same position, same size, same pose, same outline. Do not move, resize, redraw or restyle it.',
-    `- Every part of the mannequin that the item does not cover must stay the same flat ${colorName(silhouette)}. Do not draw skin, a face, hair or anything else on it.`,
+    `- Every part of the mannequin that the item does not cover must stay the same flat ${colorName(silhouette)}. Apart from the item itself, do not draw skin, a face, hair or anything else on it.`,
     `- The background must stay the same flat ${colorName(background)} with no shadows, gradients, floor, text or frame.`,
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
@@ -158,8 +163,35 @@ export interface GenerateContext {
   doll: ManifestDoll;
   template: DollTemplate;
   data: TemplateData;
-  styleRefs: Buffer[]; // 絵柄の見本（PNG）
+  style: string; // 絵柄の説明（英語）
+  closeup: Buffer | null; // 手と足の拡大図（PNG）。手袋・靴など、手足にかかる品目のときだけ
   maxAttempts?: number;
+}
+
+const REWRITE_SCHEMA = {
+  type: 'object',
+  properties: { description: { type: 'string' } },
+  required: ['description'],
+  additionalProperties: false,
+};
+
+// 画像生成 AI に断られた説明文を、無難な言い方に書き直す
+export async function rewriteDescription(text: TextAi, description: string, kind: string): Promise<string> {
+  const result = await text.json<{ description: string }>({
+    system: 'You rewrite prompts for an image model used in a children\'s dress-up game. Reply with JSON only.',
+    prompt: [
+      `The image model refused this ${kind} description for content-policy reasons:`,
+      description,
+      '',
+      'Rewrite it in one or two English sentences so that it describes the same kind of thing in a generic, child-friendly way.',
+      NO_NAMES,
+      'Remove anything that could be read as revealing, sexual, violent or unsafe.',
+    ].join('\n'),
+    schema: REWRITE_SCHEMA,
+  });
+  const rewritten = typeof result.description === 'string' ? result.description.trim() : '';
+  if (!rewritten) throw new AiError('説明文を書き直せませんでした');
+  return rewritten.slice(0, 1000);
 }
 
 // 1 品目を作る。candidate を書き換えながら進める（途中経過を画面に出せるように）
@@ -172,6 +204,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   const maxAttempts = ctx.maxAttempts ?? MAX_ATTEMPTS;
   // 前の回の結果。作り直しが失敗したり、何も残らなかったりしたときは、こちらを残す
   let kept: { png: Buffer; source: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
+  let rewritten = false; // 断られて説明文を書き直したか（1 回まで）
+  let rewriteNote: string[] = []; // 書き直したことを、最後まで候補の注記に残す
   const keepEarlier = (reason: string) => {
     if (!kept) return false;
     candidate.png = kept.png;
@@ -191,13 +225,27 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
       const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
       await ctx.budget.spend();
       const generated = await ctx.image.generate({
-        prompt: itemPrompt(item, label, ctx.data.style, keys.silhouette, keys.background, feedback, ctx.styleRefs.length),
-        images: [silhouette, ...ctx.styleRefs],
+        prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
+        images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
       });
-      result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette });
+      result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette, parts: Object.values(ctx.data.parts) });
       if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
     } catch (error) {
       const message = (error as Error).message;
+      // 内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す
+      if (error instanceof AiError && error.blocked && !rewritten && attempt < maxAttempts) {
+        rewritten = true;
+        try {
+          const before = item.description;
+          item.description = await rewriteDescription(ctx.text, before, label);
+          rewriteNote = [`画像 AI に断られたので、説明文を書き直しました（前: ${before}）`];
+          candidate.notes = rewriteNote;
+          feedback = null;
+          continue;
+        } catch {
+          // 書き直せなければ、下でふつうの失敗として扱う
+        }
+      }
       if (keepEarlier(message)) return;
       candidate.notes = [message];
       candidate.status = 'failed';
@@ -212,7 +260,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.png = await rgbaToPng(result.rgba, result.width, result.height);
     candidate.source = await rgbaToPng(result.source, result.width, result.height);
     candidate.warnings = [...result.warnings];
-    candidate.notes = [];
+    candidate.notes = [...rewriteNote];
 
     // 数値の検品
     const problems: string[] = result.warnings.map((w) => w.message);
@@ -246,12 +294,13 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         return;
       }
       if (verdict.ok) {
+        candidate.notes = [...rewriteNote];
         candidate.status = 'passed';
         return;
       }
       problems.push(verdict.reason || '見た目の検品で不合格でした');
     }
-    candidate.notes = problems;
+    candidate.notes = [...rewriteNote, ...problems];
     kept = { png: candidate.png, source: candidate.source, warnings: candidate.warnings, notes: problems };
     feedback = problems.join(' / ');
   }
@@ -290,6 +339,7 @@ export async function planBackgrounds(text: TextAi, input: { theme: string; coun
       'For each background give:',
       '- name: a short Japanese name in hiragana/katakana only, at most 12 characters, unique.',
       '- description: one or two English sentences describing the scene. No people, no animals in the foreground, no text. The centre of the picture must be calm and uncluttered because a doll stands there.',
+      NO_NAMES.replace('an outfit', 'a scene'),
     ].join('\n'),
     schema: BACKGROUND_PLAN_SCHEMA,
   });
@@ -311,24 +361,37 @@ export interface BackgroundCandidate {
   notes: string[];
 }
 
-export async function generateBackground(ctx: { image: ImageAi; budget: Budget; style: string }, candidate: BackgroundCandidate): Promise<void> {
+export async function generateBackground(ctx: { text: TextAi; image: ImageAi; budget: Budget; style: string }, candidate: BackgroundCandidate): Promise<void> {
   candidate.status = 'working';
-  candidate.attempts = 1;
-  try {
-    await ctx.budget.spend();
-    const generated = await ctx.image.generate({
-      prompt: [
-        `Draw a square background illustration for a children's dress-up game: ${candidate.item.description}`,
-        ctx.style ? `Art style: ${ctx.style}` : 'Soft, bright, friendly illustration style.',
-        'Rules: no people, no characters, no text, no frame. Keep the centre calm and uncluttered. The ground or floor should be visible in the lower quarter so a standing doll looks natural.',
-      ].join('\n'),
-      images: [],
-    });
-    // 正方形でなければ中央を切り出す
-    candidate.png = await sharp(generated).resize(1024, 1024, { fit: 'cover' }).png().toBuffer();
-    candidate.status = 'passed';
-  } catch (error) {
-    candidate.notes = [(error as Error).message];
-    candidate.status = 'failed';
+  // 内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    candidate.attempts = attempt;
+    try {
+      await ctx.budget.spend();
+      const generated = await ctx.image.generate({
+        prompt: [
+          `Draw a square background illustration for a children's dress-up game: ${candidate.item.description}`,
+          ctx.style ? `Art style: ${ctx.style}` : 'Soft, bright, friendly illustration style.',
+          'Rules: no people, no characters, no text, no frame. Keep the centre calm and uncluttered. The ground or floor should be visible in the lower quarter so a standing doll looks natural.',
+        ].join('\n'),
+        images: [],
+      });
+      // 正方形でなければ中央を切り出す
+      candidate.png = await sharp(generated).resize(1024, 1024, { fit: 'cover' }).png().toBuffer();
+      candidate.status = 'passed';
+      return;
+    } catch (error) {
+      candidate.notes = [(error as Error).message];
+      candidate.status = 'failed';
+      if (!(error instanceof AiError && error.blocked) || attempt > 1) return;
+      try {
+        const before = candidate.item.description;
+        candidate.item.description = await rewriteDescription(ctx.text, before, 'background');
+        candidate.notes = [`断られたので説明文を書き直しました（前: ${before}）`];
+        candidate.status = 'working';
+      } catch {
+        return;
+      }
+    }
   }
 }

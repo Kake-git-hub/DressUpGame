@@ -27,4 +27,12 @@ describe('createGemini', () => {
     const limit = await createGemini('k', 'm', reply(429, {})).generate({ prompt: 'x', images: [] }).catch((e: AiError) => e);
     expect(limit).toMatchObject({ status: 429, retryable: false });
   });
+  it('内容の決まりで断られたときは、書き直しの対象として印を付ける', async () => {
+    const blocked = await createGemini('k', 'm', reply(400, { error: { message: 'Request blocked due to prohibited content guidelines. Please modify your input and retry' } }))
+      .generate({ prompt: 'x', images: [] })
+      .catch((e: AiError) => e);
+    expect(blocked).toMatchObject({ status: 422, retryable: false, blocked: true });
+    const other = await createGemini('k', 'm', reply(400, { error: { message: 'bad request' } })).generate({ prompt: 'x', images: [] }).catch((e: AiError) => e);
+    expect(other).toMatchObject({ blocked: false });
+  });
 });

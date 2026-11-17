@@ -7,6 +7,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { alphaBBox } from '../../src/pipeline/alpha.ts';
+import { estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
 import { dollTemplateFromImage, processGenerated } from './processGenerated.ts';
 import type { DollTemplate, ProcessResult } from './processGenerated.ts';
 
@@ -102,9 +103,73 @@ describe('processGenerated（サンプル画像）', () => {
     const b = alphaBBox((await processGenerated(input, doll, { nudge: { scale: 1, dx: 10, dy: -7 } })).rgba, 1024, 1024)!;
     expect(b.x - a.x).toBe(10);
     expect(b.y - a.y).toBe(-7);
-  }, 30_000);
+    // 部位ごとの直しをしていても、微調整はそのまま上乗せされる（直しが消えて服が跳ねない）
+    const parts = Object.values(estimateBodyParts(doll.mask, doll.canvasW, doll.canvasH)!);
+    const c = alphaBBox((await processGenerated(input, doll, { parts })).rgba, 1024, 1024)!;
+    const d = alphaBBox((await processGenerated(input, doll, { parts, nudge: { scale: 1, dx: 10, dy: -7 } })).rgba, 1024, 1024)!;
+    expect([d.x - c.x, d.y - c.y, d.w - c.w, d.h - c.h]).toEqual([10, -7, 0, 0]);
+  }, 60_000);
 
   it('壊れた入力は Error', async () => {
     await expect(processGenerated(Buffer.from('これは画像ではない'), doll)).rejects.toThrow(/読めません/);
   });
+
+  it('AI が腕を少しずらして描いても、部位ごとの位置合わせで手袋がドールの手に合う', async () => {
+    const W = doll.canvasW;
+    const parts = estimateBodyParts(doll.mask, W, doll.canvasH)!;
+    const arm = parts.armRight;
+    const hand = parts.handRight;
+    const inBox = (b: typeof arm, x: number, y: number) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
+    const [sx, sy] = [6, 5]; // AI が描き直したときの、右腕のずれ
+    // 白い背景に緑のシルエット。右腕だけ (sx, sy) ずれていて、その手に赤い手袋
+    const raw = Buffer.alloc(W * W * 3, 255);
+    for (let y = 0; y < W; y++) {
+      for (let x = 0; x < W; x++) {
+        const moved = inBox({ x: arm.x, y: arm.y, w: arm.w + 20, h: arm.h + 20 }, x, y);
+        const fx = moved ? x - sx : x;
+        const fy = moved ? y - sy : y;
+        if (fx < 0 || fy < 0 || !doll.mask[fy * W + fx]) continue;
+        const glove = moved && inBox(hand, fx, fy);
+        raw.set(glove ? [200, 30, 40] : [0, 255, 0], (y * W + x) * 3);
+      }
+    }
+    const input = await sharp(raw, { raw: { width: W, height: W, channels: 3 } }).png().toBuffer();
+    // 手袋がドールの手をどれだけ覆うか、手袋のうちドールの外にはみ出す割合
+    const fit = (r: ProcessResult) => {
+      let handPixels = 0, covered = 0, glove = 0, outside = 0;
+      for (let y = hand.y - 20; y < hand.y + hand.h + 20; y++) {
+        for (let x = hand.x - 20; x < hand.x + hand.w + 20; x++) {
+          const on = doll.mask[y * W + x] === 1 && inBox(hand, x, y);
+          const g = alphaAt(r, x, y) >= 128;
+          if (on) handPixels++;
+          if (on && g) covered++;
+          if (g) glove++;
+          if (g && !doll.mask[y * W + x]) outside++;
+        }
+      }
+      return { coverage: covered / handPixels, outside: outside / glove };
+    };
+    const plain = fit(await processGenerated(input, doll, { silhouetteColor: [0, 255, 0] }));
+    const fixed = await processGenerated(input, doll, { silhouetteColor: [0, 255, 0], parts: Object.values(parts) });
+    const better = fit(fixed);
+    expect(plain.outside).toBeGreaterThan(0.08); // 直さなければ、はみ出す
+    expect(better.coverage).toBeGreaterThan(0.95);
+    expect(better.outside).toBeLessThan(0.03);
+    const armShift = fixed.partShifts.find((s) => s.box === arm || (s.box.x === arm.x && s.box.y === arm.y))!;
+    expect([armShift.dx, armShift.dy]).toEqual([-sx, -sy]);
+  }, 60_000);
+
+  it('作者のサンプルでも、部位ごとの直しは数 px 以内で、服の範囲はほとんど変わらない', async () => {
+    const parts = Object.values(estimateBodyParts(doll.mask, doll.canvasW, doll.canvasH)!);
+    for (const name of ['sample-green-set.webp', 'sample-green-dress.webp']) {
+      const input = await read(name);
+      const a = await processGenerated(input, doll);
+      const b = await processGenerated(input, doll, { parts });
+      expect(b.warnings).toEqual(a.warnings);
+      for (const s of b.partShifts) expect(Math.hypot(s.dx, s.dy)).toBeLessThanOrEqual(12);
+      const x = alphaBBox(a.rgba, 1024, 1024)!;
+      const y = alphaBBox(b.rgba, 1024, 1024)!;
+      expect(Math.abs(x.x - y.x) + Math.abs(x.y - y.y) + Math.abs(x.w - y.w) + Math.abs(x.h - y.h)).toBeLessThanOrEqual(16);
+    }
+  }, 90_000);
 });

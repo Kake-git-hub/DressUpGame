@@ -9,10 +9,12 @@ import Anthropic from '@anthropic-ai/sdk';
 export class AiError extends Error {
   readonly status: number;
   readonly retryable: boolean; // 同じ依頼をもう一度出す意味があるか（画像が返らなかった、など）
-  constructor(message: string, status = 502, retryable = false) {
+  readonly blocked: boolean; // 内容の決まりで断られた（説明文を書き直せば通るかもしれない）
+  constructor(message: string, status = 502, retryable = false, blocked = false) {
     super(message);
     this.status = status;
     this.retryable = retryable;
+    this.blocked = blocked;
   }
 }
 
@@ -118,6 +120,10 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
       if (!response.ok) {
         if (response.status === 429) throw new AiError('Gemini API の利用制限に達しました。少し待ってからやり直してください', 429);
         if (response.status === 401 || response.status === 403) throw new AiError('Gemini API のキーが正しくありません（GEMINI_API_KEY）', 500);
+        const detail = json.error?.message ?? '';
+        if (response.status === 400 && /prohibited|blocked|safety|policy/i.test(detail)) {
+          throw new AiError(`Gemini API が内容の決まりにより断りました（${detail}）`, 422, false, true);
+        }
         throw new AiError(`Gemini API のエラー（${response.status}）: ${json.error?.message ?? '詳細なし'}`);
       }
       // 最後に出てきた画像を使う
@@ -127,6 +133,7 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
         for (const block of step.content ?? []) if (block.type === 'image' && block.data) data = block.data;
       }
       if (data) return Buffer.from(data, 'base64');
+      if (/prohibited|blocked|safety/i.test(json.status ?? '')) throw new AiError(`Gemini API が内容の決まりにより断りました（${json.status}）`, 422, false, true);
       throw new AiError(`Gemini API が画像を返しませんでした（${json.status ?? '理由なし'}）`, 422, true);
     },
   };

@@ -36,7 +36,7 @@ test.describe('スタジオ', () => {
     await expect(page.getByRole('heading', { name: 'きせかえスタジオ' })).toBeVisible();
   });
 
-  test('ドールを追加すると、型紙ができる', async ({ page }) => {
+  test('ドールを追加すると、範囲ができる', async ({ page }) => {
     // ドールが無い間は、ほかのタブは使えない
     await expect(page.getByTestId('tab-add')).toBeDisabled();
     await page.getByTestId('doll-name').fill('アニメ');
@@ -49,14 +49,13 @@ test.describe('スタジオ', () => {
     await page.getByTestId('doll-add').click();
     await expect(page.getByTestId('template')).toBeVisible();
     await expect(page.getByTestId('doll-select')).toContainText('アニメ');
-    // 絵柄の説明を保存できる
-    await page.getByTestId('template-style').fill('アニメ調、はっきりした線');
+    // 範囲を保存できる（絵柄の項目はもう無い）
+    await expect(page.getByTestId('template-style')).toHaveCount(0);
     await page.getByTestId('template-save').click();
     await expect(page.getByTestId('template-saved')).toBeVisible();
-    await page.reload();
-    await page.getByTestId('tab-doll').click();
-    await expect(page.getByTestId('template-style')).toHaveValue('アニメ調、はっきりした線');
-    // 基準画像をダウンロードできる
+    // 基準画像は「画像から追加」でダウンロードできる
+    await page.getByTestId('tab-add').click();
+    await page.getByText('AI に渡す基準画像').click();
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('silhouette-link').click()]);
     expect(await download.failure()).toBeNull();
     expect(fs.statSync(await download.path()).size).toBeGreaterThan(10_000);
@@ -126,6 +125,15 @@ test.describe('スタジオ', () => {
     await expect(page.getByTestId('ai-status')).toContainText('キーが未設定');
     await page.getByTestId('tab-generate').click();
     await expect(page.getByTestId('generate-unavailable')).toContainText('ANTHROPIC_API_KEY');
+    // テーマ + 絵柄 + 作るもの（カテゴリか背景）+ 枚数。選んだ絵柄は次に開いたときも残る
+    await expect(page.getByTestId('count')).toHaveValue('1');
+    await page.getByTestId('style-pastel').click();
+    await page.getByTestId('target-background').click();
+    await expect(page.getByText('全部のドールで使う背景にする')).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId('style-pastel')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('target-background')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('make')).toBeDisabled();
     await page.getByTestId('publish-open').click();
     await expect(page.getByTestId('publish-dialog')).toContainText('git の作業フォルダではない');
     const manifest = await request.get('http://127.0.0.1:4174/DressUpGame/local-content/manifest.json');

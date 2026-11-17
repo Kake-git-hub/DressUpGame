@@ -23,7 +23,8 @@ import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, p
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
 import { loadDollTemplate, processGenerated } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
-import { pngToRgba, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { findStyle } from '../../src/studio/stylePresets.ts';
 
 const run = promisify(execFile);
 
@@ -62,6 +63,16 @@ const png = (data: Buffer): ApiResponse => ({ status: 200, type: 'image/png', bo
 
 const MIME: Record<string, string> = { '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.png': 'image/png' };
 const MAX_ITEMS_PER_PLAN = 30;
+
+// 範囲 region が、手か足の箱の半分以上にかかるか（手袋・靴・袖など。指先の形を AI に見せる）
+function touchesHandsOrFeet(region: Box | null, data: TemplateData): boolean {
+  if (!region) return false;
+  return [data.parts.handLeft, data.parts.handRight, data.parts.feet].some((b) => {
+    const w = Math.min(b.x + b.w, region.x + region.w) - Math.max(b.x, region.x);
+    const h = Math.min(b.y + b.h, region.y + region.h) - Math.max(b.y, region.y);
+    return w > 0 && h > 0 && w * h >= (b.w * b.h) / 2;
+  });
+}
 const MAX_JOBS_KEPT = 20;
 
 interface Job {
@@ -173,8 +184,10 @@ export class StudioApi {
     if (!data || !data.parts || !data.regions) {
       const parts = estimateBodyParts(template.mask, template.canvasW, template.canvasH);
       if (!parts) throw new HttpError(500, 'ドールの画像が全部透明です');
-      data = { parts, regions: {}, style: '', styleRefs: [] };
+      data = { parts, regions: {} };
     }
+    // 以前の型紙にあった絵柄の項目は使わない（絵柄は「テーマから作る」で選ぶ）
+    data = { parts: data.parts, regions: data.regions };
     for (const c of doll.categories) {
       if (!(c.id in data.regions)) data.regions[c.id] = defaultRegion(c.label, data.parts, template.canvasW, template.canvasH);
     }
@@ -232,6 +245,7 @@ export class StudioApi {
           result = await processGenerated(req.body, await this.dollTemplate(doll), {
             nudge: { scale, dx: num('dx', 0), dy: num('dy', 0) },
             silhouetteColor: req.query.get('silhouette') ? parseColor(req.query.get('silhouette'), 'silhouette') : undefined,
+            parts: Object.values((await this.templateData(doll)).parts),
           });
         } catch (error) {
           throw new HttpError(400, (error as Error).message);
@@ -308,7 +322,7 @@ export class StudioApi {
         const isBox = (v: unknown): v is Box =>
           typeof v === 'object' && v !== null && (['x', 'y', 'w', 'h'] as const).every((k) => Number.isFinite((v as Box)[k])) && (v as Box).w > 0 && (v as Box).h > 0;
         const pick = (b: Box): Box => ({ x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) });
-        if (!t || typeof t.parts !== 'object' || t.parts === null || typeof t.regions !== 'object' || t.regions === null || typeof t.style !== 'string' || !Array.isArray(t.styleRefs)) {
+        if (!t || typeof t.parts !== 'object' || t.parts === null || typeof t.regions !== 'object' || t.regions === null) {
           throw new HttpError(400, '型紙の形が正しくありません');
         }
         const parts = { ...current.parts };
@@ -322,7 +336,7 @@ export class StudioApi {
           if (r !== null && r !== undefined && !isBox(r)) throw new HttpError(400, `カテゴリ「${c.label}」の範囲を、数値で入力してください（幅と高さは 1 以上）`);
           regions[c.id] = r ? pick(r) : null;
         }
-        const saved: TemplateData = { parts, regions, style: t.style.slice(0, 2000), styleRefs: t.styleRefs.filter((id) => doll.items.some((i) => i.id === id)).slice(0, 3) };
+        const saved: TemplateData = { parts, regions };
         await this.store.updateStudioData<Record<string, TemplateData>>('templates', {}, (all) => ({ ...all, [doll.id]: saved }));
         return json(saved);
       }
@@ -332,7 +346,7 @@ export class StudioApi {
       }
 
       case 'POST /api/plan': {
-        const b = this.body<{ dollId: string; theme: string; count: number; categories?: string[] }>(req);
+        const b = this.body<{ dollId: string; theme: string; count: number; categories?: string[]; styleId?: string }>(req);
         const { text } = this.requireAi();
         const { doll } = await this.doll(b.dollId);
         const theme = typeof b.theme === 'string' ? b.theme.trim().slice(0, 400) : '';
@@ -341,12 +355,11 @@ export class StudioApi {
         // 1 回の実行の上限に収まる数まで（案を作ったのに、生成で断られることが無いように）
         const most = Math.max(1, Math.min(MAX_ITEMS_PER_PLAN, Math.floor(this.options.budget.limits.perRun / MAX_ATTEMPTS)));
         if (!(count >= 1 && count <= most)) throw new HttpError(400, `品目数は 1〜${most} で指定してください`);
-        const data = await this.templateData(doll);
-        const items = await planItems(text, doll, { theme, count, categories: b.categories, style: data.style });
+        const items = await planItems(text, doll, { theme, count, categories: b.categories, style: findStyle(b.styleId).prompt });
         return json({ items, maxImages: items.length * MAX_ATTEMPTS });
       }
       case 'POST /api/jobs': {
-        const b = this.body<{ dollId: string; items: PlannedItem[] }>(req);
+        const b = this.body<{ dollId: string; items: PlannedItem[]; styleId?: string }>(req);
         const { text, image } = this.requireAi();
         const { doll } = await this.doll(b.dollId);
         if (!Array.isArray(b.items) || b.items.length === 0 || b.items.length > MAX_ITEMS_PER_PLAN) throw new HttpError(400, `品目は 1〜${MAX_ITEMS_PER_PLAN} 点で指定してください`);
@@ -358,20 +371,19 @@ export class StudioApi {
         await this.options.budget.check(items.length * MAX_ATTEMPTS);
         const template = await this.dollTemplate(doll);
         const data = await this.templateData(doll);
-        const styleRefs: Buffer[] = [];
-        for (const id of data.styleRefs) {
-          const item = doll.items.find((i) => i.id === id);
-          if (!item) continue;
-          const layer = await loadDollTemplate(this.store.dir, item.image);
-          styleRefs.push(await rgbaToPng(layer.rgba, layer.canvasW, layer.canvasH));
-        }
-        const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) =>
-          generateCandidate({ text, image, budget: this.options.budget, doll, template, data, styleRefs }, c as Candidate),
-        );
+        const style = findStyle(b.styleId).prompt;
+        // 手と足の拡大図は、手足にかかる品目があるときだけ作る
+        const closeup = items.some((i) => touchesHandsOrFeet(data.regions[i.category] ?? null, data))
+          ? await renderCloseups(template, [data.parts.handLeft, data.parts.handRight, data.parts.feet])
+          : null;
+        const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) => {
+          const usesCloseup = touchesHandsOrFeet(data.regions[(c as Candidate).item.category] ?? null, data);
+          return generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, closeup: usesCloseup ? closeup : null }, c as Candidate);
+        });
         return json({ id: job.id });
       }
       case 'POST /api/background-jobs': {
-        const b = this.body<{ dollId?: string | null; theme: string; count: number }>(req);
+        const b = this.body<{ dollId?: string | null; theme: string; count: number; styleId?: string }>(req);
         const { text, image } = this.requireAi();
         const manifest = await this.store.read();
         const doll = b.dollId ? manifest.dolls.find((d) => d.id === b.dollId) : undefined;
@@ -383,9 +395,9 @@ export class StudioApi {
         await this.options.budget.check(count);
         const existing = [...manifest.backgrounds, ...manifest.dolls.flatMap((d) => d.backgrounds)].map((x) => x.name);
         const planned = await planBackgrounds(text, { theme, count, existing });
-        const style = doll ? (await this.templateData(doll)).style : '';
+        const style = findStyle(b.styleId).prompt;
         const job = this.startJob('backgrounds', doll?.id ?? null, planned.map((item): BackgroundCandidate => ({ item, status: 'waiting', attempts: 0, notes: [] })), (c) =>
-          generateBackground({ image, budget: this.options.budget, style }, c as BackgroundCandidate),
+          generateBackground({ text, image, budget: this.options.budget, style }, c as BackgroundCandidate),
         );
         return json({ id: job.id });
       }
