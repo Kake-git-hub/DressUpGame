@@ -18,6 +18,12 @@ const MATTE_TOLERANCE = 48;
 const MATTE_MIN = 0.12;
 // 画像の画素数をこれで割った数より小さいかけらは、消し残りとみなして消す（2000px 四方で 80 画素）
 const SPECK_DIVISOR = 50000;
+// キーの色の取り除き: 消した領域からの届く範囲（画像の幅に対する割合）、
+// 混ざり具合がこれ以下は服の色とみなす、そこから直し始めて RAMP で全部直す、これ以上は消す
+const DESPILL_REACH = 0.03;
+const DESPILL_START = 0.15;
+const DESPILL_RAMP = 0.1;
+const DESPILL_DROP = 0.85;
 // 服の色がこれより近いと、背景・シルエットと区別できず欠けが疑われる
 const CLOSE_COLOR_DISTANCE = 60;
 
@@ -257,6 +263,31 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
     rgba[i + 3] = updates[k + 4];
   }
 
+  // 5b. 服に混ざったキーの色（半透明の飾りや化粧の下から透けたシルエット色、ふちの色移り）を取り除く。
+  //     消した領域の近くだけで行う（服の奥の柄は触らない）
+  const reach = Math.max(8, Math.round(width * DESPILL_REACH));
+  const near = new Uint8Array(total); // 1 = 消した領域から reach px 以内
+  let wave: number[] = [];
+  for (let p = 0; p < total; p++) if (removed(p)) wave.push(p);
+  for (let d = 0; d < reach && wave.length > 0; d++) {
+    const next: number[] = [];
+    for (const p of wave) {
+      const x = p % width;
+      const visit = (n: number) => {
+        if (!near[n] && !removed(n)) {
+          near[n] = 1;
+          next.push(n);
+        }
+      };
+      if (x > 0) visit(p - 1);
+      if (x < width - 1) visit(p + 1);
+      if (p >= width) visit(p - width);
+      if (p < total - width) visit(p + width);
+    }
+    wave = next;
+  }
+  despillKeys(rgba, width, height, keyList, near);
+
   // 6. 消し残りの小さなかけら（境目に残った数画素）を消す
   const minSize = Math.max(4, Math.round(total / SPECK_DIVISOR));
   const seen = new Uint8Array(total);
@@ -291,6 +322,43 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
   }
 
   return { background, silhouette };
+}
+
+/**
+ * キーの色（緑・マゼンタなど、はっきりした色）が混ざった画素から、その色を取り除く。
+ * 画素を「服の色 × (1 - t) + キーの色 × t」とみなし、t（混ざり具合）を
+ * 「キーで強い色の成分 − キーで弱い色の成分」の大きさから求めて、服の色に戻し、t の分だけ透けさせる。
+ * 白・黒・灰色などのキーは、服の明るさと区別できないので扱わない。
+ * only を渡すと、1 の画素だけを直す。
+ */
+export function despillKeys(rgba: Pixels, width: number, height: number, keys: readonly (readonly number[])[], only?: Uint8Array): void {
+  for (const key of keys) {
+    const high = [0, 1, 2].filter((c) => key[c] >= 160);
+    const low = [0, 1, 2].filter((c) => key[c] <= 95);
+    if (high.length === 0 || low.length === 0) continue;
+    const keySpill = Math.min(...high.map((c) => key[c])) - Math.max(...low.map((c) => key[c]));
+    if (keySpill <= 0) continue;
+    for (let p = 0; p < width * height; p++) {
+      if (only && !only[p]) continue;
+      const i = p * 4;
+      if (rgba[i + 3] < 8) continue;
+      let hi = 255;
+      for (const c of high) hi = Math.min(hi, rgba[i + c]);
+      let lo = 0;
+      for (const c of low) lo = Math.max(lo, rgba[i + c]);
+      const t0 = (hi - lo) / keySpill;
+      if (t0 <= DESPILL_START) continue;
+      // 弱い混ざり（服そのものの色かもしれない）は少しだけ、強い混ざりはそのまま直す
+      const w = Math.min(1, (t0 - DESPILL_START) / DESPILL_RAMP);
+      const t = Math.min(1, t0 * w * w * (3 - 2 * w));
+      if (t >= DESPILL_DROP) {
+        rgba[i + 3] = 0;
+        continue;
+      }
+      for (let c = 0; c < 3; c++) rgba[i + c] = Math.max(0, Math.min(255, Math.round((rgba[i + c] - t * key[c]) / (1 - t))));
+      rgba[i + 3] = Math.round(rgba[i + 3] * (1 - t));
+    }
+  }
 }
 
 /**

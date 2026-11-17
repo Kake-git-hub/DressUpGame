@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { chooseKeyColors, colorDistance, detectKeyColors } from '../pipeline/keyColors';
 import type { Rgb } from '../pipeline/keyColors';
-import { closeColorRatio, cutOutClothing } from '../pipeline/cutout';
+import { closeColorRatio, cutOutClothing, despillKeys } from '../pipeline/cutout';
 
 type Rgba = [number, number, number, number];
 const W = 64;
@@ -189,5 +189,29 @@ describe('chooseKeyColors', () => {
     const k = chooseKeyColors([[255, 255, 255], [0, 255, 0], [255, 0, 255]]);
     expect(k.silhouette).not.toEqual([0, 0, 0]);
     expect(k.background).not.toEqual([0, 0, 0]);
+  });
+});
+
+describe('despillKeys', () => {
+  const px = (...colors: number[][]) => new Uint8ClampedArray(colors.flatMap((c) => [...c, 255]));
+  it('緑がまざった画素から緑を取り除き、まざった分だけ透けさせる', () => {
+    // ピンク (240, 120, 160) と緑 (0, 255, 0) を半々
+    const rgba = px([120, 188, 80]);
+    despillKeys(rgba, 1, 1, [[0, 255, 0]]);
+    expect(rgba[3]).toBeLessThan(220);
+    expect(rgba[3]).toBeGreaterThan(120);
+    expect(rgba[1]).toBeLessThanOrEqual(Math.max(rgba[0], rgba[2]) + 2); // 緑が飛び出していない
+  });
+  it('ほとんどキーの色の画素はほぼ透明に、服の色（青・白・水色）はそのまま', () => {
+    const rgba = px([20, 240, 30], [30, 60, 200], [250, 250, 250], [150, 225, 210]);
+    despillKeys(rgba, 4, 1, [[0, 255, 0]]);
+    expect(rgba[3]).toBeLessThan(60);
+    expect([...rgba.slice(4)]).toEqual([30, 60, 200, 255, 250, 250, 250, 255, 150, 225, 210, 255]);
+  });
+  it('白・黒などのキーは扱わない。only の外は触らない', () => {
+    const rgba = px([200, 200, 200], [120, 188, 80]);
+    despillKeys(rgba, 2, 1, [[255, 255, 255]]);
+    despillKeys(rgba, 2, 1, [[0, 255, 0]], new Uint8Array([1, 0]));
+    expect([...rgba]).toEqual([200, 200, 200, 255, 120, 188, 80, 255]);
   });
 });
