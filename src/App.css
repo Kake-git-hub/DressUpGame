@@ -113,7 +113,8 @@ textarea {
   gap: 0;
   flex: 1;
   min-height: 0; /* flexで縮小を許可 */
-  padding-left: 16px;
+  /* メニューを左端に寄せる（背景の正方形に重ならないように） */
+  padding-left: max(4px, env(safe-area-inset-left, 0px));
 }
 
 /* アバターセクション - 画面全体に配置 */
@@ -179,7 +180,8 @@ textarea {
 /* iPad横向き最適化 */
 @media (min-width: 1024px) and (orientation: landscape) {
   .app {
-    padding: 4px 16px;
+    /* 左右は空けない（メニューを左端に寄せて、背景に重ならないようにする） */
+    padding: 4px 0;
   }
 
   .app-header {
@@ -570,17 +572,18 @@ textarea {
   cursor: nwse-resize;
 }
 
-/* 調整する服の切り替え（画面の下） */
+/* 調整する服の切り替え（画面の左。上がいちばん手前） */
 .item-adjust-picker {
   position: fixed;
-  left: 50%;
-  bottom: 12px;
-  transform: translateX(-50%);
+  left: max(8px, env(safe-area-inset-left, 0px));
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  padding: 6px 10px;
-  max-width: calc(100vw - 32px);
-  overflow-x: auto;
+  padding: 10px 6px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.92);
   border-radius: 16px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);

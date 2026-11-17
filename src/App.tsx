@@ -28,7 +28,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.12.1';
+const APP_VERSION = '0.13.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -122,7 +122,7 @@ function App() {
   }, [loadState, currentDoll, allClothing, allBackgrounds]);
 
   // 着せ替え状態管理フック（選べる服の絞り込みはメニュー側で行う）
-  const { equipItem, unequipItem, unequipItemById, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp();
+  const { equipItem, unequipItemById, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp();
 
   // 保存された装備（ID・調整値のみ）。素材の読み込み完了時に1回だけ復元する
   const savedOutfitRef = useRef<ReturnType<typeof loadOutfit> | null>(null);
@@ -239,14 +239,19 @@ function App() {
     setAdjustingItemId(null);
   }, []);
 
-  // 調整画面の枠の × で、その服を脱がせて調整を終える
+  // 調整画面の枠の × で、その服を脱がせる。調整は続け、いちばん手前の服に切り替える（服が無くなったら終える）
   const handleAdjustRemove = useCallback(
     (itemId: string) => {
+      const rest = equippedItems.filter((item) => item.id !== itemId);
       unequipItemById(itemId);
-      setIsAdjustingItem(false);
-      setAdjustingItemId(null);
+      if (rest.length > 0) {
+        setAdjustingItemId(rest[rest.length - 1].id); // equippedItems は重ね順（最後がいちばん手前）
+      } else {
+        setIsAdjustingItem(false);
+        setAdjustingItemId(null);
+      }
     },
-    [unequipItemById],
+    [equippedItems, unequipItemById],
   );
 
   // スクリーンショットを撮影して保存（Web Share API対応）
@@ -327,14 +332,6 @@ function App() {
   const handleDragEnd = useCallback(() => {
     dragPreviewRef.current?.hide();
   }, []);
-
-  // 服を脱がせる処理（「なし」選択時）
-  const handleItemRemove = useCallback(
-    (type: string) => {
-      unequipItem(type);
-    },
-    [unequipItem]
-  );
 
   // リセット
   const handleReset = useCallback(() => {
@@ -478,7 +475,6 @@ function App() {
             <DressUpMenu
               items={filteredClothing}
               onItemDrop={handleItemDrop}
-              onItemRemove={handleItemRemove}
               equippedItems={equippedItems}
               dolls={allDolls}
               currentDollId={currentDoll?.id ?? ''}

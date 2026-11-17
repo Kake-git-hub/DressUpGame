@@ -3,14 +3,13 @@
  * 背景はボタン切り替えで別画面、服はフォルダ名でグループ化して表示
  * 左側にスクロール用スペースを配置（誤ドラッグ防止）
  */
-import { useState, useMemo, useCallback, useRef, memo } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
 
 interface DressUpMenuProps {
   items: ClothingItemData[];
   onItemDrop: (item: ClothingItemData) => void;
-  onItemRemove?: (type: ClothingType) => void;
   equippedItems: ClothingItemData[];
   dolls: DollData[];
   currentDollId: string;
@@ -28,7 +27,6 @@ interface DressUpMenuProps {
 export function DressUpMenu({
   items,
   onItemDrop,
-  onItemRemove,
   equippedItems,
   dolls,
   currentDollId,
@@ -49,7 +47,6 @@ export function DressUpMenu({
   const [selectedCategoryLandscape, setSelectedCategoryLandscape] = useState<string | null>(null);
   
   // スクロール用ref
-  const itemListRef = useRef<HTMLDivElement>(null);
 
   // 装備中のアイテムIDをセット化
   const equippedIds = useMemo(() => new Set(equippedItems.map(i => i.id)), [equippedItems]);
@@ -118,7 +115,7 @@ export function DressUpMenu({
           )}
 
           {/* スクロール可能な背景リスト */}
-          <div style={styles.itemList} ref={itemListRef}>
+          <ScrollList>
             <div style={styles.scrollContent}>
               {backgrounds.map(bg => (
                 <DraggableBackground
@@ -139,7 +136,7 @@ export function DressUpMenu({
                 </p>
               )}
             </div>
-          </div>
+          </ScrollList>
         </div>
       </div>
     );
@@ -158,21 +155,8 @@ export function DressUpMenu({
             ← もどる
           </button>
           
-          {/* カテゴリの「なし」ボタン（装備中の場合） */}
-          {equippedTypes.has(selectedCategoryLandscape as ClothingType) && (
-            <button
-              style={styles.categoryRemoveButton}
-              onClick={() => {
-                onItemRemove?.(selectedCategoryLandscape as ClothingType);
-                setSelectedCategoryLandscape(null);
-              }}
-            >
-              ✕ なし
-            </button>
-          )}
-
           {/* スクロール可能なアイテムリスト */}
-          <div style={styles.itemList} ref={itemListRef}>
+          <ScrollList>
             <div style={styles.scrollContent}>
               {selectedCategoryItemsLandscape.map(item => (
                 <DraggableItem
@@ -186,7 +170,7 @@ export function DressUpMenu({
                 />
               ))}
             </div>
-          </div>
+          </ScrollList>
         </div>
       </div>
     );
@@ -217,7 +201,7 @@ export function DressUpMenu({
         </div>
 
         {/* スクロール可能なカテゴリリスト */}
-        <div style={styles.itemList} ref={itemListRef}>
+        <ScrollList>
           <div style={styles.scrollContent}>
             {/* 背景ボタン（カテゴリと同じサイズ） */}
             {backgrounds.length > 0 && (
@@ -280,7 +264,7 @@ export function DressUpMenu({
               </p>
             )}
           </div>
-        </div>
+        </ScrollList>
       </div>
     </div>
   );
@@ -514,6 +498,44 @@ const DraggableBackground = memo(function DraggableBackground({
   );
 });
 
+// 縦に並ぶ一覧。上下の ▲▼ で、見えている高さの 8 割ずつ動かす（指で動かすのが難しい子ども向け）
+function ScrollList({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ top: true, bottom: false });
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setEdge({ top: el.scrollTop <= 2, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 2 });
+  }, []);
+  useEffect(() => {
+    update();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, [update]);
+  const scroll = (direction: 1 | -1) => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollBy({ top: direction * el.clientHeight * 0.8, behavior: 'smooth' });
+  };
+  return (
+    <>
+      <button style={{ ...styles.scrollButton, ...(edge.top ? styles.scrollButtonOff : {}) }} onClick={() => scroll(-1)} disabled={edge.top} aria-label="うえへ" data-testid="menu-scroll-up">
+        ▲
+      </button>
+      <div style={styles.itemList} ref={ref} onScroll={update}>
+        {children}
+      </div>
+      <button style={{ ...styles.scrollButton, ...(edge.bottom ? styles.scrollButtonOff : {}) }} onClick={() => scroll(1)} disabled={edge.bottom} aria-label="したへ" data-testid="menu-scroll-down">
+        ▼
+      </button>
+    </>
+  );
+}
+
 const MENU_WIDTH = 160;
 const SCROLL_PADDING = 30; // 右側のスクロール用余白
 const ITEM_PADDING = 4;
@@ -582,6 +604,23 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: '6px',
     cursor: 'pointer',
     flexShrink: 0,
+  },
+  scrollButton: {
+    width: '100%',
+    height: '28px',
+    flexShrink: 0,
+    padding: 0,
+    fontSize: '14px',
+    lineHeight: 1,
+    color: '#ff69b4',
+    backgroundColor: '#fff',
+    border: '2px solid #ffd1e8',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  scrollButtonOff: {
+    opacity: 0.3,
+    cursor: 'default',
   },
   itemList: {
     display: 'flex',

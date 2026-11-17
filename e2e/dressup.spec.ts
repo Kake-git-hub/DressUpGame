@@ -133,13 +133,14 @@ test('タップだけでは着ない（現状の動作）', async ({ page }) => 
   expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
 });
 
-test('「なし」で脱げる', async ({ page }) => {
+test('服のメニューに「なし」は無く、上下の ▲▼ がある', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
-  await expectPixel(page, DOLL_X, TOP_Y, RED);
   await openCategory(page, 'トップス');
-  await page.locator('.palette-section button', { hasText: 'なし' }).click();
-  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await expect(page.locator('.palette-section button', { hasText: 'なし' })).toHaveCount(0);
+  await expect(page.getByTestId('menu-scroll-up')).toBeVisible();
+  await expect(page.getByTestId('menu-scroll-down')).toBeVisible();
+  await expect(page.getByTestId('menu-scroll-up')).toBeDisabled(); // いちばん上にいる
 });
 
 test('調整: 動かして完了すると位置が変わり、再読み込み後も保たれる', async ({ page }) => {
@@ -617,8 +618,27 @@ test('調整画面で重なりの前後を変えられる', async ({ page }) => 
   await expect(page.getByTestId('layer-pos')).toHaveText('2/2');
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, OVERLAP_Y, GREEN);
-  // 調整する服を、下の一覧で切り替えられる
+  // 調整する服を、左の一覧で切り替えられる
   await page.locator('.tool-button').first().click();
   await page.getByTestId('adjust-picker').locator('button').nth(1).click();
   await expect(page.getByTestId('layer-pos')).toHaveText('1/2'); // トップス
 });
+
+test('調整の × で脱がせても、調整は続き、残りの服に切り替わる', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await page.locator('.tool-button').first().click();
+  await page.getByTestId('sticker-remove').click(); // 最後に着たボトムスを脱がせる
+  await expect(page.locator('.item-adjust-overlay')).toBeVisible();
+  await expect(page.getByTestId('layer-pos')).toHaveText('1/1');
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, BOTTOM_Y, SKIN);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  // 一覧は画面の左
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await page.locator('.tool-button').first().click();
+  const picker = (await page.getByTestId('adjust-picker').boundingBox())!;
+  expect(picker.x).toBeLessThan(40);
+});
+
