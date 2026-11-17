@@ -6,6 +6,7 @@ import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
 import type { Job, PlannedItem, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
+import { forgetParts } from './partsCache';
 import { STYLE_PRESETS, findStyle } from './stylePresets';
 import type { CardSource } from './ItemCard';
 
@@ -36,7 +37,16 @@ export function AddItems({ doll, onChanged }: Common) {
         const key = `file-${counter.current++}`;
         setCards((list) => [
           ...list,
-          { key, name: stem(file.name), category: '', cutUrl: `data:image/png;base64,${r.png}`, sourceUrl: `data:image/png;base64,${r.source}`, warnings: r.warnings, notes: [] },
+          {
+            key,
+            name: stem(file.name),
+            category: '',
+            cutUrl: `data:image/png;base64,${r.png}`,
+            sourceUrl: `data:image/png;base64,${r.source}`,
+            shapeUrl: r.shape ? `data:image/png;base64,${r.shape}` : null,
+            warnings: r.warnings,
+            notes: [],
+          },
         ]);
       } catch (e) {
         setErrors((list) => [...list, `${file.name}: ${message(e)}`]);
@@ -287,7 +297,7 @@ function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo
           <div key={`${i}-${c.attempts}`}>
             <ItemCard
               doll={doll}
-              source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), warnings: c.warnings, notes: c.notes }}
+              source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), shapeUrl: c.hasShape ? api.jobImageUrl(id, i, 'shape', c.attempts) : null, warnings: c.warnings, notes: c.notes }}
               onDiscard={() => hide(i)}
               onSaved={() => { hide(i); void onChanged(); }}
               onRedo={() => { hide(i); onRedo(c.item as PlannedItem); }}
@@ -583,7 +593,7 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
               );
             })}
             <div className="row">
-              <button className="primary" data-testid="template-save" onClick={() => void api.saveTemplate(doll.id, template).then((t) => { setTemplate(t); setSaved(true); void onChanged(); }, (e) => setError(message(e)))}>
+              <button className="primary" data-testid="template-save" onClick={() => void api.saveTemplate(doll.id, template).then((t) => { forgetParts(doll.id); setTemplate(t); setSaved(true); void onChanged(); }, (e) => setError(message(e)))}>
                 範囲を保存
               </button>
               {saved && <span data-testid="template-saved">保存しました</span>}

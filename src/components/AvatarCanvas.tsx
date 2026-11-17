@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
+import { activeHides } from '../engine/hides';
 import type { DollConfig, DollData, EquippedItem, DollTransform } from '../types';
 
 // 外部から呼び出せるメソッド
@@ -26,7 +27,7 @@ interface AvatarCanvasProps {
   onCanvasReady?: () => void;
 }
 
-function toDollConfig(doll: DollData | null | undefined): DollConfig {
+function toDollConfig(doll: DollData | null | undefined, hides: DollConfig['hides'] = []): DollConfig {
   return {
     width: 200,
     height: 300,
@@ -34,6 +35,7 @@ function toDollConfig(doll: DollData | null | undefined): DollConfig {
     canvasW: doll?.canvasW,
     canvasH: doll?.canvasH,
     box: doll?.box,
+    hides,
   };
 }
 
@@ -83,7 +85,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   const redrawAll = async (engine: PixiEngine) => {
     const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting } = latest.current;
     await engine.setBackground(bg ?? null);
-    await engine.drawDoll(toDollConfig(currentDoll));
+    await engine.drawDoll(toDollConfig(currentDoll, activeHides(items, adjusting)));
     await engine.drawClothing(adjusting ? items.filter((item) => item.id !== adjusting) : items);
     engine.forceRedraw();
   };
@@ -110,7 +112,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
         if (dollTransform) {
           engine.setDollTransform(dollTransform);
         }
-        await engine.drawDoll(toDollConfig(latest.current.doll));
+        await engine.drawDoll(toDollConfig(latest.current.doll, activeHides(latest.current.equippedItems, latest.current.adjustingItemId)));
         setIsReady(true);
         onCanvasReady?.();
 
@@ -167,12 +169,15 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       .catch((error) => console.error('描画エラー:', error));
   };
 
-  // ドールが変わったら更新（エンジン再初期化なし）
+  // ドールか、服が隠す所が変わったら更新（エンジン再初期化なし）
+  const hidesKey = activeHides(equippedItems, adjustingItemId)
+    .map((h) => h.url)
+    .join('\n');
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      redrawWhenDone(engineRef.current.drawDoll(toDollConfig(doll)));
+      redrawWhenDone(engineRef.current.drawDoll(toDollConfig(doll, activeHides(latest.current.equippedItems, latest.current.adjustingItemId))));
     }
-  }, [doll, isReady]);
+  }, [doll, hidesKey, isReady]);
 
   // 装備アイテムが変わったら再描画
   useEffect(() => {
@@ -199,7 +204,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       engine.setDollTransform(dollTransform);
       redrawWhenDone(
         Promise.all([
-          engine.drawDoll(toDollConfig(latest.current.doll)),
+          engine.drawDoll(toDollConfig(latest.current.doll, activeHides(latest.current.equippedItems, latest.current.adjustingItemId))),
           engine.drawClothing(latest.current.equippedItems),
         ])
       );

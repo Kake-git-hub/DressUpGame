@@ -252,6 +252,8 @@ export interface ClothingItemData {
   canvasW: number;
   canvasH: number;
   box: Box;
+  // 着ているあいだ隠すドールの部分（白い不透明な所）。位置はドールのキャンバス上
+  hide?: { url: string; box: Box };
 }
 
 // 装備中のアイテム（動的zIndex付き）
@@ -331,6 +333,8 @@ export interface DollConfig {
   canvasW?: number;
   canvasH?: number;
   box?: Box;
+  // 着ている服が隠すドールの部分（ドールのキャンバス上）
+  hides?: { url: string; box: Box }[];
 }
 
 // インポート用のアイテムデータ形式

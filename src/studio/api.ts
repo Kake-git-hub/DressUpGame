@@ -21,6 +21,7 @@ export interface Warning {
 export interface ProcessResult {
   png: string; // base64
   source: string;
+  shape: string | null; // AI が描いた体と服の形（base64 PNG）。切り抜き済みの画像では null
   warnings: Warning[];
   alignment: { scale: number; dx: number; dy: number; score: number };
 }
@@ -41,6 +42,7 @@ export interface JobCandidate {
   notes: string[];
   warnings: Warning[];
   hasImage: boolean;
+  hasShape?: boolean;
 }
 export interface Job {
   id: string;
@@ -77,7 +79,7 @@ export const api = {
   status: () => get<Status>('/status'),
   content: () => get<Manifest>('/content'),
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
-  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string }) => send<ManifestItem>('POST', '/items', input),
+  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string }) => send<ManifestItem>('POST', '/items', input),
   updateItem: (change: { id: string; name?: string; category?: string }) => send<ManifestItem>('PATCH', '/items', change),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
@@ -95,7 +97,7 @@ export const api = {
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）
-  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
+  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' | 'shape' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
   publish: (message: string) => send<{ log: string }>('POST', '/publish', { message }),
 };
 

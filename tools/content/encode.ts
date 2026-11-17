@@ -54,6 +54,24 @@ export async function encodeCutout(rgba: Pixels, width: number, height: number, 
   };
 }
 
+// 隠す所（白、不透明度が隠す強さ）: 必要な範囲だけを切り出して書く。何も無ければ null
+export async function encodeMask(alpha: Uint8Array | Uint8ClampedArray, width: number, height: number, writer: FileWriter): Promise<ManifestImage | null> {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let p = 0; p < width * height; p++) {
+    rgba[p * 4] = 255;
+    rgba[p * 4 + 1] = 255;
+    rgba[p * 4 + 2] = 255;
+    rgba[p * 4 + 3] = alpha[p];
+  }
+  const box = alphaBBox(rgba, width, height);
+  if (!box) return null;
+  const data = await sharp(Buffer.from(rgba.buffer), { raw: { width, height, channels: 4 } })
+    .extract({ left: box.x, top: box.y, width: box.w, height: box.h })
+    .webp({ lossless: true, effort: 6 })
+    .toBuffer();
+  return { file: await writer.write(data, 'webp'), canvasW: width, canvasH: height, box };
+}
+
 // 背景: 縮小して JPEG とサムネイルを書く
 export async function encodeBackground(input: string | Buffer, id: string, name: string, writer: FileWriter): Promise<ManifestBackground> {
   const base = sharp(input).flatten({ background: '#ffffff' });

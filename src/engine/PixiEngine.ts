@@ -3,7 +3,8 @@
  * ドールと服のレンダリングを担当
  * フィルターなし版（パフォーマンス最優先）
  */
-import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter, Texture } from 'pixi.js';
+import { eraseHides } from './hides';
 import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 
 // ドール・服の表示高さ（画面の高さに対する割合）
@@ -28,6 +29,18 @@ function setCanvasOrigin(sprite: Sprite, placed: Placed, texture: { width: numbe
   sprite.pivot.set((canvasW / 2 - box.x) * sx, (canvasH / 2 - box.y) * sy);
 }
 
+// 服の中心（テクスチャ上）と、元キャンバスの中心から服の中心までのずれ（元キャンバスの px）
+export function itemPivot(placed: Placed, texture: { width: number; height: number }): { x: number; y: number; fromCanvasCenter: { x: number; y: number } } {
+  const canvasW = placed.canvasW ?? texture.width;
+  const canvasH = placed.canvasH ?? texture.height;
+  const box = placed.box ?? { x: 0, y: 0, w: texture.width, h: texture.height };
+  return {
+    x: texture.width / 2,
+    y: texture.height / 2,
+    fromCanvasCenter: { x: box.x + box.w / 2 - canvasW / 2, y: box.y + box.h / 2 - canvasH / 2 },
+  };
+}
+
 export class PixiEngine {
   private app: Application | null = null;
   private backgroundContainer: Container | null = null;
@@ -48,6 +61,8 @@ export class PixiEngine {
   private dollDrawId = 0;
   private clothingDrawId = 0;
   private backgroundDrawId = 0;
+  // 服が隠す所を消したドールのテクスチャ（作り直したら前のものは捨てる）
+  private hiddenDollTexture: Texture | null = null;
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -299,10 +314,30 @@ export class PixiEngine {
     // 画像URLが指定されていて、カスタム顔がない場合は画像を読み込む
     if (config.imageUrl && config.imageUrl.length > 0) {
       try {
-        const texture = await Assets.load(config.imageUrl);
+        let texture: Texture = await Assets.load(config.imageUrl);
+        // 着ている服が隠す所（手袋・くつの下の指先など）を消したドールにする
+        const hides = config.hides ?? [];
+        let hidden: Texture | null = null;
+        if (hides.length > 0 && config.box) {
+          try {
+            const masks = await Promise.all(
+              hides.map(async (h) => ({ image: ((await Assets.load(h.url)) as Texture).source.resource as CanvasImageSource, box: h.box })),
+            );
+            const source = texture.source.resource as CanvasImageSource & { width: number; height: number };
+            hidden = Texture.from(eraseHides(source, config.box, masks));
+          } catch (error) {
+            console.warn('服が隠す所を読めませんでした。ドールをそのまま表示します:', error);
+          }
+        }
         // 読み込み中に別のドールの描画が始まったら、こちらは捨てる（二重に表示しない）
-        if (drawId !== this.dollDrawId || this.destroyed || !this.dollContainer) return;
+        if (drawId !== this.dollDrawId || this.destroyed || !this.dollContainer) {
+          hidden?.destroy(true);
+          return;
+        }
         this.dollContainer.removeChildren();
+        this.hiddenDollTexture?.destroy(true);
+        this.hiddenDollTexture = hidden;
+        if (hidden) texture = hidden;
         // 縮小時の画質向上：リニア補間を使用
         texture.source.scaleMode = 'linear';
         const dollSprite = new Sprite(texture);
@@ -518,12 +553,13 @@ export class PixiEngine {
         // 調整スケールを適用
         clothingSprite.scale.set(baseScale * s * adjustScale);
 
-        // 切り抜き画像を、元キャンバスの中心が原点になるように置く
-        setCanvasOrigin(clothingSprite, item, texture);
-
-        // 位置を設定
-        clothingSprite.x = itemX;
-        clothingSprite.y = itemY;
+        // 拡大・回転は服そのものの中心を軸にする（シールのように、その場で回る）。
+        // 調整していなければ、元キャンバスの中心を原点に置いたときと同じ位置になる
+        const pivot = itemPivot(item, texture);
+        clothingSprite.anchor.set(0);
+        clothingSprite.pivot.set(pivot.x, pivot.y);
+        clothingSprite.x = itemX + pivot.fromCanvasCenter.x * baseScale * s;
+        clothingSprite.y = itemY + pivot.fromCanvasCenter.y * baseScale * s;
         
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
@@ -731,6 +767,12 @@ export class PixiEngine {
     this.destroyed = true;
     this.initialized = false;
     this.customFaceUrl = null;
+    try {
+      this.hiddenDollTexture?.destroy(true);
+    } catch {
+      // 無視
+    }
+    this.hiddenDollTexture = null;
 
     // コンテナをクリア
     if (this.dollContainer) {

@@ -35,6 +35,9 @@ export interface ProcessResult {
   keyColors: KeyColors;
   alignment: Alignment;
   partShifts: PartShift[]; // 部位ごとの細かい直し（直さなかった部位は 0）
+  // AI が描いた体と服の形（背景でない所）。服と同じ位置合わせ。ドールの手足を服に合わせて隠すときに使う。
+  // キャンバス大の不透明度（0〜255）。切り抜き済みの画像では null
+  shape: Uint8Array | null;
   closeColorRatio: number;
   warnings: ProcessWarning[];
 }
@@ -54,6 +57,29 @@ export interface ProcessOptions {
 }
 
 const POOR_FIT_SCORE = 0.6;
+// AI の体の形を、ドールの輪郭線を削らないように少し太らせる（px）
+const SHAPE_MARGIN = 2;
+
+// 不透明度を r px 太らせる（最大値フィルター、横→縦）
+function dilate(alpha: Uint8Array, width: number, height: number, r: number): Uint8Array {
+  const tmp = new Uint8Array(alpha.length);
+  const out = new Uint8Array(alpha.length);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let m = 0;
+      for (let k = Math.max(0, x - r); k <= Math.min(width - 1, x + r); k++) m = Math.max(m, alpha[y * width + k]);
+      tmp[y * width + x] = m;
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let m = 0;
+      for (let k = Math.max(0, y - r); k <= Math.min(height - 1, y + r); k++) m = Math.max(m, tmp[k * width + x]);
+      out[y * width + x] = m;
+    }
+  }
+  return out;
+}
 const CLOSE_COLOR_LIMIT = 0.05;
 
 export async function dollTemplateFromImage(data: Buffer, image: ManifestImage): Promise<DollTemplate> {
@@ -190,6 +216,14 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     rgba = warpByParts(rgba, doll.canvasW, doll.canvasH, partShifts);
     source = warpByParts(source, doll.canvasW, doll.canvasH, partShifts);
   }
+  let shape: Uint8Array | null = null;
+  if (foreground) {
+    let placed = await place(foreground, width, height, scale, dx, dy, doll.canvasW, doll.canvasH);
+    if (partShifts.length) placed = warpByParts(placed, doll.canvasW, doll.canvasH, partShifts);
+    shape = new Uint8Array(doll.canvasW * doll.canvasH);
+    for (let p = 0; p < shape.length; p++) shape[p] = placed[p * 4 + 3];
+    shape = dilate(shape, doll.canvasW, doll.canvasH, SHAPE_MARGIN);
+  }
   if (!alreadyCut) removeCornerSpeck(rgba, doll.canvasW, doll.canvasH);
 
   if (!alphaBBox(rgba, doll.canvasW, doll.canvasH)) {
@@ -198,5 +232,5 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     warnings.push({ code: 'touches-edge', message: '服が画像の端まで届いています。切れているかもしれません' });
   }
 
-  return { rgba, source, width: doll.canvasW, height: doll.canvasH, keyColors, alignment, partShifts, closeColorRatio: ratio, warnings };
+  return { rgba, source, width: doll.canvasW, height: doll.canvasH, keyColors, alignment, partShifts, shape, closeColorRatio: ratio, warnings };
 }

@@ -178,6 +178,25 @@ describe('服の追加', () => {
     await ok('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`);
     expect((await call('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`)).status).toBe(404);
   }, 30_000);
+  it('処理の結果に AI の体の形が付き、隠す所を添えて保存すると一覧に hide が入る。置き換えで外せる', async () => {
+    const generated = await fakeImage.generate({ prompt: '', images: [(await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer] });
+    const r = await ok<{ png: string; shape: string | null }>('POST', `/api/process?doll=${dollId}`, generated);
+    expect(r.shape).toBeTruthy();
+    const shape = await sharp(Buffer.from(r.shape!, 'base64')).metadata();
+    expect([shape.width, shape.height]).toEqual([1024, 1024]);
+    // 右下の 40px 四方を隠す
+    const mask = await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: '#ffffff' } }).png().toBuffer(), left: 900, top: 950 }])
+      .png()
+      .toBuffer();
+    const item = await ok<{ id: string; hide?: { file: string; box: { x: number; y: number; w: number; h: number } } }>('POST', '/api/items', { dollId, category: 'くつ', name: 'かくす', png: r.png, hide: mask.toString('base64') });
+    expect(item.hide?.box).toEqual({ x: 900, y: 950, w: 40, h: 40 });
+    const replaced = await ok<{ hide?: unknown }>('POST', '/api/items', { dollId, category: 'くつ', name: 'かくす', png: r.png, replaceId: item.id });
+    expect(replaced.hide).toBeUndefined();
+    const small = (await sharp({ create: { width: 8, height: 8, channels: 4, background: '#ffffff' } }).png().toBuffer()).toString('base64');
+    expect((await call('POST', '/api/items', { dollId, category: 'くつ', name: 'だめ', png: r.png, hide: small })).status).toBe(400);
+    await ok('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`);
+  }, 30_000);
   it('壊れた画像・不正な名前・無いドールは、何も書かずにエラー', async () => {
     expect((await call('POST', `/api/process?doll=${dollId}`, Buffer.from('x'))).status).toBe(400);
     expect((await call('POST', '/api/process?doll=いない', Buffer.from('x'))).status).toBe(404);

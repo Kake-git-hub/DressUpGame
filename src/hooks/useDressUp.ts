@@ -47,6 +47,8 @@ export interface UseDressUpReturn {
   equipItem: (item: ClothingItemData) => void;
   // 服を脱がせる
   unequipItem: (type: ClothingType) => void;
+  // 着ている服を 1 着だけ脱がせる（重ね着できるカテゴリでも、ほかは残す）
+  unequipItemById: (itemId: string) => void;
   // 指定タイプの装備アイテムを取得
   getEquippedItem: (type: ClothingType) => EquippedItem | null;
   // 装備中のアイテム一覧（レンダリング順）。装備が変わらない限り同じ配列参照を返す
@@ -110,6 +112,13 @@ export function useDressUp(
     setState((prev) => ({
       ...prev,
       equippedItems: prev.equippedItems.filter((e) => e.type !== type),
+    }));
+  }, []);
+
+  const unequipItemById = useCallback((itemId: string) => {
+    setState((prev) => ({
+      ...prev,
+      equippedItems: prev.equippedItems.filter((e) => e.id !== itemId),
     }));
   }, []);
 
@@ -189,6 +198,7 @@ export function useDressUp(
     state,
     equipItem,
     unequipItem,
+    unequipItemById,
     getEquippedItem,
     equippedItems,
     resetAll,

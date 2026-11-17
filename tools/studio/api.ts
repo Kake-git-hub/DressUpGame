@@ -23,7 +23,7 @@ import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, p
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
 import { loadDollTemplate, processGenerated } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
-import { pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { alphaToPng, pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 
 const run = promisify(execFile);
@@ -253,6 +253,7 @@ export class StudioApi {
         return json({
           png: (await rgbaToPng(result.rgba, result.width, result.height)).toString('base64'),
           source: (await rgbaToPng(result.source, result.width, result.height)).toString('base64'),
+          shape: result.shape ? (await alphaToPng(result.shape, result.width, result.height)).toString('base64') : null,
           keyColors: result.keyColors,
           alignment: result.alignment,
           warnings: result.warnings,
@@ -260,15 +261,23 @@ export class StudioApi {
       }
 
       case 'POST /api/items': {
-        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string }>(req);
+        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string }>(req);
         if (typeof b.png !== 'string') throw new HttpError(400, 'png を指定してください');
         let image;
+        let hide: Uint8Array | null = null;
         try {
           image = await pngToRgba(Buffer.from(b.png, 'base64'));
-        } catch {
+          if (typeof b.hide === 'string' && b.hide) {
+            const mask = await pngToRgba(Buffer.from(b.hide, 'base64'));
+            if (mask.width !== image.width || mask.height !== image.height) throw new HttpError(400, '隠す所の画像の大きさが服と違います');
+            hide = new Uint8Array(mask.width * mask.height);
+            for (let p = 0; p < hide.length; p++) hide[p] = mask.rgba[p * 4 + 3];
+          }
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
           throw new HttpError(400, '画像を読めませんでした');
         }
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...image, replaceId: b.replaceId }));
+        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...image, replaceId: b.replaceId, hide }));
       }
       case 'PATCH /api/items': {
         const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null }>(req);
@@ -416,13 +425,16 @@ export class StudioApi {
             notes: c.notes,
             warnings: 'warnings' in c ? c.warnings : [],
             hasImage: !!c.png,
+            hasShape: 'shape' in c && !!c.shape,
           })),
         });
       }
       case 'GET /api/jobs/image': {
         const job = this.job(this.param(req, 'id'));
         const candidate = job.candidates[Number(this.param(req, 'index'))];
-        const data = req.query.get('kind') === 'source' && candidate && 'source' in candidate ? candidate.source : candidate?.png;
+        const kind = req.query.get('kind');
+        const data =
+          kind === 'source' && candidate && 'source' in candidate ? candidate.source : kind === 'shape' ? (candidate && 'shape' in candidate ? candidate.shape : undefined) : candidate?.png;
         if (!data) throw new HttpError(404, '画像がありません');
         return png(data);
       }

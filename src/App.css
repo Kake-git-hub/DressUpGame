@@ -508,6 +508,104 @@ textarea {
   color: white;
 }
 
+/* 重なりの前後（まえへ・うしろへ） */
+.item-adjust-layer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 16px;
+}
+.item-adjust-layer .item-adjust-front-btn {
+  margin-top: 0;
+}
+.item-adjust-front-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.item-adjust-layer-pos {
+  font-size: 0.75rem;
+  color: #666;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+/* シールのような枠と、角のつまみ */
+.sticker-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #ff69b4;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.sticker-handle {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: #fff;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  cursor: pointer;
+}
+.sticker-remove {
+  left: 0;
+  top: 0;
+  background: #ff5a7a;
+}
+.sticker-rotate {
+  right: 0;
+  bottom: 0;
+  background: #ff69b4;
+  cursor: nwse-resize;
+}
+
+/* 調整する服の切り替え（画面の下） */
+.item-adjust-picker {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 300;
+}
+.item-adjust-picker button {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  padding: 3px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.item-adjust-picker button.on {
+  border-color: #ff69b4;
+  background: #ffe8f3;
+}
+.item-adjust-picker img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 /* 色相スライダー（右上ボタン群内） */
 .item-adjust-hue-slider {
   display: flex;

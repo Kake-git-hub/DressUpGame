@@ -4,8 +4,14 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ManifestDoll } from '../content/manifest';
+import type { BodyParts } from '../pipeline/bodyParts';
+import { defaultLimbs, hideMask, limbZones } from '../pipeline/limbZones';
+import type { Limb } from '../pipeline/limbZones';
 import { ApiError, api, blobToBase64, contentUrl } from './api';
 import type { Warning } from './api';
+import { loadParts } from './partsCache';
+
+
 
 export interface CardSource {
   key: string;
@@ -13,6 +19,7 @@ export interface CardSource {
   category: string;
   cutUrl: string; // 切り抜いた服（ドールのキャンバス大の PNG）
   sourceUrl: string; // 切り抜く前（同じ位置合わせ）
+  shapeUrl?: string | null; // AI が描いた体と服の形（手足の先を服に合わせるのに使う）
   warnings: Warning[];
   notes: string[];
 }
@@ -43,11 +50,17 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   const { canvasW, canvasH, box } = doll.image;
   const viewRef = useRef<HTMLCanvasElement>(null);
   const cutRef = useRef<HTMLCanvasElement | null>(null); // 編集中の服
-  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement } | null>(null);
+  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null } | null>(null);
+  const hideRef = useRef<HTMLCanvasElement | null>(null); // 着ているあいだドールを隠す所（白）
+  const [parts, setParts] = useState<BodyParts | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(source.name);
   const [category, setCategory] = useState(source.category || doll.categories[0]?.id || '');
+  const labelOf = (id: string) => doll.categories.find((c) => c.id === id)?.label ?? id;
+  // 手足の先を服に合わせる（はみ出したドールの指先などを隠す）。手袋・くつなどは最初から入れる
+  const [limbs, setLimbs] = useState<Limb[]>(() => defaultLimbs(labelOf(source.category || doll.categories[0]?.id || '')));
+  const [hasHide, setHasHide] = useState(false);
   const [nudge, setNudge] = useState({ scale: 1, dx: 0, dy: 0 });
   const [tool, setTool] = useState<Tool>('move');
   const [brush, setBrush] = useState(BRUSHES[1]);
@@ -80,17 +93,31 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       drawNudged(ctx, loaded.source);
       return;
     }
-    if (view === 'worn') ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
+    if (view === 'worn') {
+      ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
+      if (hideRef.current && hasHide) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.drawImage(hideRef.current, 0, 0);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
     ctx.drawImage(cut, 0, 0);
-  }, [view, drawNudged, canvasW, canvasH, box]);
+  }, [view, drawNudged, canvasW, canvasH, box, hasHide]);
 
   // 画像を読む
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadImage(contentUrl(doll.image.file)), loadImage(source.cutUrl), loadImage(source.sourceUrl)])
-      .then(([d, c, s]) => {
+    Promise.all([
+      loadImage(contentUrl(doll.image.file)),
+      loadImage(source.cutUrl),
+      loadImage(source.sourceUrl),
+      source.shapeUrl ? loadImage(source.shapeUrl).catch(() => null) : Promise.resolve(null),
+      source.shapeUrl ? loadParts(doll.id).catch(() => null) : Promise.resolve(null),
+    ])
+      .then(([d, c, s, shape, p]) => {
         if (cancelled) return;
-        images.current = { doll: d, cut: c, source: s };
+        images.current = { doll: d, cut: c, source: s, shape };
+        setParts(p);
         const canvas = document.createElement('canvas');
         canvas.width = canvasW;
         canvas.height = canvasH;
@@ -101,7 +128,45 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [doll.image.file, source.cutUrl, source.sourceUrl, canvasW, canvasH]);
+  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl, canvasW, canvasH]);
+
+  // 隠す所を作る: 手首・すねから先で、AI が描いた形（微調整に合わせて動かす）の外にあるドール
+  useEffect(() => {
+    const loaded = images.current;
+    if (!ready || !loaded?.shape || !parts || limbs.length === 0) {
+      setHasHide(false);
+      return;
+    }
+    const layer = (draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas');
+      c.width = canvasW;
+      c.height = canvasH;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      draw(ctx);
+      return ctx.getImageData(0, 0, canvasW, canvasH).data;
+    };
+    const dollPixels = layer((ctx) => ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h));
+    const shapePixels = layer((ctx) => drawNudged(ctx, loaded.shape!));
+    const alphaOf = (data: Uint8ClampedArray) => {
+      const out = new Uint8Array(canvasW * canvasH);
+      for (let p = 0; p < out.length; p++) out[p] = data[p * 4 + 3];
+      return out;
+    };
+    const mask = hideMask(alphaOf(dollPixels), alphaOf(shapePixels), limbZones(parts, limbs, canvasW, canvasH), canvasW, canvasH);
+    const canvas = hideRef.current ?? document.createElement('canvas');
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    const ctx = canvas.getContext('2d')!;
+    const image = ctx.createImageData(canvasW, canvasH);
+    let any = false;
+    for (let p = 0; p < mask.length; p++) {
+      image.data.set([255, 255, 255, mask[p]], p * 4);
+      if (mask[p] > 0) any = true;
+    }
+    ctx.putImageData(image, 0, 0);
+    hideRef.current = canvas;
+    setHasHide(any);
+  }, [ready, parts, limbs, drawNudged, canvasW, canvasH, box]);
 
   // 微調整が変わったら、元の切り抜きから作り直す（手直しは消える）
   useEffect(() => {
@@ -113,7 +178,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     setTouched(false);
   }, [ready, drawNudged, canvasW, canvasH]);
 
-  useEffect(paint, [paint, ready, nudge]);
+  useEffect(paint, [paint, ready, nudge, hasHide, limbs]);
 
   const move = (dx: number, dy: number, factor = 1) => setNudge((n) => ({ scale: Math.round(n.scale * factor * 1000) / 1000, dx: n.dx + dx, dy: n.dy + dy }));
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -167,7 +232,8 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     try {
       const blob = await new Promise<Blob | null>((resolve) => cut.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('画像を作れませんでした');
-      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId });
+      const hideBlob = hasHide && hideRef.current ? await new Promise<Blob | null>((resolve) => hideRef.current!.toBlob(resolve, 'image/png')) : null;
+      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined });
       onSaved();
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : String(e));
@@ -212,7 +278,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
         )}
         <label>
           カテゴリ
-          <select value={category} onChange={(e) => { setCategory(e.target.value); setConflict(false); }} data-testid="card-category">
+          <select value={category} onChange={(e) => { setCategory(e.target.value); setLimbs(defaultLimbs(labelOf(e.target.value))); setConflict(false); }} data-testid="card-category">
             {doll.categories.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
             ))}
@@ -237,6 +303,24 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
             ずれ ({nudge.dx}, {nudge.dy})・倍率 {(nudge.scale * 100).toFixed(1)}%
           </span>
         </div>
+        {source.shapeUrl && (
+          <div className="group" data-testid="card-limbs">
+            <span>手足の先を服に合わせる（服からはみ出したドールの指先などを、着ているあいだ隠す）</span>
+            <div className="row small">
+              {(['hands', 'feet'] as Limb[]).map((l) => (
+                <label key={l}>
+                  <input
+                    type="checkbox"
+                    checked={limbs.includes(l)}
+                    onChange={(e) => setLimbs((list) => (e.target.checked ? [...list, l] : list.filter((x) => x !== l)))}
+                    data-testid={`limb-${l}`}
+                  />
+                  {l === 'hands' ? '手の先' : '足の先'}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="group">
           <span>手直し</span>
           <div className="row small">

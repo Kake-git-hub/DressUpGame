@@ -32,6 +32,9 @@ export interface ManifestItem {
   // カテゴリの値と違うときだけ持つ（同じカテゴリでも重ね順が違う服がある）
   layer?: number;
   overlap?: boolean;
+  // 着ているあいだ、ドールのこの部分を隠す（手袋・くつの下から指先などがはみ出さないように）。
+  // 白で不透明な所が隠す所。位置はドールのキャンバス上
+  hide?: ManifestImage;
 }
 
 export interface ManifestBackground {
@@ -143,6 +146,7 @@ function doll(v: unknown, path: string): ManifestDoll {
     };
     if (r.layer !== undefined) item.layer = num(r.layer, `${p}.layer`);
     if (r.overlap !== undefined) item.overlap = bool(r.overlap, `${p}.overlap`);
+    if (r.hide !== undefined) item.hide = image(r.hide, `${p}.hide`);
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);

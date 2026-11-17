@@ -28,7 +28,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.11.1';
+const APP_VERSION = '0.12.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -122,7 +122,7 @@ function App() {
   }, [loadState, currentDoll, allClothing, allBackgrounds]);
 
   // 着せ替え状態管理フック（選べる服の絞り込みはメニュー側で行う）
-  const { equipItem, unequipItem, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp();
+  const { equipItem, unequipItem, unequipItemById, equippedItems, resetAll, updateItemAdjustment, restoreEquipped } = useDressUp();
 
   // 保存された装備（ID・調整値のみ）。素材の読み込み完了時に1回だけ復元する
   const savedOutfitRef = useRef<ReturnType<typeof loadOutfit> | null>(null);
@@ -238,6 +238,16 @@ function App() {
     setIsAdjustingItem(false);
     setAdjustingItemId(null);
   }, []);
+
+  // 調整画面の枠の × で、その服を脱がせて調整を終える
+  const handleAdjustRemove = useCallback(
+    (itemId: string) => {
+      unequipItemById(itemId);
+      setIsAdjustingItem(false);
+      setAdjustingItemId(null);
+    },
+    [unequipItemById],
+  );
 
   // スクリーンショットを撮影して保存（Web Share API対応）
   const handleScreenshot = useCallback(async () => {
@@ -509,6 +519,9 @@ function App() {
           menuOffset={MENU_WIDTH}
           rightOffset={RIGHT_BUTTON_WIDTH}
           doll={currentDoll}
+          equippedItems={equippedItems}
+          onRemove={handleAdjustRemove}
+          onSelect={setAdjustingItemId}
         />
       )}
 

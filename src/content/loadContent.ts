@@ -90,6 +90,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
         canvasW: item.image.canvasW,
         canvasH: item.image.canvasH,
         box: item.image.box,
+        ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
       });
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));

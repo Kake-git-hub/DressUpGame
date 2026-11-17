@@ -31,6 +31,18 @@ export async function renderPreview(doll: DollTemplate, layers: Uint8ClampedArra
     .toBuffer();
 }
 
+// 不透明度だけの画像（白）。AI が描いた体の形などを画面に渡すのに使う
+export function alphaToPng(alpha: Uint8Array, width: number, height: number): Promise<Buffer> {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let p = 0; p < width * height; p++) {
+    rgba[p * 4] = 255;
+    rgba[p * 4 + 1] = 255;
+    rgba[p * 4 + 2] = 255;
+    rgba[p * 4 + 3] = alpha[p];
+  }
+  return rgbaToPng(rgba, width, height);
+}
+
 export function rgbaToPng(rgba: Uint8ClampedArray, width: number, height: number): Promise<Buffer> {
   return sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } }).png().toBuffer();
 }

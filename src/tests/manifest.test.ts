@@ -48,6 +48,11 @@ describe('parseManifest', () => {
     expect(item.layer).toBe(5);
     expect(item.overlap).toBe(true);
   });
+  it('服が隠すドールの部分（hide）を保ち、形が違えば Error', () => {
+    const hide = { file: 'files/h.webp', canvasW: 1024, canvasH: 1024, box: { x: 300, y: 800, w: 100, h: 60 } };
+    expect(parseManifest(mutate((c) => (c.dolls[0].items[0].hide = hide))).dolls[0].items[0].hide).toEqual(hide);
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].hide = { file: 'x' })))).toThrow();
+  });
   it('layer の上書きが数値でなければ Error', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].layer = '5')))).toThrow();
   });

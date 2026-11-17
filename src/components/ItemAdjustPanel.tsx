@@ -15,6 +15,10 @@ import type { ItemAdjustment } from '../hooks/useDressUp';
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
+  // 着ている服（重ね順に下から）。重なりの前後と、調整する服の切り替えに使う
+  equippedItems?: EquippedItem[];
+  onRemove?: (itemId: string) => void; // 枠の × で服を脱がせる
+  onSelect?: (itemId: string) => void; // 別の服の調整に切り替える（いまの調整は先に反映される）
   onAdjust: (adjustment: ItemAdjustment) => void;
   onClose: () => void;
   canvasWidth: number;
@@ -90,6 +94,9 @@ export function ItemAdjustPanel({
   menuOffset = 0,
   rightOffset = 0,
   doll,
+  equippedItems = [],
+  onRemove,
+  onSelect,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -265,10 +272,63 @@ export function ItemAdjustPanel({
     }
   }, [isDollMode]);
 
-  // レイヤーを最前面に
-  const handleBringToFront = useCallback(() => {
-    setLayerAdjust(100); // 大きな値で最前面に
-  }, []);
+  // 重なりの前後: いまの重ね順（調整中の値を使う）で、1 つ前・1 つ後ろの服との間に入る
+  const effective = (i: EquippedItem) => (i.layerOrder ?? i.baseZIndex ?? 0) + (item && i.id === item.id ? layerAdjust : (i.layerAdjust ?? 0));
+  const stack = item
+    ? [...equippedItems.filter((i) => i.id !== item.id), item].sort((a, b) => effective(a) - effective(b) || a.equipOrder - b.equipOrder)
+    : [];
+  const stackIndex = item ? stack.findIndex((i) => i.id === item.id) : -1;
+  const moveLayer = useCallback(
+    (direction: 1 | -1) => {
+      if (!item || stackIndex < 0) return;
+      const neighbor = stack[stackIndex + direction];
+      if (!neighbor) return;
+      const beyond = stack[stackIndex + direction * 2];
+      const near = effective(neighbor);
+      // 隣の服を越えた所（その先の服との中間。先が無ければ 1 つ分先）に置く
+      const far = beyond && effective(beyond) !== near ? effective(beyond) : near + direction;
+      const target = (near + far) / 2;
+      setLayerAdjust(target - (item.layerOrder ?? item.baseZIndex ?? 0));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stack と effective は item・layerAdjust・equippedItems から決まる
+    [item, stackIndex, layerAdjust, equippedItems],
+  );
+
+  // 枠の角の「拡大・回転」つまみ（シールの調整と同じ操作）
+  const handleRef = useRef<{ cx: number; cy: number; distance: number; angle: number; scale: number; rotation: number } | null>(null);
+  const startHandle = (e: React.PointerEvent, cx: number, cy: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    handleRef.current = { cx, cy, distance: Math.max(1, Math.hypot(dx, dy)), angle: (Math.atan2(dy, dx) * 180) / Math.PI, scale, rotation };
+  };
+  const moveHandle = (e: React.PointerEvent) => {
+    const h = handleRef.current;
+    if (!h) return;
+    e.stopPropagation();
+    const dx = e.clientX - h.cx;
+    const dy = e.clientY - h.cy;
+    setScale(Math.max(0.3, Math.min(2.5, h.scale * (Math.hypot(dx, dy) / h.distance))));
+    let next = h.rotation + (Math.atan2(dy, dx) * 180) / Math.PI - h.angle;
+    while (next > 180) next -= 360;
+    while (next < -180) next += 360;
+    setRotation(next);
+  };
+  const endHandle = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    handleRef.current = null;
+  };
+  // つまみに触れたときは、背景の「移動」の操作を始めない
+  const stopGesture = { onTouchStart: (e: React.TouchEvent) => e.stopPropagation(), onMouseDown: (e: React.MouseEvent) => e.stopPropagation() };
+
+  // 別の服に切り替える前に、いまの調整を反映する
+  const switchTo = (id: string) => {
+    if (!item || id === item.id) return;
+    onAdjustRef.current({ adjustOffsetX: offsetX, adjustOffsetY: offsetY, adjustScale: scale, adjustRotation: rotation, layerAdjust, colorHue });
+    onSelect?.(id);
+  };
 
   // タッチ開始
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -353,7 +413,7 @@ export function ItemAdjustPanel({
           const newScale = Math.max(0.3, Math.min(2.0, touchStartRef.current.initialScale * scaleRatio));
           setDollScale(newScale);
         } else {
-          const newScale = Math.max(0.5, Math.min(2.0, touchStartRef.current.initialScale * scaleRatio));
+          const newScale = Math.max(0.3, Math.min(2.5, touchStartRef.current.initialScale * scaleRatio));
           setScale(newScale);
         }
       }
@@ -468,7 +528,7 @@ export function ItemAdjustPanel({
       if (isDollMode) {
         setDollScale((prev) => Math.max(0.3, Math.min(2.0, prev + delta)));
       } else {
-        setScale((prev) => Math.max(0.5, Math.min(2.0, prev + delta)));
+        setScale((prev) => Math.max(0.3, Math.min(2.5, prev + delta)));
       }
     }
   }, [isDollMode]);
@@ -515,31 +575,83 @@ export function ItemAdjustPanel({
         // キャンバス内座標(Pixi:論理) → window座標(CSSピクセル)に変換
         const windowX = canvasLeft + baseX * canvasScaleX;
         const windowY = canvasTop + baseY * canvasScaleY;
+        const { box, canvasW, canvasH } = item;
+        const k = previewUnit * dollTransform.scale; // 元キャンバスの 1px → 画面の px
+        // 服の中心（拡大・回転の軸）。画面の座標
+        const centerX = windowX + (box.x + box.w / 2 - canvasW / 2) * k;
+        const centerY = windowY + (box.y + box.h / 2 - canvasH / 2) * k;
+        const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
 
         return (
-          <>
+          <div
+            style={{
+              position: 'absolute',
+              left: `${windowX}px`,
+              top: `${windowY}px`,
+              transform: `translate(-50%, -50%) scale(${dollTransform.scale})`,
+              transformOrigin: 'center center',
+              pointerEvents: 'none',
+              zIndex: 50,
+            }}
+          >
             <div
               style={{
-                position: 'absolute',
-                left: `${windowX}px`,
-                top: `${windowY}px`,
-                transform: `translate(-50%, -50%) scale(${scale * dollTransform.scale}) rotate(${rotation}deg)`,
-                transformOrigin: 'center center',
-                pointerEvents: 'none',
-                zIndex: 50,
+                position: 'relative',
+                transform: `rotate(${rotation}deg) scale(${scale})`,
+                transformOrigin: `${(box.x + box.w / 2) * previewUnit}px ${(box.y + box.h / 2) * previewUnit}px`,
               }}
             >
               <PlacedImage
                 src={item.imageUrl}
                 alt="調整プレビュー"
                 hue={colorHue}
-                canvasW={item.canvasW}
-                canvasH={item.canvasH}
-                box={item.box}
+                canvasW={canvasW}
+                canvasH={canvasH}
+                box={box}
                 unit={previewUnit}
               />
+              {/* シールのような枠: 左上 × で脱がせる、右下で拡大・回転 */}
+              <div
+                className="sticker-frame"
+                data-testid="sticker-frame"
+                style={{
+                  left: `${box.x * previewUnit}px`,
+                  top: `${box.y * previewUnit}px`,
+                  width: `${box.w * previewUnit}px`,
+                  height: `${box.h * previewUnit}px`,
+                  borderWidth: `${2 * counter}px`,
+                }}
+              >
+                {onRemove && (
+                  <button
+                    className="sticker-handle sticker-remove"
+                    style={{ transform: `translate(-50%, -50%) scale(${counter})` }}
+                    {...stopGesture}
+                    onClick={() => onRemove(item.id)}
+                    title="ぬがせる"
+                    aria-label="ぬがせる"
+                    data-testid="sticker-remove"
+                  >
+                    ×
+                  </button>
+                )}
+                <div
+                  className="sticker-handle sticker-rotate"
+                  style={{ transform: `translate(50%, 50%) scale(${counter})` }}
+                  {...stopGesture}
+                  onPointerDown={(e) => startHandle(e, centerX, centerY)}
+                  onPointerMove={moveHandle}
+                  onPointerUp={endHandle}
+                  onPointerCancel={endHandle}
+                  title="ひっぱって大きさと向きを変える"
+                  aria-label="大きさと向き"
+                  data-testid="sticker-rotate"
+                >
+                  ⤡
+                </div>
+              </div>
             </div>
-          </>
+          </div>
         );
       })()}
 
@@ -609,15 +721,17 @@ export function ItemAdjustPanel({
         <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">
           ↺
         </button>
-        {/* 最前面ボタン（アイテムモードのみ） */}
+        {/* 重なりの前後（アイテムモードのみ） */}
         {!isDollMode && (
-          <button 
-            className={`item-adjust-front-btn ${layerAdjust > 0 ? 'active' : ''}`}
-            onClick={handleBringToFront} 
-            title="最前面に"
-          >
-            ⬆
-          </button>
+          <div className="item-adjust-layer" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+            <button className="item-adjust-front-btn" onClick={() => moveLayer(1)} disabled={stackIndex >= stack.length - 1} title="まえへ" data-testid="layer-front">
+              ⬆
+            </button>
+            <div className="item-adjust-layer-pos" data-testid="layer-pos">{stackIndex + 1}/{stack.length}</div>
+            <button className="item-adjust-front-btn" onClick={() => moveLayer(-1)} disabled={stackIndex <= 0} title="うしろへ" data-testid="layer-back">
+              ⬇
+            </button>
+          </div>
         )}
         {/* 色相スライダー（アイテムモードのみ） */}
         {!isDollMode && (
@@ -642,6 +756,17 @@ export function ItemAdjustPanel({
           </div>
         )}
       </div>
+
+      {/* 着ている服（手前が上）。押すと、その服の調整に切り替える */}
+      {!isDollMode && item && stack.length > 1 && (
+        <div className="item-adjust-picker" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
+          {[...stack].reverse().map((i) => (
+            <button key={i.id} className={i.id === item.id ? 'on' : ''} onClick={() => switchTo(i.id)} title={i.name}>
+              <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

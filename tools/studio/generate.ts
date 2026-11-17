@@ -18,7 +18,7 @@ import type { ImageAi, TextAi } from './ai.ts';
 import type { Budget } from './budget.ts';
 import { processGenerated } from './processGenerated.ts';
 import type { DollTemplate, ProcessWarning } from './processGenerated.ts';
-import { renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
 
 // ドールごとの型紙（studio/templates.json に保存する）
 export interface TemplateData {
@@ -43,6 +43,7 @@ export interface Candidate {
   attempts: number;
   png?: Buffer; // ドールのキャンバス大の、切り抜いた服
   source?: Buffer; // 切り抜く前（位置合わせ済み）
+  shape?: Buffer; // AI が描いた体と服の形（PNG）。手足の先を服に合わせるときに使う
   warnings: ProcessWarning[];
   notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
 }
@@ -203,13 +204,14 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   let feedback: string | null = null;
   const maxAttempts = ctx.maxAttempts ?? MAX_ATTEMPTS;
   // 前の回の結果。作り直しが失敗したり、何も残らなかったりしたときは、こちらを残す
-  let kept: { png: Buffer; source: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
+  let kept: { png: Buffer; source: Buffer; shape?: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
   let rewritten = false; // 断られて説明文を書き直したか（1 回まで）
   let rewriteNote: string[] = []; // 書き直したことを、最後まで候補の注記に残す
   const keepEarlier = (reason: string) => {
     if (!kept) return false;
     candidate.png = kept.png;
     candidate.source = kept.source;
+    candidate.shape = kept.shape;
     candidate.warnings = kept.warnings;
     candidate.notes = [...kept.notes, `作り直しは採用しませんでした（${reason}）`];
     candidate.status = 'flagged';
@@ -259,6 +261,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     if (empty && keepEarlier('服が見つかりませんでした')) return;
     candidate.png = await rgbaToPng(result.rgba, result.width, result.height);
     candidate.source = await rgbaToPng(result.source, result.width, result.height);
+    candidate.shape = result.shape ? await alphaToPng(result.shape, result.width, result.height) : undefined;
     candidate.warnings = [...result.warnings];
     candidate.notes = [...rewriteNote];
 
@@ -301,7 +304,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
       problems.push(verdict.reason || '見た目の検品で不合格でした');
     }
     candidate.notes = [...rewriteNote, ...problems];
-    kept = { png: candidate.png, source: candidate.source, warnings: candidate.warnings, notes: problems };
+    kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, warnings: candidate.warnings, notes: problems };
     feedback = problems.join(' / ');
   }
   candidate.status = candidate.png ? 'flagged' : 'failed';
