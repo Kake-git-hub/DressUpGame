@@ -6,7 +6,7 @@
  * ドール・服・背景の画像は、別リポジトリ（DressUpGame-content）から配信されたものを読む。
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
-import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer } from './components';
+import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlash } from './components';
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
@@ -23,12 +23,13 @@ import {
   loadCurrentBackgroundId,
 } from './services/stateStorage';
 import { saveOutfit, loadOutfit } from './services/outfitStorage';
+import { playDressUpSound } from './services/sound';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.14.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -207,6 +208,13 @@ function App() {
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
+  // 調整中の服より手前の服（equippedItems は重ね順）。調整画面が代わりに重ねて描くので、キャンバスには描かない
+  const frontItemIds = useMemo(() => {
+    if (!isAdjustingItem || adjustingItemId === null) return undefined;
+    const index = equippedItems.findIndex((item) => item.id === adjustingItemId);
+    return index < 0 ? undefined : equippedItems.slice(index + 1).map((item) => item.id);
+  }, [isAdjustingItem, adjustingItemId, equippedItems]);
+
   // 調整ボタンクリックで調整モード開始
   const handleAdjustButtonClick = useCallback(() => {
     if (isAdjustingItem) return;
@@ -302,11 +310,22 @@ function App() {
   const dragPreviewRef = useRef<DragPreviewHandle>(null);
   const avatarSectionRef = useRef<HTMLElement>(null);
 
+  // 着せた服を一瞬光らせる（同じ服を続けて着せても、もう一度光るように回数も持つ）
+  const [flash, setFlash] = useState<{ id: string; count: number } | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(null), 900);
+    return () => clearTimeout(timer);
+  }, [flash]);
+  const flashItem = flash ? equippedItems.find((item) => item.id === flash.id) ?? null : null;
+
   // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
     (item: ClothingItemData) => {
       equipItem(item);
       dragPreviewRef.current?.hide();
+      setFlash((prev) => ({ id: item.id, count: (prev?.count ?? 0) + 1 }));
+      playDressUpSound();
     },
     [equipItem]
   );
@@ -407,6 +426,18 @@ function App() {
 
   return (
     <div className="app">
+      {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
+      {currentDoll && !isAdjustingItem && (
+        <button
+          className="screenshot-button"
+          onClick={handleScreenshot}
+          title="スクショ"
+          data-testid="screenshot-button"
+        >
+          📷
+        </button>
+      )}
+
       {/* 右下ボタングループ - 調整中は非表示 */}
       {!isAdjustingItem && (
         <div className="bottom-right-buttons">
@@ -445,6 +476,7 @@ function App() {
               menuOffset={MENU_WIDTH}
               rightOffset={RIGHT_BUTTON_WIDTH}
               adjustingItemId={isAdjustingItem ? adjustingItemId : null}
+              hiddenItemIds={frontItemIds}
             />
           </section>
         )}
@@ -458,13 +490,6 @@ function App() {
               title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}
             >
               {equippedItems.length > 0 ? '👗' : '📐'}
-            </button>
-            <button
-              className="tool-button"
-              onClick={handleScreenshot}
-              title="スクショ"
-            >
-              📷
             </button>
           </div>
         )}
@@ -518,6 +543,19 @@ function App() {
           equippedItems={equippedItems}
           onRemove={handleAdjustRemove}
           onSelect={setAdjustingItemId}
+        />
+      )}
+
+      {/* 着せた服を一瞬光らせる */}
+      {flashItem && !isAdjustingItem && (
+        <EquipFlash
+          key={flash!.count}
+          item={flashItem}
+          dollTransform={dollTransform}
+          canvasWidth={canvasSize.width}
+          canvasHeight={canvasSize.height}
+          menuOffset={MENU_WIDTH}
+          rightOffset={RIGHT_BUTTON_WIDTH}
         />
       )}
 

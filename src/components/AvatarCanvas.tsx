@@ -24,6 +24,8 @@ interface AvatarCanvasProps {
   menuOffset?: number; // メニュー幅オフセット（左側）
   rightOffset?: number; // 右ボタン領域オフセット（右側）
   adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
+  // キャンバスに描かない服（調整中の服より手前の服。調整画面が代わりに重ねて描く）
+  hiddenItemIds?: string[];
   onCanvasReady?: () => void;
 }
 
@@ -39,6 +41,12 @@ function toDollConfig(doll: DollData | null | undefined, hides: DollConfig['hide
   };
 }
 
+// キャンバスに描く服（調整中の服と、調整画面が重ねて描く服を除く）。hidden は ID を改行でつないだもの
+function visibleItems(items: EquippedItem[], hidden: string): EquippedItem[] {
+  const ids = new Set(hidden.split('\n').filter(Boolean));
+  return ids.size > 0 ? items.filter((item) => !ids.has(item.id)) : items;
+}
+
 export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(function AvatarCanvas({
   width = 400,
   height = 500,
@@ -49,6 +57,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   menuOffset = 0,
   rightOffset = 60,
   adjustingItemId = null,
+  hiddenItemIds,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,10 +65,12 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   const [isReady, setIsReady] = useState(false);
 
   // 非同期の再描画から参照する、最新の props
-  const latest = useRef({ equippedItems, doll, backgroundImageUrl, adjustingItemId });
+  const hiddenKey = [adjustingItemId ?? '', ...(hiddenItemIds ?? [])].join('\n');
+  const latest = useRef({ equippedItems, doll, backgroundImageUrl, adjustingItemId, hiddenKey });
   useEffect(() => {
-    latest.current = { equippedItems, doll, backgroundImageUrl, adjustingItemId };
+    latest.current = { equippedItems, doll, backgroundImageUrl, adjustingItemId, hiddenKey };
   });
+
 
   // 外部に公開するメソッド
   useImperativeHandle(ref, () => ({
@@ -83,10 +94,10 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
 
   // 背景・ドール・服をすべて描き直す
   const redrawAll = async (engine: PixiEngine) => {
-    const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting } = latest.current;
+    const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting, hiddenKey: hidden } = latest.current;
     await engine.setBackground(bg ?? null);
     await engine.drawDoll(toDollConfig(currentDoll, activeHides(items, adjusting)));
-    await engine.drawClothing(adjusting ? items.filter((item) => item.id !== adjusting) : items);
+    await engine.drawClothing(visibleItems(items, hidden));
     engine.forceRedraw();
   };
 
@@ -182,13 +193,10 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   // 装備アイテムが変わったら再描画
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      // 調整中のアイテムは非表示にする
-      const itemsToRender = adjustingItemId
-        ? equippedItems.filter(item => item.id !== adjustingItemId)
-        : equippedItems;
-      redrawWhenDone(engineRef.current.drawClothing(itemsToRender));
+      // 調整中のアイテム（と、その手前の服）は非表示にする
+      redrawWhenDone(engineRef.current.drawClothing(visibleItems(equippedItems, hiddenKey)));
     }
-  }, [equippedItems, adjustingItemId, isReady]);
+  }, [equippedItems, hiddenKey, isReady]);
 
   // 背景が変わったら更新
   useEffect(() => {
@@ -205,7 +213,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       redrawWhenDone(
         Promise.all([
           engine.drawDoll(toDollConfig(latest.current.doll, activeHides(latest.current.equippedItems, latest.current.adjustingItemId))),
-          engine.drawClothing(latest.current.equippedItems),
+          engine.drawClothing(visibleItems(latest.current.equippedItems, latest.current.hiddenKey)),
         ])
       );
     }

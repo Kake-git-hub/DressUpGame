@@ -7,9 +7,9 @@
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
 import { useCallback, useState, useEffect, useRef } from 'react';
-import type { CSSProperties } from 'react';
-import { HueCanvas } from './HueCanvas';
-import type { Box, DollData, EquippedItem, DollTransform } from '../types';
+import { PlacedImage, PlacedItem } from './PlacedItem';
+import { canvasGeometry, itemOrigin, lookOf } from './placement';
+import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 
@@ -51,36 +51,6 @@ function getAngle(touch1: TouchPoint, touch2: TouchPoint): number {
   const dx = touch2.clientX - touch1.clientX;
   const dy = touch2.clientY - touch1.clientY;
   return (Math.atan2(dy, dx) * 180) / Math.PI;
-}
-
-// 切り抜き画像を、元キャンバスの中での位置に置いて表示する。
-// 外枠が元キャンバス全体の大きさなので、外枠の中心＝元キャンバスの中心（PixiEngine の原点と同じ）。
-function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue }: {
-  src: string;
-  alt: string;
-  canvasW: number;
-  canvasH: number;
-  box: Box;
-  unit: number;
-  hue?: number; // 指定すると、色相を変えた状態で表示する（服の調整用）
-}) {
-  const placed: CSSProperties = {
-    position: 'absolute',
-    display: 'block',
-    left: `${box.x * unit}px`,
-    top: `${box.y * unit}px`,
-    width: `${box.w * unit}px`,
-    height: `${box.h * unit}px`,
-  };
-  return (
-    <div style={{ position: 'relative', width: `${canvasW * unit}px`, height: `${canvasH * unit}px` }}>
-      {hue === undefined ? (
-        <img src={src} alt={alt} draggable={false} style={placed} />
-      ) : (
-        <HueCanvas src={src} hue={hue} style={placed} testId="adjust-preview" />
-      )}
-    </div>
-  );
 }
 
 export function ItemAdjustPanel({
@@ -269,8 +239,18 @@ export function ItemAdjustPanel({
       setRotation(0);
       setLayerAdjust(0);
       setColorHue(0);
+      // 重なりの順番はその場でキャンバスに反映する
+      onAdjustRef.current({ layerAdjust: 0 });
     }
   }, [isDollMode]);
+
+  // 枠の右上: 位置・大きさ・傾きだけを元に戻す
+  const handleResetPlacement = useCallback(() => {
+    setOffsetX(0);
+    setOffsetY(0);
+    setScale(1.0);
+    setRotation(0);
+  }, []);
 
   // 重なりの前後: いまの重ね順（調整中の値を使う）で、1 つ前・1 つ後ろの服との間に入る
   const effective = (i: EquippedItem) => (i.layerOrder ?? i.baseZIndex ?? 0) + (item && i.id === item.id ? layerAdjust : (i.layerAdjust ?? 0));
@@ -288,7 +268,10 @@ export function ItemAdjustPanel({
       // 隣の服を越えた所（その先の服との中間。先が無ければ 1 つ分先）に置く
       const far = beyond && effective(beyond) !== near ? effective(beyond) : near + direction;
       const target = (near + far) / 2;
-      setLayerAdjust(target - (item.layerOrder ?? item.baseZIndex ?? 0));
+      const next = target - (item.layerOrder ?? item.baseZIndex ?? 0);
+      setLayerAdjust(next);
+      // 重なりの順番は、調整中でもその場でキャンバスに反映する
+      onAdjustRef.current({ layerAdjust: next });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stack と effective は item・layerAdjust・equippedItems から決まる
     [item, stackIndex, layerAdjust, equippedItems],
@@ -547,70 +530,23 @@ export function ItemAdjustPanel({
       onWheel={handleWheel}
       style={{ cursor: isMouseDragging ? 'grabbing' : 'grab' }}
     >
-      {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー */}
+      {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー。
+          調整中の服より手前の服も、キャンバスではなくここに重ねて、重なりの順番をその場で見せる */}
       {!isDollMode && item && (() => {
-        // ドール中心位置を計算（PixiEngineと同じ計算）
-        // dollTransformのx,yは背景領域内での%位置（50%=中央）
-        const dollCenterX = bgCenterX + ((dollTransform.x - 50) / 100) * bgSize;
-        const dollCenterY = bgCenterY + ((dollTransform.y - 50) / 100) * bgSize;
-        
-        // アイテムの基準位置を計算（キャンバス内座標）
-        let baseX: number;
-        let baseY: number;
-        
-        if (item?.movable && ((item.offsetX ?? 0) !== 0 || (item.offsetY ?? 0) !== 0)) {
-          // movableアイテム: bgCenter + offset で計算（PixiEngineと同じ）
-          baseX = bgCenterX + ((item.offsetX ?? 0) / 100) * bgSize;
-          baseY = bgCenterY + ((item.offsetY ?? 0) / 100) * bgSize;
-        } else {
-          // 通常アイテム: ドール中心
-          baseX = dollCenterX;
-          baseY = dollCenterY;
-        }
-        
-        // 調整オフセットを適用
-        baseX += offsetX;
-        baseY += offsetY;
-        
-        // キャンバス内座標(Pixi:論理) → window座標(CSSピクセル)に変換
-        const windowX = canvasLeft + baseX * canvasScaleX;
-        const windowY = canvasTop + baseY * canvasScaleY;
+        const geometry = canvasGeometry(canvasInfo, canvasWidth, canvasHeight, menuOffset, rightOffset);
+        const look = { offsetX, offsetY, scale, rotation, hue: colorHue };
+        const origin = itemOrigin(item, look, geometry, dollTransform);
         const { box, canvasW, canvasH } = item;
         const k = previewUnit * dollTransform.scale; // 元キャンバスの 1px → 画面の px
         // 服の中心（拡大・回転の軸）。画面の座標
-        const centerX = windowX + (box.x + box.w / 2 - canvasW / 2) * k;
-        const centerY = windowY + (box.y + box.h / 2 - canvasH / 2) * k;
+        const centerX = origin.x + (box.x + box.w / 2 - canvasW / 2) * k;
+        const centerY = origin.y + (box.y + box.h / 2 - canvasH / 2) * k;
         const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
 
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: `${windowX}px`,
-              top: `${windowY}px`,
-              transform: `translate(-50%, -50%) scale(${dollTransform.scale})`,
-              transformOrigin: 'center center',
-              pointerEvents: 'none',
-              zIndex: 50,
-            }}
-          >
-            <div
-              style={{
-                position: 'relative',
-                transform: `rotate(${rotation}deg) scale(${scale})`,
-                transformOrigin: `${(box.x + box.w / 2) * previewUnit}px ${(box.y + box.h / 2) * previewUnit}px`,
-              }}
-            >
-              <PlacedImage
-                src={item.imageUrl}
-                alt="調整プレビュー"
-                hue={colorHue}
-                canvasW={canvasW}
-                canvasH={canvasH}
-                box={box}
-                unit={previewUnit}
-              />
-              {/* シールのような枠: 左上 × で脱がせる、右下で拡大・回転 */}
+          <>
+            <PlacedItem item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50} alwaysHue testId="adjust-preview">
+              {/* シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転 */}
               <div
                 className="sticker-frame"
                 data-testid="sticker-frame"
@@ -635,6 +571,17 @@ export function ItemAdjustPanel({
                     ×
                   </button>
                 )}
+                <button
+                  className="sticker-handle sticker-reset"
+                  style={{ transform: `translate(50%, -50%) scale(${counter})` }}
+                  {...stopGesture}
+                  onClick={handleResetPlacement}
+                  title="位置・大きさ・向きをもどす"
+                  aria-label="位置・大きさ・向きをもどす"
+                  data-testid="sticker-reset"
+                >
+                  ↺
+                </button>
                 <div
                   className="sticker-handle sticker-rotate"
                   style={{ transform: `translate(50%, 50%) scale(${counter})` }}
@@ -650,8 +597,19 @@ export function ItemAdjustPanel({
                   ⤡
                 </div>
               </div>
-            </div>
-          </div>
+            </PlacedItem>
+            {stack.slice(stackIndex + 1).map((front, i) => (
+              <PlacedItem
+                key={front.id}
+                item={front}
+                look={lookOf(front)}
+                geometry={geometry}
+                dollTransform={dollTransform}
+                zIndex={51 + i}
+                className="adjust-front-item"
+              />
+            ))}
+          </>
         );
       })()}
 
@@ -713,7 +671,7 @@ export function ItemAdjustPanel({
         );
       })()}
 
-      {/* 右上ボタン（完了・リセット・最前面・カラー） */}
+      {/* 右上ボタン（完了・リセット・カラー） */}
       <div className="item-adjust-top-buttons">
         <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">
           ✓
@@ -721,18 +679,6 @@ export function ItemAdjustPanel({
         <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">
           ↺
         </button>
-        {/* 重なりの前後（アイテムモードのみ） */}
-        {!isDollMode && (
-          <div className="item-adjust-layer" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-            <button className="item-adjust-front-btn" onClick={() => moveLayer(1)} disabled={stackIndex >= stack.length - 1} title="まえへ" data-testid="layer-front">
-              ⬆
-            </button>
-            <div className="item-adjust-layer-pos" data-testid="layer-pos">{stackIndex + 1}/{stack.length}</div>
-            <button className="item-adjust-front-btn" onClick={() => moveLayer(-1)} disabled={stackIndex <= 0} title="うしろへ" data-testid="layer-back">
-              ⬇
-            </button>
-          </div>
-        )}
         {/* 色相スライダー（アイテムモードのみ） */}
         {!isDollMode && (
           <div 
@@ -753,18 +699,37 @@ export function ItemAdjustPanel({
               title={`色相: ${colorHue}°`}
             />
             <div className="hue-value">{colorHue}°</div>
+            <button
+              className="hue-reset-btn"
+              onClick={() => setColorHue(0)}
+              disabled={colorHue === 0}
+              title="色をもどす"
+              aria-label="色をもどす"
+              data-testid="hue-reset"
+            >
+              ↺
+            </button>
           </div>
         )}
       </div>
 
-      {/* 着ている服（手前が上）。押すと、その服の調整に切り替える */}
-      {!isDollMode && item && stack.length > 1 && (
+      {/* 着ている服（重なりの順番。手前が上）。押すと、その服の調整に切り替える。
+          上下のボタンで、調整中の服の重なりを前後に入れ替える */}
+      {!isDollMode && item && (
         <div className="item-adjust-picker" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
-          {[...stack].reverse().map((i) => (
-            <button key={i.id} className={i.id === item.id ? 'on' : ''} onClick={() => switchTo(i.id)} title={i.name}>
-              <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
-            </button>
-          ))}
+          <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={stackIndex >= stack.length - 1} title="まえへ" aria-label="まえへ" data-testid="layer-front">
+            ▲
+          </button>
+          <div className="item-adjust-picker-items" data-testid="adjust-picker-items">
+            {[...stack].reverse().map((i) => (
+              <button key={i.id} className={i.id === item.id ? 'on' : ''} onClick={() => switchTo(i.id)} title={i.name} data-testid="adjust-picker-item">
+                <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
+              </button>
+            ))}
+          </div>
+          <button className="item-adjust-layer-btn" onClick={() => moveLayer(-1)} disabled={stackIndex <= 0} title="うしろへ" aria-label="うしろへ" data-testid="layer-back">
+            ▼
+          </button>
         </div>
       )}
     </div>

@@ -104,7 +104,11 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       `Number of items to plan: ${input.count}`,
       `Art style: ${input.style || 'not specified'}`,
       'Allowed categories (use the id exactly as written):',
-      ...categories.map((c) => `- ${c.id}`),
+      ...categories.map((c) => {
+        const kind = categoryKind(c.label);
+        const note = kind === 'face' ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)' : kind === 'hair' ? ' (hairstyle only: hair and bangs. Never any facial features.)' : '';
+        return `- ${c.id}${note}`;
+      }),
       '',
       NO_NAMES,
       'If the theme itself names a character or a work, design an original item that only borrows the general mood and colours.',
@@ -126,6 +130,36 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
     .slice(0, input.count);
   if (items.length === 0) throw new AiError('品目を作れませんでした。テーマを変えてやり直してください', 422);
   return items;
+}
+
+// 顔と髪型は別のカテゴリで着せ替えるので、それぞれ相手の部分を描かせない
+const FACE_LABEL = /かお|顔|face|メイク|makeup/i;
+const HAIR_LABEL = /^(かみ|髪|ヘア|hair)$|ヘアスタイル|かみがた|髪型|hair ?style/i;
+
+export function categoryKind(label: string): 'face' | 'hair' | null {
+  if (HAIR_LABEL.test(label.trim())) return 'hair';
+  if (FACE_LABEL.test(label)) return 'face';
+  return null;
+}
+
+// カテゴリごとの追加の決まり（画像生成への指示）
+export function categoryRules(label: string): string[] {
+  switch (categoryKind(label)) {
+    case 'face':
+      return [
+        '- This item is the face only: eyes, eyebrows, eyelashes, nose, mouth and cheek blush, drawn on the head of the mannequin.',
+        '- Draw no hair at all: no bangs, fringe, sidelocks, sideburns, ponytail, hair outline or hair accessories. Hairstyles are a separate item, so the top and sides of the head must stay bald.',
+        '- No hat, no ears decorations and nothing outside the face area.',
+      ];
+    case 'hair':
+      return [
+        '- This item is the hairstyle only (hair, bangs, and the hair at the back), like a wig placed on the mannequin\'s head.',
+        '- Do not draw eyes, eyebrows, nose, mouth or any other facial features. Faces are a separate item, so the face area must stay the flat mannequin colour where the hair does not cover it.',
+        '- No hat or other accessories.',
+      ];
+    default:
+      return [];
+  }
 }
 
 const INSPECT_SCHEMA = {
@@ -151,6 +185,7 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `- The background must stay the same flat ${colorName(background)} with no shadows, gradients, floor, text or frame.`,
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
+    ...categoryRules(categoryLabel),
     '- Square image, same framing as the template.',
     feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',
   ]
@@ -287,8 +322,10 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
             `The item should be: ${item.description} (type: ${label}).`,
             'Set ok to false if any of these is true: the item does not match the description; parts of it are missing or have holes that look like cut-out errors; ' +
               'leftover patches of flat key colour or background remain; it is misplaced on the body; extra objects, body parts or text are present; the drawing is malformed.',
+            categoryKind(label) === 'face' ? 'This item must be a face without any hair: set ok to false if any hair (bangs, sidelocks, hair outline) is drawn.' : '',
+            categoryKind(label) === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
             'Otherwise set ok to true. In reason, explain briefly in Japanese (one sentence).',
-          ].join('\n'),
+          ].filter(Boolean).join('\n'),
           images: [preview],
           schema: INSPECT_SCHEMA,
         });
