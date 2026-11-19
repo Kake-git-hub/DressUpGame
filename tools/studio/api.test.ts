@@ -228,15 +228,44 @@ describe('服の追加', () => {
     await ok('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`);
     expect((await call('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`)).status).toBe(404);
   }, 30_000);
+  it('シルエットから作った服は、余白つきのキャンバスで処理され、ドールのキャンバスより上に描いた分も残る', async () => {
+    const silhouette = (await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer;
+    const meta = await sharp(silhouette).metadata();
+    const w = meta.width!;
+    // 型紙の上端から 3% の所（ドールのキャンバスより上の余白）に、頭の上の大きな帽子を描く
+    const hat = await sharp({ create: { width: Math.round(w * 0.2), height: Math.round(w * 0.09), channels: 3, background: '#c81e28' } }).png().toBuffer();
+    const generated = await sharp(silhouette).composite([{ input: hat, left: Math.round(w * 0.4), top: Math.round(w * 0.03) }]).png().toBuffer();
+    const r = await ok<{ png: string; warnings: unknown[] }>('POST', `/api/process?doll=${dollId}`, generated);
+    expect(r.warnings).toEqual([]);
+    const cut = await sharp(Buffer.from(r.png, 'base64')).metadata();
+    expect([cut.width, cut.height]).toEqual([1228, 1228]);
+    const item = await ok<{ image: { canvasW: number; canvasH: number; box: { y: number; h: number } } }>('POST', '/api/items', { dollId, category: 'ぼうし', name: 'おおきなぼうし', png: r.png });
+    expect([item.image.canvasW, item.image.canvasH]).toEqual([1228, 1228]);
+    // 帽子の上端は、ドールのキャンバスの上端（作業用キャンバスの 102px 目）より上
+    expect(item.image.box.y).toBeLessThan(102 - 40);
+    expect(item.image.box.y).toBeGreaterThan(20);
+  }, 30_000);
+  it('切り抜き済みの画像（シルエットなし）は、ドールのキャンバスのまま', async () => {
+    const cutout = await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: await sharp({ create: { width: 200, height: 200, channels: 4, background: '#c81e28' } }).png().toBuffer(), left: 400, top: 300 }])
+      .png()
+      .toBuffer();
+    const r = await ok<{ png: string }>('POST', `/api/process?doll=${dollId}`, cutout);
+    const cut = await sharp(Buffer.from(r.png, 'base64')).metadata();
+    expect([cut.width, cut.height]).toEqual([1024, 1024]);
+    const item = await ok<{ image: { canvasW: number; box: { x: number; y: number } } }>('POST', '/api/items', { dollId, category: 'トップス', name: 'きりぬきずみ', png: r.png });
+    expect(item.image.canvasW).toBe(1024);
+    expect([item.image.box.x, item.image.box.y]).toEqual([400, 300]);
+  }, 30_000);
   it('処理の結果に AI の体の形が付き、隠す所を添えて保存すると一覧に hide が入る。置き換えで外せる', async () => {
     const generated = await fakeImage.generate({ prompt: '', images: [(await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer] });
     const r = await ok<{ png: string; shape: string | null }>('POST', `/api/process?doll=${dollId}`, generated);
     expect(r.shape).toBeTruthy();
     const shape = await sharp(Buffer.from(r.shape!, 'base64')).metadata();
-    expect([shape.width, shape.height]).toEqual([1024, 1024]);
-    // 右下の 40px 四方を隠す
-    const mask = await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: '#ffffff' } }).png().toBuffer(), left: 900, top: 950 }])
+    expect([shape.width, shape.height]).toEqual([1228, 1228]); // 余白つきの作業用キャンバス（1024 + 102 × 2）
+    // ドールのキャンバスの右下の 40px 四方を隠す（作業用キャンバスでは 102px ずれる）
+    const mask = await sharp({ create: { width: 1228, height: 1228, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: await sharp({ create: { width: 40, height: 40, channels: 4, background: '#ffffff' } }).png().toBuffer(), left: 900 + 102, top: 950 + 102 }])
       .png()
       .toBuffer();
     const item = await ok<{ id: string; hide?: { file: string; box: { x: number; y: number; w: number; h: number } } }>('POST', '/api/items', { dollId, category: 'くつ', name: 'かくす', png: r.png, hide: mask.toString('base64') });
