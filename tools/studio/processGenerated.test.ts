@@ -173,3 +173,59 @@ describe('processGenerated（サンプル画像）', () => {
     }
   }, 90_000);
 });
+
+describe('頭に付く品目の位置合わせ（anchor）', () => {
+  const GREEN = [0, 255, 0];
+  const MAGENTA = [255, 0, 255];
+  const GOLD = [230, 180, 60];
+  const HEAD = { x: 460, y: 27, w: 107, h: 134 };
+  const DRIFT = 18;
+
+  // AI が、体はそのままで頭だけ右へ DRIFT px ずらして描いた髪型の画像
+  async function driftedHair(): Promise<Buffer> {
+    const W = doll.canvasW;
+    const H = doll.canvasH;
+    const rgb = Buffer.alloc(W * H * 3);
+    const neck = HEAD.y + HEAD.h;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const body = y >= neck ? doll.mask[y * W + x] : x - DRIFT >= 0 ? doll.mask[y * W + x - DRIFT] : 0;
+        // 髪: ずれた頭を囲む楕円。顔の下半分は見えている
+        const cx = HEAD.x + HEAD.w / 2 + DRIFT;
+        const cy = HEAD.y + HEAD.h * 0.45;
+        const inHair = ((x - cx) / (HEAD.w * 0.7)) ** 2 + ((y - cy) / (HEAD.h * 0.62)) ** 2 <= 1;
+        const face = body && y > HEAD.y + HEAD.h * 0.4 && y < neck;
+        const color = inHair && !face ? GOLD : body ? GREEN : MAGENTA;
+        rgb.set(color, (y * W + x) * 3);
+      }
+    }
+    return sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+  }
+  const centerX = (r: ProcessResult) => {
+    const box = alphaBBox(r.rgba, r.width, r.height)!;
+    return box.x + box.w / 2;
+  };
+
+  it('体に合わせるだけだと髪が頭からずれ、頭を基準にすると頭の真上に来る', async () => {
+    const image = await driftedHair();
+    const parts = estimateBodyParts(doll.mask, doll.canvasW, doll.canvasH)!;
+    const headCenter = HEAD.x + HEAD.w / 2;
+
+    const plain = await processGenerated(image, doll, { silhouetteColor: [0, 255, 0], parts: Object.values(parts) });
+    expect(plain.anchorShift).toBeNull();
+    expect(Math.abs(centerX(plain) - headCenter)).toBeGreaterThan(10);
+
+    const anchored = await processGenerated(image, doll, { silhouetteColor: [0, 255, 0], parts: Object.values(parts), anchor: HEAD });
+    expect(anchored.anchorShift).not.toBeNull();
+    expect(Math.abs(anchored.anchorShift!.dx + DRIFT)).toBeLessThanOrEqual(3);
+    expect(Math.abs(anchored.anchorShift!.dy)).toBeLessThanOrEqual(3);
+    expect(Math.abs(centerX(anchored) - headCenter)).toBeLessThanOrEqual(3);
+    expect(anchored.partShifts).toEqual([]); // 部位ごとの直しはしない
+  }, 60_000);
+
+  it('ずれていない画像は動かさない', async () => {
+    const r = await processGenerated(await read('sample-green-set.webp'), doll, { anchor: HEAD });
+    expect(r.anchorShift).toBeNull();
+    expect(r.warnings).toEqual([]);
+  }, 30_000);
+});

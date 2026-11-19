@@ -2,9 +2,12 @@
  * 服を、Pixi のキャンバスに描かれるのと同じ位置・大きさで、画面（CSS）に重ねて表示する。
  * 調整中のプレビュー、調整中の服より手前の服、着せたときの光る演出で使う。
  */
+import { useEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { HueCanvas } from './HueCanvas';
-import type { Box, DollTransform, EquippedItem } from '../types';
+import type { Box, DollData, DollTransform, EquippedItem } from '../types';
+import { eraseHides } from '../engine/hides';
+import type { Hide } from '../engine/hides';
 import { itemOrigin } from './placement';
 import type { CanvasGeometry, ItemLook } from './placement';
 
@@ -40,7 +43,7 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, testId
 }
 
 // 服 1 点を、キャンバス上と同じ所に重ねる。children は服と同じ向き・大きさで重なる（枠など）
-export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, testId, children }: {
+export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, testId, part = 'front', children }: {
   item: EquippedItem;
   look: ItemLook;
   geometry: CanvasGeometry;
@@ -49,11 +52,13 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
   className?: string;
   alwaysHue?: boolean; // 色相 0 でも HueCanvas で描く（スライダーの動きに追従させるため）
   testId?: string;
+  part?: 'front' | 'back'; // back = ドールの下に描く分（後ろ髪など）。上の分と同じ軸で動く
   children?: ReactNode;
 }) {
   const origin = itemOrigin(item, look, geometry, dollTransform);
   const { box, canvasW, canvasH } = item;
   const unit = geometry.unit;
+  const shown = part === 'back' && item.back ? { src: item.back.url, box: item.back.box } : { src: item.imageUrl, box };
   return (
     <div
       className={className}
@@ -75,16 +80,74 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
         }}
       >
         <PlacedImage
-          src={item.imageUrl}
+          src={shown.src}
           alt={item.name}
           hue={alwaysHue || look.hue !== 0 ? look.hue : undefined}
           canvasW={canvasW}
           canvasH={canvasH}
-          box={box}
+          box={shown.box}
           unit={unit}
           testId={testId}
         />
         {children}
+      </div>
+    </div>
+  );
+}
+
+const loadImage = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+
+// ドールを、キャンバス上と同じ所に重ねる（ドールの後ろの服を調整している間、キャンバスのドールの代わりに描く）。
+// hides: 着ている服が隠す所（手袋の下の指先など）。キャンバスと同じように消して描く
+export function PlacedDoll({ doll, hides, geometry, dollTransform, zIndex }: {
+  doll: DollData;
+  hides: Hide[];
+  geometry: CanvasGeometry;
+  dollTransform: DollTransform;
+  zIndex: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { bodyImageUrl, box } = doll;
+  const hidesKey = hides.map((h) => h.url).join('\n');
+  useEffect(() => {
+    if (!hidesKey) return;
+    let cancelled = false;
+    Promise.all([loadImage(bodyImageUrl), ...hides.map((h) => loadImage(h.url))])
+      .then(([image, ...masks]) => {
+        const canvas = canvasRef.current;
+        if (cancelled || !canvas) return;
+        const erased = eraseHides(image, box, masks.map((m, i) => ({ image: m, box: hides[i].box })));
+        canvas.width = erased.width;
+        canvas.height = erased.height;
+        canvas.getContext('2d')?.drawImage(erased, 0, 0);
+      })
+      .catch(() => {
+        // 読めなければ、下の <img>（隠す所なし）のまま
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hides は hidesKey で見る
+  }, [bodyImageUrl, hidesKey, box.x, box.y, box.w, box.h]);
+
+  const unit = geometry.unit;
+  const x = geometry.left + (geometry.bgCenterX + ((dollTransform.x - 50) / 100) * geometry.bgSize) * geometry.scaleX;
+  const y = geometry.top + (geometry.bgCenterY + ((dollTransform.y - 50) / 100) * geometry.bgSize) * geometry.scaleY;
+  const placed: CSSProperties = { position: 'absolute', left: `${box.x * unit}px`, top: `${box.y * unit}px`, width: `${box.w * unit}px`, height: `${box.h * unit}px` };
+  return (
+    <div
+      data-testid="adjust-doll"
+      style={{ position: 'absolute', left: `${x}px`, top: `${y}px`, transform: `translate(-50%, -50%) scale(${dollTransform.scale})`, pointerEvents: 'none', zIndex }}
+    >
+      <div style={{ position: 'relative', width: `${doll.canvasW * unit}px`, height: `${doll.canvasH * unit}px` }}>
+        {hidesKey ? <canvas ref={canvasRef} style={placed} /> : <img src={bodyImageUrl} alt="" draggable={false} style={placed} />}
       </div>
     </div>
   );

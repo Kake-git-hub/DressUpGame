@@ -4,6 +4,7 @@
  * フィルターなし版（パフォーマンス最優先）
  */
 import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter, Texture } from 'pixi.js';
+import { isBehindDoll } from './layers';
 import { eraseHides } from './hides';
 import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 
@@ -301,6 +302,11 @@ export class PixiEngine {
     };
   }
 
+  // ドールを隠す・戻す（ドールの後ろの服を調整している間は、画面側のプレビューが代わりにドールを描く）
+  setDollVisible(visible: boolean): void {
+    if (this.dollContainer) this.dollContainer.visible = visible;
+  }
+
   // ドールを描画（画像URLがあれば画像、なければプレースホルダー）
   async drawDoll(config: DollConfig): Promise<void> {
     if (!this.dollContainer || !this.app || !this.initialized || this.destroyed) {
@@ -479,8 +485,12 @@ export class PixiEngine {
   }
 
   // 服を描画（imageUrlがあれば画像、なければプレースホルダー）。
-  // hiddenFront の服は、ドールの上の分を描かない（調整中は画面側のプレビューが代わりに出る）。ドールの下の分（後ろ髪）は描く
-  async drawClothing(items: (ClothingItemData | EquippedItem)[], hiddenFront: ReadonlySet<string> | null = null): Promise<void> {
+  // 描く順番（下から）: ドールの後ろに回した服 → ほかの服の下の分（後ろ髪）→ ドール → ほかの服の上の分（layers.ts の drawOrder と同じ）。
+  // hidden.fronts の服は上の分を、hidden.backs の服は下の分を描かない（調整中は画面側のプレビューが代わりに出る）
+  async drawClothing(
+    items: (ClothingItemData | EquippedItem)[],
+    hidden: { fronts?: ReadonlySet<string>; backs?: ReadonlySet<string> } | null = null,
+  ): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -494,7 +504,8 @@ export class PixiEngine {
     // 新しい一時コンテナを作成（全ロード完了後に一括表示するため）
     const tempContainer = new Container();
     tempContainer.label = 'tempClothingContainer';
-    const backSprites: Sprite[] = [];
+    const backSprites: Sprite[] = []; // 服の下の分（後ろ髪など）
+    const behindSprites: Sprite[] = []; // ドールの後ろに回した服
 
     // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
     const loadPromises = items.map(async (item) => {
@@ -561,8 +572,9 @@ export class PixiEngine {
         return [hueFilter];
       };
 
+      const behind = isBehindDoll(item as EquippedItem);
       // ドールの下に描く分（後ろ髪など）: 上の分と同じ軸で、同じように動かす
-      if (backTexture && item.back) {
+      if (backTexture && item.back && !hidden?.backs?.has(item.id)) {
         backTexture.source.scaleMode = 'linear';
         const baseScale = (this.app.screen.height * HEIGHT_RATIO) / 1024;
         const front = itemPivot(item, texture ?? backTexture);
@@ -581,9 +593,9 @@ export class PixiEngine {
         backSprite.y = itemY + front.fromCanvasCenter.y * baseScale * s;
         backSprite.rotation = (adjustRotation * Math.PI) / 180;
         if (colorHue !== 0) backSprite.filters = hueFilters();
-        backSprites.push(backSprite);
+        (behind ? behindSprites : backSprites).push(backSprite);
       }
-      if (hiddenFront?.has(item.id)) continue;
+      if (hidden?.fronts?.has(item.id)) continue;
 
       // テクスチャがロード済みの場合はスプライトを作成
       if (texture) {
@@ -613,7 +625,8 @@ export class PixiEngine {
 
         if (colorHue !== 0) clothingSprite.filters = hueFilters();
 
-        tempContainer.addChild(clothingSprite);
+        if (behind) behindSprites.push(clothingSprite);
+        else tempContainer.addChild(clothingSprite);
       } else if (error) {
         // 画像読み込み失敗時はプレースホルダーを表示
         console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
@@ -643,7 +656,7 @@ export class PixiEngine {
     // ドールの下に描く分を入れ替える
     for (const child of this.backContainer.children) if (child instanceof Sprite) child.filters = null;
     this.backContainer.removeChildren().forEach((child) => child.destroy());
-    for (const sprite of backSprites) this.backContainer.addChild(sprite);
+    for (const sprite of [...behindSprites, ...backSprites]) this.backContainer.addChild(sprite);
 
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
     this.cacheClothingContainer();

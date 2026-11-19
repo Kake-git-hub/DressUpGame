@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { alphaBBox } from '../../src/pipeline/alpha.ts';
-import { alignToDoll } from '../../src/pipeline/align.ts';
+import { alignToDoll, refineAtAnchor } from '../../src/pipeline/align.ts';
 import type { Alignment } from '../../src/pipeline/align.ts';
 import { closeColorRatio, cutOutClothing } from '../../src/pipeline/cutout.ts';
 import { detectKeyColors } from '../../src/pipeline/keyColors.ts';
@@ -16,6 +16,7 @@ import type { KeyColors, Rgb } from '../../src/pipeline/keyColors.ts';
 import { findPartShifts, warpByParts } from '../../src/pipeline/partAlign.ts';
 import type { PartShift } from '../../src/pipeline/partAlign.ts';
 import { removeCornerSpeck } from '../../src/pipeline/removeCornerSpeck.ts';
+import { removeFarSpecks } from '../../src/pipeline/removeFarSpecks.ts';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import type { ManifestImage } from '../../src/content/manifest.ts';
 
@@ -34,6 +35,7 @@ export interface ProcessResult {
   height: number;
   keyColors: KeyColors;
   alignment: Alignment;
+  anchorShift: { dx: number; dy: number } | null; // 基準の部位（頭など）に合わせて全体を動かした量。動かしていなければ null
   partShifts: PartShift[]; // 部位ごとの細かい直し（直さなかった部位は 0）
   // AI が描いた体と服の形（背景でない所）。服と同じ位置合わせ。ドールの手足を服に合わせて隠すときに使う。
   // キャンバス大の不透明度（0〜255）。切り抜き済みの画像では null
@@ -54,6 +56,8 @@ export interface ProcessOptions {
   nudge?: { scale: number; dx: number; dy: number }; // 自動の位置合わせに重ねる手動の微調整
   silhouetteColor?: Rgb; // 生成時に指定したシルエット色（分かっていれば）
   parts?: Box[]; // 体の部位（型紙）。あれば、部位ごとに位置を直す
+  // 髪型・帽子など、体の 1 か所だけに付く品目の、その部位（頭）。あれば、体全体ではなくその部位に合わせて置く（部位ごとの直しはしない）
+  anchor?: Box;
 }
 
 // 作業用のキャンバス: ドールのキャンバスのまわりに、この割合（幅に対して）の余白を足す。
@@ -173,6 +177,7 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
   let alignment: Alignment = { scale: 1, dx: 0, dy: 0, score: 0 };
   let ratio = 0;
   let foreground: Uint8ClampedArray | null = null; // 生成画像で背景でない所（シルエット＋服）
+  let sides: { silhouette: Uint8Array; background: Uint8Array } | null = null; // 生成画像のシルエットと背景
   if (alreadyCut) {
     keyColors = { background: [0, 0, 0], silhouette: null };
     // 縦横比が違う画像は、キャンバスの中央に置く
@@ -183,6 +188,7 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
       doll: { mask: doll.mask, width: doll.canvasW, height: doll.canvasH },
     });
     const masks = cutOutClothing(cut, width, height, keyColors);
+    sides = { silhouette: masks.silhouette, background: masks.background };
     ratio = closeColorRatio(cut, width, height, keyColors);
     foreground = new Uint8ClampedArray(width * height * 4);
     for (let p = 0; p < width * height; p++) if (!masks.background[p]) foreground[p * 4 + 3] = 255;
@@ -207,6 +213,24 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     }
   }
 
+  // 頭に付く品目は、頭のまわりだけを見て、全体をもう一度合わせる（AI が頭だけ少しずらして描くことがある）
+  let anchorShift: { dx: number; dy: number } | null = null;
+  if (options.anchor && sides && keyColors.silhouette) {
+    const at = async (mask: Uint8Array) => {
+      const px = new Uint8ClampedArray(width * height * 4);
+      for (let p = 0; p < width * height; p++) if (mask[p]) px[p * 4 + 3] = 255;
+      const placed = await place(px, width, height, toDoll * alignment.scale, Math.round(alignment.dx), Math.round(alignment.dy), doll.canvasW, doll.canvasH);
+      const out = new Uint8Array(doll.canvasW * doll.canvasH);
+      for (let p = 0; p < out.length; p++) if (placed[p * 4 + 3] >= 128) out[p] = 1;
+      return out;
+    };
+    const found = refineAtAnchor({ silhouette: await at(sides.silhouette), background: await at(sides.background), doll: doll.mask, width: doll.canvasW, height: doll.canvasH, box: options.anchor });
+    if (found.dx !== 0 || found.dy !== 0) {
+      anchorShift = { dx: found.dx, dy: found.dy };
+      alignment = { ...alignment, dx: alignment.dx + found.dx, dy: alignment.dy + found.dy };
+    }
+  }
+
   const scale = toDoll * alignment.scale * nudge.scale;
   const dx = Math.round(alignment.dx + nudge.dx);
   const dy = Math.round(alignment.dy + nudge.dy);
@@ -216,7 +240,7 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
   // 部位ごとの細かい直し（AI が描き直したときの、指先・腕の角度などの小さなゆがみ）
   // 手の微調整（nudge）の前の位置で探し、見つけた直しを微調整後の位置に移して使う
   let partShifts: PartShift[] = [];
-  if (foreground && keyColors.silhouette && options.parts?.length) {
+  if (foreground && keyColors.silhouette && options.parts?.length && !options.anchor) {
     const baseScale = toDoll * alignment.scale;
     const bx = Math.round(alignment.dx);
     const by = Math.round(alignment.dy);
@@ -242,7 +266,10 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     for (let p = 0; p < shape.length; p++) shape[p] = placed[p * 4 + 3];
     shape = dilate(shape, doll.canvasW, doll.canvasH, SHAPE_MARGIN);
   }
-  if (!alreadyCut) removeCornerSpeck(rgba, doll.canvasW, doll.canvasH);
+  if (!alreadyCut) {
+    removeCornerSpeck(rgba, doll.canvasW, doll.canvasH);
+    removeFarSpecks(rgba, doll.canvasW, doll.canvasH);
+  }
 
   if (!alphaBBox(rgba, doll.canvasW, doll.canvasH)) {
     warnings.push({ code: 'empty', message: '服が見つかりません（全部が背景またはシルエットでした）' });
@@ -250,5 +277,5 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     warnings.push({ code: 'touches-edge', message: '服が画像の端まで届いています。切れているかもしれません' });
   }
 
-  return { rgba, source, width: doll.canvasW, height: doll.canvasH, keyColors, alignment, partShifts, shape, closeColorRatio: ratio, warnings };
+  return { rgba, source, width: doll.canvasW, height: doll.canvasH, keyColors, alignment, anchorShift, partShifts, shape, closeColorRatio: ratio, warnings };
 }
