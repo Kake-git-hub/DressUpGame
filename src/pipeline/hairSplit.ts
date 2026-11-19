@@ -63,6 +63,8 @@ function distance(from: Uint8Array, through: Uint8Array | null, width: number, h
 export interface HairSplitOptions {
   // この行（y）より下の髪は、前にしない（頭のまわりの前髪だけを前に残す。手や腕にかかった髪は、後ろ髪としてドールの後ろへ）
   frontBottom?: number;
+  // AI が描いた体と髪の形（背景でない所の不透明度、0〜255）。あれば、体の外のすき間は「AI の体があった所」だけ埋める
+  bodyShape?: ArrayLike<number>;
 }
 
 // 前髪として残す範囲の下の端: あごの少し下
@@ -77,6 +79,7 @@ export function splitHair(
   options: HairSplitOptions = {},
 ): HairSplit | null {
   const frontBottom = options.frontBottom ?? height;
+  const shape = options.bodyShape ?? null;
   const total = width * height;
   const inside = new Uint8Array(total);
   const outside = new Uint8Array(total);
@@ -172,7 +175,34 @@ export function splitHair(
     solid[p] = rgba[p * 4 + 3] >= 128 ? 1 : 0;
     if (solid[p] && nearBody(p)) back[p * 4 + 3] = 255; // 体の近くのふちは、半透明のままだとすき間に見える
   }
-  const gapLimit = Math.max(depth * 2, Math.round(width * GAP_SHARE)); // 体の外で、埋めてよいすき間の幅
+  // 体の外で埋めてよい所: 髪と体にはさまれた細いすき間（AI の体がドールより太かった分）。
+  // すき間の幅（髪からの距離 + 体からの距離）が gapLimit 以下の所だけ。AI の体の形が分かっていれば、AI の体があった所だけ。
+  // 左右に分かれた髪と体のあいだの広い空きや、腕と胴のあいだは埋めない
+  const gapLimit = Math.max(depth * 2, Math.round(width * GAP_SHARE));
+  const nearDoll = distance(inside, null, width, height, gapLimit);
+  const gap = new Uint8Array(total);
+  let wave: number[] = [];
+  for (let p = 0; p < total; p++) if (solid[p]) wave.push(p);
+  for (let d = 1; d <= gapLimit && wave.length > 0; d++) {
+    const next: number[] = [];
+    for (const p of wave) {
+      const x = p % width;
+      const visit = (n: number) => {
+        if (solid[n] || gap[n] || inside[n]) return;
+        if (nearDoll[n] === 0 || nearDoll[n] + d > gapLimit + 1) return;
+        if (shape && shape[n] < 128) return;
+        gap[n] = 1;
+        next.push(n);
+      };
+      if (x > 0) visit(p - 1);
+      if (x < width - 1) visit(p + 1);
+      if (p >= width) visit(p - width);
+      if (p < total - width) visit(p + width);
+    }
+    wave = next;
+  }
+
+  // 行ごとに、髪にはさまれた区間の「体の下」と「細いすき間」を、両側の髪の色をなめらかにつないで埋める
   const inset = Math.max(1, Math.round(depth / 2)); // 色は、髪のふち（輪郭線）より少し内側から取る
   for (let y = 0; y < height; y++) {
     const row = y * width;
@@ -202,20 +232,11 @@ export function splitHair(
       };
       const left = colorAt(a - 1, -1);
       const right = colorAt(b + 1, 1);
-      // 体の外の所は、体と髪にはさまれた細いすき間だけ埋める（左右に分かれた髪と体のあいだの、広い空きは埋めない）
-      let i = a;
-      while (i <= b) {
-        let j = i;
-        const isBody = inside[row + i] === 1;
-        while (j <= b && (inside[row + j] === 1) === isBody) j++;
-        if (isBody || j - i <= gapLimit) {
-          for (let k = i; k < j; k++) {
-            const t = (k - a + 1) / (b - a + 2);
-            for (let c = 0; c < 3; c++) back[(row + k) * 4 + c] = Math.round(rgba[left + c] * (1 - t) + rgba[right + c] * t);
-            back[(row + k) * 4 + 3] = 255;
-          }
-        }
-        i = j;
+      for (let k = a; k <= b; k++) {
+        if (!inside[row + k] && !gap[row + k]) continue;
+        const t = (k - a + 1) / (b - a + 2);
+        for (let c = 0; c < 3; c++) back[(row + k) * 4 + c] = Math.round(rgba[left + c] * (1 - t) + rgba[right + c] * t);
+        back[(row + k) * 4 + 3] = 255;
       }
     }
   }

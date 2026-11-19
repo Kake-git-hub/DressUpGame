@@ -30,7 +30,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.17.0';
+const APP_VERSION = '0.17.1';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;

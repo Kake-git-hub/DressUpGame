@@ -14,6 +14,8 @@ import type { Box } from '../../src/pipeline/alpha.ts';
 import { anchorPart, shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
 import type { BodyParts } from '../../src/pipeline/bodyParts.ts';
 import { isHairCategory } from '../../src/pipeline/hairSplit.ts';
+import { skinColor } from '../../src/pipeline/fillInside.ts';
+import { limbZones } from '../../src/pipeline/limbZones.ts';
 import { chooseKeyColors } from '../../src/pipeline/keyColors.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
@@ -343,10 +345,21 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         });
         // 髪型・帽子は、体全体ではなく頭に合わせて置く
         const anchor = anchorPart(label);
+        const feetZone = limbZones(ctx.data.parts, ['feet'], ctx.template.canvasW, ctx.template.canvasH)[0];
         result = await processGenerated(generated, ctx.template, {
           silhouetteColor: keys.silhouette,
           parts: Object.values(ctx.data.parts),
           anchor: anchor ? ctx.data.parts[anchor] : undefined,
+          // くつ: 靴の内側（AI の足があった所）は切り抜かず、ドールの肌の色で埋める
+          fillInside:
+            categoryKind(label) === 'shoes' && feetZone
+              ? {
+                  zone: feetZone,
+                  color: skinColor(ctx.template.rgba, ctx.template.canvasW, ctx.template.canvasH, ctx.data.parts.legs),
+                  // 足首から上は埋めない（ドールの脚をそのまま見せる）
+                  top: ctx.data.parts.feet.y,
+                }
+              : undefined,
         });
         if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
       }
@@ -387,7 +400,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     const problems: string[] = result.warnings.map((w) => w.message);
     const fixes: string[] = result.warnings.map((w) => WARNING_FIX[w.code]); // 作り直すときに画像生成 AI へ伝える指示（英語）
     const region = ctx.data.regions[item.category];
-    if (region && !empty) {
+    // 髪は長くも広くもなるので、範囲では見ない（頭に合っているかは、見た目の検品で見る）
+    if (region && !empty && categoryKind(label) !== 'hair') {
       const share = shareInsideRegion(result.rgba, result.width, result.height, region);
       if (share < MIN_REGION_SHARE) {
         problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);

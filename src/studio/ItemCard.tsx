@@ -150,7 +150,14 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     const dollPixels = pixels((ctx) => ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h));
     const alpha = new Uint8Array(canvasW * canvasH);
     for (let p = 0; p < alpha.length; p++) alpha[p] = dollPixels[p * 4 + 3];
-    const split = splitHair(pixels((ctx) => ctx.drawImage(cut, 0, 0)), alpha, canvasW, canvasH, undefined, parts ? { frontBottom: hairFrontBottom(parts.head) + padY } : {});
+    // AI が描いた体と髪の形（微調整に合わせて動かす）。後ろ髪の穴を埋める範囲を決めるのに使う
+    let bodyShape: Uint8Array | undefined;
+    if (loaded.shape) {
+      const shapePixels = pixels((ctx) => drawNudged(ctx, loaded.shape!));
+      bodyShape = new Uint8Array(canvasW * canvasH);
+      for (let p = 0; p < bodyShape.length; p++) bodyShape[p] = shapePixels[p * 4 + 3];
+    }
+    const split = splitHair(pixels((ctx) => ctx.drawImage(cut, 0, 0)), alpha, canvasW, canvasH, undefined, { ...(parts ? { frontBottom: hairFrontBottom(parts.head) + padY } : {}), bodyShape });
     if (!split) return;
     const toCanvas = (data: Uint8ClampedArray) => {
       const c = document.createElement('canvas');
@@ -160,7 +167,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       return c;
     };
     splitRef.current = { front: toCanvas(split.front), back: toCanvas(split.back) };
-  }, [isHair, canvasW, canvasH, box, parts, padY]);
+  }, [isHair, canvasW, canvasH, box, parts, padY, drawNudged]);
 
   // 画像を読む
   useEffect(() => {
@@ -359,7 +366,17 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       const blob = await new Promise<Blob | null>((resolve) => cut.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('画像を作れませんでした');
       const hideBlob = hasHide && hideRef.current ? await new Promise<Blob | null>((resolve) => hideRef.current!.toBlob(resolve, 'image/png')) : null;
-      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined });
+      // 髪: AI が描いた体と髪の形も送る（後ろ髪の穴を、画面と同じように埋めるため）
+      let shape: string | undefined;
+      if (isHair && images.current?.shape) {
+        const c = document.createElement('canvas');
+        c.width = canvasW;
+        c.height = canvasH;
+        drawNudged(c.getContext('2d')!, images.current.shape);
+        const shapeBlob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
+        if (shapeBlob) shape = await blobToBase64(shapeBlob);
+      }
+      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined, shape });
       onSaved();
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : String(e));

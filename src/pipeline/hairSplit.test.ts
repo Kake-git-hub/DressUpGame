@@ -84,6 +84,23 @@ describe('splitHair', () => {
     expect(alpha(s.front, 80, 80)).toBe(0);
     expect(alpha(s.front, 80, 30)).toBe(255);
   });
+  it('腕と胴のあいだのような、髪に接していないすき間は埋めない', () => {
+    const px = hair();
+    const d = doll();
+    rect(d, 1, 76, 60, 84, 150, [0]); // 体のまん中に、細いすき間（腕と胴のあいだ）
+    const s = splitHair(px, d, W, H, DEPTH)!;
+    expect(alpha(s.back, 80, 100)).toBe(0);
+    expect(alpha(s.back, 70, 100)).toBe(255);
+  });
+  it('AI の体の形が分かっていれば、髪の隣のすき間は「AI の体があった所」だけ埋める', () => {
+    const px = hair();
+    rect(px, 4, 50, 60, 62, 150, [0, 0, 0, 0]); // 左の後ろ髪を、体の 10px 手前（x 49）で終わらせる
+    const shape = new Uint8Array(W * H);
+    rect(shape, 1, 30, 10, 130, 150, [255]); // AI の絵では、そこも体か髪だった
+    expect(alpha(splitHair(px, doll(), W, H, DEPTH, { bodyShape: shape })!.back, 55, 100)).toBe(255);
+    rect(shape, 1, 50, 60, 59, 150, [0]); // AI の絵でも背景だった（髪と体のあいだの空き）
+    expect(alpha(splitHair(px, doll(), W, H, DEPTH, { bodyShape: shape })!.back, 55, 100)).toBe(0);
+  });
   it('体の内側に髪が無ければ null（分けない）', () => {
     const px = new Uint8ClampedArray(W * H * 4);
     rect(px, 4, 10, 10, 40, 150, GOLD);
