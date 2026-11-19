@@ -135,15 +135,18 @@ export class ContentStore {
     return this.change(async (manifest) => {
       const doll = ContentStore.doll(manifest, dollId);
       if (!doll.categories.some((c) => c.id === input.category)) throw new ContentError(`カテゴリ「${input.category}」がありません`, 404);
-      if (input.width !== doll.image.canvasW || input.height !== doll.image.canvasH) {
+      // 服のキャンバスは、ドールのキャンバスと同じか、まわりに同じ幅の余白を足したもの（中心が同じ）
+      const padX = (input.width - doll.image.canvasW) / 2;
+      const padY = (input.height - doll.image.canvasH) / 2;
+      if (padX < 0 || padX !== padY || !Number.isInteger(padX)) {
         throw new ContentError(`画像の大きさ（${input.width}×${input.height}）がドールのキャンバス（${doll.image.canvasW}×${doll.image.canvasH}）と違います`);
       }
       const existing = input.replaceId ? doll.items.find((i) => i.id === input.replaceId) : undefined;
       if (input.replaceId && !existing) throw new ContentError(`置き換えるアイテム「${input.replaceId}」がありません`, 404);
       const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer, input.thumbFrom);
       if (!encoded) throw new ContentError('画像が全部透明です');
-      if (input.hide && input.hide.length !== input.width * input.height) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
-      const hide = input.hide ? await encodeMask(input.hide, input.width, input.height, this.writer) : null;
+      if (input.hide && input.hide.length !== doll.image.canvasW * doll.image.canvasH) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
+      const hide = input.hide ? await encodeMask(input.hide, doll.image.canvasW, doll.image.canvasH, this.writer) : null;
       if (input.back && input.back.length !== input.width * input.height * 4) throw new ContentError('後ろに描く画像の大きさがドールのキャンバスと違います');
       const back = input.back ? await encodeLayer(input.back, input.width, input.height, this.writer) : null;
       if (existing) {

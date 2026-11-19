@@ -2,7 +2,7 @@
  * 服の候補 1 点のカード: ドールに着せたプレビュー、微調整、手直し、カテゴリと名前、保存
  * 手で入れた画像にも、自動生成の候補にも使う。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ManifestDoll } from '../content/manifest';
 import type { BodyParts } from '../pipeline/bodyParts';
 import { isHairCategory, splitHair } from '../pipeline/hairSplit';
@@ -48,7 +48,18 @@ interface Props {
 }
 
 export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
-  const { canvasW, canvasH, box } = doll.image;
+  // 服のキャンバス。AI で作った服は、ドールのキャンバスのまわりに余白を足した大きさ（中心は同じ）で届く。
+  // 読み込むまでは、ドールのキャンバスの大きさにしておく
+  const [size, setSize] = useState({ w: doll.image.canvasW, h: doll.image.canvasH });
+  const canvasW = size.w;
+  const canvasH = size.h;
+  const padX = Math.round((canvasW - doll.image.canvasW) / 2);
+  const padY = Math.round((canvasH - doll.image.canvasH) / 2);
+  // 服のキャンバス上の、ドールの位置
+  const box = useMemo(
+    () => ({ x: doll.image.box.x + padX, y: doll.image.box.y + padY, w: doll.image.box.w, h: doll.image.box.h }),
+    [doll.image.box.x, doll.image.box.y, doll.image.box.w, doll.image.box.h, padX, padY],
+  );
   const viewRef = useRef<HTMLCanvasElement>(null);
   const cutRef = useRef<HTMLCanvasElement | null>(null); // 編集中の服
   const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null } | null>(null);
@@ -160,16 +171,17 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
         images.current = { doll: d, cut: c, source: s, shape };
         setParts(p);
         const canvas = document.createElement('canvas');
-        canvas.width = canvasW;
-        canvas.height = canvasH;
+        canvas.width = c.naturalWidth;
+        canvas.height = c.naturalHeight;
         cutRef.current = canvas;
+        setSize({ w: c.naturalWidth, h: c.naturalHeight });
         setReady(true);
       })
       .catch((e: Error) => !cancelled && setError(e.message));
     return () => {
       cancelled = true;
     };
-  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl, canvasW, canvasH]);
+  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl]);
 
   // 隠す所を作る: 手首・すねから先で、AI が描いた形（微調整に合わせて動かす）の外にあるドール
   useEffect(() => {
@@ -193,7 +205,9 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       for (let p = 0; p < out.length; p++) out[p] = data[p * 4 + 3];
       return out;
     };
-    const mask = hideMask(alphaOf(dollPixels), alphaOf(shapePixels), limbZones(parts, limbs, canvasW, canvasH), canvasW, canvasH);
+    // 型紙の部位はドールのキャンバス上の位置なので、服のキャンバス上の位置に直す
+    const shifted = Object.fromEntries(Object.entries(parts).map(([k, b]) => [k, { ...b, x: b.x + padX, y: b.y + padY }])) as BodyParts;
+    const mask = hideMask(alphaOf(dollPixels), alphaOf(shapePixels), limbZones(shifted, limbs, canvasW, canvasH), canvasW, canvasH);
     const canvas = hideRef.current ?? document.createElement('canvas');
     canvas.width = canvasW;
     canvas.height = canvasH;
@@ -207,7 +221,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     ctx.putImageData(image, 0, 0);
     hideRef.current = canvas;
     setHasHide(any);
-  }, [ready, parts, limbs, drawNudged, canvasW, canvasH, box]);
+  }, [ready, parts, limbs, drawNudged, canvasW, canvasH, box, padX, padY]);
 
   // 微調整が変わったら、元の切り抜きから作り直す（手直しは消える）
   useEffect(() => {

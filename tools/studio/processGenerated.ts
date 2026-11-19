@@ -56,6 +56,24 @@ export interface ProcessOptions {
   parts?: Box[]; // 体の部位（型紙）。あれば、部位ごとに位置を直す
 }
 
+// 作業用のキャンバス: ドールのキャンバスのまわりに、この割合（幅に対して）の余白を足す。
+// ドールはキャンバスのほぼ上下いっぱいに立っているので、そのままでは、頭より上の髪や帽子、足より下の靴底を描く場所が無い
+export const WORK_MARGIN = 0.1;
+export const workPad = (canvasW: number): number => Math.round(canvasW * WORK_MARGIN);
+
+// ドールのまわりに pad px の余白を足した型（服はこの広いキャンバスのまま保存する。中心はドールのキャンバスと同じ）
+export function padTemplate(doll: DollTemplate, pad: number): DollTemplate {
+  const canvasW = doll.canvasW + pad * 2;
+  const canvasH = doll.canvasH + pad * 2;
+  const rgba = new Uint8ClampedArray(canvasW * canvasH * 4);
+  const mask = new Uint8Array(canvasW * canvasH);
+  for (let y = 0; y < doll.canvasH; y++) {
+    rgba.set(doll.rgba.subarray(y * doll.canvasW * 4, (y + 1) * doll.canvasW * 4), ((y + pad) * canvasW + pad) * 4);
+    mask.set(doll.mask.subarray(y * doll.canvasW, (y + 1) * doll.canvasW), (y + pad) * canvasW + pad);
+  }
+  return { rgba, mask, canvasW, canvasH };
+}
+
 const POOR_FIT_SCORE = 0.6;
 // AI の体の形を、ドールの輪郭線を削らないように少し太らせる（px）
 const SHAPE_MARGIN = 2;

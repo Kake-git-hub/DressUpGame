@@ -22,7 +22,7 @@ import { BudgetError } from './budget.ts';
 import type { Budget } from './budget.ts';
 import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, planItems } from './generate.ts';
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
-import { dollTemplateFromImage, loadDollTemplate, processGenerated } from './processGenerated.ts';
+import { dollTemplateFromImage, loadDollTemplate, padTemplate, processGenerated, workPad } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
 import { alphaToPng, pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
@@ -178,7 +178,9 @@ export class StudioApi {
     const { doll } = await this.doll(dollId);
     const label = doll.categories.find((c) => c.id === category)?.label ?? category;
     if (!force && !isHairCategory(label)) return image;
-    const template = await this.dollTemplate(doll);
+    // 服は、ドールのキャンバスか、余白を足した作業用のキャンバス。大きさに合うほうの型を使う
+    let template = await this.dollTemplate(doll);
+    if (template.canvasW !== image.width) template = await this.workTemplate(doll);
     if (template.canvasW !== image.width || template.canvasH !== image.height) return image; // 大きさの違いは、保存のときに断られる
     const alpha = new Uint8Array(image.width * image.height);
     for (let p = 0; p < alpha.length; p++) alpha[p] = template.rgba[p * 4 + 3];
@@ -193,6 +195,28 @@ export class StudioApi {
       this.templates.set(key, template);
     }
     return template;
+  }
+
+  // 余白を足した、作業用の型（生成と切り抜きはこの上で行う）
+  private async workTemplate(doll: ManifestDoll): Promise<DollTemplate> {
+    const key = `${doll.id}\n${doll.image.file}\nwork`;
+    let template = this.templates.get(key);
+    if (!template) {
+      const base = await this.dollTemplate(doll);
+      template = padTemplate(base, workPad(base.canvasW));
+      this.templates.set(key, template);
+    }
+    return template;
+  }
+  // 型紙（ドールのキャンバス上の位置）を、作業用のキャンバス上の位置に直す
+  private async workData(doll: ManifestDoll): Promise<TemplateData> {
+    const data = await this.templateData(doll);
+    const pad = workPad(doll.image.canvasW);
+    const shift = (b: Box): Box => ({ ...b, x: b.x + pad, y: b.y + pad });
+    return {
+      parts: Object.fromEntries(Object.entries(data.parts).map(([k, b]) => [k, shift(b)])) as TemplateData['parts'],
+      regions: Object.fromEntries(Object.entries(data.regions).map(([k, b]) => [k, b ? shift(b) : null])),
+    };
   }
 
   // 型紙: 保存されたものがあればそれ、無ければ輪郭から推定する。あとから増えたカテゴリの範囲は補う
@@ -261,11 +285,17 @@ export class StudioApi {
         if (scale < 0.5 || scale > 2) throw new HttpError(400, 'scale は 0.5〜2 で指定してください');
         let result;
         try {
-          result = await processGenerated(req.body, await this.dollTemplate(doll), {
+          const options = {
             nudge: { scale, dx: num('dx', 0), dy: num('dy', 0) },
             silhouetteColor: req.query.get('silhouette') ? parseColor(req.query.get('silhouette'), 'silhouette') : undefined,
-            parts: Object.values((await this.templateData(doll)).parts),
-          });
+          };
+          // 切り抜き済みの画像（シルエットなし）は、ドールのキャンバスのまま。
+          // シルエットのある画像は、余白つきの型紙から作ったものか、余白なしの古い型紙から作ったものかを、合い具合で決める
+          result = await processGenerated(req.body, await this.dollTemplate(doll), { ...options, parts: Object.values((await this.templateData(doll)).parts) });
+          if (result.keyColors.silhouette) {
+            const padded = await processGenerated(req.body, await this.workTemplate(doll), { ...options, parts: Object.values((await this.workData(doll)).parts) });
+            if (padded.alignment.score >= result.alignment.score) result = padded;
+          }
         } catch (error) {
           throw new HttpError(400, (error as Error).message);
         }
@@ -289,8 +319,15 @@ export class StudioApi {
           if (typeof b.hide === 'string' && b.hide) {
             const mask = await pngToRgba(Buffer.from(b.hide, 'base64'));
             if (mask.width !== image.width || mask.height !== image.height) throw new HttpError(400, '隠す所の画像の大きさが服と違います');
-            hide = new Uint8Array(mask.width * mask.height);
-            for (let p = 0; p < hide.length; p++) hide[p] = mask.rgba[p * 4 + 3];
+            // 隠す所は、ドールのキャンバス上の位置で持つ。服が余白つきのキャンバスなら、まん中（ドールのキャンバス）を切り出す
+            const { doll } = await this.doll(b.dollId);
+            const padX = (mask.width - doll.image.canvasW) / 2;
+            const padY = (mask.height - doll.image.canvasH) / 2;
+            if (padX < 0 || padY < 0 || !Number.isInteger(padX) || !Number.isInteger(padY)) throw new HttpError(400, '隠す所の画像の大きさがドールのキャンバスと合いません');
+            hide = new Uint8Array(doll.image.canvasW * doll.image.canvasH);
+            for (let y = 0; y < doll.image.canvasH; y++) {
+              for (let x = 0; x < doll.image.canvasW; x++) hide[y * doll.image.canvasW + x] = mask.rgba[((y + padY) * mask.width + x + padX) * 4 + 3];
+            }
           }
         } catch (error) {
           if (error instanceof HttpError) throw error;
@@ -383,7 +420,7 @@ export class StudioApi {
       }
       case 'GET /api/silhouette': {
         const { doll } = await this.doll(this.param(req, 'doll'));
-        return png(await renderSilhouette(await this.dollTemplate(doll), parseColor(req.query.get('color') ?? '00ff00', 'color'), parseColor(req.query.get('bg') ?? 'ffffff', 'bg')));
+        return png(await renderSilhouette(await this.workTemplate(doll), parseColor(req.query.get('color') ?? '00ff00', 'color'), parseColor(req.query.get('bg') ?? 'ffffff', 'bg')));
       }
 
       case 'POST /api/plan': {
@@ -410,8 +447,9 @@ export class StudioApi {
           return { category: i.category, name: i.name.trim(), description: i.description.slice(0, 1000), colors: Array.isArray(i.colors) ? i.colors.filter((c) => typeof c === 'string').slice(0, 6) : [] };
         });
         await this.options.budget.check(items.length * this.maxAttempts);
-        const template = await this.dollTemplate(doll);
-        const data = await this.templateData(doll);
+        // 生成と切り抜きは、余白を足した作業用のキャンバスの上で行う
+        const template = await this.workTemplate(doll);
+        const data = await this.workData(doll);
         const style = findStyle(b.styleId).prompt;
         // 手と足の拡大図は、手足にかかる品目があるときだけ作る
         const closeup = items.some((i) => touchesHandsOrFeet(data.regions[i.category] ?? null, data))
