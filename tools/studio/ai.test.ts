@@ -27,6 +27,14 @@ describe('createGemini', () => {
     const limit = await createGemini('k', 'm', reply(429, {})).generate({ prompt: 'x', images: [] }).catch((e: AiError) => e);
     expect(limit).toMatchObject({ status: 429, retryable: false });
   });
+  it('月の上限額に達したときは、待っても直らないことが分かる文にする', async () => {
+    const cap = await createGemini('k', 'm', reply(429, { error: { message: 'Your project has exceeded its monthly spending cap. Please go to AI Studio at https://ai.studio/spend to manage your project spend cap.', code: 'too_many_requests' } }))
+      .generate({ prompt: 'x', images: [] })
+      .catch((e: AiError) => e);
+    expect(cap).toMatchObject({ status: 429, retryable: false });
+    expect((cap as AiError).message).toMatch(/月の上限額/);
+    expect((cap as AiError).message).not.toMatch(/少し待って/);
+  });
   it('内容の決まりで断られたときは、書き直しの対象として印を付ける', async () => {
     const blocked = await createGemini('k', 'm', reply(400, { error: { message: 'Request blocked due to prohibited content guidelines. Please modify your input and retry' } }))
       .generate({ prompt: 'x', images: [] })
