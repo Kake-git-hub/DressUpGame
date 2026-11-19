@@ -78,6 +78,27 @@ async function toCanvas(rgba: Uint8ClampedArray, size: number, crop: FaceCrop, c
  * AI が頭の拡大図に顔を描いた画像 → ドールの頭に重ねる「お面」（肌ごと）。head は、ドールのキャンバス上の頭の箱
  * reference は、AI に渡した拡大図（renderHeadCloseup の結果）。
  */
+// お面の肌の色を、ドールの肌に合わせる（AI は肌を少し濃く・赤く塗り直すことが多く、そのままだと首から下と色が合わない）。
+// お面の中の色の中央値（肌の画素がいちばん多い）どうしを比べ、その比で全体の色を直す
+export function matchSkin(rgba: Uint8ClampedArray, doll: Uint8ClampedArray, mask: Uint8Array): void {
+  const mine: number[][] = [[], [], []];
+  const theirs: number[][] = [[], [], []];
+  for (let p = 0; p < mask.length; p++) {
+    if (mask[p] < 200) continue;
+    for (let c = 0; c < 3; c++) {
+      mine[c].push(rgba[p * 4 + c]);
+      theirs[c].push(doll[p * 4 + c]);
+    }
+  }
+  if (mine[0].length < 50) return;
+  const median = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1];
+  const gain = [0, 1, 2].map((c) => Math.max(0.7, Math.min(1.4, median(theirs[c]) / Math.max(1, median(mine[c])))));
+  for (let p = 0; p < mask.length; p++) {
+    if (mask[p] < 8) continue;
+    for (let c = 0; c < 3; c++) rgba[p * 4 + c] = Math.min(255, Math.round(rgba[p * 4 + c] * gain[c]));
+  }
+}
+
 // お面の形（キャンバス大、0〜255）: ドールの頭（あごまで）。ふちは少し内側へぼかし、首との境目は広めにぼかす
 export function headMask(doll: DollTemplate, head: Box, crop: FaceCrop): Uint8Array {
   const { canvasW, canvasH } = doll;
@@ -126,6 +147,7 @@ export async function processFace(generated: Buffer, reference: Buffer, doll: Do
   const rgba = new Uint8ClampedArray(source);
   const mask = headMask(doll, head, crop);
   for (let p = 0; p < mask.length; p++) rgba[p * 4 + 3] = mask[p] < 8 ? 0 : mask[p];
+  matchSkin(rgba, doll.rgba, mask);
   // 何か描き足されたか（元の絵との違い）は、警告のためだけに見る
   const drawn = await toCanvas(matte.rgba, FACE_SIZE, crop, canvasW, canvasH);
   for (let i = 3; i < drawn.length; i += 4) if (drawn[i] < 8) drawn[i] = 0;

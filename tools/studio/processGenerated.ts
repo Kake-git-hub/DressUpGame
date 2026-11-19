@@ -17,6 +17,7 @@ import { findPartShifts, warpByParts } from '../../src/pipeline/partAlign.ts';
 import type { PartShift } from '../../src/pipeline/partAlign.ts';
 import { removeCornerSpeck } from '../../src/pipeline/removeCornerSpeck.ts';
 import { removeFarSpecks } from '../../src/pipeline/removeFarSpecks.ts';
+import { fillInside } from '../../src/pipeline/fillInside.ts';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import type { ManifestImage } from '../../src/content/manifest.ts';
 
@@ -58,6 +59,8 @@ export interface ProcessOptions {
   parts?: Box[]; // 体の部位（型紙）。あれば、部位ごとに位置を直す
   // 髪型・帽子など、体の 1 か所だけに付く品目の、その部位（頭）。あれば、体全体ではなくその部位に合わせて置く（部位ごとの直しはしない）
   anchor?: Box;
+  // くつ: 靴に囲まれた「AI の足があった所」を、切り抜かずにこの色（ドールの肌）で埋める。zone は足もとの範囲
+  fillInside?: { zone: Box; color: Rgb; top: number };
 }
 
 // 作業用のキャンバス: ドールのキャンバスのまわりに、この割合（幅に対して）の余白を足す。
@@ -265,6 +268,15 @@ export async function processGenerated(input: Buffer, doll: DollTemplate, option
     shape = new Uint8Array(doll.canvasW * doll.canvasH);
     for (let p = 0; p < shape.length; p++) shape[p] = placed[p * 4 + 3];
     shape = dilate(shape, doll.canvasW, doll.canvasH, SHAPE_MARGIN);
+  }
+  if (options.fillInside && sides && keyColors.silhouette) {
+    const px = new Uint8ClampedArray(width * height * 4);
+    for (let p = 0; p < width * height; p++) if (sides.silhouette[p]) px[p * 4 + 3] = 255;
+    let placed = await place(px, width, height, scale, dx, dy, doll.canvasW, doll.canvasH);
+    if (partShifts.length) placed = warpByParts(placed, doll.canvasW, doll.canvasH, partShifts);
+    const silhouette = new Uint8Array(doll.canvasW * doll.canvasH);
+    for (let p = 0; p < silhouette.length; p++) if (placed[p * 4 + 3] >= 64) silhouette[p] = 1;
+    fillInside(rgba, silhouette, doll.canvasW, doll.canvasH, options.fillInside.zone, options.fillInside.color, options.fillInside.top);
   }
   if (!alreadyCut) {
     removeCornerSpeck(rgba, doll.canvasW, doll.canvasH);

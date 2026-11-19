@@ -174,6 +174,7 @@ export class StudioApi {
     category: string,
     image: { rgba: Uint8ClampedArray; width: number; height: number },
     force = false,
+    shape: Uint8Array | null = null, // AI が描いた体と髪の形（画像と同じ大きさの不透明度）
   ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray }> {
     const { doll } = await this.doll(dollId);
     const label = doll.categories.find((c) => c.id === category)?.label ?? category;
@@ -187,7 +188,7 @@ export class StudioApi {
     // 前に残すのは、頭のまわりの前髪だけ
     const head = (await this.templateData(doll)).parts.head;
     const padY = Math.round((image.height - doll.image.canvasH) / 2);
-    const split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY });
+    const split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY, bodyShape: shape ?? undefined });
     return split ? { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: image.rgba } : image;
   }
   private async dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {
@@ -313,12 +314,20 @@ export class StudioApi {
       }
 
       case 'POST /api/items': {
-        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string }>(req);
+        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string }>(req);
         if (typeof b.png !== 'string') throw new HttpError(400, 'png を指定してください');
         let image;
         let hide: Uint8Array | null = null;
+        let shape: Uint8Array | null = null;
         try {
           image = await pngToRgba(Buffer.from(b.png, 'base64'));
+          if (typeof b.shape === 'string' && b.shape) {
+            const s = await pngToRgba(Buffer.from(b.shape, 'base64'));
+            if (s.width === image.width && s.height === image.height) {
+              shape = new Uint8Array(s.width * s.height);
+              for (let p = 0; p < shape.length; p++) shape[p] = s.rgba[p * 4 + 3];
+            }
+          }
           if (typeof b.hide === 'string' && b.hide) {
             const mask = await pngToRgba(Buffer.from(b.hide, 'base64'));
             if (mask.width !== image.width || mask.height !== image.height) throw new HttpError(400, '隠す所の画像の大きさが服と違います');
@@ -336,7 +345,7 @@ export class StudioApi {
           if (error instanceof HttpError) throw error;
           throw new HttpError(400, '画像を読めませんでした');
         }
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...(await this.hairLayers(b.dollId, b.category, image)), replaceId: b.replaceId, hide }));
+        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...(await this.hairLayers(b.dollId, b.category, image, false, shape)), replaceId: b.replaceId, hide }));
       }
       case 'POST /api/items/split-hair': {
         // 保存済みの髪（1 枚）を、前髪と後ろ髪に分け直す
