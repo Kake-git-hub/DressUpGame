@@ -203,7 +203,7 @@ const WARNING_FIX: Record<WarningCode, string> = {
   'poor-fit': 'The mannequin was moved, resized or redrawn. Keep it exactly where it is in the template (same position, size, pose and outline) and only add the item.',
   'color-too-close': 'Parts of the item used colours too close to the mannequin or background colour. Use clearly different colours for every part of the item.',
   empty: 'No item was visible in the result. Draw the item clearly on the mannequin.',
-  'touches-edge': 'The item reached the edge of the image and was cut off. Draw it smaller so that the whole item fits inside the image with a clear margin on every side.',
+  'touches-edge': 'The item reached the edge of the image and was cut off. Draw it smaller or shorter so that the whole item fits inside the image with a clear margin on every side.',
   repainted: 'Parts of the picture that should not change were repainted. Leave everything except the item itself exactly as it is in the given image.',
 };
 
@@ -389,6 +389,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         const swap = await processSwap(generated, reference, ctx.template, tiles, swapZones(frame, ctx.data.parts), background);
         result = swap;
         hide = swap.hide;
+        if (swap.warnings.some((w) => w.code === 'color-too-close')) avoid.push(background);
       } else if (frame === 'upper') {
         // 髪・帽子: 上半身を拡大したシルエットに描かせ、拡大図の上で切り抜いて、キャンバスに戻す
         const [tile] = frameTiles('upper', ctx.data.parts, canvasW, canvasH);

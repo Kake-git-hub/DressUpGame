@@ -139,6 +139,25 @@ describe('processSwap（本物の生成画像）', async () => {
     expect(Math.abs(a.x + a.w - b.x - b.w)).toBeLessThanOrEqual(3);
   });
 
+  it('品目の色が背景色に近いと、欠けているかもしれないと警告する', async () => {
+    // 足の上に茶色の靴を描き、その上に背景に近い緑の帯を付ける
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
+      <rect x="250" y="700" width="520" height="260" rx="40" fill="#7a3b1e"/>
+      <rect x="250" y="760" width="520" height="90" fill="#28e83c"/></svg>`;
+    const painted = await sharp(reference).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
+    const result = await processSwap(painted, reference, doll, [tile], [zone], GREEN);
+    expect(result.warnings.map((w) => w.code)).toContain('color-too-close');
+    expect(result.closeColorRatio).toBeGreaterThan(0.05);
+  });
+
+  it('品目が拡大図の上の端まで届いていたら、切れているかもしれないと警告する（ひざ上までのブーツなど）', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
+      <rect x="250" y="0" width="520" height="960" fill="#7a3b1e"/></svg>`;
+    const painted = await sharp(reference).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
+    const result = await processSwap(painted, reference, doll, [tile], [zone], GREEN);
+    expect(result.warnings.map((w) => w.code)).toContain('touches-edge');
+  });
+
   it('何も描かれていなければ「見つかりません」', async () => {
     const result = await processSwap(reference, reference, doll, [tile], [zone], GREEN);
     expect(result.warnings.map((w) => w.code)).toContain('empty');

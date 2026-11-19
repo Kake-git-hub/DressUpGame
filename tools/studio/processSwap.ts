@@ -14,6 +14,7 @@ import { cutOutClothing } from '../../src/pipeline/cutout.ts';
 import { diffMatte, matchToReference } from '../../src/pipeline/diffMatte.ts';
 import { FRAME_SIZE } from '../../src/pipeline/frames.ts';
 import type { Tile } from '../../src/pipeline/frames.ts';
+import { pixelDistance } from '../../src/pipeline/keyColors.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import { pasteTile, toTile } from './frame.ts';
 import type { DollTemplate, ProcessResult, ProcessWarning } from './processGenerated.ts';
@@ -36,6 +37,13 @@ const EDGE_MARGIN = 0.03;
 const CORE_PER = 200;
 // 品目の「まるごと残す範囲」を、隠す範囲よりこの px（キャンバス上）だけ広く取る
 const OVERLAP = 3;
+// 背景色との距離: これ未満なら「きれいな背景」。これ以上 CLOSE_DISTANCE 未満の色が品目に多いと、品目が背景と一緒に消えた疑いがある
+const CLEAN_DISTANCE = 30;
+const CLOSE_DISTANCE = 110;
+const CLOSE_COLOR_LIMIT = 0.05;
+// 拡大図の上の端から、この割合の帯に品目がこれだけ（帯の画素に対する割合）あれば、端で切れた疑いがある
+const TOP_BAND = 0.02;
+const TOP_BAND_SHARE = 0.03;
 // 元の図と違う画素が、枠の画素数をこれで割った数より少なければ「何も描かれていない」
 const EMPTY_DIVISOR = 1500;
 
@@ -126,6 +134,9 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
   let poorFit = false;
   let drawn = 0; // 元の図と違う画素（枠の上）
   let area = 0;
+  let kept = 0; // 品目として残った画素
+  let close = 0; // 背景に近い色で、消えたか消えかけた画素
+  let cutOff = false;
   let alignment = { scale: 1, dx: 0, dy: 0, score: 1 };
 
   for (const tile of tiles) {
@@ -191,6 +202,18 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
       }
     }
     for (let p = 0; p < w * h; p++) if (cut[p * 4 + 3] < 8) cut[p * 4 + 3] = 0;
+    // 背景に近い色の品目: 描き足された所（元の図と違う所）で、きれいな背景ではないのに背景に近い色
+    for (let p = 0; p < w * h; p++) {
+      if (cut[p * 4 + 3] >= 128) kept++;
+      if (diff[p] < 128) continue;
+      const d = pixelDistance(match.rgba, p * 4, background);
+      if (d >= CLEAN_DISTANCE && d < CLOSE_DISTANCE) close++;
+    }
+    // 上の端で切れていないか（ひざ上までのブーツ、ひじ上までの手袋）
+    const band = Math.max(2, Math.round(h * TOP_BAND));
+    let top = 0;
+    for (let y = edge; y < edge + band; y++) for (let x = 0; x < w; x++) if (diff[y * w + x] >= 128) top++;
+    if (top > w * band * TOP_BAND_SHARE) cutOff = true;
     // 範囲の外の、細い線だけのかけらは捨てる（位置が少し合わなかったときの、輪郭線のずれの消し残り）
     const outside = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (cut[(y * w + x) * 4 + 3] > 0 && !inBoxes(tileZones, x, y)) outside[y * w + x] = 1;
@@ -211,10 +234,14 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
   if (!alphaBBox(rgba, canvasW, canvasH) || drawn < area / EMPTY_DIVISOR) {
     warnings.push({ code: 'empty', message: '品目が見つかりません（元の絵から何も変わっていませんでした）' });
   } else {
+    if (kept > 0 && close / kept > CLOSE_COLOR_LIMIT) {
+      warnings.push({ code: 'color-too-close', message: '品目の色が背景の色に近く、一部が欠けているかもしれません' });
+    }
+    if (cutOff) warnings.push({ code: 'touches-edge', message: '品目が拡大図の上の端まで届いています。切れているかもしれません（丈を短くしてください）' });
     if (poorFit) warnings.push({ code: 'poor-fit', message: 'AI が絵の大きさや位置を変えたようです。位置がずれているかもしれません' });
     if (body > 0 && changed / body > REPAINT_LIMIT) {
       warnings.push({ code: 'repainted', message: 'AI が脚や腕ごと描き直したようです。肌の色や輪郭がドールと合わないかもしれません' });
     }
   }
-  return { rgba, source, width: canvasW, height: canvasH, keyColors: { background, silhouette: null }, alignment, anchorShift: null, partShifts: [], shape: null, closeColorRatio: 0, warnings, hide };
+  return { rgba, source, width: canvasW, height: canvasH, keyColors: { background, silhouette: null }, alignment, anchorShift: null, partShifts: [], shape: null, closeColorRatio: kept > 0 ? close / kept : 0, warnings, hide };
 }
