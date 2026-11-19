@@ -189,7 +189,7 @@ test('写真: ダウンロードされる PNG が空でない', async ({ page })
 
   const [download] = await Promise.all([
     page.waitForEvent('download'),
-    page.locator('.tool-button').nth(1).click(),
+    page.getByTestId('screenshot-button').click(),
   ]);
   const file = await download.path();
   const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -551,6 +551,14 @@ test('色スライダー: 動かすと調整中の表示がその場で変わり
   await expect
     .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), HUE_GREEN, 12), { timeout: 5000, message: '開き直しても緑' })
     .toBe(true);
+
+  // 色のリセットで元の色に戻る
+  await page.getByTestId('hue-reset').click();
+  await expect(page.locator('.hue-slider-vertical')).toHaveValue('0');
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), RED, 12), { timeout: 5000, message: 'リセットで赤に戻る' })
+    .toBe(true);
+  await expect(page.getByTestId('hue-reset')).toBeDisabled();
 });
 
 test('隠す所を持つ服を着ると、そこだけドールが消える。動かすと隠さない', async ({ page }) => {
@@ -597,13 +605,44 @@ test('調整の枠: 角のつまみで大きくでき、× で脱がせる', asy
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
 });
 
+test('調整の枠: 右上の ↺ で位置・大きさ・向きだけ元に戻る', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await page.locator('.tool-button').first().click();
+  await page.locator('.hue-slider-vertical').fill('120');
+  await page.mouse.move(DOLL_X, DOLL_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + ADJUST_DX, DOLL_Y, { steps: 6 });
+  await page.mouse.up();
+  await page.getByTestId('sticker-reset').click();
+  await expect(page.locator('.hue-slider-vertical')).toHaveValue('120'); // 色はそのまま
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expect
+    .poll(async () => near(await canvasPixel(page, DOLL_X, TOP_Y), [0, 255, 0, 255], 12), { timeout: 10_000, message: '元の位置で緑' })
+    .toBe(true);
+});
+
+test('着せると服が一瞬光り、写真ボタンはリセットから離れている', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expect(page.getByTestId('equip-flash')).toHaveCount(0, { timeout: 5000 }); // 少しで消える
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  const shot = (await page.getByTestId('screenshot-button').boundingBox())!;
+  const reset = (await page.locator('.reset-button-fixed').boundingBox())!;
+  expect(reset.y - (shot.y + shot.height)).toBeGreaterThanOrEqual(60);
+});
+
 test('調整画面で重なりの前後を変えられる', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
   await dragItemToDoll(page, 'ボトムス', 'green');
   // 最後に着たボトムスを調整する。ボトムスはトップスより下（1/2）
   await page.locator('.tool-button').first().click();
-  await expect(page.getByTestId('layer-pos')).toHaveText('1/2');
+  const pickerItems = page.getByTestId('adjust-picker-item'); // 上がいちばん手前
+  await expect(pickerItems).toHaveCount(2);
+  await expect(pickerItems.nth(1)).toHaveClass(/on/);
+  await expect(page.getByTestId('layer-back')).toBeDisabled();
   // ボトムスを上に動かして、トップスに重ねる
   const OVERLAP_Y = imgY(480);
   await page.mouse.move(DOLL_X, BOTTOM_Y);
@@ -612,16 +651,27 @@ test('調整画面で重なりの前後を変えられる', async ({ page }) => 
   await page.mouse.up();
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, OVERLAP_Y, RED); // トップスが手前
-  // 前へ
+  // 前へ。調整中でも、その場で重なりが入れ替わる
   await page.locator('.tool-button').first().click();
   await page.getByTestId('layer-front').click();
-  await expect(page.getByTestId('layer-pos')).toHaveText('2/2');
+  await expect(pickerItems.nth(0)).toHaveClass(/on/);
+  await expect(page.getByTestId('layer-front')).toBeDisabled();
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, OVERLAP_Y), GREEN, 12), { timeout: 5000, message: '調整中にボトムスが手前になる' })
+    .toBe(true);
+  // 後ろへ戻すと、その場でトップスが手前に戻る（キャンバスに描いたトップスが見える）
+  await page.getByTestId('layer-back').click();
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, OVERLAP_Y), RED, 12), { timeout: 5000, message: '調整中にトップスが手前に戻る' })
+    .toBe(true);
+  await page.getByTestId('layer-front').click();
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, OVERLAP_Y, GREEN);
   // 調整する服を、左の一覧で切り替えられる
   await page.locator('.tool-button').first().click();
-  await page.getByTestId('adjust-picker').locator('button').nth(1).click();
-  await expect(page.getByTestId('layer-pos')).toHaveText('1/2'); // トップス
+  await pickerItems.nth(1).click();
+  await expect(pickerItems.nth(1)).toHaveClass(/on/); // トップス（うしろ）
+  await expect(page.getByTestId('layer-back')).toBeDisabled();
 });
 
 test('調整の × で脱がせても、調整は続き、残りの服に切り替わる', async ({ page }) => {
@@ -631,7 +681,7 @@ test('調整の × で脱がせても、調整は続き、残りの服に切り�
   await page.locator('.tool-button').first().click();
   await page.getByTestId('sticker-remove').click(); // 最後に着たボトムスを脱がせる
   await expect(page.locator('.item-adjust-overlay')).toBeVisible();
-  await expect(page.getByTestId('layer-pos')).toHaveText('1/1');
+  await expect(page.getByTestId('adjust-picker-item')).toHaveCount(1);
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, BOTTOM_Y, SKIN);
   await expectPixel(page, DOLL_X, TOP_Y, RED);

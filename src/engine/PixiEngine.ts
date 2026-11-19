@@ -479,8 +479,8 @@ export class PixiEngine {
   }
 
   // 服を描画（imageUrlがあれば画像、なければプレースホルダー）。
-  // hiddenFrontId の服は、ドールの上の分を描かない（調整中は画面側のプレビューが代わりに出る）。ドールの下の分（後ろ髪）は描く
-  async drawClothing(items: (ClothingItemData | EquippedItem)[], hiddenFrontId: string | null = null): Promise<void> {
+  // hiddenFront の服は、ドールの上の分を描かない（調整中は画面側のプレビューが代わりに出る）。ドールの下の分（後ろ髪）は描く
+  async drawClothing(items: (ClothingItemData | EquippedItem)[], hiddenFront: ReadonlySet<string> | null = null): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -583,7 +583,7 @@ export class PixiEngine {
         if (colorHue !== 0) backSprite.filters = hueFilters();
         backSprites.push(backSprite);
       }
-      if (item.id === hiddenFrontId) continue;
+      if (hiddenFront?.has(item.id)) continue;
 
       // テクスチャがロード済みの場合はスプライトを作成
       if (texture) {
