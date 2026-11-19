@@ -21,6 +21,9 @@ describe('dollPrompt', () => {
     expect(prompt).toMatch(/#00FF00/);
     expect(prompt).toMatch(/turned outward/);
     expect(prompt).toMatch(/no face/);
+    // 手は、手のひらが見える「パー」の形（作者の指定）
+    expect(prompt).toMatch(/palm facing the viewer/);
+    expect(prompt).toMatch(/fingers spread/);
   });
 });
 
