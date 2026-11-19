@@ -113,7 +113,7 @@ describe('てぶくろ（差し替え式）', () => {
     const tiles = frameTiles('hands', parts, doll.canvasW, doll.canvasH);
     const hands = [toTile(parts.handLeft, tiles[0]), toTile(parts.handRight, tiles[1])];
     const { calls, candidate } = await run('てぶくろ', (size) =>
-      svg(size, hands.map((h, i) => `<rect x="${i * 512 + h.x - 10}" y="${h.y - 10}" width="${h.w + 20}" height="${h.h + 20}" rx="20" fill="#7a3b1e"/>`).join('')),
+      svg(size, hands.map((h, i) => `<rect x="${tiles[i].to.x + h.x - 10}" y="${h.y - 10}" width="${h.w + 20}" height="${h.h + 20}" rx="20" fill="#7a3b1e"/>`).join('')),
     );
     expect(calls).toHaveLength(1);
     expect(calls[0].prompt).toMatch(/two panels/);

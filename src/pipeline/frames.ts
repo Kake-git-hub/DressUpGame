@@ -14,6 +14,7 @@ export interface Tile {
 }
 
 export const FRAME_SIZE = 1024;
+const PANEL_GAP = 64; // 手の図: 左右の 2 枚のあいだの、背景だけの帯（px）
 export type FrameKind = 'upper' | 'feet' | 'hands';
 
 // カテゴリ名から、拡大図の種類を決める。全身の図で作るもの（服・靴下）と、別の作り方をする顔は null
@@ -50,20 +51,22 @@ export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, c
     const size = Math.max(bottom - top, parts.feet.w * 1.3);
     return [{ from: fit(parts.feet.x + parts.feet.w / 2, bottom - size, size, size, canvasW, canvasH), to: full }];
   }
-  // 手: 左右それぞれ、腕の下のほうから指先まで。縦長（1:2）の図を左右に並べる
-  const half = FRAME_SIZE / 2;
+  // 手: 左右それぞれ、腕の下のほうから指先まで。縦長の図を、すき間を空けて左右に並べる。
+  // 胴が写りこまないように、枠の内側の端を腕の内側の端にそろえる
+  const panelW = (FRAME_SIZE - PANEL_GAP) / 2;
   return (
     [
-      [parts.armLeft, parts.handLeft, 0],
-      [parts.armRight, parts.handRight, half],
+      [parts.armLeft, parts.handLeft, 0, true],
+      [parts.armRight, parts.handRight, panelW + PANEL_GAP, false],
     ] as const
-  ).map(([arm, hand, toX]) => {
+  ).map(([arm, hand, toX, left]) => {
     const x0 = Math.min(arm.x, hand.x);
     const x1 = Math.max(arm.x + arm.w, hand.x + hand.w);
     const bottom = Math.max(arm.y + arm.h, hand.y + hand.h) + tall * 0.03;
     const w = Math.max((x1 - x0) * 1.25, hand.w * 1.5);
-    const h = w * 2;
-    return { from: fit((x0 + x1) / 2, bottom - h, w, h, canvasW, canvasH), to: { x: toX, y: 0, w: half, h: FRAME_SIZE } };
+    const h = (w * FRAME_SIZE) / panelW;
+    const box = fit(left ? x1 - w / 2 : x0 + w / 2, bottom - h, w, h, canvasW, canvasH);
+    return { from: box, to: { x: toX, y: 0, w: panelW, h: FRAME_SIZE } };
   });
 }
 

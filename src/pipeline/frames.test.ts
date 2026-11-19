@@ -63,8 +63,12 @@ describe('frameTiles', () => {
     const [l, r] = frameTiles('hands', parts, W, W);
     expect(contains(l.from, parts.handLeft)).toBe(true);
     expect(contains(r.from, parts.handRight)).toBe(true);
-    expect(l.to).toEqual({ x: 0, y: 0, w: 512, h: 1024 });
-    expect(r.to).toEqual({ x: 512, y: 0, w: 512, h: 1024 });
+    // 2 枚のあいだに背景のすき間を空ける（つながった 1 つの絵に見えないように）
+    expect(l.to).toEqual({ x: 0, y: 0, w: 480, h: 1024 });
+    expect(r.to).toEqual({ x: 544, y: 0, w: 480, h: 1024 });
+    // 胴を写さない: 枠の内側の端は、腕の内側の端まで
+    expect(l.from.x + l.from.w).toBeLessThanOrEqual(parts.armLeft.x + parts.armLeft.w);
+    expect(r.from.x).toBeGreaterThanOrEqual(parts.armRight.x);
   });
   it('部位がキャンバスの端にあっても、枠ははみ出さない', () => {
     const edge = shift(raw, 0); // 余白なしのキャンバス（1024）
