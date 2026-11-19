@@ -349,6 +349,12 @@ describe('テーマからの自動生成', () => {
     expect(job.candidates.map((c) => c.hasHide)).toEqual([false, true]);
     expect((await call('GET', `/api/jobs/image?id=${id}&index=1&kind=hide`)).type).toBe('image/png');
     expect((await call('GET', `/api/jobs/image?id=${id}&index=0&kind=hide`)).status).toBe(404);
+    // 採用するとき、隠す所を添えて保存すると、一覧の品目に hide が付く（足もとにある）
+    const img = async (kind: string) => ((await call('GET', `/api/jobs/image?id=${id}&index=1&kind=${kind}`)).body as Buffer).toString('base64');
+    await ok('POST', '/api/items', { dollId, category: 'くつ', name: 'b', png: await img('png'), hide: await img('hide') });
+    const saved = (await ok<{ dolls: { items: { hide?: { box: { y: number; h: number } } }[] }[] }>('GET', '/api/content')).dolls[0].items[0];
+    expect(saved.hide).toBeDefined();
+    expect(saved.hide!.box.y).toBeGreaterThan(800);
   }, 60_000);
   it('生成: 高解像度の元画像（studio/masters/）があれば、拡大図はそこから作る（同じ大きさの図になり、候補ができる）', async () => {
     const content = await ok<{ dolls: { image: { file: string; box: { w: number; h: number } } }[] }>('GET', '/api/content');
