@@ -34,6 +34,8 @@ const MIN_MATCH_PIXELS = 200;
 const EDGE_MARGIN = 0.03;
 // 範囲の外の品目は、この太さ（枠の幅 ÷ CORE_PER の 2 倍 + 1 px 四方）の芯を持つかたまりだけ残す
 const CORE_PER = 200;
+// 品目の「まるごと残す範囲」を、隠す範囲よりこの px（キャンバス上）だけ広く取る
+const OVERLAP = 3;
 // 元の図と違う画素が、枠の画素数をこれで割った数より少なければ「何も描かれていない」
 const EMPTY_DIVISOR = 1500;
 
@@ -154,7 +156,8 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
     }
     area += w * h;
     const near = grow(diff, w, h, GROW);
-    const tileZones = zones.map((z) => toTile(z, tile));
+    // 品目の側は、範囲を少し広く取る（隠す所との境目で、ドールと品目が重なるように。重ならないと、継ぎ目に細いすき間が見える）
+    const tileZones = zones.map((z) => toTile({ x: z.x - OVERLAP, y: z.y - OVERLAP, w: z.w + OVERLAP * 2, h: z.h + OVERLAP * 2 }, tile));
 
     // 元の図のドール（背景でない所）
     const refCut = new Uint8ClampedArray(ref);
@@ -200,7 +203,8 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
   const hide = new Uint8Array(canvasW * canvasH);
   for (const z of zones) {
     for (let y = Math.max(0, z.y); y < Math.min(canvasH, z.y + z.h); y++) {
-      for (let x = Math.max(0, z.x); x < Math.min(canvasW, z.x + z.w); x++) hide[y * canvasW + x] = doll.rgba[(y * canvasW + x) * 4 + 3];
+      // 範囲をまるごと隠す（ドールの輪郭の、うすい画素も残さない）
+      for (let x = Math.max(0, z.x); x < Math.min(canvasW, z.x + z.w); x++) hide[y * canvasW + x] = 255;
     }
   }
 

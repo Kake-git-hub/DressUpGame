@@ -81,19 +81,46 @@ describe('processSwap（本物の生成画像）', async () => {
     expect(top).toBeLessThan(1500);
   });
 
-  it('隠す所は、差し替える範囲の中のドールだけ', async () => {
+  it('隠す所は、差し替える範囲をまるごと（ドールの輪郭のうすい画素も残さない）。範囲の外は隠さない', async () => {
     const result = await processSwap(pumps, reference, doll, [tile], [zone], GREEN);
-    let inside = 0, hidden = 0, outside = 0;
+    let partial = 0, outside = 0;
     for (let p = 0; p < SIZE * SIZE; p++) {
       const inZone = Math.floor(p / SIZE) >= ZONE_TOP;
-      if (inZone && doll.mask[p]) {
-        inside++;
-        if (result.hide[p] >= 128) hidden++;
-      }
+      if (inZone && result.hide[p] !== 255) partial++;
       if (!inZone && result.hide[p] > 0) outside++;
     }
-    expect(hidden / inside).toBeGreaterThan(0.99);
+    expect(partial).toBe(0);
     expect(outside).toBe(0);
+  });
+
+  it('足首の継ぎ目にすき間ができない: 縮めて戻したドール（隠したあと）に重ねても、脚の内側はどの行も不透明', async () => {
+    // 本番と同じく、拡大図（1024）はキャンバス（ここでは 512）より細かい
+    const N = SIZE / 2;
+    const small = await sharp(reference).resize(N, N).removeAlpha().ensureAlpha().raw().toBuffer();
+    const rgba = new Uint8ClampedArray(small);
+    const mask = new Uint8Array(N * N);
+    for (let p = 0; p < N * N; p++) {
+      if (isGreen(small, p * 4)) rgba[p * 4 + 3] = 0;
+      else mask[p] = 1;
+    }
+    const half: DollTemplate = { rgba, mask, canvasW: N, canvasH: N };
+    const top = 333;
+    const result = await processSwap(pumps, reference, half, [{ from: { x: 0, y: 0, w: N, h: N }, to: tile.to }], [{ x: 0, y: top, w: N, h: N - top }], GREEN);
+    const inner = (x: number, y: number) => {
+      for (let d = -5; d <= 5; d++) if (!mask[y * N + x + d]) return false;
+      return true;
+    };
+    let thin = 0;
+    for (let y = top - 5; y < top + 5; y++) {
+      for (let x = 5; x < N - 5; x++) {
+        if (!inner(x, y) || !inner(x, top - 6)) continue;
+        const p = y * N + x;
+        const dollA = (rgba[p * 4 + 3] * (255 - result.hide[p])) / 255;
+        const itemA = result.rgba[p * 4 + 3];
+        if (itemA + (dollA * (255 - itemA)) / 255 < 250) thin++;
+      }
+    }
+    expect(thin).toBe(0);
   });
 
   it('AI が絵を 12px ずらして返しても、横は同じ位置に取り出す', async () => {
