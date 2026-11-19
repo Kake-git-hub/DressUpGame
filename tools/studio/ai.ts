@@ -122,7 +122,13 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
       }
       const json = (await response.json().catch(() => ({}))) as GeminiInteraction;
       if (!response.ok) {
-        if (response.status === 429) throw new AiError('Gemini API の利用制限に達しました。少し待ってからやり直してください', 429);
+        if (response.status === 429) {
+          // 月の上限額は、待っても直らない（AI Studio の「Spend」で上限を変える）
+          if (/spend(ing)? cap/i.test(json.error?.message ?? '')) {
+            throw new AiError('Gemini API の月の上限額に達しています。Google AI Studio の「Spend」（https://ai.studio/spend）で上限を確かめてください', 429);
+          }
+          throw new AiError('Gemini API の利用制限に達しました。少し待ってからやり直してください', 429);
+        }
         if (response.status === 401 || response.status === 403) throw new AiError('Gemini API のキーが正しくありません（GEMINI_API_KEY）', 500);
         const detail = json.error?.message ?? '';
         if (response.status === 400 && /prohibited|blocked|safety|policy/i.test(detail)) {

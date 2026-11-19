@@ -51,3 +51,4 @@ kisekae-*.zip
 
 # スタジオの記録（画像生成の枚数など）
 .studio
+.superpowers/

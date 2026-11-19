@@ -201,7 +201,7 @@ export interface AnchorInput {
 export interface AnchorShift {
   dx: number; // 画像全体をこの量だけ動かす（ドールのキャンバス px）。動かさないときは 0
   dy: number;
-  gain: number; // 改善した量（部位の中のドールの面積に対する割合）
+  gain: number; // 改善した量（合っている度合いの差、0〜2）
 }
 
 const ANCHOR_MIN_GAIN = 0.02;
@@ -229,8 +229,14 @@ export function refineAtAnchor(input: AnchorInput): AnchorShift {
   const none: AnchorShift = { dx: 0, dy: 0, gain: 0 };
   if (dollArea === 0) return none;
 
+  // 合っている度合い（-1〜1）: 範囲の中で、シルエットか背景だと分かっている画素のうち、
+  // 「シルエットはドールの内側、背景はドールの外側」に合っている割合 − 合っていない割合。
+  // 割合で見る（合っている画素の数では見ない）。数で見ると、髪が頭を覆っているとき、
+  // 画像を上へずらして首や肩を範囲に引きこむだけで点が増えてしまう
+  const minKnown = Math.max(1, Math.round(dollArea * 0.05));
   const value = (dx: number, dy: number): number => {
-    let v = 0;
+    let agree = 0;
+    let known = 0;
     for (let y = y0; y < y1; y++) {
       const sy = y - dy;
       if (sy < 0 || sy >= height) continue;
@@ -239,14 +245,19 @@ export function refineAtAnchor(input: AnchorInput): AnchorShift {
         if (sx < 0 || sx >= width) continue;
         const q = sy * width + sx;
         const d = doll[y * width + x];
-        if (silhouette[q]) v += d ? 1 : -1;
-        else if (background[q] && d) v -= 1;
+        if (silhouette[q]) {
+          known++;
+          agree += d ? 1 : -1;
+        } else if (background[q]) {
+          known++;
+          agree += d ? -1 : 1;
+        }
       }
     }
-    return v;
+    return known < minKnown ? -1 : agree / known;
   };
   // 同じくらいなら、動かす量の小さいほうを選ぶ
-  const score = (dx: number, dy: number) => value(dx, dy) - 0.02 * dollArea * (Math.hypot(dx, dy) / reach);
+  const score = (dx: number, dy: number) => value(dx, dy) - ANCHOR_MIN_GAIN * (Math.hypot(dx, dy) / reach);
   const rest = value(0, 0);
   let best = { dx: 0, dy: 0, score: rest };
   for (let dy = -reach; dy <= reach; dy += 2) {
@@ -263,6 +274,6 @@ export function refineAtAnchor(input: AnchorInput): AnchorShift {
       if (s > best.score) best = { dx, dy, score: s };
     }
   }
-  const gain = (value(best.dx, best.dy) - rest) / dollArea;
+  const gain = value(best.dx, best.dy) - rest;
   return gain >= ANCHOR_MIN_GAIN && (best.dx !== 0 || best.dy !== 0) ? { dx: best.dx, dy: best.dy, gain } : none;
 }

@@ -134,7 +134,7 @@ describe('generateCandidate（顔）', () => {
     const candidate: Candidate = { item: { category: 'かお', name: 'きらきらおめめ', description: 'Big sparkling violet eyes and a small smile.', colors: ['#6a5acd'] }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
     try {
       await generateCandidate(
-        { text, image, budget: new Budget(path.join(dir, 'budget.json'), { perDay: 5, perRun: 5 }), doll: manifestDoll, template: doll, data: { parts, regions: { かお: null } }, style: '', closeup: null },
+        { text, image, budget: new Budget(path.join(dir, 'budget.json'), { perDay: 5, perRun: 5 }), doll: manifestDoll, template: doll, data: { parts, regions: { かお: null } }, style: '' },
         candidate,
       );
     } finally {
