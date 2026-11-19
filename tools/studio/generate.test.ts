@@ -17,9 +17,9 @@ describe('categoryKind / categoryRules', () => {
       expect(categoryRules(label)).toEqual([]);
     }
   });
-  it('くつ・ブーツは靴として扱い、足を完全に覆うように描かせる。くつしたは靴ではない', () => {
+  it('くつ・ブーツは靴として扱う（閉じた靴に限る決まりは無い）。くつしたは靴ではない', () => {
     for (const label of ['くつ', '靴', 'ブーツ', 'shoes']) expect(categoryKind(label)).toBe('shoes');
     for (const label of ['くつした', 'ソックス', '靴下']) expect(categoryKind(label)).toBeNull();
-    expect(categoryRules('くつ').join('\n')).toMatch(/completely covering both feet/);
+    expect(categoryRules('くつ')).toEqual([]);
   });
 });

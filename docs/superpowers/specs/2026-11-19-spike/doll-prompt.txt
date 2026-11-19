@@ -1,0 +1,9 @@
+The attached image is the base doll of a paper-doll dress-up game for young children. Draw a NEW base doll in exactly the same anime art style, skin colour and plain white bandeau top and white shorts, but redesigned so that clothes, shoes, gloves and wigs are easy to draw onto it:
+- Full body, standing, seen straight from the front, perfectly left-right symmetric, centred, the whole figure visible with a clear margin on every side.
+- Proportions: about 5.5 heads tall with a larger, rounder head than the reference (cute but not chibi), slim child-friendly body.
+- The head is completely bald and has no face at all: no eyes, eyebrows, nose, mouth; small simple ears. Just smooth skin.
+- Arms straight, held away from the body in an A-pose (about 35 degrees from the torso), with a clear gap between arm and torso. Hands open and relaxed with the fingers together (mitten-like, thumb slightly apart), palms facing the thighs.
+- Legs straight and apart, with a clearly visible gap between the legs from the crotch down to the feet. The two feet are well separated (a gap of about one foot width between them).
+- Feet flat on the ground, each foot turned outward about 30 degrees so the top of the foot and the toes are clearly visible, like a standing fashion mannequin. No tiptoe.
+- Thin, clean dark-brown outlines (much thinner than the reference), flat cel shading with very little shading detail.
+- Background: completely flat pure green (#00FF00), no shadow, no floor, no text, no frame.

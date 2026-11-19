@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import sharp from 'sharp';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
@@ -24,7 +25,7 @@ import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, p
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
 import { dollTemplateFromImage, loadDollTemplate, padTemplate, processGenerated, workPad } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
-import { alphaToPng, pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { alphaToPng, pngToRgba, renderSilhouette, rgbaToPng } from './silhouette.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 
 const run = promisify(execFile);
@@ -66,15 +67,6 @@ const png = (data: Buffer): ApiResponse => ({ status: 200, type: 'image/png', bo
 const MIME: Record<string, string> = { '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.png': 'image/png' };
 const MAX_ITEMS_PER_PLAN = 30;
 
-// 範囲 region が、手か足の箱の半分以上にかかるか（手袋・靴・袖など。指先の形を AI に見せる）
-function touchesHandsOrFeet(region: Box | null, data: TemplateData): boolean {
-  if (!region) return false;
-  return [data.parts.handLeft, data.parts.handRight, data.parts.feet].some((b) => {
-    const w = Math.min(b.x + b.w, region.x + region.w) - Math.max(b.x, region.x);
-    const h = Math.min(b.y + b.h, region.y + region.h) - Math.max(b.y, region.y);
-    return w > 0 && h > 0 && w * h >= (b.w * b.h) / 2;
-  });
-}
 const MAX_JOBS_KEPT = 20;
 
 interface Job {
@@ -211,6 +203,29 @@ export class StudioApi {
       this.templates.set(key, template);
     }
     return template;
+  }
+  // 拡大図のもとにする、高解像度の作業用の型。素材フォルダの studio/masters/ に、ドールの画像と同じ名前の
+  // 整数倍の画像があればそれを使う。無ければ、ふつうの作業用の型（scale 1）
+  private async hiTemplate(doll: ManifestDoll): Promise<{ template: DollTemplate; scale: number }> {
+    const key = `${doll.id}\n${doll.image.file}\nhi`;
+    const cached = this.templates.get(key);
+    const work = await this.workTemplate(doll);
+    if (cached) return { template: cached, scale: cached.canvasW / work.canvasW };
+    const file = path.join(this.store.dir, 'studio', 'masters', `${path.basename(doll.image.file, path.extname(doll.image.file))}.webp`);
+    let data: Buffer;
+    try {
+      data = await fs.readFile(file);
+    } catch {
+      return { template: work, scale: 1 };
+    }
+    const meta = await sharp(data).metadata();
+    const scale = Math.round((meta.width ?? 0) / doll.image.box.w);
+    if (!(scale >= 2 && scale <= 4)) return { template: work, scale: 1 };
+    const { canvasW, canvasH, box } = doll.image;
+    const base = await dollTemplateFromImage(data, { file: doll.image.file, canvasW: canvasW * scale, canvasH: canvasH * scale, box: { x: box.x * scale, y: box.y * scale, w: box.w * scale, h: box.h * scale } });
+    const template = padTemplate(base, workPad(canvasW) * scale);
+    this.templates.set(key, template);
+    return { template, scale };
   }
   // 型紙（ドールのキャンバス上の位置）を、作業用のキャンバス上の位置に直す
   private async workData(doll: ManifestDoll): Promise<TemplateData> {
@@ -463,14 +478,10 @@ export class StudioApi {
         const template = await this.workTemplate(doll);
         const data = await this.workData(doll);
         const style = findStyle(b.styleId).prompt;
-        // 手と足の拡大図は、手足にかかる品目があるときだけ作る
-        const closeup = items.some((i) => touchesHandsOrFeet(data.regions[i.category] ?? null, data))
-          ? await renderCloseups(template, [data.parts.handLeft, data.parts.handRight, data.parts.feet])
-          : null;
-        const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) => {
-          const usesCloseup = touchesHandsOrFeet(data.regions[(c as Candidate).item.category] ?? null, data);
-          return generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, closeup: usesCloseup ? closeup : null, maxAttempts: this.maxAttempts }, c as Candidate);
-        });
+        const hi = await this.hiTemplate(doll);
+        const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) =>
+          generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, hi, maxAttempts: this.maxAttempts }, c as Candidate),
+        );
         return json({ id: job.id });
       }
       case 'POST /api/background-jobs': {
@@ -508,6 +519,7 @@ export class StudioApi {
             warnings: 'warnings' in c ? c.warnings : [],
             hasImage: !!c.png,
             hasShape: 'shape' in c && !!c.shape,
+            hasHide: 'hide' in c && !!c.hide,
           })),
         });
       }
@@ -516,7 +528,15 @@ export class StudioApi {
         const candidate = job.candidates[Number(this.param(req, 'index'))];
         const kind = req.query.get('kind');
         const data =
-          kind === 'source' && candidate && 'source' in candidate ? candidate.source : kind === 'shape' ? (candidate && 'shape' in candidate ? candidate.shape : undefined) : candidate?.png;
+          kind === 'source' && candidate && 'source' in candidate ? candidate.source : kind === 'shape'
+              ? candidate && 'shape' in candidate
+                ? candidate.shape
+                : undefined
+              : kind === 'hide'
+                ? candidate && 'hide' in candidate
+                  ? candidate.hide
+                  : undefined
+                : candidate?.png;
         if (!data) throw new HttpError(404, '画像がありません');
         return png(data);
       }

@@ -23,6 +23,8 @@ export interface CardSource {
   cutUrl: string; // 切り抜いた服（ドールのキャンバス大の PNG）
   sourceUrl: string; // 切り抜く前（同じ位置合わせ）
   shapeUrl?: string | null; // AI が描いた体と服の形（手足の先を服に合わせるのに使う）
+  // 差し替え式の品目（くつ・てぶくろ）: 着ているあいだドールを隠す所（白で不透明）。あれば、これをそのまま使う
+  hideUrl?: string | null;
   warnings: Warning[];
   notes: string[];
 }
@@ -64,9 +66,10 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   );
   const viewRef = useRef<HTMLCanvasElement>(null);
   const cutRef = useRef<HTMLCanvasElement | null>(null); // 編集中の服
-  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null } | null>(null);
+  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null; hide: HTMLImageElement | null } | null>(null);
   const hideRef = useRef<HTMLCanvasElement | null>(null); // 着ているあいだドールを隠す所（白）
   const [parts, setParts] = useState<BodyParts | null>(null);
+  const [swap, setSwap] = useState(true); // 差し替え式の品目で、ドールの手足の先を隠すか
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(source.name);
@@ -178,10 +181,11 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       loadImage(source.sourceUrl),
       source.shapeUrl ? loadImage(source.shapeUrl).catch(() => null) : Promise.resolve(null),
       loadParts(doll.id).catch(() => null), // 型紙の部位（手足の先を合わせる・前髪の範囲を決めるのに使う）
+      source.hideUrl ? loadImage(source.hideUrl).catch(() => null) : Promise.resolve(null),
     ])
-      .then(([d, c, s, shape, p]) => {
+      .then(([d, c, s, shape, p, hide]) => {
         if (cancelled) return;
-        images.current = { doll: d, cut: c, source: s, shape };
+        images.current = { doll: d, cut: c, source: s, shape, hide };
         setParts(p);
         const canvas = document.createElement('canvas');
         canvas.width = c.naturalWidth;
@@ -201,11 +205,21 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl]);
+  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl, source.hideUrl]);
 
   // 隠す所を作る: 手首・すねから先で、AI が描いた形（微調整に合わせて動かす）の外にあるドール
   useEffect(() => {
     const loaded = images.current;
+    // 差し替え式: 生成のときに決まった「隠す所」を、微調整に合わせて動かして使う
+    if (ready && loaded?.hide) {
+      const canvas = hideRef.current ?? document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      drawNudged(canvas.getContext('2d')!, loaded.hide);
+      hideRef.current = canvas;
+      setHasHide(swap);
+      return;
+    }
     if (!ready || !loaded?.shape || !parts || limbs.length === 0) {
       setHasHide(false);
       return;
@@ -241,7 +255,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     ctx.putImageData(image, 0, 0);
     hideRef.current = canvas;
     setHasHide(any);
-  }, [ready, parts, limbs, drawNudged, canvasW, canvasH, box, padX, padY]);
+  }, [ready, parts, limbs, swap, drawNudged, canvasW, canvasH, box, padX, padY]);
 
   // 微調整が変わったら、元の切り抜きから作り直す（手直しは消える）
   useEffect(() => {
@@ -489,7 +503,15 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
             ずれ ({nudge.dx}, {nudge.dy})・倍率 {(nudge.scale * 100).toFixed(1)}%
           </span>
         </div>
-        {source.shapeUrl && (
+        {source.hideUrl && (
+          <div className="group" data-testid="card-swap">
+            <label>
+              <input type="checkbox" checked={swap} onChange={(e) => setSwap(e.target.checked)} data-testid="swap-part" />
+              ドールの手・足の先を、この絵と入れ替える（着ているあいだ、ドールのその部分を隠す）
+            </label>
+          </div>
+        )}
+        {source.shapeUrl && !source.hideUrl && (
           <div className="group" data-testid="card-limbs">
             <span>手足の先を服に合わせる（服からはみ出したドールの指先などを、着ているあいだ隠す）</span>
             <div className="row small">

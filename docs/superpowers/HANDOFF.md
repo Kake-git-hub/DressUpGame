@@ -1,10 +1,20 @@
-# 引き継ぎ（2026-11-16 時点）
+# 引き継ぎ（2026-11-19 時点）
 
 次のセッションは、まずこの文書を読み、続けて「設計書」と「ロードマップ」を読んでから始める。
 
 - 設計書: `docs/superpowers/specs/2026-11-15-lightweight-rework-design.md`
 - ロードマップ: `docs/superpowers/plans/2026-11-16-roadmap.md`
 - 各段階の計画と結果: `docs/superpowers/plans/`
+
+## 0. 最新（2026-11-19、v0.18.0）: 新ドールと部位の差し替え式生成
+
+設計と結果: `docs/superpowers/specs/2026-11-19-new-doll-and-part-swap-design.md`（9 章が結果）。計画: `docs/superpowers/plans/2026-11-19-new-doll-and-part-swap.md`。
+
+- 髪・帽子は上半身の拡大図、くつ・てぶくろは本物の脚・腕の拡大図に描かせる。くつ・てぶくろは足首・手首から先を絵ごと差し替える（`tools/studio/processSwap.ts`、枠は `src/pipeline/frames.ts`）。
+- 新ドールは作者が「候補 2」を選んだ（候補の一覧 `docs/superpowers/specs/2026-11-19-spike/doll-candidates.jpg` の左から 2 番目。元画像は同じフォルダの `doll_chosen_2.webp`、2048px・緑の背景）。**まだ素材リポジトリに入れていない。** 入れるときは `npx tsx tools/studio/makeDoll.ts import docs/superpowers/specs/2026-11-19-spike/doll_chosen_2.webp <素材フォルダ> <名前> アニメ`。名前は作者に確認する（仮は「アニメ2」）。
+- **止まっている理由: Gemini API の月の上限額**（AI Studio の Spend）。作者が上限を上げるか月が替わったら、(1) 候補 2 を `makeDoll.ts import` で登録、(2) `tryItems.ts` で靴 5・髪 5・手袋 3・顔 3・服 8 を作って出来を見る、(3) 手袋と帽子の方式を本物で確かめる、(4) 作者の了承後に素材リポジトリへ公開。
+- クラウド環境で画像生成を呼ぶとき: `NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy`（中継がキーを差し込む）。Claude API のキーは無いので、企画と見た目の検品は人が代わる（`tryItems.ts`）。
+- 以下の 1〜2 章は 2026-11-16 時点の記録（スタジオはその後 `main` に入り、公開中の版は v0.17.1 → v0.18.0）。
 
 ## 1. いまの状態
 
