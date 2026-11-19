@@ -5,26 +5,30 @@
  *  → 切り抜きと位置合わせ → 数値の検品 → 見た目の検品（Claude がドールに着せた絵を見る）
  *  → 不合格なら、直してほしい点を画像生成への指示にして、1 回だけ自動で作り直す
  *
+ * 髪・帽子は、全身ではなく上半身を拡大したシルエットに描かせる（細部がつぶれない）。
+ * くつ・てぶくろは、ドールの本物の脚・腕を拡大した図に描かせ、足首・手首から先を絵ごと差し替える（processSwap.ts）。
  * 顔だけは作り方が違う: ドールの本物の頭の拡大図に描かせ、その頭を肌ごと「お面」のように切り取る（processFace.ts）。
  *
  * できた候補は公開しない。人が採用したものだけが、別の API で登録される。
  */
 import sharp from 'sharp';
 import type { Box } from '../../src/pipeline/alpha.ts';
-import { anchorPart, shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
+import type { Tile } from '../../src/pipeline/frames.ts';
+import { shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
 import type { BodyParts } from '../../src/pipeline/bodyParts.ts';
 import { isHairCategory } from '../../src/pipeline/hairSplit.ts';
-import { skinColor } from '../../src/pipeline/fillInside.ts';
-import { limbZones } from '../../src/pipeline/limbZones.ts';
-import { chooseKeyColors } from '../../src/pipeline/keyColors.ts';
+import { frameKind, frameTiles, swapZones } from '../../src/pipeline/frames.ts';
+import { chooseBackground, chooseKeyColors, skinColor } from '../../src/pipeline/keyColors.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
 import { AiError } from './ai.ts';
 import type { ImageAi, TextAi } from './ai.ts';
 import type { Budget } from './budget.ts';
 import { faceCrop, isFaceCategory, processFace, renderHeadCloseup } from './processFace.ts';
+import { pasteTile, pasteTileAlpha, renderFrame, tileTemplate, toTile } from './frame.ts';
 import { processGenerated } from './processGenerated.ts';
-import type { DollTemplate, ProcessWarning, WarningCode } from './processGenerated.ts';
+import type { DollTemplate, ProcessResult, ProcessWarning, WarningCode } from './processGenerated.ts';
+import { processSwap } from './processSwap.ts';
 import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
 
 // ドールごとの型紙（studio/templates.json に保存する）
@@ -51,6 +55,7 @@ export interface Candidate {
   png?: Buffer; // ドールのキャンバス大の、切り抜いた服
   source?: Buffer; // 切り抜く前（位置合わせ済み）
   shape?: Buffer; // AI が描いた体と服の形（PNG）。手足の先を服に合わせるときに使う
+  hide?: Buffer; // 差し替え式の品目（くつ・てぶくろ）: 着ているあいだドールを隠す所（PNG、白で不透明な所）
   warnings: ProcessWarning[];
   notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
 }
@@ -120,10 +125,8 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
           kind === 'face'
             ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
             : kind === 'hair'
-              ? ' (hairstyle only: hair and bangs. Never any facial features.)'
-              : kind === 'shoes'
-                ? ' (closed shoes or boots that cover the whole foot. No sandals, open toes or bare insteps.)'
-                : '';
+              ? ' (hairstyle only: hair and bangs, no longer than the hips. Never any facial features.)'
+              : '';
         return `- ${c.id}${note}`;
       }),
       '',
@@ -138,7 +141,7 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       '',
       'Special categories:',
       '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
-      '- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face.',
+      '- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. The hair is no longer than the hips.',
     ].join('\n'),
     schema: PLAN_SCHEMA,
   });
@@ -182,14 +185,6 @@ export function categoryRules(label: string): string[] {
         '- No hat or other accessories.',
         '- The hair may be long and wide. Hair that hangs behind the body is fine: it will be placed behind the doll, so what matters is that the hair sits exactly on the head.',
       ];
-    case 'shoes':
-      // 靴の内側（足が入る所）をシルエットの色のまま残させない。残ると、そこが切り抜かれて、ドールの足と形が合わずにのぞく
-      return [
-        '- Draw the shoes as solid, fully opaque objects seen straight from the front, completely covering both feet of the mannequin from the toes up to the top edge of the shoe.',
-        '- Inside the outline of each shoe, nothing of the mannequin may remain visible: no foot, toes, instep or ankle in the mannequin colour, and no visible shoe opening. Paint that whole area with the shoe itself.',
-        '- The top edge of each shoe is a clean line across the ankle or leg; the leg simply disappears into the shoe.',
-        '- Straps, ribbons or laces must lie on the shoe itself or be drawn as solid bands around the leg, not as thin lines with the mannequin colour showing between them.',
-      ];
     default:
       return [];
   }
@@ -209,16 +204,14 @@ const WARNING_FIX: Record<WarningCode, string> = {
   'color-too-close': 'Parts of the item used colours too close to the mannequin or background colour. Use clearly different colours for every part of the item.',
   empty: 'No item was visible in the result. Draw the item clearly on the mannequin.',
   'touches-edge': 'The item reached the edge of the image and was cut off. Draw it smaller so that the whole item fits inside the image with a clear margin on every side.',
-  repainted: 'The head or skin was repainted. Leave everything except the facial features exactly as it is.',
+  repainted: 'Parts of the picture that should not change were repainted. Leave everything except the item itself exactly as it is in the given image.',
 };
 
-function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, closeup: boolean): string {
+function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, upper: boolean): string {
   return [
-    `The first image is a mannequin template: a flat ${colorName(silhouette)} silhouette of a doll on a flat ${colorName(background)} background.`,
-    closeup
-      ? 'The second image shows close-ups of the same mannequin\'s hands and feet in their real colours (from left to right: the hand on the left side of the template, the hand on the right side, the feet). ' +
-        'Use it only to see the exact shape of the fingers and toes so that the item fits them precisely. Do not copy it into the result and do not paint skin colour on the mannequin.'
-      : '',
+    upper
+      ? `The image is a mannequin template: the upper half (head to hips) of a doll as a flat ${colorName(silhouette)} silhouette on a flat ${colorName(background)} background. The body continues below the bottom edge of the image.`
+      : `The first image is a mannequin template: a flat ${colorName(silhouette)} silhouette of a doll on a flat ${colorName(background)} background.`,
     `Draw exactly one item on the mannequin: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
@@ -233,12 +226,56 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
     '- Do not draw an outline, border or shadow around the mannequin itself, and do not draw body details on it (no chin or jaw line, no neck line, no collarbone, no fingers).',
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
+    upper ? '- The whole item must end above the bottom edge of the image, with a clear margin.' : '',
     ...categoryRules(categoryLabel),
     '- Square image, same framing as the template.',
     feedback ? `A previous attempt at this same item was inspected and rejected. Draw it again from scratch and fix these problems:\n${feedback}` : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+// 差し替え式の品目（くつ・てぶくろ）の指示文。画像は、ドールの本物の脚（腕）の拡大図
+function swapPrompt(item: PlannedItem, categoryLabel: string, style: string, background: Rgb, kind: 'feet' | 'hands', feedback: string | null): string {
+  const feet = kind === 'feet';
+  return [
+    feet
+      ? `The image is a close-up of the lower legs and bare feet of a doll for a paper-doll dress-up game, on a flat ${colorName(background)} background.`
+      : `The image shows two panels side by side: close-ups of the two forearms and bare hands of a doll for a paper-doll dress-up game (left panel: the arm on the left side of the doll, right panel: the arm on the right side), on a flat ${colorName(background)} background.`,
+    feet ? `Put this pair of shoes on the feet: ${item.description}` : `Put this pair of gloves on the two hands, the same glove mirrored on each hand: ${item.description}`,
+    `Item type: ${categoryLabel}.`,
+    style ? `Art style: ${style}` : '',
+    feet
+      ? 'The shoes replace the bare feet: draw each foot inside its shoe naturally (skin visible in the opening of a low shoe or between sandal straps is fine), with no part of the original bare foot sticking out beside or below the shoe.'
+      : 'The gloves replace the bare hands: draw each hand inside its glove naturally, in the same pose and position, with no part of the original bare hand sticking out beside the glove.',
+    'Strict rules:',
+    feet
+      ? '- Keep both legs exactly as they are above the shoes: same position, size, outline and skin colour.'
+      : '- Keep both arms exactly as they are above the gloves: same position, size, angle, outline and skin colour. Keep each arm in its own panel.',
+    '- Keep the same framing. Do not zoom, crop, move or rotate anything.',
+    `- The background stays the same flat ${colorName(background)} with no shadow, floor, gradient, text or frame.`,
+    `- The item must not contain ${colorName(background)} or colours close to it.`,
+    '- Draw the item in the same art style and with the same thin outlines as the doll.',
+    '- Draw only this one item, fully visible and not cut off by the image edge.',
+    feedback ? `A previous attempt at this same item was inspected and rejected. Draw it again and fix these problems:\n${feedback}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+// 枠の上で処理した結果を、キャンバスに戻す
+async function fromTile(result: ProcessResult, tile: Tile, canvasW: number, canvasH: number): Promise<ProcessResult> {
+  const rgba = new Uint8ClampedArray(canvasW * canvasH * 4);
+  const source = new Uint8ClampedArray(canvasW * canvasH * 4);
+  await pasteTile(rgba, canvasW, canvasH, result.rgba, tile);
+  await pasteTile(source, canvasW, canvasH, result.source, tile);
+  let shape: Uint8Array | null = null;
+  if (result.shape) {
+    shape = new Uint8Array(canvasW * canvasH);
+    await pasteTileAlpha(shape, canvasW, canvasH, result.shape, tile);
+  }
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 8) rgba[i] = 0;
+  return { ...result, rgba, source, shape, width: canvasW, height: canvasH };
 }
 
 // 顔の指示文。画像は、ドールの本物の頭の拡大図（顔はまだ無い）
@@ -268,7 +305,8 @@ export interface GenerateContext {
   template: DollTemplate;
   data: TemplateData;
   style: string; // 絵柄の説明（英語）
-  closeup: Buffer | null; // 手と足の拡大図（PNG）。手袋・靴など、手足にかかる品目のときだけ
+  // ドールの高解像度の型（拡大図のもと）。scale = その大きさ ÷ template の大きさ。無ければ template から拡大する
+  hi?: { template: DollTemplate; scale: number };
   maxAttempts?: number;
 }
 
@@ -307,7 +345,10 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   let feedback: string | null = null;
   const maxAttempts = ctx.maxAttempts ?? MAX_ATTEMPTS;
   // 前の回の結果。作り直しが失敗したり、何も残らなかったりしたときは、こちらを残す
-  let kept: { png: Buffer; source: Buffer; shape?: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
+  let kept: { png: Buffer; source: Buffer; shape?: Buffer; hide?: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
+  const frame = frameKind(label);
+  const hi = ctx.hi ?? { template: ctx.template, scale: 1 };
+  const { canvasW, canvasH } = ctx.template;
   let rewritten = false; // 断られて説明文を書き直したか（1 回まで）
   let rewriteNote: string[] = []; // 書き直したことを、最後まで候補の注記に残す
   let redoNote: string[] = []; // 検品で不合格になり、指示を添えて作り直したこと
@@ -316,6 +357,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.png = kept.png;
     candidate.source = kept.source;
     candidate.shape = kept.shape;
+    candidate.hide = kept.hide;
     candidate.warnings = kept.warnings;
     candidate.notes = [...kept.notes, `作り直しは採用しませんでした（${reason}）`];
     candidate.status = 'flagged';
@@ -326,7 +368,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   for (let attempt = 1; attempt <= maxAttempts + (rewritten ? 1 : 0); attempt++) {
     candidate.attempts = attempt;
     candidate.status = 'working'; // 作り直し中は、前の回の画像を候補として見せない
-    let result;
+    let result: ProcessResult;
+    let hide: Uint8Array | null = null;
     try {
       if (isFaceCategory(label)) {
         // 顔: 本物の頭の拡大図に描かせて、元の図との違いを取り出す
@@ -335,32 +378,33 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         await ctx.budget.spend();
         const generated = await ctx.image.generate({ prompt: facePrompt(item, label, ctx.style, feedback), images: [reference] });
         result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND, ctx.data.parts.head);
+      } else if (frame === 'feet' || frame === 'hands') {
+        // くつ・てぶくろ: 本物の脚（腕）の拡大図に描かせて、足首（手首）から先を絵ごと差し替える
+        const tiles = frameTiles(frame, ctx.data.parts, canvasW, canvasH);
+        const skin = skinColor(ctx.template.rgba, canvasW, canvasH, frame === 'feet' ? ctx.data.parts.legs : ctx.data.parts.armLeft);
+        const background = chooseBackground([...planned, ...avoid, skin, [255, 255, 255]]);
+        const reference = await renderFrame(hi.template, hi.scale, tiles, background, null);
+        await ctx.budget.spend();
+        const generated = await ctx.image.generate({ prompt: swapPrompt(item, label, ctx.style, background, frame, feedback), images: [reference] });
+        const swap = await processSwap(generated, reference, ctx.template, tiles, swapZones(frame, ctx.data.parts), background);
+        result = swap;
+        hide = swap.hide;
+      } else if (frame === 'upper') {
+        // 髪・帽子: 上半身を拡大したシルエットに描かせ、拡大図の上で切り抜いて、キャンバスに戻す
+        const [tile] = frameTiles('upper', ctx.data.parts, canvasW, canvasH);
+        const keys = chooseKeyColors([...planned, ...avoid]);
+        const silhouette = await renderFrame(hi.template, hi.scale, [tile], keys.background, keys.silhouette);
+        await ctx.budget.spend();
+        const generated = await ctx.image.generate({ prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, true), images: [silhouette] });
+        const onTile = await processGenerated(generated, await tileTemplate(hi.template, hi.scale, tile), { silhouetteColor: keys.silhouette, anchor: toTile(ctx.data.parts.head, tile) });
+        result = await fromTile(onTile, tile, canvasW, canvasH);
+        if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
       } else {
         const keys = chooseKeyColors([...planned, ...avoid]);
         const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
         await ctx.budget.spend();
-        const generated = await ctx.image.generate({
-          prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
-          images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
-        });
-        // 髪型・帽子は、体全体ではなく頭に合わせて置く
-        const anchor = anchorPart(label);
-        const feetZone = limbZones(ctx.data.parts, ['feet'], ctx.template.canvasW, ctx.template.canvasH)[0];
-        result = await processGenerated(generated, ctx.template, {
-          silhouetteColor: keys.silhouette,
-          parts: Object.values(ctx.data.parts),
-          anchor: anchor ? ctx.data.parts[anchor] : undefined,
-          // くつ: 靴の内側（AI の足があった所）は切り抜かず、ドールの肌の色で埋める
-          fillInside:
-            categoryKind(label) === 'shoes' && feetZone
-              ? {
-                  zone: feetZone,
-                  color: skinColor(ctx.template.rgba, ctx.template.canvasW, ctx.template.canvasH, ctx.data.parts.legs),
-                  // 足首から上は埋めない（ドールの脚をそのまま見せる）
-                  top: ctx.data.parts.feet.y,
-                }
-              : undefined,
-        });
+        const generated = await ctx.image.generate({ prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, false), images: [silhouette] });
+        result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette, parts: Object.values(ctx.data.parts) });
         if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
       }
     } catch (error) {
@@ -393,6 +437,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.png = await rgbaToPng(result.rgba, result.width, result.height);
     candidate.source = await rgbaToPng(result.source, result.width, result.height);
     candidate.shape = result.shape ? await alphaToPng(result.shape, result.width, result.height) : undefined;
+    candidate.hide = hide ? await alphaToPng(hide, result.width, result.height) : undefined;
     candidate.warnings = [...result.warnings];
     candidate.notes = [...rewriteNote, ...redoNote];
 
@@ -401,7 +446,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     const fixes: string[] = result.warnings.map((w) => WARNING_FIX[w.code]); // 作り直すときに画像生成 AI へ伝える指示（英語）
     const region = ctx.data.regions[item.category];
     // 髪は長くも広くもなるので、範囲では見ない（頭に合っているかは、見た目の検品で見る）
-    if (region && !empty && categoryKind(label) !== 'hair') {
+    // くつ・てぶくろは、拡大図の枠の中にしか描けないので見ない
+    if (region && !empty && categoryKind(label) !== 'hair' && frame !== 'feet' && frame !== 'hands') {
       const share = shareInsideRegion(result.rgba, result.width, result.height, region);
       if (share < MIN_REGION_SHARE) {
         problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
@@ -413,7 +459,14 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     if (problems.length === 0) {
       let verdict: { ok: boolean; reason: string; fix?: string };
       try {
-        const preview = await renderPreview(ctx.template, [result.rgba]);
+        // 差し替え式は、ゲームと同じように、ドールの足（手）を隠してから重ねる
+        let shown = ctx.template;
+        if (hide) {
+          const rgba = new Uint8ClampedArray(ctx.template.rgba);
+          for (let p = 0; p < hide.length; p++) rgba[p * 4 + 3] = Math.round((rgba[p * 4 + 3] * (255 - hide[p])) / 255);
+          shown = { ...ctx.template, rgba };
+        }
+        const preview = await renderPreview(shown, [result.rgba]);
         verdict = await ctx.text.json<{ ok: boolean; reason: string; fix?: string }>({
           system: 'You are a strict quality inspector for a children\'s dress-up game. Reply with JSON only.',
           prompt: [
@@ -428,7 +481,8 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
             '- extra objects, body parts or text are present, or the drawing is malformed.',
             categoryKind(label) === 'face' ? 'This item must be a face without any hair: set ok to false if any hair (bangs, sidelocks, hair outline) is drawn.' : '',
             categoryKind(label) === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
-            categoryKind(label) === 'shoes' ? 'These must be shoes that cover the feet completely: set ok to false if the doll\'s bare foot, toes or the outline of the foot shows through inside a shoe or sticks out of it.' : '',
+            frame === 'feet' ? 'The shoes replace the doll\'s feet: set ok to false if a second foot or toes stick out beside or below a shoe, or if there is a visible seam or colour jump on the leg just above the shoe.' : '',
+            frame === 'hands' ? 'The gloves replace the doll\'s hands: set ok to false if a second hand or fingers stick out beside a glove, or if there is a visible seam or colour jump on the arm just above the glove.' : '',
             'Otherwise set ok to true.',
             'reason: explain briefly in Japanese (one sentence) what you saw.',
             'fix: if ok is false, write one to three short English sentences addressed to the image model that will redraw the item, saying exactly what to change ' +
@@ -453,7 +507,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
       fixes.push((typeof verdict.fix === 'string' && verdict.fix.trim()) || verdict.reason || 'The result did not pass inspection. Follow the rules above more strictly.');
     }
     candidate.notes = [...rewriteNote, ...redoNote, ...problems];
-    kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, warnings: candidate.warnings, notes: [...redoNote, ...problems] };
+    kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, hide: candidate.hide, warnings: candidate.warnings, notes: [...redoNote, ...problems] };
     feedback = fixes.map((f) => `- ${f}`).join('\n');
     redoNote = [`検品の指摘を伝えて、自動で作り直しました（前の指摘: ${problems.join(' / ')}）`];
   }

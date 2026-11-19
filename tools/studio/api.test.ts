@@ -327,7 +327,7 @@ describe('テーマからの自動生成', () => {
     expect(prompt).toMatch(/Never mention the name of any real or fictional character/);
     expect(prompt).toMatch(/pastel colours/);
   });
-  it('生成: 選んだ絵柄を画像 AI に渡す。手足にかかる品目（くつ）には手と足の拡大図を添え、どこにでも付く品目には添えない', async () => {
+  it('生成: 選んだ絵柄を画像 AI に渡す。くつは本物の脚の拡大図 1 枚に描かせ、候補に「隠す所」が付く', async () => {
     const { id } = await ok<{ id: string }>('POST', '/api/jobs', {
       dollId,
       styleId: 'real',
@@ -341,9 +341,28 @@ describe('テーマからの自動生成', () => {
     const shoes = imageCalls.find((c) => c.prompt.includes('Red shoes'))!;
     expect(shirt.prompt).toMatch(/Semi-realistic/);
     expect(shirt.images).toHaveLength(1);
-    expect(shirt.prompt).not.toMatch(/close-ups/);
-    expect(shoes.images).toHaveLength(2);
-    expect(shoes.prompt).toMatch(/close-ups of the same mannequin's hands and feet/);
+    expect(shirt.prompt).toMatch(/silhouette/);
+    expect(shoes.images).toHaveLength(1);
+    expect(shoes.prompt).toMatch(/lower legs and bare feet/);
+    expect(shoes.prompt).toMatch(/Semi-realistic/);
+    const job = await ok<{ candidates: { hasImage: boolean; hasHide: boolean }[] }>('GET', `/api/jobs?id=${id}`);
+    expect(job.candidates.map((c) => c.hasHide)).toEqual([false, true]);
+    expect((await call('GET', `/api/jobs/image?id=${id}&index=1&kind=hide`)).type).toBe('image/png');
+    expect((await call('GET', `/api/jobs/image?id=${id}&index=0&kind=hide`)).status).toBe(404);
+  }, 60_000);
+  it('生成: 高解像度の元画像（studio/masters/）があれば、拡大図はそこから作る（同じ大きさの図になり、候補ができる）', async () => {
+    const content = await ok<{ dolls: { image: { file: string; box: { w: number; h: number } } }[] }>('GET', '/api/content');
+    const { file, box } = content.dolls[0].image;
+    const masters = path.join(dir, 'content', 'studio', 'masters');
+    await fs.mkdir(masters, { recursive: true });
+    await sharp(path.join(dir, 'content', file)).resize(box.w * 2, box.h * 2, { fit: 'fill' }).webp({ lossless: true }).toFile(path.join(masters, `${path.basename(file, path.extname(file))}.webp`));
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'くつ', name: 'b', description: 'Red shoes.', colors: ['#c81e28'] }] });
+    await api.waitForJob(id);
+    const meta = await sharp(imageCalls[0].images[0]).metadata();
+    expect([meta.width, meta.height]).toEqual([1024, 1024]);
+    const job = await ok<{ candidates: { status: string; hasImage: boolean; hasHide: boolean }[] }>('GET', `/api/jobs?id=${id}`);
+    expect(job.candidates[0]).toMatchObject({ hasImage: true, hasHide: true });
+    expect(job.candidates[0].status).not.toBe('failed');
   }, 60_000);
   it('画像 AI に内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す', async () => {
     let calls = 0;

@@ -51,34 +51,3 @@ export async function pngToRgba(png: Buffer): Promise<{ rgba: Uint8ClampedArray;
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { rgba: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width: info.width, height: info.height };
 }
-
-// ドールの手と足の拡大図（AI に指先の形を見せる参考画像）。boxes の順に、左から並べる
-export async function renderCloseups(doll: DollTemplate, boxes: { x: number; y: number; w: number; h: number }[], height = 512, background = '#e9e6f2'): Promise<Buffer> {
-  const { canvasW, canvasH } = doll;
-  const doll8 = Buffer.from(doll.rgba.buffer, doll.rgba.byteOffset, doll.rgba.byteLength);
-  const gap = Math.round(height * 0.08);
-  const tiles: { input: Buffer; width: number }[] = [];
-  for (const b of boxes) {
-    // 少し余白を付けて切り出す
-    const pad = Math.round(Math.max(b.w, b.h) * 0.12);
-    const left = Math.max(0, Math.round(b.x - pad));
-    const top = Math.max(0, Math.round(b.y - pad));
-    const width = Math.max(1, Math.min(canvasW, Math.round(b.x + b.w + pad)) - left);
-    const h = Math.max(1, Math.min(canvasH, Math.round(b.y + b.h + pad)) - top);
-    const tileW = Math.max(1, Math.round((width * height) / h));
-    const input = await sharp(doll8, { raw: { width: canvasW, height: canvasH, channels: 4 } })
-      .extract({ left, top, width, height: h })
-      .resize(tileW, height, { kernel: 'lanczos3' })
-      .png()
-      .toBuffer();
-    tiles.push({ input, width: tileW });
-  }
-  const total = tiles.reduce((sum, t) => sum + t.width, 0) + gap * (tiles.length + 1);
-  let x = gap;
-  const composite = tiles.map((t) => {
-    const item = { input: t.input, left: x, top: gap };
-    x += t.width + gap;
-    return item;
-  });
-  return sharp({ create: { width: total, height: height + gap * 2, channels: 3, background } }).composite(composite).png().toBuffer();
-}

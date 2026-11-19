@@ -154,3 +154,36 @@ export function chooseKeyColors(planned: Rgb[]): { silhouette: Rgb; background: 
   }
   return best;
 }
+
+// 本物のドールを写した拡大図（差し替え式の品目）の背景色: 品目の色・肌・下着の色のどれからも遠い、はっきりした色
+const SWAP_BACKGROUNDS: Rgb[] = [
+  [0, 255, 0],
+  [255, 0, 255],
+  [0, 0, 255],
+  [0, 255, 255],
+];
+export function chooseBackground(avoid: Rgb[]): Rgb {
+  let best = SWAP_BACKGROUNDS[0];
+  let bestMargin = -1;
+  for (const c of SWAP_BACKGROUNDS) {
+    const margin = Math.min(...avoid.map((a) => colorDistance(c, a)), 442);
+    if (margin > bestMargin) {
+      best = c;
+      bestMargin = margin;
+    }
+  }
+  return best;
+}
+
+// ドールの肌の色: box の中の、不透明な画素の色の中央値
+export function skinColor(doll: Pixels, width: number, height: number, box: { x: number; y: number; w: number; h: number }): Rgb {
+  const values: number[][] = [[], [], []];
+  for (let y = Math.max(0, Math.round(box.y)); y < Math.min(height, Math.round(box.y + box.h)); y++) {
+    for (let x = Math.max(0, Math.round(box.x)); x < Math.min(width, Math.round(box.x + box.w)); x++) {
+      const p = (y * width + x) * 4;
+      if (doll[p + 3] < 255) continue;
+      for (let c = 0; c < 3; c++) values[c].push(doll[p + c]);
+    }
+  }
+  return values.map((v) => (v.length ? v.sort((a, b) => a - b)[v.length >> 1] : 224)) as Rgb;
+}
