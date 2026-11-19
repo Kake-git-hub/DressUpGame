@@ -2,11 +2,12 @@
  * 品目を決め打ちで渡して、本物の画像生成を回すコマンド（企画と見た目の検品は、人が代わる）
  *
  *   npx tsx tools/studio/tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ>
- *   npx tsx tools/studio/tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...>
+ *   npx tsx tools/studio/tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...> [replace]
  *
  * 品目の JSON: [{ "category": "くつ", "name": "…", "description": "英語の説明", "colors": ["#rrggbb"] }, …]
  * 出力フォルダに、品目ごとに 切り抜き（-cut.png）・隠す所（-hide.png）・AI の形（-shape.png）・ドールに着せた絵（-worn.jpg）と、
  * 結果の一覧（result.json）を書く。save は、選んだ番号の候補を素材フォルダに登録する（公開はしない）。
+ * 最後に replace を付けると、同じカテゴリ・同じ名前の品目を置き換える。
  * Claude API のキーが無い環境のためのもの。見た目の検品は必ず「合格」を返すので、できた絵は人が見て選ぶこと。
  */
 import fs from 'node:fs/promises';
@@ -87,23 +88,24 @@ async function generate(contentDir: string, dollId: string, itemsFile: string, o
   await fs.writeFile(path.join(outDir, 'result.json'), JSON.stringify(job.candidates, null, 1));
 }
 
-async function save(contentDir: string, dollId: string, outDir: string, picks: string): Promise<void> {
+async function save(contentDir: string, dollId: string, outDir: string, picks: string, replace: boolean): Promise<void> {
   const api = makeApi(contentDir, outDir);
   const candidates = JSON.parse(await fs.readFile(path.join(outDir, 'result.json'), 'utf8')) as View[];
+  const existing = replace ? ((await api.store.read()).dolls.find((d) => d.id === dollId)?.items ?? []) : [];
   const read = async (file: string) => fs.readFile(path.join(outDir, file)).then((b) => b.toString('base64'), () => undefined);
   for (const i of picks.split(',').map(Number)) {
     const c = candidates[i];
     const png = await read(`${i}-cut.png`);
     if (!c || !png) throw new Error(`${i} 番の候補がありません`);
-    const saved = await ok<{ id: string }>(api, 'POST', '/api/items', { dollId, category: c.item.category, name: c.item.name, png, hide: await read(`${i}-hide.png`), shape: await read(`${i}-shape.png`) });
+    const saved = await ok<{ id: string }>(api, 'POST', '/api/items', { dollId, category: c.item.category, name: c.item.name, png, hide: await read(`${i}-hide.png`), shape: await read(`${i}-shape.png`), replaceId: existing.find((e) => e.category === c.item.category && e.name === c.item.name)?.id });
     console.log(`登録しました: ${saved.id}`);
   }
 }
 
 const args = process.argv.slice(2);
-const run = args[0] === 'save' && args.length === 5 ? save(args[1], args[2], args[3], args[4]) : args.length === 4 ? generate(args[0], args[1], args[2], args[3]) : null;
+const run = args[0] === 'save' && (args.length === 5 || (args.length === 6 && args[5] === 'replace')) ? save(args[1], args[2], args[3], args[4], args[5] === 'replace') : args.length === 4 ? generate(args[0], args[1], args[2], args[3]) : null;
 if (!run) {
-  console.log('使い方:\n  tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ>\n  tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...>');
+  console.log('使い方:\n  tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ>\n  tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...> [replace]');
   process.exitCode = 1;
 } else {
   run.catch((error: Error) => {
