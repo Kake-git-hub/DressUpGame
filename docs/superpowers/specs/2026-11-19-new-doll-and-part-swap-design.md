@@ -1,7 +1,7 @@
 # 作りやすい新ドールと、部位の差し替え式生成: 設計書
 
 - 作成日: 2026-11-19
-- 状態: **作者の了承待ち**
+- 状態: **仕組みは実装済み（v0.18.0）。新ドールの服の本番生成は未実施**（画像 API の月の上限額に達したため。9 章）
 - 関連: `2026-11-15-lightweight-rework-design.md`（全体の設計）、`../plans/2026-11-16-studio.md`（スタジオの計画と結果）
 
 ## 1. なぜ作るか
@@ -183,3 +183,35 @@
 試行で使った靴の指示文（パンプスの例）:
 
 > The image is a close-up of the lower legs and bare feet of a doll for a paper-doll dress-up game, on a flat green background. Put this pair of shoes on the feet: （品目の説明）. The shoes replace the bare feet: draw each foot inside its shoe naturally (the instep skin visible in the opening of the pump is fine), with no bare toes sticking out. Keep both legs exactly as they are above the shoes: same position, size, outline and skin colour. Keep the same framing; do not zoom, crop or move anything. The background stays the same flat pure green (#00FF00) with no shadow or floor. The shoes must not contain green. Same anime art style and thin dark outlines as the legs.
+
+## 9. 結果（2026-11-19、v0.18.0）
+
+計画: `../plans/2026-11-19-new-doll-and-part-swap.md`
+
+**できたこと**
+
+- 枠の計算（`src/pipeline/frames.ts`）、拡大図の描画と貼り戻し（`tools/studio/frame.ts`）、差し替え式の取り出し（`tools/studio/processSwap.ts`）、生成への組み込み（`generate.ts`・`api.ts`）、候補カードの「隠す所」（`ItemCard.tsx`）、ドールづくりの道具（`dollPrompt.ts`・`makeDoll.ts`）、本物の生成を回すスクリプト（`tryItems.ts`）。
+- 作者が選んだドール（候補 2）は、取り込みまで確かめた（一時フォルダ。素材リポジトリには未登録）。
+
+**本物の画像で確かめたこと**（生成済みの試行の画像 5 枚を、実装した処理に通した）
+
+- パンプス・ブーツ: 警告なし。位置合わせのずれ 0。足首の継ぎ目・ドールの足の消し残りなし（最初は、足の輪郭のうすい線と、足首の細いすき間が出た。直してテストにした）。
+- 髪: 青・緑の色残り 0.5% 未満。ゲームで前髪／後ろ髪に分かれて表示される。
+- ゲーム本体（ビルドした版）で、試行のドールに髪と靴を着せた画面: `2026-11-19-spike/game-check.jpg`。靴をはくと足が差し替わる。ゲーム本体のコードは版数以外変えていない。
+
+**本物の画像で見つけて直したこと**
+
+- 頭の位置合わせ（`refineAtAnchor`）が、長い髪のとき絵を上へずらしていた（首が見えていると、ずらすほど点が増える数え方だった）。割合で見るように直した。**既存のドールの髪・帽子にも効く。**
+- 手袋の図は、左右の腕がつながって 1 つの形に見えたので、あいだに背景の帯を空け、胴が写りこまないようにした。
+- 画像 API が月の上限額で断ったとき、「少し待って」ではなく、上限額であることを伝える。
+
+**確かめられていないこと**
+
+1. **新ドール（候補 2）での本番の生成（靴 5・髪 5・手袋 3・顔 3・服 8）は、1 枚もできていない。** 最初の 4 枚を出した時点で、Gemini API が「月の上限額を超えた」と断った（HTTP 429）。使えた画像は合計 10 枚（ドール 5、靴 2、髪 1、動作確認 2）。目標（靴・髪それぞれ 5 点中 4 点以上）は未判定。
+2. 手袋の「左右を 1 枚に並べる」方式は、本物の AI では未確認（偽の AI でのテストだけ）。
+3. 帽子を上半身の拡大図で作る方式も、本物の AI では未確認。
+4. 既存の 2 体（アニメ・リアル）での新方式の出来（やらないこと、のとおり）。
+5. スタジオの画面で、差し替え式の候補のカードを実際に開いた確認（API のテストと、処理の結果の画像でだけ確かめた）。
+6. 色スライダーで靴の中の肌も変わること、靴下 + 甲の開いた靴の見え方（設計どおり未対応。作者に見てもらう）。
+
+**上限額が戻ったら**: `tools/studio/tryItems.ts` で品目の JSON を渡して回す（README 参照）。素材フォルダへの新ドールの登録は `makeDoll.ts import`。
