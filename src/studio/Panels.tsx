@@ -1,6 +1,7 @@
 /**
  * スタジオの各タブ
  */
+import { isHairCategory } from '../pipeline/hairSplit';
 import { useEffect, useRef, useState } from 'react';
 import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
@@ -454,6 +455,10 @@ export function Library({ doll, onChanged }: Common) {
                       <option key={x.id} value={x.id}>{x.label}</option>
                     ))}
                   </select>
+                  {isHairCategory(c.label) && !item.back && (
+                    <button title="後ろ髪をドールの下に描くようにする（ドールの輪郭線が髪で削られなくなる）" onClick={() => void guard(() => api.splitHair(item.id))} data-testid="split-hair">前髪と後ろ髪に分ける</button>
+                  )}
+                  {item.back && <span className="hint">前髪・後ろ髪</span>}
                   <button onClick={() => confirm(`「${item.name}」を消しますか？`) && void guard(() => api.deleteItem(item.id))}>消す</button>
                 </figure>
               ))}

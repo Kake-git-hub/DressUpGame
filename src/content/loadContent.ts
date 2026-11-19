@@ -91,6 +91,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
         canvasH: item.image.canvasH,
         box: item.image.box,
         ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
+        ...(item.back ? { back: { url: url(item.back.file), box: item.back.box } } : {}),
       });
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));

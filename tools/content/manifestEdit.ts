@@ -12,7 +12,7 @@ import sharp from 'sharp';
 import { parseManifest } from '../../src/content/manifest.ts';
 import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestItem } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
-import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeMask, uniqueId } from './encode.ts';
+import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeMask, uniqueId, encodeLayer } from './encode.ts';
 
 export class ContentError extends Error {
   readonly status: number;
@@ -59,6 +59,8 @@ export interface ItemInput {
   height: number;
   replaceId?: string; // 指定すると、その ID のまま画像と名前・カテゴリを差し替える
   hide?: Uint8Array | Uint8ClampedArray | null; // 着ているあいだドールを隠す所（キャンバス大の不透明度）。null・無しなら隠さない
+  back?: Pixels | null; // ドールの下に描く分（後ろ髪など。rgba と同じ大きさ）。null・無しなら持たない
+  thumbFrom?: Pixels; // サムネイルにする絵（無ければ rgba）
 }
 
 export class ContentStore {
@@ -138,11 +140,15 @@ export class ContentStore {
       }
       const existing = input.replaceId ? doll.items.find((i) => i.id === input.replaceId) : undefined;
       if (input.replaceId && !existing) throw new ContentError(`置き換えるアイテム「${input.replaceId}」がありません`, 404);
-      const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer);
+      const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer, input.thumbFrom);
       if (!encoded) throw new ContentError('画像が全部透明です');
       if (input.hide && input.hide.length !== input.width * input.height) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
       const hide = input.hide ? await encodeMask(input.hide, input.width, input.height, this.writer) : null;
+      if (input.back && input.back.length !== input.width * input.height * 4) throw new ContentError('後ろに描く画像の大きさがドールのキャンバスと違います');
+      const back = input.back ? await encodeLayer(input.back, input.width, input.height, this.writer) : null;
       if (existing) {
+        if (back) existing.back = back;
+        else delete existing.back;
         existing.name = name;
         existing.category = input.category;
         existing.image = encoded.image;
@@ -158,6 +164,7 @@ export class ContentStore {
         image: encoded.image,
         thumb: encoded.thumb,
         ...(hide ? { hide } : {}),
+        ...(back ? { back } : {}),
       };
       doll.items.push(item);
       return item;

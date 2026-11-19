@@ -86,7 +86,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting } = latest.current;
     await engine.setBackground(bg ?? null);
     await engine.drawDoll(toDollConfig(currentDoll, activeHides(items, adjusting)));
-    await engine.drawClothing(adjusting ? items.filter((item) => item.id !== adjusting) : items);
+    await engine.drawClothing(items, adjusting ?? null);
     engine.forceRedraw();
   };
 
@@ -182,11 +182,8 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   // 装備アイテムが変わったら再描画
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
-      // 調整中のアイテムは非表示にする
-      const itemsToRender = adjustingItemId
-        ? equippedItems.filter(item => item.id !== adjustingItemId)
-        : equippedItems;
-      redrawWhenDone(engineRef.current.drawClothing(itemsToRender));
+      // 調整中のアイテムは、ドールの上の分を描かない（調整画面のプレビューが代わりに出る）
+      redrawWhenDone(engineRef.current.drawClothing(equippedItems, adjustingItemId));
     }
   }, [equippedItems, adjustingItemId, isReady]);
 

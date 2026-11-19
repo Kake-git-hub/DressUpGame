@@ -254,6 +254,8 @@ export interface ClothingItemData {
   box: Box;
   // 着ているあいだ隠すドールの部分（白い不透明な所）。位置はドールのキャンバス上
   hide?: { url: string; box: Box };
+  // ドールの下（後ろ）に描く分（後ろ髪など）。位置はドールのキャンバス上
+  back?: { url: string; box: Box };
 }
 
 // 装備中のアイテム（動的zIndex付き）

@@ -20,6 +20,7 @@ export function contentUrlsForDoll(
     doll.bodyImageUrl,
     ...thumbs.filter((u): u is string => !!u),
     ...items.map((i) => i.imageUrl),
+    ...items.flatMap((i) => (i.back ? [i.back.url] : [])),
     ...bgs.map((b) => b.imageUrl),
   ];
 }

@@ -165,6 +165,55 @@ describe('ドールと型紙', () => {
   });
 });
 
+describe('髪（前髪と後ろ髪）', () => {
+  // 頭の上にかぶり、体の左右に垂れる金色の髪（ドールのキャンバス大の PNG）
+  async function hairPng(): Promise<string> {
+    const content = await ok<{ dolls: { image: { canvasW: number; canvasH: number; box: { x: number; y: number; w: number; h: number } } }[] }>('GET', '/api/content');
+    const { canvasW, canvasH, box } = content.dolls[0].image;
+    const k = box.w / 500; // dollPng は 500×1000
+    const at = (x: number, y: number) => [Math.round(box.x + x * k), Math.round(box.y + y * k)];
+    const [hx, hy] = at(170, 5); // 頭（中心 250,80・半径 70）の上半分にかぶる
+    const [lx, ly] = at(120, 5); // 頭の左に垂れる房（体の外）
+    const [rx] = at(335, 5);
+    const gold = (w: number, h: number) => sharp({ create: { width: Math.round(w * k), height: Math.round(h * k), channels: 4, background: '#f0c85a' } }).png().toBuffer();
+    const png = await sharp({ create: { width: canvasW, height: canvasH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([
+        { input: await gold(160, 70), left: hx, top: hy },
+        { input: await gold(50, 400), left: lx, top: ly },
+        { input: await gold(50, 400), left: rx, top: ly },
+      ])
+      .png()
+      .toBuffer();
+    return png.toString('base64');
+  }
+  type Saved = { id: string; image: { box: { w: number; h: number } }; back?: { file: string; box: { w: number; h: number } } };
+  const addHairCategory = () => ok('PUT', '/api/categories', { dollId, category: { label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: true, movable: false } });
+
+  it('髪のカテゴリに保存すると、前髪（image）と後ろ髪（back）に分かれる。ほかのカテゴリは分かれない', async () => {
+    await addHairCategory();
+    const png = await hairPng();
+    const hair = await ok<Saved>('POST', '/api/items', { dollId, category: 'ヘアスタイル', name: 'きんぱつ', png });
+    expect(hair.back).toBeDefined();
+    expect(hair.back!.box.h).toBeGreaterThan(hair.image.box.h * 2); // 後ろ髪は垂れた房まで、前髪は頭の上だけ
+    expect(hair.back!.box.w).toBeGreaterThan(hair.image.box.w);
+    await fs.access(path.join(dir, 'content', hair.back!.file));
+    const top = await ok<Saved>('POST', '/api/items', { dollId, category: 'トップス', name: 'きんのふく', png });
+    expect(top.back).toBeUndefined();
+  }, 30_000);
+
+  it('保存済みの 1 枚の髪を、あとから分けられる。2 回目は断る', async () => {
+    await addHairCategory();
+    const saved = await ok<Saved>('POST', '/api/items', { dollId, category: 'トップス', name: 'むかしのかみ', png: await hairPng() });
+    await ok('PATCH', '/api/items', { id: saved.id, category: 'ヘアスタイル' });
+    const split = await ok<Saved>('POST', '/api/items/split-hair', { id: saved.id });
+    expect(split.id).toBe(saved.id);
+    expect(split.back).toBeDefined();
+    expect(split.image.box.h).toBeLessThan(saved.image.box.h);
+    expect((await call('POST', '/api/items/split-hair', { id: saved.id })).status).toBe(400);
+    expect((await call('POST', '/api/items/split-hair', { id: 'ない' })).status).toBe(404);
+  }, 30_000);
+});
+
 describe('服の追加', () => {
   it('画像を処理して、保存できる', async () => {
     const generated = await fakeImage.generate({ prompt: '', images: [(await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer] });

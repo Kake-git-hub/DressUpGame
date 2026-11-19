@@ -32,18 +32,34 @@ export interface EncodedImage {
   thumb: string;
 }
 
-// RGBA（キャンバス全体）を透明でない部分で切り抜いて、WebP（劣化なし）とサムネイルを書く。全部透明なら null
-export async function encodeCutout(rgba: Pixels, width: number, height: number, writer: FileWriter): Promise<EncodedImage | null> {
+function crop(rgba: Pixels, width: number, height: number): { image: sharp.Sharp; box: NonNullable<ReturnType<typeof alphaBBox>> } | null {
   const box = alphaBBox(rgba, width, height);
   if (!box) return null;
-  const cropped = sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } }).extract({
+  const image = sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } }).extract({
     left: box.x,
     top: box.y,
     width: box.w,
     height: box.h,
   });
+  return { image, box };
+}
+
+// RGBA（キャンバス全体）を透明でない部分で切り抜いて、WebP（劣化なし）だけを書く（サムネイルなし）。全部透明なら null
+export async function encodeLayer(rgba: Pixels, width: number, height: number, writer: FileWriter): Promise<ManifestImage | null> {
+  const cropped = crop(rgba, width, height);
+  if (!cropped) return null;
+  const data = await cropped.image.webp({ lossless: true, effort: 6 }).toBuffer();
+  return { file: await writer.write(data, 'webp'), canvasW: width, canvasH: height, box: cropped.box };
+}
+
+// RGBA（キャンバス全体）を透明でない部分で切り抜いて、WebP（劣化なし）とサムネイルを書く。全部透明なら null。
+// thumbFrom を渡すと、サムネイルはそちらの絵から作る（前髪と後ろ髪に分けた髪の、全体の絵など）
+export async function encodeCutout(rgba: Pixels, width: number, height: number, writer: FileWriter, thumbFrom?: Pixels): Promise<EncodedImage | null> {
+  const main0 = crop(rgba, width, height);
+  if (!main0) return null;
+  const { image: cropped, box } = main0;
   const main = await cropped.clone().webp({ lossless: true, effort: 6 }).toBuffer();
-  const thumb = await cropped
+  const thumb = await ((thumbFrom && crop(thumbFrom, width, height)?.image) || cropped)
     .clone()
     .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 85, alphaQuality: 100 })

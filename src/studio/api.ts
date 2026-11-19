@@ -81,6 +81,7 @@ export const api = {
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
   addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string }) => send<ManifestItem>('POST', '/items', input),
   updateItem: (change: { id: string; name?: string; category?: string }) => send<ManifestItem>('PATCH', '/items', change),
+  splitHair: (id: string) => send<ManifestItem>('POST', '/items/split-hair', { id }),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
   updateCategory: (dollId: string, id: string, change: Partial<Omit<ManifestCategory, 'id'>>) => send<ManifestCategory>('PATCH', '/categories', { dollId, id, change }),

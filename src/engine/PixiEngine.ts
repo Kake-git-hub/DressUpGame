@@ -44,6 +44,7 @@ export function itemPivot(placed: Placed, texture: { width: number; height: numb
 export class PixiEngine {
   private app: Application | null = null;
   private backgroundContainer: Container | null = null;
+  private backContainer: Container | null = null; // ドールの下に描く分（後ろ髪など）
   private dollContainer: Container | null = null;
   private clothingContainer: Container | null = null;
   private faceContainer: Container | null = null;
@@ -102,6 +103,11 @@ export class PixiEngine {
       this.backgroundContainer.label = 'backgroundContainer';
       this.app.stage.addChild(this.backgroundContainer);
 
+      // ドールの下に描く分（後ろ髪など）。背景の上、ドールの下
+      this.backContainer = new Container();
+      this.backContainer.label = 'backContainer';
+      this.app.stage.addChild(this.backContainer);
+
       // ドール用コンテナ
       this.dollContainer = new Container();
       this.dollContainer.label = 'dollContainer';
@@ -132,6 +138,7 @@ export class PixiEngine {
   private cleanup(): void {
     this.initialized = false;
     this.backgroundContainer = null;
+    this.backContainer = null;
     this.dollContainer = null;
     this.clothingContainer = null;
     this.faceContainer = null;
@@ -471,8 +478,9 @@ export class PixiEngine {
     }
   }
 
-  // 服を描画（imageUrlがあれば画像、なければプレースホルダー）
-  async drawClothing(items: (ClothingItemData | EquippedItem)[]): Promise<void> {
+  // 服を描画（imageUrlがあれば画像、なければプレースホルダー）。
+  // hiddenFrontId の服は、ドールの上の分を描かない（調整中は画面側のプレビューが代わりに出る）。ドールの下の分（後ろ髪）は描く
+  async drawClothing(items: (ClothingItemData | EquippedItem)[], hiddenFrontId: string | null = null): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
     }
@@ -486,19 +494,22 @@ export class PixiEngine {
     // 新しい一時コンテナを作成（全ロード完了後に一括表示するため）
     const tempContainer = new Container();
     tempContainer.label = 'tempClothingContainer';
+    const backSprites: Sprite[] = [];
 
     // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
     const loadPromises = items.map(async (item) => {
+      // ドールの下に描く分。読めなくても、上の分は描く
+      const backTexture: Texture | null = item.back ? await Assets.load(item.back.url).catch(() => null) : null;
       if (item.imageUrl) {
         try {
           // キャッシュ済みならすぐに返る
           const texture = await Assets.load(item.imageUrl);
-          return { item, texture, error: null };
+          return { item, texture, backTexture, error: null };
         } catch (error) {
-          return { item, texture: null, error };
+          return { item, texture: null, backTexture, error };
         }
       }
-      return { item, texture: null, error: null };
+      return { item, texture: null, backTexture, error: null };
     });
 
     const drawId = ++this.clothingDrawId;
@@ -506,13 +517,13 @@ export class PixiEngine {
 
     // 破棄チェック（ロード中に破棄された場合）。
     // 読み込み中に次の描画が始まった場合も捨てる（遅れて届いた古い服装で上書きしない）
-    if (this.destroyed || !this.clothingContainer || drawId !== this.clothingDrawId) {
+    if (this.destroyed || !this.clothingContainer || !this.backContainer || drawId !== this.clothingDrawId) {
       tempContainer.destroy({ children: true });
       return;
     }
 
     // ロード完了後、一時コンテナに描画
-    for (const { item, texture, error } of loadedItems) {
+    for (const { item, texture, backTexture, error } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
@@ -537,6 +548,42 @@ export class PixiEngine {
       // 調整オフセットを適用（ピクセル単位）
       itemX += adjustOffsetX;
       itemY += adjustOffsetY;
+
+      // 色相フィルター（colorHueが設定されている場合のみ個別適用）
+      const colorHue = (item as EquippedItem).colorHue ?? 0;
+      const hueFilters = () => {
+        const hueFilter = new ColorMatrixFilter();
+        hueFilter.hue(colorHue, false);
+        // 解像度をデバイスに合わせる（画質維持）
+        hueFilter.resolution = window.devicePixelRatio || 1;
+        // パディングを0にして位置ずれを防止
+        hueFilter.padding = 0;
+        return [hueFilter];
+      };
+
+      // ドールの下に描く分（後ろ髪など）: 上の分と同じ軸で、同じように動かす
+      if (backTexture && item.back) {
+        backTexture.source.scaleMode = 'linear';
+        const baseScale = (this.app.screen.height * HEIGHT_RATIO) / 1024;
+        const front = itemPivot(item, texture ?? backTexture);
+        const box = item.back.box;
+        const canvasW = item.canvasW ?? backTexture.width;
+        const canvasH = item.canvasH ?? backTexture.height;
+        const backSprite = new Sprite(backTexture);
+        backSprite.anchor.set(0);
+        // 軸（上の分の中心）を、後ろの画像の上の座標に直す
+        backSprite.pivot.set(
+          ((canvasW / 2 + front.fromCanvasCenter.x - box.x) * backTexture.width) / box.w,
+          ((canvasH / 2 + front.fromCanvasCenter.y - box.y) * backTexture.height) / box.h,
+        );
+        backSprite.scale.set(((baseScale * s * adjustScale) * box.w) / backTexture.width, ((baseScale * s * adjustScale) * box.h) / backTexture.height);
+        backSprite.x = itemX + front.fromCanvasCenter.x * baseScale * s;
+        backSprite.y = itemY + front.fromCanvasCenter.y * baseScale * s;
+        backSprite.rotation = (adjustRotation * Math.PI) / 180;
+        if (colorHue !== 0) backSprite.filters = hueFilters();
+        backSprites.push(backSprite);
+      }
+      if (item.id === hiddenFrontId) continue;
 
       // テクスチャがロード済みの場合はスプライトを作成
       if (texture) {
@@ -564,17 +611,7 @@ export class PixiEngine {
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-        // 色相フィルター（colorHueが設定されている場合のみ個別適用）
-        const colorHue = (item as EquippedItem).colorHue ?? 0;
-        if (colorHue !== 0) {
-          const hueFilter = new ColorMatrixFilter();
-          hueFilter.hue(colorHue, false);
-          // 解像度をデバイスに合わせる（画質維持）
-          hueFilter.resolution = window.devicePixelRatio || 1;
-          // パディングを0にして位置ずれを防止
-          hueFilter.padding = 0;
-          clothingSprite.filters = [hueFilter];
-        }
+        if (colorHue !== 0) clothingSprite.filters = hueFilters();
 
         tempContainer.addChild(clothingSprite);
       } else if (error) {
@@ -602,6 +639,11 @@ export class PixiEngine {
       this.clothingContainer.addChild(child);
     }
     tempContainer.destroy();
+
+    // ドールの下に描く分を入れ替える
+    for (const child of this.backContainer.children) if (child instanceof Sprite) child.filters = null;
+    this.backContainer.removeChildren().forEach((child) => child.destroy());
+    for (const sprite of backSprites) this.backContainer.addChild(sprite);
 
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
     this.cacheClothingContainer();

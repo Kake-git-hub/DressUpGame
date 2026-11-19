@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
 import type { BodyParts } from '../../src/pipeline/bodyParts.ts';
+import { isHairCategory } from '../../src/pipeline/hairSplit.ts';
 import { chooseKeyColors } from '../../src/pipeline/keyColors.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
@@ -54,8 +55,6 @@ export interface Candidate {
 // 1 品目あたりの生成回数の既定（1 = 自動の作り直しなし。値段を抑える）。STUDIO_MAX_ATTEMPTS で変えられる
 export const MAX_ATTEMPTS = 1;
 const MIN_REGION_SHARE = 0.8;
-// 髪として扱うカテゴリ（名前で決める）
-const isHairCategory = (label: string): boolean => /かみ|髪|ヘア|hair/i.test(label);
 // 頭の拡大図の背景（AI が塗り変えにくい、うすい無彩色）
 const FACE_BACKGROUND: Rgb = [233, 230, 242];
 
@@ -165,7 +164,7 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `- Every part of the mannequin that the item does not cover must stay the same flat ${colorName(silhouette)}. Apart from the item itself, do not draw skin, a face, hair or anything else on it.`,
     `- The background must stay the same flat ${colorName(background)} with no shadows, gradients, floor, text or frame.`,
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
-    '- Do not draw an outline, border or shadow around the mannequin itself.',
+    '- Do not draw an outline, border or shadow around the mannequin itself, and do not draw body details on it (no chin or jaw line, no neck line, no collarbone, no fingers).',
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
     '- Square image, same framing as the template.',
     feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',

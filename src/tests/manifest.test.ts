@@ -53,6 +53,11 @@ describe('parseManifest', () => {
     expect(parseManifest(mutate((c) => (c.dolls[0].items[0].hide = hide))).dolls[0].items[0].hide).toEqual(hide);
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].hide = { file: 'x' })))).toThrow();
   });
+  it('ドールの下に描く分（back）を保ち、形が違えば Error', () => {
+    const back = { file: 'files/b.webp', canvasW: 1024, canvasH: 1024, box: { x: 200, y: 20, w: 600, h: 900 } };
+    expect(parseManifest(mutate((c) => (c.dolls[0].items[0].back = back))).dolls[0].items[0].back).toEqual(back);
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].back = { file: 'x' })))).toThrow();
+  });
   it('layer の上書きが数値でなければ Error', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].layer = '5')))).toThrow();
   });

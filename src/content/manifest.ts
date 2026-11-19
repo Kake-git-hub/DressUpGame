@@ -35,6 +35,8 @@ export interface ManifestItem {
   // 着ているあいだ、ドールのこの部分を隠す（手袋・くつの下から指先などがはみ出さないように）。
   // 白で不透明な所が隠す所。位置はドールのキャンバス上
   hide?: ManifestImage;
+  // ドールの下（後ろ）に描く分。髪の「後ろ髪」など。image のほうはドールの上に描く（前髪）
+  back?: ManifestImage;
 }
 
 export interface ManifestBackground {
@@ -147,6 +149,7 @@ function doll(v: unknown, path: string): ManifestDoll {
     if (r.layer !== undefined) item.layer = num(r.layer, `${p}.layer`);
     if (r.overlap !== undefined) item.overlap = bool(r.overlap, `${p}.overlap`);
     if (r.hide !== undefined) item.hide = image(r.hide, `${p}.hide`);
+    if (r.back !== undefined) item.back = image(r.back, `${p}.back`);
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);

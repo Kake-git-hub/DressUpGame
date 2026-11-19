@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ManifestDoll } from '../content/manifest';
 import type { BodyParts } from '../pipeline/bodyParts';
+import { isHairCategory, splitHair } from '../pipeline/hairSplit';
 import { defaultLimbs, hideMask, limbZones } from '../pipeline/limbZones';
 import type { Limb } from '../pipeline/limbZones';
 import { ApiError, api, blobToBase64, contentUrl } from './api';
@@ -59,6 +60,9 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   const [category, setCategory] = useState(source.category || doll.categories[0]?.id || '');
   const labelOf = (id: string) => doll.categories.find((c) => c.id === id)?.label ?? id;
   // 手足の先を服に合わせる（はみ出したドールの指先などを隠す）。手袋・くつなどは最初から入れる
+  const isHair = isHairCategory(labelOf(category));
+  const [cutVersion, setCutVersion] = useState(0);
+  const splitRef = useRef<{ front: HTMLCanvasElement; back: HTMLCanvasElement } | null>(null);
   const [limbs, setLimbs] = useState<Limb[]>(() => defaultLimbs(labelOf(source.category || doll.categories[0]?.id || '')));
   const [hasHide, setHasHide] = useState(false);
   const [nudge, setNudge] = useState({ scale: 1, dx: 0, dy: 0 });
@@ -93,6 +97,14 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       drawNudged(ctx, loaded.source);
       return;
     }
+    // 髪: 保存のときと同じように、後ろ髪 → ドール → 前髪の順に重ねて見せる（ブラシで直している最中は、分ける前の絵）
+    const layers = view === 'worn' && isHair ? splitRef.current : null;
+    if (layers) {
+      ctx.drawImage(layers.back, 0, 0);
+      ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
+      ctx.drawImage(layers.front, 0, 0);
+      return;
+    }
     if (view === 'worn') {
       ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
       if (hideRef.current && hasHide) {
@@ -102,7 +114,36 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       }
     }
     ctx.drawImage(cut, 0, 0);
-  }, [view, drawNudged, canvasW, canvasH, box, hasHide]);
+  }, [view, drawNudged, canvasW, canvasH, box, hasHide, isHair]);
+
+  // 髪を、前髪と後ろ髪に分けて持っておく（切り抜きが変わるたびに作り直す）
+  const refreshSplit = useCallback(() => {
+    const cut = cutRef.current;
+    const loaded = images.current;
+    splitRef.current = null;
+    if (!cut || !loaded || !isHair) return;
+    const pixels = (draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas');
+      c.width = canvasW;
+      c.height = canvasH;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      draw(ctx);
+      return ctx.getImageData(0, 0, canvasW, canvasH).data;
+    };
+    const dollPixels = pixels((ctx) => ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h));
+    const alpha = new Uint8Array(canvasW * canvasH);
+    for (let p = 0; p < alpha.length; p++) alpha[p] = dollPixels[p * 4 + 3];
+    const split = splitHair(pixels((ctx) => ctx.drawImage(cut, 0, 0)), alpha, canvasW, canvasH);
+    if (!split) return;
+    const toCanvas = (data: Uint8ClampedArray) => {
+      const c = document.createElement('canvas');
+      c.width = canvasW;
+      c.height = canvasH;
+      c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(data), canvasW, canvasH), 0, 0);
+      return c;
+    };
+    splitRef.current = { front: toCanvas(split.front), back: toCanvas(split.back) };
+  }, [isHair, canvasW, canvasH, box]);
 
   // 画像を読む
   useEffect(() => {
@@ -176,7 +217,15 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     ctx.clearRect(0, 0, canvasW, canvasH);
     drawNudged(ctx, images.current.cut);
     setTouched(false);
+    setCutVersion((v) => v + 1);
   }, [ready, drawNudged, canvasW, canvasH]);
+
+  // 切り抜きを作り直したとき・カテゴリを変えたときに、髪の前後を分け直す（手直しは消さない）
+  useEffect(() => {
+    if (!ready) return;
+    refreshSplit();
+    paint();
+  }, [ready, cutVersion, refreshSplit, paint]);
 
   useEffect(paint, [paint, ready, nudge, hasHide, limbs]);
 
@@ -215,6 +264,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     ctx.clearRect(0, 0, canvasW, canvasH);
     if (tool === 'restore') drawNudged(ctx, loaded.source);
     ctx.restore();
+    splitRef.current = null; // 直している最中は分けない。指を離したら作り直す
     setTouched(true);
     paint();
   };
@@ -256,6 +306,11 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
             stroke(e);
           }}
           onPointerMove={stroke}
+          onPointerUp={() => {
+            if (tool === 'move' || !isHair) return;
+            refreshSplit();
+            paint();
+          }}
         />
         <div className="row small">
           {(['worn', 'cut', 'source'] as View[]).map((v) => (

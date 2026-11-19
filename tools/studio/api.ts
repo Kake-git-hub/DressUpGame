@@ -12,6 +12,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
+import { isHairCategory, splitHair } from '../../src/pipeline/hairSplit.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
@@ -21,7 +22,7 @@ import { BudgetError } from './budget.ts';
 import type { Budget } from './budget.ts';
 import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, planItems } from './generate.ts';
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
-import { loadDollTemplate, processGenerated } from './processGenerated.ts';
+import { dollTemplateFromImage, loadDollTemplate, processGenerated } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
 import { alphaToPng, pngToRgba, renderCloseups, renderSilhouette, rgbaToPng } from './silhouette.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
@@ -167,6 +168,23 @@ export class StudioApi {
     if (!doll) throw new HttpError(404, `ドール「${dollId}」がありません`);
     return { manifest, doll };
   }
+  // 髪のカテゴリなら、前髪（ドールの上）と後ろ髪（ドールの下）に分ける。ほかはそのまま
+  private async hairLayers(
+    dollId: string,
+    category: string,
+    image: { rgba: Uint8ClampedArray; width: number; height: number },
+    force = false,
+  ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray }> {
+    const { doll } = await this.doll(dollId);
+    const label = doll.categories.find((c) => c.id === category)?.label ?? category;
+    if (!force && !isHairCategory(label)) return image;
+    const template = await this.dollTemplate(doll);
+    if (template.canvasW !== image.width || template.canvasH !== image.height) return image; // 大きさの違いは、保存のときに断られる
+    const alpha = new Uint8Array(image.width * image.height);
+    for (let p = 0; p < alpha.length; p++) alpha[p] = template.rgba[p * 4 + 3];
+    const split = splitHair(image.rgba, alpha, image.width, image.height);
+    return split ? { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: image.rgba } : image;
+  }
   private async dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {
     const key = `${doll.id}\n${doll.image.file}`;
     let template = this.templates.get(key);
@@ -278,7 +296,20 @@ export class StudioApi {
           if (error instanceof HttpError) throw error;
           throw new HttpError(400, '画像を読めませんでした');
         }
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...image, replaceId: b.replaceId, hide }));
+        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...(await this.hairLayers(b.dollId, b.category, image)), replaceId: b.replaceId, hide }));
+      }
+      case 'POST /api/items/split-hair': {
+        // 保存済みの髪（1 枚）を、前髪と後ろ髪に分け直す
+        const b = this.body<{ id: string }>(req);
+        const manifest = await this.store.read();
+        const doll = manifest.dolls.find((d) => d.items.some((i) => i.id === b.id));
+        const item = doll?.items.find((i) => i.id === b.id);
+        if (!doll || !item) throw new HttpError(404, `アイテム「${b.id}」がありません`);
+        if (item.back) throw new HttpError(400, 'この髪は、もう前髪と後ろ髪に分かれています');
+        const placed = await dollTemplateFromImage(await fs.readFile(path.join(this.store.dir, item.image.file)), item.image);
+        const layers = await this.hairLayers(doll.id, item.category, { rgba: placed.rgba, width: placed.canvasW, height: placed.canvasH }, true);
+        if (!layers.back) throw new HttpError(422, '体の前にかかる髪が見つからないので、分けませんでした');
+        return json(await this.store.addItem(doll.id, { category: item.category, name: item.name, ...layers, replaceId: item.id }));
       }
       case 'PATCH /api/items': {
         const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null }>(req);
