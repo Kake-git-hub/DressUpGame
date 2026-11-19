@@ -11,8 +11,12 @@
  */
 import type { Pixels } from './alpha';
 
-// 髪として扱うカテゴリ（名前で決める）
-export const isHairCategory = (label: string): boolean => /かみ|髪|ヘア|hair/i.test(label);
+// うしろがみのカテゴリ（名前で決める）: 前髪とは別の品目として、最初からドールの後ろに描く 1 枚として作る
+export const isBackHairCategory = (label: string): boolean => /うしろ[がか]み|後ろ?髪|バックヘア|back ?hair/i.test(label);
+// 髪として扱うカテゴリ（名前で決める）。うしろがみは含まない
+export const isHairCategory = (label: string): boolean => /かみ|まえがみ|髪|ヘア|hair/i.test(label) && !isBackHairCategory(label);
+// 1 枚の髪を、保存のときに前髪と後ろ髪に分けるか。うしろがみのカテゴリを持つドールでは分けない（髪のカテゴリは前髪だけを作る）
+export const splitsHair = (label: string, allLabels: readonly string[]): boolean => isHairCategory(label) && !allLabels.some(isBackHairCategory);
 
 export interface HairSplit {
   front: Uint8ClampedArray; // ドールの上に描く分
@@ -28,6 +32,8 @@ const CORE_PER = 400;
 const FRAGMENT_DIVISOR = 1000;
 // 体のふちの帯で、髪を「前」とみなすには、まわりのこの範囲（px）の体がすべて髪で隠れていること
 const COVER_REACH = 2;
+// 描いた絵で穴を埋めるとき、穴のふちで、もとの髪を絵に置き換える幅（px）
+const SEAM_WIDTH = 4;
 // 後ろ髪で、体の外にある「体と髪のあいだのすき間」を埋める幅の上限（画像の幅に対する割合）
 const GAP_SHARE = 0.02;
 
@@ -168,7 +174,26 @@ export function splitHair(
   const frontPixels = new Uint8ClampedArray(total * 4);
   for (let p = 0; p < total; p++) if (front[p]) frontPixels.set(rgba.subarray(p * 4, p * 4 + 4), p * 4);
 
-  // 後ろ: 髪の全体。体の形の穴を、左右の髪の色で埋める（行ごとに、穴の両側の髪の色をなめらかにつなぐ）
+  const back = fillBehindBody(rgba, inside, nearBody, width, height, depth, shape, null);
+  return { front: frontPixels, back };
+}
+
+/**
+ * 髪の全体に、体の形の穴を埋めた「マントのような 1 枚」を作る。
+ * 埋めるのは、行ごとに、髪にはさまれた「体の下」と「髪と体のあいだの細いすき間」。
+ * paint（体に隠れていた髪を描いた絵。髪のある所だけ不透明）があれば、その絵で埋める。無い所は、両側の髪の色をなめらかにつなぐ
+ */
+function fillBehindBody(
+  rgba: Pixels,
+  inside: Uint8Array,
+  nearBody: (p: number) => boolean,
+  width: number,
+  height: number,
+  depth: number,
+  shape: ArrayLike<number> | null,
+  paint: Pixels | null,
+): Uint8ClampedArray {
+  const total = width * height;
   const back = new Uint8ClampedArray(rgba);
   const solid = new Uint8Array(total);
   for (let p = 0; p < total; p++) {
@@ -203,6 +228,7 @@ export function splitHair(
   }
 
   // 行ごとに、髪にはさまれた区間の「体の下」と「細いすき間」を、両側の髪の色をなめらかにつないで埋める
+  const painted = new Uint8Array(total); // 描いた絵で埋めた所
   const inset = Math.max(1, Math.round(depth / 2)); // 色は、髪のふち（輪郭線）より少し内側から取る
   for (let y = 0; y < height; y++) {
     const row = y * width;
@@ -232,13 +258,63 @@ export function splitHair(
       };
       const left = colorAt(a - 1, -1);
       const right = colorAt(b + 1, 1);
-      for (let k = a; k <= b; k++) {
-        if (!inside[row + k] && !gap[row + k]) continue;
+      const joined = (k: number, q: number) => {
         const t = (k - a + 1) / (b - a + 2);
-        for (let c = 0; c < 3; c++) back[(row + k) * 4 + c] = Math.round(rgba[left + c] * (1 - t) + rgba[right + c] * t);
-        back[(row + k) * 4 + 3] = 255;
+        for (let c = 0; c < 3; c++) back[q + c] = Math.round(rgba[left + c] * (1 - t) + rgba[right + c] * t);
+        back[q + 3] = 255;
+      };
+      const fillable = (k: number) => inside[row + k] === 1 || gap[row + k] === 1;
+      if (!paint) {
+        for (let k = a; k <= b; k++) if (fillable(k)) joined(k, (row + k) * 4);
+        continue;
+      }
+      // 描いた絵があるとき: 絵に髪がある所は、その絵で埋める。絵に髪が無い所は、髪が無いものとして埋めない
+      // （脚の後ろなど。切り抜きの残りかすを両端にして、体を塗りつぶさないように）。
+      // ただし、絵のふちと髪のあいだにできる細いすき間（絵の位置が少し違う分）は、両側の色でつなぐ
+      let k = a;
+      while (k <= b) {
+        const q = (row + k) * 4;
+        if (!fillable(k)) {
+          k++;
+        } else if (paint[q + 3] >= 128) {
+          for (let c = 0; c < 3; c++) back[q + c] = paint[q + c];
+          back[q + 3] = 255;
+          painted[row + k] = 1;
+          k++;
+        } else {
+          const start = k;
+          while (k <= b && fillable(k) && paint[(row + k) * 4 + 3] < 128) k++;
+          if (k - start <= gapLimit) for (let m = start; m < k; m++) joined(m, (row + m) * 4);
+        }
       }
     }
   }
-  return { front: frontPixels, back };
+  // 穴のふち（体の輪郭線だった所）: もとの髪のふちは、マネキンの色がにじんで線に見える。絵で埋めた所に接する数 px を、絵に置き換える
+  if (paint) {
+    const seam = distance(painted, solid, width, height, SEAM_WIDTH);
+    for (let p = 0; p < total; p++) {
+      if (seam[p] === 0 || paint[p * 4 + 3] < 128) continue;
+      for (let c = 0; c < 3; c++) back[p * 4 + c] = paint[p * 4 + c];
+    }
+  }
+  return back;
+}
+
+/**
+ * うしろがみ: マネキンのまわりに描かれた髪（rgba）から、体の形の穴を埋めた 1 枚を作る。
+ * paint は、マネキンを消して髪を描き足した絵（髪のある所だけ不透明）。位置や大きさが少し違っていても、穴の中の模様として使うだけなので、輪郭は rgba のまま
+ */
+export function capeHair(
+  rgba: Pixels,
+  dollAlpha: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: { bodyShape?: ArrayLike<number>; paint?: Pixels } = {},
+): Uint8ClampedArray {
+  const depth = Math.max(2, Math.round(width / DEPTH_PER));
+  const total = width * height;
+  const inside = new Uint8Array(total);
+  for (let p = 0; p < total; p++) inside[p] = dollAlpha[p] >= 128 ? 1 : 0;
+  const fromInside = distance(inside, null, width, height, Math.max(1, Math.round(depth / 2)));
+  return fillBehindBody(rgba, inside, (p) => inside[p] === 1 || fromInside[p] > 0, width, height, depth, options.bodyShape ?? null, options.paint ?? null);
 }

@@ -13,7 +13,7 @@ import sharp from 'sharp';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { anchorPart, shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
 import type { BodyParts } from '../../src/pipeline/bodyParts.ts';
-import { isHairCategory } from '../../src/pipeline/hairSplit.ts';
+import { capeHair, isBackHairCategory, isHairCategory } from '../../src/pipeline/hairSplit.ts';
 import { skinColor } from '../../src/pipeline/fillInside.ts';
 import { limbZones } from '../../src/pipeline/limbZones.ts';
 import { chooseKeyColors } from '../../src/pipeline/keyColors.ts';
@@ -104,6 +104,8 @@ const PLAN_SCHEMA = {
 export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string }): Promise<PlannedItem[]> {
   const categories = doll.categories.filter((c) => !input.categories?.length || input.categories.includes(c.id));
   if (categories.length === 0) throw new AiError('カテゴリが選ばれていません', 400);
+  // うしろがみのカテゴリを持つドールでは、髪のカテゴリは前髪だけを作る
+  const frontOnly = doll.categories.some((c) => isBackHairCategory(c.label));
   const result = await text.json<{ items: PlannedItem[] }>({
     system:
       'You plan clothing and accessory items for a paper-doll dress-up game played by young children in Japan. ' +
@@ -119,8 +121,12 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
         const note =
           kind === 'face'
             ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
-            : kind === 'hair'
-              ? ' (hairstyle only: hair and bangs. Never any facial features.)'
+            : kind === 'backhair'
+              ? ' (back hair only: the mass of hair at the back of the head and hanging down behind the body, as its own item. Describe its length, shape and colour. No bangs, no face.)'
+              : kind === 'hair'
+                ? frontOnly
+                  ? ' (front hair only: bangs, the hair on top of the head and short side locks beside the face. The long hair behind the body is the separate back-hair category. Never any facial features.)'
+                  : ' (hairstyle only: hair and bangs. Never any facial features.)'
               : kind === 'shoes'
                 ? ' (closed shoes or boots that cover the whole foot. No sandals, open toes or bare insteps.)'
                 : '';
@@ -155,11 +161,12 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
 
 // 顔と髪型は別のカテゴリで着せ替えるので、それぞれ相手の部分を描かせない
 const FACE_LABEL = /かお|顔|face|メイク|makeup/i;
-const HAIR_LABEL = /^(かみ|髪|ヘア|hair)$|ヘアスタイル|かみがた|髪型|hair ?style/i;
+const HAIR_LABEL = /^(かみ|髪|ヘア|hair)$|ヘアスタイル|かみがた|髪型|hair ?style|まえがみ|前髪/i;
 
 const SHOES_LABEL = /くつ(?!した)|靴(?!下)|shoe|ブーツ|boot/i;
 
-export function categoryKind(label: string): 'face' | 'hair' | 'shoes' | null {
+export function categoryKind(label: string): 'face' | 'hair' | 'backhair' | 'shoes' | null {
+  if (isBackHairCategory(label)) return 'backhair';
   if (HAIR_LABEL.test(label.trim())) return 'hair';
   if (FACE_LABEL.test(label)) return 'face';
   if (SHOES_LABEL.test(label)) return 'shoes';
@@ -167,8 +174,17 @@ export function categoryKind(label: string): 'face' | 'hair' | 'shoes' | null {
 }
 
 // カテゴリごとの追加の決まり（画像生成への指示）
-export function categoryRules(label: string): string[] {
+// frontOnly: うしろがみを別の品目として作るドールの、髪のカテゴリ（前髪だけを描かせる）
+export function categoryRules(label: string, frontOnly = false): string[] {
   switch (categoryKind(label)) {
+    case 'backhair':
+      return [
+        '- This item is the BACK HAIR only: the hair at the back of the head and the hair that hangs down behind the neck, shoulders and back. It is a separate layer that will be placed behind the doll.',
+        '- The mannequin stands in front of this hair and hides the part of it that is directly behind the body. Nothing is drawn on top of the mannequin: no bangs, no fringe, and no strands in front of the face, shoulders, arms or body.',
+        '- The hair is visible only around the mannequin: above and beside the head, and beside and below the body where it sticks out from behind.',
+        '- Draw it at a natural size for this doll. Lengths in the description are measured on the body of the mannequin.',
+        '- No face, no hat and no other accessories.',
+      ];
     case 'face':
       return [
         '- This item is the face only: eyes, eyebrows, eyelashes, nose, mouth and cheek blush, drawn on the head of the mannequin.',
@@ -176,6 +192,14 @@ export function categoryRules(label: string): string[] {
         '- No hat, no ears decorations and nothing outside the face area.',
       ];
     case 'hair':
+      if (frontOnly) {
+        return [
+          '- This item is the FRONT HAIR only: the bangs, the hair on top of the head and short side locks beside the face, like the front half of a wig placed on the mannequin\'s head.',
+          '- Do not draw long hair hanging down behind or beside the body, and no ponytails or braids: the back hair is a separate item. The hair ends around the height of the chin or the shoulders at the latest.',
+          '- Do not draw eyes, eyebrows, nose, mouth or any other facial features. Faces are a separate item, so the face area must stay the flat mannequin colour where the hair does not cover it.',
+          '- No hat or other accessories.',
+        ];
+      }
       return [
         '- This item is the hairstyle only (hair, bangs, and the hair at the back), like a wig placed on the mannequin\'s head.',
         '- Do not draw eyes, eyebrows, nose, mouth or any other facial features. Faces are a separate item, so the face area must stay the flat mannequin colour where the hair does not cover it.',
@@ -212,7 +236,7 @@ const WARNING_FIX: Record<WarningCode, string> = {
   repainted: 'The head or skin was repainted. Leave everything except the facial features exactly as it is.',
 };
 
-function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, closeup: boolean): string {
+function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, closeup: boolean, frontOnly = false): string {
   return [
     `The first image is a mannequin template: a flat ${colorName(silhouette)} silhouette of a doll on a flat ${colorName(background)} background.`,
     closeup
@@ -222,7 +246,9 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `Draw exactly one item on the mannequin: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
-    isHairCategory(categoryLabel)
+    isBackHairCategory(categoryLabel)
+      ? `Every gap between strands of hair must show the flat ${colorName(background)} background or the flat mannequin, never any other colour.`
+      : isHairCategory(categoryLabel)
       ? `This item is a hairstyle worn like a wig. Draw only the hair. The face area of the head must stay the same flat ${colorName(silhouette)} (no eyes, no mouth, no skin). ` +
         `Every gap between strands of hair must show the flat ${colorName(background)} background or the flat mannequin, never any other colour.`
       : '',
@@ -233,12 +259,70 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
     '- Do not draw an outline, border or shadow around the mannequin itself, and do not draw body details on it (no chin or jaw line, no neck line, no collarbone, no fingers).',
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
-    ...categoryRules(categoryLabel),
+    ...categoryRules(categoryLabel, frontOnly),
     '- Square image, same framing as the template.',
     feedback ? `A previous attempt at this same item was inspected and rejected. Draw it again from scratch and fix these problems:\n${feedback}` : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+// うしろがみの 2 枚目: マネキンを消して、体に隠れていた髪を描かせる
+function backHairRevealPrompt(silhouette: Rgb, background: Rgb): string {
+  return [
+    `The image shows hair drawn around a flat ${colorName(silhouette)} mannequin on a flat ${colorName(background)} background. The mannequin stands in front of the hair and hides part of it.`,
+    'Edit this image: remove the mannequin and reveal the hair that was hidden behind it.',
+    '- Keep the hair that is already visible exactly as it is: same position, same size, same outline, same colours, same art style. Do not move, resize, lengthen, widen or restyle the hair.',
+    '- Where the mannequin overlaps the area of the hair (the head, the neck, the shoulders, and the body and arms between the left and right parts of the hair), paint the hidden hair: strands in the same colours and style that continue the visible hair, so that the hair becomes one solid unbroken mass like a cape, with no hole and no outline in the shape of the head or body.',
+    `- Where the mannequin is outside the hair (for example the legs below the tips of the hair, or the arms beside it), replace it with the flat ${colorName(background)} background.`,
+    `- No ${colorName(silhouette)} may remain anywhere. Do not draw a face, skin, a body or anything new.`,
+    `- The background stays the same flat ${colorName(background)}. Square image, same framing.`,
+  ].join('\n');
+}
+
+// 鍵の色（背景・シルエット）に近い画素を透明にする。残るのが、描かれた髪
+const KEY_DISTANCE = 90;
+function withoutKeyColors(rgba: Uint8ClampedArray, keys: Rgb[]): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(rgba);
+  for (let i = 0; i < out.length; i += 4) {
+    for (const [r, g, b] of keys) {
+      if (Math.hypot(out[i] - r, out[i + 1] - g, out[i + 2] - b) < KEY_DISTANCE) {
+        out[i + 3] = 0;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * うしろがみを、穴のない 1 枚にする。
+ * 1 枚目（マネキンのまわりに描いた髪）は、大きさと位置がドールに合っているが、体の所に穴がある。
+ * 2 枚目として、マネキンを消して髪を描き足した絵を作らせ、穴の中だけをその絵で埋める（輪郭は 1 枚目のまま）。
+ * 2 枚目が作れなければ、穴は左右の髪の色でつないで埋める（note にその旨）
+ */
+async function completeBackHair(
+  ctx: GenerateContext,
+  result: { rgba: Uint8ClampedArray; source: Uint8ClampedArray; shape: Uint8Array | null; width: number; height: number },
+  keys: { silhouette: Rgb; background: Rgb },
+): Promise<{ rgba: Uint8ClampedArray; note: string | null }> {
+  const { width, height } = result;
+  const alpha = new Uint8Array(width * height);
+  for (let p = 0; p < alpha.length; p++) alpha[p] = ctx.template.rgba[p * 4 + 3];
+  let paint: Uint8ClampedArray | undefined;
+  let note: string | null = null;
+  try {
+    await ctx.budget.spend();
+    const revealed = await ctx.image.generate({
+      prompt: backHairRevealPrompt(keys.silhouette, keys.background),
+      images: [await rgbaToPng(result.source, width, height)],
+    });
+    const raw = await sharp(revealed).ensureAlpha().resize(width, height, { fit: 'fill' }).raw().toBuffer();
+    paint = withoutKeyColors(new Uint8ClampedArray(raw.buffer, raw.byteOffset, raw.byteLength), [keys.silhouette, keys.background]);
+  } catch (error) {
+    note = `体に隠れる部分の髪を描けなかったので、左右の色でつないで埋めました（${(error as Error).message}）`;
+  }
+  return { rgba: capeHair(result.rgba, alpha, width, height, { bodyShape: result.shape ?? undefined, paint }), note };
 }
 
 // 顔の指示文。画像は、ドールの本物の頭の拡大図（顔はまだ無い）
@@ -306,6 +390,10 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   const avoid: Rgb[] = []; // 前回、服と近すぎた色
   let feedback: string | null = null;
   const maxAttempts = ctx.maxAttempts ?? MAX_ATTEMPTS;
+  const kind = categoryKind(label);
+  // うしろがみのカテゴリを持つドールでは、髪のカテゴリは前髪だけを作る
+  const frontOnly = ctx.doll.categories.some((c) => isBackHairCategory(c.label));
+  let backHairNote: string[] = [];
   // 前の回の結果。作り直しが失敗したり、何も残らなかったりしたときは、こちらを残す
   let kept: { png: Buffer; source: Buffer; shape?: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
   let rewritten = false; // 断られて説明文を書き直したか（1 回まで）
@@ -340,7 +428,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
         await ctx.budget.spend();
         const generated = await ctx.image.generate({
-          prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
+          prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup, frontOnly),
           images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
         });
         // 髪型・帽子は、体全体ではなく頭に合わせて置く
@@ -362,6 +450,13 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
               : undefined,
         });
         if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
+        // うしろがみ: 体の形の穴を埋めて、1 枚にする（描けた髪があるときだけ）
+        backHairNote = [];
+        if (kind === 'backhair' && !result.warnings.some((w) => w.code === 'empty')) {
+          const completed = await completeBackHair(ctx, result, keys);
+          result = { ...result, rgba: completed.rgba };
+          if (completed.note) backHairNote = [completed.note];
+        }
       }
     } catch (error) {
       const message = (error as Error).message;
@@ -394,14 +489,14 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.source = await rgbaToPng(result.source, result.width, result.height);
     candidate.shape = result.shape ? await alphaToPng(result.shape, result.width, result.height) : undefined;
     candidate.warnings = [...result.warnings];
-    candidate.notes = [...rewriteNote, ...redoNote];
+    candidate.notes = [...rewriteNote, ...redoNote, ...backHairNote];
 
     // 数値の検品
     const problems: string[] = result.warnings.map((w) => w.message);
     const fixes: string[] = result.warnings.map((w) => WARNING_FIX[w.code]); // 作り直すときに画像生成 AI へ伝える指示（英語）
     const region = ctx.data.regions[item.category];
     // 髪は長くも広くもなるので、範囲では見ない（頭に合っているかは、見た目の検品で見る）
-    if (region && !empty && categoryKind(label) !== 'hair') {
+    if (region && !empty && kind !== 'hair' && kind !== 'backhair') {
       const share = shareInsideRegion(result.rgba, result.width, result.height, region);
       if (share < MIN_REGION_SHARE) {
         problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
@@ -413,7 +508,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     if (problems.length === 0) {
       let verdict: { ok: boolean; reason: string; fix?: string };
       try {
-        const preview = await renderPreview(ctx.template, [result.rgba]);
+        const preview = kind === 'backhair' ? await renderPreview(ctx.template, [], undefined, [result.rgba]) : await renderPreview(ctx.template, [result.rgba]);
         verdict = await ctx.text.json<{ ok: boolean; reason: string; fix?: string }>({
           system: 'You are a strict quality inspector for a children\'s dress-up game. Reply with JSON only.',
           prompt: [
@@ -427,7 +522,11 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
             '- leftover patches of flat key colour or background, stray specks or a rectangular block remain;',
             '- extra objects, body parts or text are present, or the drawing is malformed.',
             categoryKind(label) === 'face' ? 'This item must be a face without any hair: set ok to false if any hair (bangs, sidelocks, hair outline) is drawn.' : '',
-            categoryKind(label) === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
+            kind === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
+            kind === 'hair' && frontOnly ? 'This item must be front hair only (bangs, top of the head, short side locks): set ok to false if long hair hangs down behind or beside the body.' : '',
+            kind === 'backhair'
+              ? 'This item is back hair: it is placed BEHIND the doll, so the doll covers its middle and the head stays bald in front. That is correct. Judge only the hair that sticks out around the doll: set ok to false if it is not centred behind the head, if its size is unnatural for this doll, or if hair is drawn in front of the face or body.'
+              : '',
             categoryKind(label) === 'shoes' ? 'These must be shoes that cover the feet completely: set ok to false if the doll\'s bare foot, toes or the outline of the foot shows through inside a shoe or sticks out of it.' : '',
             'Otherwise set ok to true.',
             'reason: explain briefly in Japanese (one sentence) what you saw.',
@@ -440,19 +539,19 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         });
       } catch (error) {
         // 検品そのものができなかった。できた画像は残し、人に見てもらう（作り直しても検品はまた失敗する）
-        candidate.notes = [...rewriteNote, ...redoNote, `見た目の検品ができませんでした（${(error as Error).message}）`];
+        candidate.notes = [...rewriteNote, ...redoNote, ...backHairNote, `見た目の検品ができませんでした（${(error as Error).message}）`];
         candidate.status = 'flagged';
         return;
       }
       if (verdict.ok) {
-        candidate.notes = [...rewriteNote, ...redoNote];
+        candidate.notes = [...rewriteNote, ...redoNote, ...backHairNote];
         candidate.status = 'passed';
         return;
       }
       problems.push(verdict.reason || '見た目の検品で不合格でした');
       fixes.push((typeof verdict.fix === 'string' && verdict.fix.trim()) || verdict.reason || 'The result did not pass inspection. Follow the rules above more strictly.');
     }
-    candidate.notes = [...rewriteNote, ...redoNote, ...problems];
+    candidate.notes = [...rewriteNote, ...redoNote, ...backHairNote, ...problems];
     kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, warnings: candidate.warnings, notes: [...redoNote, ...problems] };
     feedback = fixes.map((f) => `- ${f}`).join('\n');
     redoNote = [`検品の指摘を伝えて、自動で作り直しました（前の指摘: ${problems.join(' / ')}）`];

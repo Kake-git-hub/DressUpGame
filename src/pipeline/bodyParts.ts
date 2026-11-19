@@ -152,7 +152,7 @@ export function defaultRegion(label: string, parts: BodyParts, width: number, he
 
 // 体の 1 か所だけに付く品目（髪型・帽子）の、位置合わせの基準にする部位。体全体に沿う品目は null
 export function anchorPart(label: string): PartName | null {
-  return /ぼうし|帽子|hat|かんむり|ティアラ|かみ|髪|ヘア|hair/i.test(label) ? 'head' : null;
+  return /ぼうし|帽子|hat|かんむり|ティアラ|かみ|がみ|髪|ヘア|hair/i.test(label) ? 'head' : null;
 }
 
 // 服の不透明な画素のうち、範囲に入っている割合（0〜1）。服が無ければ 1

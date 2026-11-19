@@ -12,7 +12,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
-import { hairFrontBottom, isHairCategory, splitHair } from '../../src/pipeline/hairSplit.ts';
+import { hairFrontBottom, splitHair, splitsHair } from '../../src/pipeline/hairSplit.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
@@ -178,7 +178,8 @@ export class StudioApi {
   ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray }> {
     const { doll } = await this.doll(dollId);
     const label = doll.categories.find((c) => c.id === category)?.label ?? category;
-    if (!force && !isHairCategory(label)) return image;
+    // うしろがみを別の品目として作るドールでは、髪は分けない（髪のカテゴリは前髪だけ）
+    if (!force && !splitsHair(label, doll.categories.map((c) => c.label))) return image;
     // 服は、ドールのキャンバスか、余白を足した作業用のキャンバス。大きさに合うほうの型を使う
     let template = await this.dollTemplate(doll);
     if (template.canvasW !== image.width) template = await this.workTemplate(doll);

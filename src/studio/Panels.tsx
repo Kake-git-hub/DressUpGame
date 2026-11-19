@@ -1,7 +1,7 @@
 /**
  * スタジオの各タブ
  */
-import { isHairCategory } from '../pipeline/hairSplit';
+import { isBackHairCategory, isHairCategory } from '../pipeline/hairSplit';
 import { useEffect, useRef, useState } from 'react';
 import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
@@ -476,7 +476,7 @@ export function Library({ doll, onChanged }: Common) {
           disabled={!newLabel.trim()}
           onClick={() =>
             void guard(async () => {
-              await api.saveCategory(doll.id, { label: newLabel.trim(), layer: 11, menuOrder: Math.max(0, ...doll.categories.map((c) => c.menuOrder)) + 1, overlap: false, movable: false });
+              await api.saveCategory(doll.id, { label: newLabel.trim(), layer: isBackHairCategory(newLabel) ? -1 : 11, menuOrder: Math.max(0, ...doll.categories.map((c) => c.menuOrder)) + 1, overlap: false, movable: false });
               setNewLabel('');
             })
           }

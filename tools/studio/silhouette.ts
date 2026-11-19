@@ -22,11 +22,12 @@ export async function renderSilhouette(doll: DollTemplate, color: Rgb, backgroun
 }
 
 // 服（キャンバス大の RGBA）をドールに着せた確認用の画像
-export async function renderPreview(doll: DollTemplate, layers: Uint8ClampedArray[], background = '#e9e6f2'): Promise<Buffer> {
+// behind は、ドールの後ろに描く分（うしろがみ）
+export async function renderPreview(doll: DollTemplate, layers: Uint8ClampedArray[], background = '#e9e6f2', behind: Uint8ClampedArray[] = []): Promise<Buffer> {
   const { canvasW: width, canvasH: height } = doll;
   const raw = (px: Uint8ClampedArray) => ({ input: Buffer.from(px.buffer, px.byteOffset, px.byteLength), raw: { width, height, channels: 4 as const } });
   return sharp({ create: { width, height, channels: 3, background } })
-    .composite([raw(doll.rgba), ...layers.map(raw)])
+    .composite([...behind.map(raw), raw(doll.rgba), ...layers.map(raw)])
     .png()
     .toBuffer();
 }

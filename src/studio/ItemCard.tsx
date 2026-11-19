@@ -7,7 +7,7 @@ import type { ManifestDoll } from '../content/manifest';
 import { alphaBBox } from '../pipeline/alpha';
 import type { Box } from '../pipeline/alpha';
 import type { BodyParts } from '../pipeline/bodyParts';
-import { hairFrontBottom, isHairCategory, splitHair } from '../pipeline/hairSplit';
+import { hairFrontBottom, isBackHairCategory, splitHair, splitsHair } from '../pipeline/hairSplit';
 import { defaultLimbs, hideMask, limbZones } from '../pipeline/limbZones';
 import type { Limb } from '../pipeline/limbZones';
 import { ApiError, api, blobToBase64, contentUrl } from './api';
@@ -73,7 +73,10 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   const [category, setCategory] = useState(source.category || doll.categories[0]?.id || '');
   const labelOf = (id: string) => doll.categories.find((c) => c.id === id)?.label ?? id;
   // 手足の先を服に合わせる（はみ出したドールの指先などを隠す）。手袋・くつなどは最初から入れる
-  const isHair = isHairCategory(labelOf(category));
+  // 髪を前髪と後ろ髪に分けるか（うしろがみのカテゴリを持つドールでは分けない）
+  const isHair = splitsHair(labelOf(category), doll.categories.map((c) => c.label));
+  // うしろがみ: ドールの後ろに描く
+  const isBackHair = isBackHairCategory(labelOf(category));
   const [cutVersion, setCutVersion] = useState(0);
   const splitRef = useRef<{ front: HTMLCanvasElement; back: HTMLCanvasElement } | null>(null);
   const [limbs, setLimbs] = useState<Limb[]>(() => defaultLimbs(labelOf(source.category || doll.categories[0]?.id || '')));
@@ -122,6 +125,11 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       ctx.drawImage(layers.front, 0, 0);
       return;
     }
+    if (view === 'worn' && isBackHair) {
+      ctx.drawImage(cut, 0, 0);
+      ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
+      return;
+    }
     if (view === 'worn') {
       ctx.drawImage(loaded.doll, box.x, box.y, box.w, box.h);
       if (hideRef.current && hasHide) {
@@ -131,7 +139,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       }
     }
     ctx.drawImage(cut, 0, 0);
-  }, [view, drawNudged, canvasW, canvasH, box, hasHide, isHair]);
+  }, [view, drawNudged, canvasW, canvasH, box, hasHide, isHair, isBackHair]);
 
   // 髪を、前髪と後ろ髪に分けて持っておく（切り抜きが変わるたびに作り直す）
   const refreshSplit = useCallback(() => {
