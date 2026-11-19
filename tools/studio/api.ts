@@ -12,7 +12,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
-import { isHairCategory, splitHair } from '../../src/pipeline/hairSplit.ts';
+import { hairFrontBottom, isHairCategory, splitHair } from '../../src/pipeline/hairSplit.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
@@ -184,7 +184,10 @@ export class StudioApi {
     if (template.canvasW !== image.width || template.canvasH !== image.height) return image; // 大きさの違いは、保存のときに断られる
     const alpha = new Uint8Array(image.width * image.height);
     for (let p = 0; p < alpha.length; p++) alpha[p] = template.rgba[p * 4 + 3];
-    const split = splitHair(image.rgba, alpha, image.width, image.height);
+    // 前に残すのは、頭のまわりの前髪だけ
+    const head = (await this.templateData(doll)).parts.head;
+    const padY = Math.round((image.height - doll.image.canvasH) / 2);
+    const split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY });
     return split ? { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: image.rgba } : image;
   }
   private async dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {

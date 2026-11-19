@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * 顔の作り方（本物の頭の拡大図に描かせて、違いを取り出す）を、サンプルのドールで確かめる
+ * 顔の作り方（本物の頭の拡大図に描かせて、頭を肌ごとお面として切り取る）を、サンプルのドールで確かめる
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -71,10 +71,10 @@ describe('faceCrop', () => {
 });
 
 describe('processFace', () => {
-  it('描き足した顔だけが残る。肌・輪郭・背景は残らず、緑も付かない', async () => {
+  it('頭を肌ごと「お面」として切り取る: 目もひたいの肌も残り、頭の外（背景・首から下）は残らない', async () => {
     const crop = faceCrop(parts.head, doll.canvasW, doll.canvasH);
     const reference = await renderHeadCloseup(doll, crop, BG);
-    const r = await processFace(await paintFace(reference), reference, doll, crop, BG);
+    const r = await processFace(await paintFace(reference), reference, doll, crop, BG, parts.head);
     expect(r.warnings).toEqual([]);
     expect(r.width).toBe(doll.canvasW);
     const k = crop.size / FACE_SIZE;
@@ -82,25 +82,31 @@ describe('processFace', () => {
       const i = ((crop.y + Math.round(FACE_SIZE * fy * k)) * r.width + crop.x + Math.round(FACE_SIZE * fx * k)) * 4;
       return Array.from(r.rgba.slice(i, i + 4));
     };
-    expect(at(0.43, 0.45)[3]).toBeGreaterThan(230); // 目
-    expect(at(0.39, 0.53)[3]).toBeGreaterThan(30); // ほお紅
-    expect(at(0.5, 0.3)[3]).toBe(0); // ひたい（肌のまま）
+    expect(at(0.43, 0.45)[3]).toBe(255); // 目
+    const eye = at(0.43, 0.45);
+    expect(eye[2]).toBeGreaterThan(eye[1]); // 目の色（むらさき）がそのまま残る
+    expect(at(0.5, 0.3)[3]).toBe(255); // ひたいの肌も、お面に入る
+    const skin = at(0.5, 0.3);
+    expect(skin[0]).toBeGreaterThan(skin[2]); // 肌色
     expect(at(0.05, 0.05)[3]).toBe(0); // 背景
-    // 顔のあたり（目・口・ほお）の外には、何も残らない
+    // お面は頭の箱の中に収まる（首から下は入らない）。ドールの外には出ない
     const box = alphaBBox(r.rgba, r.width, r.height)!;
-    const inFace = (v: number, from: number, to: number, origin: number) => v >= origin + FACE_SIZE * from * k - 3 && v <= origin + FACE_SIZE * to * k + 3;
-    expect(inFace(box.x, 0.34, 0.66, crop.x) && inFace(box.x + box.w, 0.34, 0.66, crop.x)).toBe(true);
-    expect(inFace(box.y, 0.39, 0.61, crop.y) && inFace(box.y + box.h, 0.39, 0.61, crop.y)).toBe(true);
-    // 緑がかった画素（旧方式の色残り）が無い
-    let green = 0;
-    for (let i = 0; i < r.rgba.length; i += 4) if (r.rgba[i + 3] >= 64 && r.rgba[i + 1] - Math.max(r.rgba[i], r.rgba[i + 2]) > 30) green++;
-    expect(green).toBe(0);
+    expect(box.x).toBeGreaterThanOrEqual(parts.head.x);
+    expect(box.x + box.w).toBeLessThanOrEqual(parts.head.x + parts.head.w);
+    expect(box.y + box.h).toBeLessThanOrEqual(parts.head.y + parts.head.h);
+    expect(box.h).toBeGreaterThan(parts.head.h * 0.8);
+    for (let p = 0; p < doll.mask.length; p++) if (!doll.mask[p]) expect(r.rgba[p * 4 + 3]).toBe(0);
+    // 首との境目は、ぼかしてある（あごの下の端は半透明）
+    const cx = Math.round(parts.head.x + parts.head.w / 2);
+    const last = r.rgba[((parts.head.y + parts.head.h - 1) * r.width + cx) * 4 + 3];
+    expect(last).toBeGreaterThan(0);
+    expect(last).toBeLessThan(128);
   }, 60_000);
 
   it('何も描かれていなければ「顔が見つかりません」', async () => {
     const crop = faceCrop(parts.head, doll.canvasW, doll.canvasH);
     const reference = await renderHeadCloseup(doll, crop, BG);
-    const r = await processFace(reference, reference, doll, crop, BG);
+    const r = await processFace(reference, reference, doll, crop, BG, parts.head);
     expect(r.warnings.map((w) => w.code)).toEqual(['empty']);
   }, 60_000);
 
@@ -108,7 +114,7 @@ describe('processFace', () => {
     const crop = faceCrop(parts.head, doll.canvasW, doll.canvasH);
     const reference = await renderHeadCloseup(doll, crop, BG);
     const repainted = await sharp({ create: { width: FACE_SIZE, height: FACE_SIZE, channels: 3, background: '#7a4a2a' } }).png().toBuffer();
-    const r = await processFace(repainted, reference, doll, crop, BG);
+    const r = await processFace(repainted, reference, doll, crop, BG, parts.head);
     expect(r.warnings.map((w) => w.code)).toEqual(['repainted']);
   }, 60_000);
 });

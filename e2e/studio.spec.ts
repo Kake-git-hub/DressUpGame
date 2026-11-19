@@ -121,6 +121,50 @@ test.describe('スタジオ', () => {
     expect(after[0].image.box.y).toBeGreaterThan(before.image.box.y + 20);
   });
 
+  test('調整の枠: 絵をつかんで動かし、角のつまみで大きさを変え、↺ で元に戻せる', async ({ page }) => {
+    await upload(page, 'sample-green-set.webp');
+    const nudge = page.getByTestId('card-nudge');
+    const read = async () => {
+      const m = /\((-?\d+), (-?\d+)\)・倍率 ([\d.]+)%/.exec((await nudge.textContent()) ?? '')!;
+      return { dx: Number(m[1]), dy: Number(m[2]), scale: Number(m[3]) };
+    };
+    await expect(nudge).toContainText('(0, 0)');
+    const frame = page.getByTestId('card-frame');
+    await expect(frame).toBeVisible();
+    const before = (await frame.boundingBox())!;
+    // 絵をつかんで、右へ 44px・下へ 22px（画面上）動かす
+    const cx = before.x + before.width / 2;
+    const cy = before.y + before.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 44, cy + 22, { steps: 5 });
+    await page.mouse.up();
+    const moved = await read();
+    expect(moved.dx).toBeGreaterThan(90); // 440px の表示で 44px = キャンバスの 1/10
+    expect(moved.dy).toBeGreaterThan(45);
+    expect(moved.scale).toBe(100);
+    const afterMove = (await frame.boundingBox())!;
+    expect(afterMove.x - before.x).toBeGreaterThan(40);
+    expect(afterMove.x - before.x).toBeLessThan(48);
+    // 右下のつまみを外へ引っぱると大きくなる。服の中心は動かない
+    const handle = (await page.getByTestId('card-frame-scale').boundingBox())!;
+    const hx = handle.x + handle.width / 2;
+    const hy = handle.y + handle.height / 2;
+    await page.mouse.move(hx, hy);
+    await page.mouse.down();
+    await page.mouse.move(hx + 30, hy + 30, { steps: 5 });
+    await page.mouse.up();
+    expect((await read()).scale).toBeGreaterThan(110);
+    const afterScale = (await frame.boundingBox())!;
+    expect(afterScale.width).toBeGreaterThan(afterMove.width * 1.1);
+    expect(Math.abs(afterScale.x + afterScale.width / 2 - (afterMove.x + afterMove.width / 2))).toBeLessThan(2);
+    // ↺ で元に戻る
+    await page.getByTestId('card-frame-reset').click();
+    await expect(nudge).toContainText('(0, 0)・倍率 100.0%');
+    await page.getByRole('button', { name: '捨てる' }).click();
+    await expect(page.getByTestId('item-card')).toHaveCount(0);
+  });
+
   test('自動生成はキーが無いと使えないと表示され、公開は理由を表示する。ゲームから素材を読める', async ({ page, request }) => {
     await expect(page.getByTestId('ai-status')).toContainText('キーが未設定');
     await page.getByTestId('tab-generate').click();

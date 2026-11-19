@@ -42,13 +42,32 @@ describe('splitHair', () => {
     expect(alpha(s.front, 58, 30)).toBe(255); // ふちの少し外
     expect(alpha(s.front, 40, 30)).toBe(0); // 体から離れた所は後ろだけ
   });
-  it('後ろ髪は髪の全体を持ち、体の下へ塗り広げられる（ドールとのすき間が出ない）', () => {
+  it('後ろ髪は髪の全体を持ち、体の形の穴は左右の髪の色で埋まる（マントのような 1 枚になる）', () => {
     const s = splitHair(hair(), doll(), W, H, DEPTH)!;
     expect(alpha(s.back, 40, 100)).toBe(255);
     expect(alpha(s.back, 80, 30)).toBe(255); // 前髪の所も持つ
-    expect(alpha(s.back, 68, 100)).toBe(255); // 体の下へ 6px
-    expect(Array.from(s.back.slice((100 * W + 68) * 4, (100 * W + 68) * 4 + 3))).toEqual(GOLD.slice(0, 3));
-    expect(alpha(s.back, 80, 100)).toBe(0); // 体のまん中までは広げない
+    expect(alpha(s.back, 68, 100)).toBe(255);
+    expect(alpha(s.back, 80, 100)).toBe(255); // 体のまん中まで埋まる
+    expect(Array.from(s.back.slice((100 * W + 80) * 4, (100 * W + 80) * 4 + 3))).toEqual(GOLD.slice(0, 3));
+    expect(alpha(s.back, 80, 170)).toBe(0); // 髪の無い高さは埋めない
+  });
+  it('左右に分かれた髪と体のあいだの広い空きは埋めない（体の下だけ埋まる）', () => {
+    const px = new Uint8ClampedArray(W * H * 4);
+    rect(px, 4, 30, 10, 130, 45, GOLD); // 頭の上と前髪
+    rect(px, 4, 20, 10, 35, 150, GOLD); // 左のふさ（体から 24px 離れている）
+    rect(px, 4, 125, 10, 140, 150, GOLD);
+    const s = splitHair(px, doll(), W, H, DEPTH)!;
+    expect(alpha(s.back, 48, 100)).toBe(0); // ふさと体のあいだの空き
+    expect(alpha(s.back, 80, 100)).toBe(255); // 体の下（ドールに隠れる）
+  });
+  it('frontBottom より下の髪は前にしない（手や腕にかかった髪は、後ろ髪だけに入る）', () => {
+    const px = hair();
+    rect(px, 4, 66, 120, 94, 140, GOLD); // 体のまん中にかかった髪
+    expect(alpha(splitHair(px, doll(), W, H, DEPTH)!.front, 80, 130)).toBe(255);
+    const s = splitHair(px, doll(), W, H, DEPTH, { frontBottom: 60 })!;
+    expect(alpha(s.front, 80, 130)).toBe(0);
+    expect(alpha(s.front, 80, 30)).toBe(255);
+    expect(alpha(s.back, 80, 130)).toBe(255);
   });
   it('AI のシルエットが体より太くてできたすき間を、後ろ髪が埋める', () => {
     const px = hair();

@@ -1,9 +1,11 @@
 /**
- * 顔（目・口・ほお紅など、肌の上にうすく重なる絵）の作り方
+ * 顔の作り方
  *
  * 服と同じ「単色のシルエットに描かせて色で抜く」方式だと、肌の代わりにシルエットの色がまざり、
  * 顔が緑がかったり、肌色の板が付いたりする。また、顔は画像のごく一部なので細部がつぶれる。
- * そこで、ドールの本物の頭を大きく写した図に描かせ、元の図との違いだけを取り出す。
+ * そこで、ドールの本物の頭を大きく写した図に顔を描かせ、その頭を肌ごと「お面」のように切り取って、ドールの頭に重ねる。
+ * 目や口だけを抜き出すことはしない（抜き出すと、うすい影やほお紅が欠けたり、色が残ったりする）。
+ * 切り取る形はドールの頭の形そのものなので、輪郭はドールとぴったり合う。首との境目は、ぼかしてなじませる。
  */
 import sharp from 'sharp';
 import { alphaBBox } from '../../src/pipeline/alpha.ts';
@@ -73,10 +75,35 @@ async function toCanvas(rgba: Uint8ClampedArray, size: number, crop: FaceCrop, c
 }
 
 /**
- * AI が頭の拡大図に描き足した画像 → ドールのキャンバスに合わせた顔
+ * AI が頭の拡大図に顔を描いた画像 → ドールの頭に重ねる「お面」（肌ごと）。head は、ドールのキャンバス上の頭の箱
  * reference は、AI に渡した拡大図（renderHeadCloseup の結果）。
  */
-export async function processFace(generated: Buffer, reference: Buffer, doll: DollTemplate, crop: FaceCrop, background: Rgb): Promise<ProcessResult> {
+// お面の形（キャンバス大、0〜255）: ドールの頭（あごまで）。ふちは少し内側へぼかし、首との境目は広めにぼかす
+export function headMask(doll: DollTemplate, head: Box, crop: FaceCrop): Uint8Array {
+  const { canvasW, canvasH } = doll;
+  const out = new Uint8Array(canvasW * canvasH);
+  const x0 = Math.max(0, crop.x);
+  const x1 = Math.min(canvasW, crop.x + crop.size);
+  const y0 = Math.max(0, crop.y);
+  const bottom = Math.min(canvasH, crop.y + crop.size, Math.round(head.y + head.h));
+  const edge = Math.max(1, Math.round(head.w * 0.02)); // ふちのぼかし（px）
+  const neck = Math.max(2, Math.round(head.h * 0.08)); // 首との境目のぼかし（px）
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < canvasW && y < canvasH && doll.rgba[(y * canvasW + x) * 4 + 3] >= 128;
+  for (let y = y0; y < bottom; y++) {
+    for (let x = x0; x < x1; x++) {
+      if (!inside(x, y)) continue;
+      // ふちからの深さ（上下左右に edge px まで見る）
+      let depth = edge + 1;
+      for (let d = 1; d <= edge && depth > edge; d++) if (!inside(x - d, y) || !inside(x + d, y) || !inside(x, y - d)) depth = d;
+      const side = Math.min(1, depth / (edge + 1));
+      const fade = Math.min(1, (bottom - y) / neck);
+      out[y * canvasW + x] = Math.round(255 * side * fade);
+    }
+  }
+  return out;
+}
+
+export async function processFace(generated: Buffer, reference: Buffer, doll: DollTemplate, crop: FaceCrop, background: Rgb, head: Box): Promise<ProcessResult> {
   let image: Uint8ClampedArray;
   try {
     image = await toRaw(generated, FACE_SIZE);
@@ -94,13 +121,17 @@ export async function processFace(generated: Buffer, reference: Buffer, doll: Do
   }
 
   const { canvasW, canvasH } = doll;
-  const rgba = await toCanvas(matte.rgba, FACE_SIZE, crop, canvasW, canvasH);
   const source = await toCanvas(match.rgba, FACE_SIZE, crop, canvasW, canvasH);
-  // 縮小でできた、ごくうすい画素は消す
-  for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 8) rgba[i] = 0;
+  // お面: AI が描いた頭を、ドールの頭の形で切り取る
+  const rgba = new Uint8ClampedArray(source);
+  const mask = headMask(doll, head, crop);
+  for (let p = 0; p < mask.length; p++) rgba[p * 4 + 3] = mask[p] < 8 ? 0 : mask[p];
+  // 何か描き足されたか（元の絵との違い）は、警告のためだけに見る
+  const drawn = await toCanvas(matte.rgba, FACE_SIZE, crop, canvasW, canvasH);
+  for (let i = 3; i < drawn.length; i += 4) if (drawn[i] < 8) drawn[i] = 0;
 
   const warnings: ProcessWarning[] = [];
-  if (!alphaBBox(rgba, canvasW, canvasH)) {
+  if (!alphaBBox(drawn, canvasW, canvasH) || !alphaBBox(rgba, canvasW, canvasH)) {
     warnings.push({ code: 'empty', message: '顔が見つかりません（元の絵から何も変わっていませんでした）' });
   } else if (matte.changedShare > REPAINT_LIMIT) {
     warnings.push({ code: 'repainted', message: 'AI が頭や背景ごと描き直したようです。肌の色や輪郭がドールと合わないかもしれません' });
