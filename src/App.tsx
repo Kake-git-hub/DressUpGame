@@ -10,6 +10,7 @@ import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlas
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
+import { sheetsAbove } from './engine/layers';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
 import { resolveStartState } from './content/startState';
@@ -29,7 +30,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.15.0';
+const APP_VERSION = '0.16.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -208,11 +209,12 @@ function App() {
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
-  // 調整中の服より手前の服（equippedItems は重ね順）。調整画面が代わりに重ねて描くので、キャンバスには描かない
-  const frontItemIds = useMemo(() => {
+  // 調整中の服より手前のもの（服・後ろ髪・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない
+  const hiddenSheets = useMemo(() => {
     if (!isAdjustingItem || adjustingItemId === null) return undefined;
-    const index = equippedItems.findIndex((item) => item.id === adjustingItemId);
-    return index < 0 ? undefined : equippedItems.slice(index + 1).map((item) => item.id);
+    const above = sheetsAbove(equippedItems, adjustingItemId);
+    const ids = (kind: 'front' | 'back') => above.flatMap((s) => (s.kind === kind ? [s.item.id] : []));
+    return { fronts: ids('front'), backs: ids('back'), doll: above.some((s) => s.kind === 'doll') };
   }, [isAdjustingItem, adjustingItemId, equippedItems]);
 
   // 調整ボタンクリックで調整モード開始
@@ -476,7 +478,7 @@ function App() {
               menuOffset={MENU_WIDTH}
               rightOffset={RIGHT_BUTTON_WIDTH}
               adjustingItemId={isAdjustingItem ? adjustingItemId : null}
-              hiddenItemIds={frontItemIds}
+              hidden={hiddenSheets}
             />
           </section>
         )}

@@ -2,6 +2,7 @@
  * 服が隠すドールの部分（手袋・くつの下からはみ出す指先など）
  */
 import type { Box, EquippedItem } from '../types';
+import { isBehindDoll } from './layers';
 
 export interface Hide {
   url: string;
@@ -9,13 +10,15 @@ export interface Hide {
 }
 
 // 着ている服のうち、ドールの一部を隠すもの。
-// 動かした・大きさや傾きを変えた服と、調整中の服は隠さない（隠した所が服からずれてしまうため）
+// 動かした・大きさや傾きを変えた服と、調整中の服は隠さない（隠した所が服からずれてしまうため）。
+// ドールの後ろに回した服も隠さない（ドールのほうが手前に見える）
 export function activeHides(items: EquippedItem[], adjustingItemId: string | null): Hide[] {
   return items
     .filter(
       (item) =>
         !!item.hide &&
         item.id !== adjustingItemId &&
+        !isBehindDoll(item) &&
         !(item.adjustOffsetX ?? 0) &&
         !(item.adjustOffsetY ?? 0) &&
         (item.adjustScale ?? 1) === 1 &&

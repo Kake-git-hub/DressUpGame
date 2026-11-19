@@ -186,3 +186,83 @@ export function alignToDoll(input: AlignInput): Alignment {
     score: quality(found),
   };
 }
+
+export interface AnchorInput {
+  // すべてドールのキャンバスの大きさ（全体の位置合わせ後）。1 = 該当
+  silhouette: Uint8Array;
+  background: Uint8Array;
+  doll: Uint8Array;
+  width: number;
+  height: number;
+  box: { x: number; y: number; w: number; h: number }; // 基準にする部位（頭など）
+  reach?: number; // ずれを探す範囲（px）。既定はキャンバス幅の 4%
+}
+
+export interface AnchorShift {
+  dx: number; // 画像全体をこの量だけ動かす（ドールのキャンバス px）。動かさないときは 0
+  dy: number;
+  gain: number; // 改善した量（部位の中のドールの面積に対する割合）
+}
+
+const ANCHOR_MIN_GAIN = 0.02;
+
+/**
+ * 髪型・帽子のように体の 1 か所（頭）だけに付く品目の、仕上げの位置合わせ。
+ *
+ * 画像生成 AI はシルエットも描き直すので、体は合っているのに頭だけ少し横にずれる、ということがある。
+ * 全体の位置合わせは面積の大きい体に引っぱられるので、頭に付く品目がその分ずれてしまう。
+ * そこで、部位のまわりだけを見て「シルエットはドールの内側、背景はドールに重ならない」が
+ * いちばん成り立つずれを探し、画像全体をその分だけ動かす。
+ */
+export function refineAtAnchor(input: AnchorInput): AnchorShift {
+  const { silhouette, background, doll, width, height, box } = input;
+  const reach = Math.max(1, Math.round(input.reach ?? width * 0.04));
+  // 見る範囲: 部位の箱を、左右と上に少し広げる（下＝首から先は、体の位置に従うので広げない）
+  const mx = Math.round(box.w * 0.35);
+  const my = Math.round(box.h * 0.35);
+  const x0 = Math.max(0, box.x - mx);
+  const x1 = Math.min(width, box.x + box.w + mx);
+  const y0 = Math.max(0, box.y - my);
+  const y1 = Math.min(height, box.y + box.h);
+  let dollArea = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) dollArea += doll[y * width + x];
+  const none: AnchorShift = { dx: 0, dy: 0, gain: 0 };
+  if (dollArea === 0) return none;
+
+  const value = (dx: number, dy: number): number => {
+    let v = 0;
+    for (let y = y0; y < y1; y++) {
+      const sy = y - dy;
+      if (sy < 0 || sy >= height) continue;
+      for (let x = x0; x < x1; x++) {
+        const sx = x - dx;
+        if (sx < 0 || sx >= width) continue;
+        const q = sy * width + sx;
+        const d = doll[y * width + x];
+        if (silhouette[q]) v += d ? 1 : -1;
+        else if (background[q] && d) v -= 1;
+      }
+    }
+    return v;
+  };
+  // 同じくらいなら、動かす量の小さいほうを選ぶ
+  const score = (dx: number, dy: number) => value(dx, dy) - 0.02 * dollArea * (Math.hypot(dx, dy) / reach);
+  const rest = value(0, 0);
+  let best = { dx: 0, dy: 0, score: rest };
+  for (let dy = -reach; dy <= reach; dy += 2) {
+    for (let dx = -reach; dx <= reach; dx += 2) {
+      const s = score(dx, dy);
+      if (s > best.score) best = { dx, dy, score: s };
+    }
+  }
+  const center = { ...best };
+  for (let dy = center.dy - 1; dy <= center.dy + 1; dy++) {
+    for (let dx = center.dx - 1; dx <= center.dx + 1; dx++) {
+      if (Math.abs(dx) > reach || Math.abs(dy) > reach) continue;
+      const s = score(dx, dy);
+      if (s > best.score) best = { dx, dy, score: s };
+    }
+  }
+  const gain = (value(best.dx, best.dy) - rest) / dollArea;
+  return gain >= ANCHOR_MIN_GAIN && (best.dx !== 0 || best.dy !== 0) ? { dx: best.dx, dy: best.dy, gain } : none;
+}

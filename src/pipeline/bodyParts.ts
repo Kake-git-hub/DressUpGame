@@ -150,6 +150,11 @@ export function defaultRegion(label: string, parts: BodyParts, width: number, he
   return clampBox({ x: base.x - l, y: base.y - t, w: base.w + l + r, h: base.h + t + b }, width, height);
 }
 
+// 体の 1 か所だけに付く品目（髪型・帽子）の、位置合わせの基準にする部位。体全体に沿う品目は null
+export function anchorPart(label: string): PartName | null {
+  return /ぼうし|帽子|hat|かんむり|ティアラ|かみ|髪|ヘア|hair/i.test(label) ? 'head' : null;
+}
+
 // 服の不透明な画素のうち、範囲に入っている割合（0〜1）。服が無ければ 1
 export function shareInsideRegion(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number, region: Box): number {
   let total = 0, inside = 0;

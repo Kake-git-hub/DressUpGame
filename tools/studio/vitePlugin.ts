@@ -11,6 +11,7 @@ import type { Plugin } from 'vite';
 import { createAiFromEnv } from './ai.ts';
 import { StudioApi } from './api.ts';
 import { Budget } from './budget.ts';
+import { MAX_ATTEMPTS } from './generate.ts';
 
 const MAX_BODY = 30 * 1024 * 1024;
 
@@ -47,7 +48,7 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
           perDay: positive(env.STUDIO_DAILY_IMAGE_LIMIT, 60),
           perRun: positive(env.STUDIO_RUN_IMAGE_LIMIT, 30),
         }),
-        maxAttempts: positive(env.STUDIO_MAX_ATTEMPTS, 1),
+        maxAttempts: positive(env.STUDIO_MAX_ATTEMPTS, MAX_ATTEMPTS),
       });
       if (!fs.existsSync(path.join(contentDir, 'manifest.json'))) {
         if (env.STUDIO_CREATE === '1') {

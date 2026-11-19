@@ -245,6 +245,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
             {busy ? '準備中…' : '作る'}
           </button>
           <span className="hint">
+            {!isBackground && status.budget.maxAttempts > 1 && `できた絵を検品し、不合格なら直し方を伝えて自動で作り直します（${status.budget.maxAttempts - 1} 回まで）。`}
             画像の生成は最大 {maxImages} 枚（作り直し・書き直しを含む）。今日は {status.budget.usedToday} / {status.budget.perDay} 枚を使用済み。
           </span>
         </div>

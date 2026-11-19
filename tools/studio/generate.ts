@@ -2,7 +2,8 @@
  * テーマからの自動生成
  *
  *  企画（Claude）→ 品目ごとに: 切り抜きやすい色を選ぶ → 型紙のシルエットを作る → 画像生成（Gemini）
- *  → 切り抜きと位置合わせ → 数値の検品 → 見た目の検品（Claude）→ 不合格なら理由を添えて作り直す
+ *  → 切り抜きと位置合わせ → 数値の検品 → 見た目の検品（Claude がドールに着せた絵を見る）
+ *  → 不合格なら、直してほしい点を画像生成への指示にして、1 回だけ自動で作り直す
  *
  * 顔（目・口・化粧）だけは作り方が違う: ドールの本物の頭の拡大図に描かせ、元の図との違いを取り出す（processFace.ts）。
  *
@@ -10,7 +11,7 @@
  */
 import sharp from 'sharp';
 import type { Box } from '../../src/pipeline/alpha.ts';
-import { shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
+import { anchorPart, shareInsideRegion } from '../../src/pipeline/bodyParts.ts';
 import type { BodyParts } from '../../src/pipeline/bodyParts.ts';
 import { isHairCategory } from '../../src/pipeline/hairSplit.ts';
 import { chooseKeyColors } from '../../src/pipeline/keyColors.ts';
@@ -21,7 +22,7 @@ import type { ImageAi, TextAi } from './ai.ts';
 import type { Budget } from './budget.ts';
 import { faceCrop, isFaceCategory, processFace, renderHeadCloseup } from './processFace.ts';
 import { processGenerated } from './processGenerated.ts';
-import type { DollTemplate, ProcessWarning } from './processGenerated.ts';
+import type { DollTemplate, ProcessWarning, WarningCode } from './processGenerated.ts';
 import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
 
 // ドールごとの型紙（studio/templates.json に保存する）
@@ -52,8 +53,9 @@ export interface Candidate {
   notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
 }
 
-// 1 品目あたりの生成回数の既定（1 = 自動の作り直しなし。値段を抑える）。STUDIO_MAX_ATTEMPTS で変えられる
-export const MAX_ATTEMPTS = 1;
+// 1 品目あたりの生成回数の既定（2 = できた絵を検品して、不合格なら指示を添えて 1 回だけ自動で作り直す）。
+// STUDIO_MAX_ATTEMPTS で変えられる（1 = 作り直しなし）
+export const MAX_ATTEMPTS = 2;
 const MIN_REGION_SHARE = 0.8;
 // 頭の拡大図の背景（AI が塗り変えにくい、うすい無彩色）
 const FACE_BACKGROUND: Rgb = [233, 230, 242];
@@ -174,9 +176,19 @@ export function categoryRules(label: string): string[] {
 
 const INSPECT_SCHEMA = {
   type: 'object',
-  properties: { ok: { type: 'boolean' }, reason: { type: 'string' } },
-  required: ['ok', 'reason'],
+  properties: { ok: { type: 'boolean' }, reason: { type: 'string' }, fix: { type: 'string' } },
+  required: ['ok', 'reason', 'fix'],
   additionalProperties: false,
+};
+
+// 数値の検品で見つけた問題を、画像生成 AI への直し方の指示（英語）にする
+const WARNING_FIX: Record<WarningCode, string> = {
+  'no-silhouette': 'The mannequin silhouette was missing or repainted. Keep the mannequin exactly as in the template, in the same flat colour, and draw only the item on it.',
+  'poor-fit': 'The mannequin was moved, resized or redrawn. Keep it exactly where it is in the template (same position, size, pose and outline) and only add the item.',
+  'color-too-close': 'Parts of the item used colours too close to the mannequin or background colour. Use clearly different colours for every part of the item.',
+  empty: 'No item was visible in the result. Draw the item clearly on the mannequin.',
+  'touches-edge': 'The item reached the edge of the image and was cut off. Draw it smaller so that the whole item fits inside the image with a clear margin on every side.',
+  repainted: 'The head or skin was repainted. Leave everything except the facial features exactly as it is.',
 };
 
 function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, silhouette: Rgb, background: Rgb, feedback: string | null, closeup: boolean): string {
@@ -202,7 +214,7 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
     ...categoryRules(categoryLabel),
     '- Square image, same framing as the template.',
-    feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',
+    feedback ? `A previous attempt at this same item was inspected and rejected. Draw it again from scratch and fix these problems:\n${feedback}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -220,7 +232,7 @@ function facePrompt(item: PlannedItem, categoryLabel: string, style: string, fee
     '- Everything else must stay pixel-for-pixel the same: the head shape and outline, the skin colour and its shading, the ears, the neck and shoulders, the background, the framing, position and size. Do not repaint, recolour, smooth or relight the skin.',
     '- Do not add hair, a hairline, a hat, glasses, earrings or any other object, and do not add text or a frame.',
     '- Place the features where a face naturally sits on this head, facing the same direction as the head, at a natural size for it.',
-    feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',
+    feedback ? `A previous attempt at this same face was inspected and rejected. Paint it again and fix these problems:\n${feedback}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -276,6 +288,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
   let kept: { png: Buffer; source: Buffer; shape?: Buffer; warnings: ProcessWarning[]; notes: string[] } | null = null;
   let rewritten = false; // 断られて説明文を書き直したか（1 回まで）
   let rewriteNote: string[] = []; // 書き直したことを、最後まで候補の注記に残す
+  let redoNote: string[] = []; // 検品で不合格になり、指示を添えて作り直したこと
   const keepEarlier = (reason: string) => {
     if (!kept) return false;
     candidate.png = kept.png;
@@ -308,7 +321,13 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
           prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
           images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
         });
-        result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette, parts: Object.values(ctx.data.parts) });
+        // 髪型・帽子は、体全体ではなく頭に合わせて置く
+        const anchor = anchorPart(label);
+        result = await processGenerated(generated, ctx.template, {
+          silhouetteColor: keys.silhouette,
+          parts: Object.values(ctx.data.parts),
+          anchor: anchor ? ctx.data.parts[anchor] : undefined,
+        });
         if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
       }
     } catch (error) {
@@ -342,51 +361,66 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.source = await rgbaToPng(result.source, result.width, result.height);
     candidate.shape = result.shape ? await alphaToPng(result.shape, result.width, result.height) : undefined;
     candidate.warnings = [...result.warnings];
-    candidate.notes = [...rewriteNote];
+    candidate.notes = [...rewriteNote, ...redoNote];
 
     // 数値の検品
     const problems: string[] = result.warnings.map((w) => w.message);
+    const fixes: string[] = result.warnings.map((w) => WARNING_FIX[w.code]); // 作り直すときに画像生成 AI へ伝える指示（英語）
     const region = ctx.data.regions[item.category];
     if (region && !empty) {
       const share = shareInsideRegion(result.rgba, result.width, result.height, region);
-      if (share < MIN_REGION_SHARE) problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
+      if (share < MIN_REGION_SHARE) {
+        problems.push(`「${label}」があるはずの範囲から、服の ${Math.round((1 - share) * 100)}% がはみ出しています`);
+        fixes.push(`The item was too large or in the wrong place for a "${label}" item. Draw it at a natural size, only on the part of the body where such an item is worn.`);
+      }
     }
 
     // 見た目の検品（数値で問題が無いときだけ。問題があれば、どうせ作り直す）
     if (problems.length === 0) {
-      let verdict: { ok: boolean; reason: string };
+      let verdict: { ok: boolean; reason: string; fix?: string };
       try {
         const preview = await renderPreview(ctx.template, [result.rgba]);
-        verdict = await ctx.text.json<{ ok: boolean; reason: string }>({
+        verdict = await ctx.text.json<{ ok: boolean; reason: string; fix?: string }>({
           system: 'You are a strict quality inspector for a children\'s dress-up game. Reply with JSON only.',
           prompt: [
-            'The image shows a doll wearing one automatically cut-out item.',
+            'The image shows a doll wearing one item that an image model drew and that was then cut out automatically.',
             `The item should be: ${item.description} (type: ${label}).`,
-            'Set ok to false if any of these is true: the item does not match the description; parts of it are missing or have holes that look like cut-out errors; ' +
-              'leftover patches of flat key colour or background remain; it is misplaced on the body; extra objects, body parts or text are present; the drawing is malformed.',
+            'Look at the picture carefully and set ok to false if any of these is true:',
+            '- the item does not match the description;',
+            '- it is misplaced: shifted sideways or up/down from the body part it belongs to, so that it does not sit naturally on the doll (for hair and hats: not centred on the head, or the bald head sticks out on one side);',
+            '- its size is unnatural for this doll: clearly too large or too small for the body part that wears it (for example a tiara or hat much wider than the head);',
+            '- parts of it are missing, cut off in a straight line, or have holes that look like cut-out errors;',
+            '- leftover patches of flat key colour or background, stray specks or a rectangular block remain;',
+            '- extra objects, body parts or text are present, or the drawing is malformed.',
             categoryKind(label) === 'face' ? 'This item must be a face without any hair: set ok to false if any hair (bangs, sidelocks, hair outline) is drawn.' : '',
             categoryKind(label) === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
-            'Otherwise set ok to true. In reason, explain briefly in Japanese (one sentence).',
+            'Otherwise set ok to true.',
+            'reason: explain briefly in Japanese (one sentence) what you saw.',
+            'fix: if ok is false, write one to three short English sentences addressed to the image model that will redraw the item, saying exactly what to change ' +
+              '(for example "Draw the tiara much smaller, about as wide as the head, resting on top of the hair." or "Centre the hair on the head; the head must be fully covered on both sides."). ' +
+              'Describe the desired result, not the cut-out process. If ok is true, set fix to an empty string.',
           ].filter(Boolean).join('\n'),
           images: [preview],
           schema: INSPECT_SCHEMA,
         });
       } catch (error) {
         // 検品そのものができなかった。できた画像は残し、人に見てもらう（作り直しても検品はまた失敗する）
-        candidate.notes = [`見た目の検品ができませんでした（${(error as Error).message}）`];
+        candidate.notes = [...rewriteNote, ...redoNote, `見た目の検品ができませんでした（${(error as Error).message}）`];
         candidate.status = 'flagged';
         return;
       }
       if (verdict.ok) {
-        candidate.notes = [...rewriteNote];
+        candidate.notes = [...rewriteNote, ...redoNote];
         candidate.status = 'passed';
         return;
       }
       problems.push(verdict.reason || '見た目の検品で不合格でした');
+      fixes.push((typeof verdict.fix === 'string' && verdict.fix.trim()) || verdict.reason || 'The result did not pass inspection. Follow the rules above more strictly.');
     }
-    candidate.notes = [...rewriteNote, ...problems];
-    kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, warnings: candidate.warnings, notes: problems };
-    feedback = problems.join(' / ');
+    candidate.notes = [...rewriteNote, ...redoNote, ...problems];
+    kept = { png: candidate.png, source: candidate.source, shape: candidate.shape, warnings: candidate.warnings, notes: [...redoNote, ...problems] };
+    feedback = fixes.map((f) => `- ${f}`).join('\n');
+    redoNote = [`検品の指摘を伝えて、自動で作り直しました（前の指摘: ${problems.join(' / ')}）`];
   }
   candidate.status = candidate.png ? 'flagged' : 'failed';
 }

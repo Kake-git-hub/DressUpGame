@@ -642,7 +642,7 @@ test('調整画面で重なりの前後を変えられる', async ({ page }) => 
   const pickerItems = page.getByTestId('adjust-picker-item'); // 上がいちばん手前
   await expect(pickerItems).toHaveCount(2);
   await expect(pickerItems.nth(1)).toHaveClass(/on/);
-  await expect(page.getByTestId('layer-back')).toBeDisabled();
+  await expect(page.getByTestId('adjust-picker-doll')).toBeVisible(); // 一覧のいちばん下はドール
   // ボトムスを上に動かして、トップスに重ねる
   const OVERLAP_Y = imgY(480);
   await page.mouse.move(DOLL_X, BOTTOM_Y);
@@ -671,7 +671,37 @@ test('調整画面で重なりの前後を変えられる', async ({ page }) => 
   await page.locator('.tool-button').first().click();
   await pickerItems.nth(1).click();
   await expect(pickerItems.nth(1)).toHaveClass(/on/); // トップス（うしろ）
+});
+
+test('調整画面の一覧にドールが並び、服をドールの後ろに回せる', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  await page.locator('.tool-button').first().click();
+  // 一覧は上から「服 → ドール」
+  const rows = page.locator('[data-testid="adjust-picker-items"] > *');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'adjust-picker-doll');
+  await expect(page.getByTestId('layer-front')).toBeDisabled();
+  // 後ろへ: ドールの後ろに回り、調整中でもその場でドールが手前に見える
+  await page.getByTestId('layer-back').click();
+  await expect(rows.nth(0)).toHaveAttribute('data-testid', 'adjust-picker-doll');
   await expect(page.getByTestId('layer-back')).toBeDisabled();
+  await expect(page.getByTestId('adjust-doll')).toBeVisible();
+  await expect
+    .poll(async () => near(await screenPixel(page, DOLL_X, BOTTOM_Y), SKIN, 12), { timeout: 5000, message: '調整中にドールが手前になる' })
+    .toBe(true);
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, BOTTOM_Y, SKIN); // 確定後も、ドールが手前
+  // 読み込み直しても、ドールの後ろのまま
+  await page.reload();
+  await expectPixel(page, DOLL_X, BOTTOM_Y, SKIN);
+  // 前へ戻すと、ドールの前に出る
+  await page.locator('.tool-button').first().click();
+  await page.getByTestId('layer-front').click();
+  await expect(page.getByTestId('adjust-doll')).toHaveCount(0);
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
 });
 
 test('調整の × で脱がせても、調整は続き、残りの服に切り替わる', async ({ page }) => {

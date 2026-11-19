@@ -7,11 +7,13 @@
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { PlacedImage, PlacedItem } from './PlacedItem';
+import { PlacedDoll, PlacedImage, PlacedItem } from './PlacedItem';
 import { canvasGeometry, itemOrigin, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
+import { activeHides } from '../engine/hides';
+import { isBehindDoll, moveLayer as nextLayerAdjust, sheetsAbove, sortByLayer } from '../engine/layers';
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
@@ -252,30 +254,19 @@ export function ItemAdjustPanel({
     setRotation(0);
   }, []);
 
-  // 重なりの前後: いまの重ね順（調整中の値を使う）で、1 つ前・1 つ後ろの服との間に入る
-  const effective = (i: EquippedItem) => (i.layerOrder ?? i.baseZIndex ?? 0) + (item && i.id === item.id ? layerAdjust : (i.layerAdjust ?? 0));
-  const stack = item
-    ? [...equippedItems.filter((i) => i.id !== item.id), item].sort((a, b) => effective(a) - effective(b) || a.equipOrder - b.equipOrder)
-    : [];
-  const stackIndex = item ? stack.findIndex((i) => i.id === item.id) : -1;
-  const moveLayer = useCallback(
-    (direction: 1 | -1) => {
-      if (!item || stackIndex < 0) return;
-      const neighbor = stack[stackIndex + direction];
-      if (!neighbor) return;
-      const beyond = stack[stackIndex + direction * 2];
-      const near = effective(neighbor);
-      // 隣の服を越えた所（その先の服との中間。先が無ければ 1 つ分先）に置く
-      const far = beyond && effective(beyond) !== near ? effective(beyond) : near + direction;
-      const target = (near + far) / 2;
-      const next = target - (item.layerOrder ?? item.baseZIndex ?? 0);
-      setLayerAdjust(next);
-      // 重なりの順番は、調整中でもその場でキャンバスに反映する
-      onAdjustRef.current({ layerAdjust: next });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stack と effective は item・layerAdjust・equippedItems から決まる
-    [item, stackIndex, layerAdjust, equippedItems],
-  );
+  // 重なりの前後: 着ている服（調整中の服は、調整中の値）とドールを、下から並べた一覧の中で動かす。
+  // ドールより下へ動かすと、ドールの後ろに回る
+  const current = item ? [...equippedItems.filter((i) => i.id !== item.id), { ...item, layerAdjust }] : [];
+  const stack = sortByLayer(current);
+  const canMove = (direction: 1 | -1) => !!item && nextLayerAdjust(current, item.id, direction) !== null;
+  const moveLayer = (direction: 1 | -1) => {
+    if (!item) return;
+    const next = nextLayerAdjust(current, item.id, direction);
+    if (next === null) return;
+    setLayerAdjust(next);
+    // 重なりの順番は、調整中でもその場でキャンバスに反映する
+    onAdjustRef.current({ layerAdjust: next });
+  };
 
   // 枠の角の「拡大・回転」つまみ（シールの調整と同じ操作）
   const handleRef = useRef<{ cx: number; cy: number; distance: number; angle: number; scale: number; rotation: number } | null>(null);
@@ -598,17 +589,23 @@ export function ItemAdjustPanel({
                 </div>
               </div>
             </PlacedItem>
-            {stack.slice(stackIndex + 1).map((front, i) => (
-              <PlacedItem
-                key={front.id}
-                item={front}
-                look={lookOf(front)}
-                geometry={geometry}
-                dollTransform={dollTransform}
-                zIndex={51 + i}
-                className="adjust-front-item"
-              />
-            ))}
+            {/* 調整中の服より手前のもの（服・後ろ髪・ドール）。キャンバスの代わりに、ここに重ねる */}
+            {sheetsAbove(current, item.id).map((sheet, i) =>
+              sheet.kind === 'doll' ? (
+                doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={51 + i} />
+              ) : (
+                <PlacedItem
+                  key={`${sheet.item.id}:${sheet.kind}`}
+                  item={sheet.item}
+                  part={sheet.kind}
+                  look={lookOf(sheet.item)}
+                  geometry={geometry}
+                  dollTransform={dollTransform}
+                  zIndex={51 + i}
+                  className="adjust-front-item"
+                />
+              ),
+            )}
           </>
         );
       })()}
@@ -713,21 +710,36 @@ export function ItemAdjustPanel({
         )}
       </div>
 
-      {/* 着ている服（重なりの順番。手前が上）。押すと、その服の調整に切り替える。
-          上下のボタンで、調整中の服の重なりを前後に入れ替える */}
+      {/* 着ている服とドール（重なりの順番。手前が上）。服を押すと、その服の調整に切り替える。
+          上下のボタンで、調整中の服の重なりを前後に入れ替える。ドールより下へ動かすと、ドールの後ろに回る */}
       {!isDollMode && item && (
         <div className="item-adjust-picker" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
-          <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={stackIndex >= stack.length - 1} title="まえへ" aria-label="まえへ" data-testid="layer-front">
+          <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={!canMove(1)} title="まえへ" aria-label="まえへ" data-testid="layer-front">
             ▲
           </button>
           <div className="item-adjust-picker-items" data-testid="adjust-picker-items">
-            {[...stack].reverse().map((i) => (
-              <button key={i.id} className={i.id === item.id ? 'on' : ''} onClick={() => switchTo(i.id)} title={i.name} data-testid="adjust-picker-item">
-                <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
-              </button>
-            ))}
+            {(() => {
+              const row = (i: EquippedItem) => (
+                <button key={i.id} className={i.id === item.id ? 'on' : ''} onClick={() => switchTo(i.id)} title={i.name} data-testid="adjust-picker-item">
+                  <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
+                </button>
+              );
+              const upper = stack.filter((i) => !isBehindDoll(i)).reverse();
+              const lower = stack.filter(isBehindDoll).reverse();
+              return (
+                <>
+                  {upper.map(row)}
+                  {doll && (
+                    <div className="item-adjust-picker-doll" title="ドール（これより下は、ドールのうしろ）" data-testid="adjust-picker-doll">
+                      <img src={doll.bodyImageUrl} alt="ドール" draggable={false} />
+                    </div>
+                  )}
+                  {lower.map(row)}
+                </>
+              );
+            })()}
           </div>
-          <button className="item-adjust-layer-btn" onClick={() => moveLayer(-1)} disabled={stackIndex <= 0} title="うしろへ" aria-label="うしろへ" data-testid="layer-back">
+          <button className="item-adjust-layer-btn" onClick={() => moveLayer(-1)} disabled={!canMove(-1)} title="うしろへ" aria-label="うしろへ" data-testid="layer-back">
             ▼
           </button>
         </div>

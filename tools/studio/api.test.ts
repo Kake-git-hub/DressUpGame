@@ -20,7 +20,7 @@ let budget: Budget;
 let dollId: string;
 let imageCalls: { prompt: string; images: Buffer[] }[];
 let textCalls: { system: string; prompt: string }[];
-let verdicts: { ok: boolean; reason: string }[];
+let verdicts: { ok: boolean; reason: string; fix?: string }[];
 
 // 人型（頭・胴・腕・脚）の透過画像
 async function dollPng(): Promise<Buffer> {
@@ -78,7 +78,7 @@ const errorOf = async (res: Promise<ApiResponse>) => {
   return { status: r.status, error: (JSON.parse(r.body.toString()) as { error: string }).error };
 };
 
-// 作り直しの動きを確かめるため、テストでは既定（1 回）ではなく 2 回までにする
+// 1 品目あたり 2 回まで（＝検品で不合格なら 1 回だけ作り直す。既定と同じ）
 function makeApi(ai = { text: fakeText as TextAi | null, image: fakeImage as ImageAi | null }, limits = { perDay: 20, perRun: 10 }, maxAttempts: number | null = 2) {
   budget = new Budget(path.join(dir, '.usage.json'), limits);
   api = new StudioApi({ contentDir: path.join(dir, 'content'), ai, budget, maxAttempts: maxAttempts ?? undefined }); // null = 既定
@@ -388,12 +388,33 @@ describe('テーマからの自動生成', () => {
     expect((await ok<{ dolls: { items: unknown[] }[] }>('GET', '/api/content')).dolls[0].items).toHaveLength(1);
     expect((await call('GET', `/api/jobs/image?id=${id}&index=9`)).status).toBe(404);
   }, 60_000);
+  it('検品で不合格なら、直し方の指示を添えて 1 回だけ作り直し、合格すれば「合格」になる（作り直したことは注記に残る）', async () => {
+    verdicts = [{ ok: false, reason: 'ティアラが頭より大きすぎます', fix: 'Draw the tiara much smaller, about as wide as the head.' }];
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [(await plan()).items[0]] });
+    await api.waitForJob(id);
+    const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
+    expect(c).toMatchObject({ status: 'passed', attempts: 2, hasImage: true });
+    expect(c.notes).toHaveLength(1);
+    expect(c.notes[0]).toMatch(/自動で作り直しました.*ティアラが頭より大きすぎます/);
+    // 画像生成 AI には、検品が書いた英語の指示が伝わる
+    expect(imageCalls).toHaveLength(2);
+    expect(imageCalls[0].prompt).not.toMatch(/previous attempt/);
+    expect(imageCalls[1].prompt).toMatch(/previous attempt[\s\S]*Draw the tiara much smaller, about as wide as the head\./);
+    // 検品には、位置と大きさを見るように頼んでいる
+    const inspect = textCalls.filter((t) => /quality inspector/.test(t.system));
+    expect(inspect).toHaveLength(2);
+    expect(inspect[0].prompt).toMatch(/misplaced/);
+    expect(inspect[0].prompt).toMatch(/size is unnatural/);
+  }, 60_000);
   it('検品で不合格なら、理由を添えて 1 回だけ作り直し、それでも不合格なら「注意あり」で残す', async () => {
     verdicts = [{ ok: false, reason: 'そでが欠けています' }, { ok: false, reason: 'まだ欠けています' }];
     const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [(await plan()).items[0]] });
     await api.waitForJob(id);
     const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
-    expect(c).toMatchObject({ status: 'flagged', attempts: 2, hasImage: true, notes: ['まだ欠けています'] });
+    expect(c).toMatchObject({ status: 'flagged', attempts: 2, hasImage: true });
+    expect(c.notes).toHaveLength(2);
+    expect(c.notes[0]).toMatch(/自動で作り直しました/);
+    expect(c.notes[1]).toBe('まだ欠けています');
     expect(imageCalls[1].prompt).toMatch(/そでが欠けています/);
     expect(await budget.usedToday()).toBe(2);
   }, 60_000);
@@ -437,9 +458,12 @@ describe('テーマからの自動生成', () => {
     expect(c.notes[0]).toMatch(/検品ができませんでした/);
     expect(await budget.usedToday()).toBe(1);
   }, 60_000);
-  it('既定では作り直さない: 検品で不合格でも 1 枚だけで「注意あり」になる。断られたときの書き直しは 1 回だけ行う', async () => {
+  it('既定は 2 回まで（作り直し 1 回）', async () => {
     makeApi(undefined, undefined, null);
-    expect((await ok<{ budget: { maxAttempts: number } }>('GET', '/api/status')).budget.maxAttempts).toBe(1);
+    expect((await ok<{ budget: { maxAttempts: number } }>('GET', '/api/status')).budget.maxAttempts).toBe(2);
+  });
+  it('1 回までにすると作り直さない: 検品で不合格でも 1 枚だけで「注意あり」になる。断られたときの書き直しは 1 回だけ行う', async () => {
+    makeApi(undefined, undefined, 1);
     verdicts = [{ ok: false, reason: 'そでが欠けています' }];
     const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A red shirt.', colors: ['#c81e28'] }] });
     await api.waitForJob(id);
@@ -448,7 +472,7 @@ describe('テーマからの自動生成', () => {
     expect(imageCalls).toHaveLength(1);
 
     let calls = 0;
-    makeApi({ text: fakeText, image: { generate: async (input) => (++calls === 1 ? Promise.reject(new AiError('断りました', 422, false, true)) : fakeImage.generate(input)) } }, undefined, null);
+    makeApi({ text: fakeText, image: { generate: async (input) => (++calls === 1 ? Promise.reject(new AiError('断りました', 422, false, true)) : fakeImage.generate(input)) } }, undefined, 1);
     const second = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'b', description: 'An Elsa dress.', colors: ['#c81e28'] }] });
     await api.waitForJob(second.id);
     expect((await ok<JobView>('GET', `/api/jobs?id=${second.id}`)).candidates[0]).toMatchObject({ status: 'passed', attempts: 2 });

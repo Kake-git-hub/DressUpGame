@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useMemo } from 'react';
 import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
+import { sortByLayer } from '../engine/layers';
 
 // 初期状態を作成
 const createInitialState = (
@@ -134,18 +135,7 @@ export function useDressUp(
   // layerOrder（フォルダ名の番号）を最優先でソート（小さい方が下＝先に描画）
   // layerAdjust（一時的なレイヤー調整）を加算して最終レイヤー値を決定
   // layerOrderがない場合はbaseZIndexを使用、最後にequipOrderで安定ソート
-  const equippedItems = useMemo((): EquippedItem[] => {
-    return [...state.equippedItems].sort((a, b) => {
-      // layerOrderがある場合はそれを最優先、layerAdjustを加算
-      const aLayer = (a.layerOrder ?? a.baseZIndex ?? 0) + (a.layerAdjust ?? 0);
-      const bLayer = (b.layerOrder ?? b.baseZIndex ?? 0) + (b.layerAdjust ?? 0);
-      if (aLayer !== bLayer) {
-        return aLayer - bLayer; // 小さい方が下（先に描画）
-      }
-      // 同じレイヤーなら着せた順番で並べる（後が上）
-      return a.equipOrder - b.equipOrder;
-    });
-  }, [state.equippedItems]);
+  const equippedItems = useMemo((): EquippedItem[] => sortByLayer(state.equippedItems), [state.equippedItems]);
 
   // 全ての服を脱がせる（下着は残す）
   const resetAll = useCallback(() => {

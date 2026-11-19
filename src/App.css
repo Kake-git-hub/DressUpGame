@@ -654,6 +654,17 @@ textarea {
   background: #fff;
   cursor: pointer;
 }
+/* ドール（重なりの基準。押せない）。これより下に並ぶ服は、ドールの後ろ */
+.item-adjust-picker-doll {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 2px dashed #9370db;
+  border-radius: 10px;
+  background: #f3edff;
+}
 .item-adjust-picker-items button.on {
   border-color: #ff69b4;
   background: #ffe8f3;

@@ -112,6 +112,7 @@ export async function processFace(generated: Buffer, reference: Buffer, doll: Do
     height: canvasH,
     keyColors: { background, silhouette: null },
     alignment: { scale: match.scale, dx: match.dx, dy: match.dy, score: 1 },
+    anchorShift: null,
     partShifts: [],
     shape: null,
     closeColorRatio: 0,

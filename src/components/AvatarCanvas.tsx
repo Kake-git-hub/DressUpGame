@@ -24,8 +24,8 @@ interface AvatarCanvasProps {
   menuOffset?: number; // メニュー幅オフセット（左側）
   rightOffset?: number; // 右ボタン領域オフセット（右側）
   adjustingItemId?: string | null; // 調整中のアイテムID（非表示にする）
-  // キャンバスに描かない服（調整中の服より手前の服。調整画面が代わりに重ねて描く）
-  hiddenItemIds?: string[];
+  // キャンバスに描かないもの（調整中の服と、それより手前のもの。調整画面が代わりに重ねて描く）
+  hidden?: HiddenSheets;
   onCanvasReady?: () => void;
 }
 
@@ -41,9 +41,17 @@ function toDollConfig(doll: DollData | null | undefined, hides: DollConfig['hide
   };
 }
 
-// キャンバスに、ドールの上の分を描かない服の ID（調整中の服と、調整画面が重ねて描く服）。hidden は ID を改行でつないだもの
-function hiddenIds(hidden: string): Set<string> {
-  return new Set(hidden.split('\n').filter(Boolean));
+// キャンバスに描かないもの: 服の上の分・服の下の分（後ろ髪など）・ドール
+export interface HiddenSheets {
+  fronts: string[];
+  backs: string[];
+  doll: boolean;
+}
+
+// hidden は「上の分の ID」と「下の分の ID」を、それぞれ改行でつなぎ、タブで分けたもの
+function hiddenIds(hidden: string): { fronts: Set<string>; backs: Set<string> } {
+  const [fronts = '', backs = ''] = hidden.split('\t');
+  return { fronts: new Set(fronts.split('\n').filter(Boolean)), backs: new Set(backs.split('\n').filter(Boolean)) };
 }
 
 export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(function AvatarCanvas({
@@ -56,7 +64,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   menuOffset = 0,
   rightOffset = 60,
   adjustingItemId = null,
-  hiddenItemIds,
+  hidden,
   onCanvasReady,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -64,7 +72,8 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   const [isReady, setIsReady] = useState(false);
 
   // 非同期の再描画から参照する、最新の props
-  const hiddenKey = [adjustingItemId ?? '', ...(hiddenItemIds ?? [])].join('\n');
+  const hiddenKey = `${[adjustingItemId ?? '', ...(hidden?.fronts ?? [])].join('\n')}\t${(hidden?.backs ?? []).join('\n')}`;
+  const hideDoll = hidden?.doll ?? false;
   const latest = useRef({ equippedItems, doll, backgroundImageUrl, adjustingItemId, hiddenKey });
   useEffect(() => {
     latest.current = { equippedItems, doll, backgroundImageUrl, adjustingItemId, hiddenKey };
@@ -197,6 +206,14 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       redrawWhenDone(engineRef.current.drawClothing(equippedItems, hiddenIds(hiddenKey)));
     }
   }, [equippedItems, hiddenKey, isReady]);
+
+  // ドールを隠す・戻す
+  useEffect(() => {
+    if (isReady && engineRef.current?.isInitialized()) {
+      engineRef.current.setDollVisible(!hideDoll);
+      engineRef.current.forceRedraw();
+    }
+  }, [hideDoll, isReady]);
 
   // 背景が変わったら更新
   useEffect(() => {
