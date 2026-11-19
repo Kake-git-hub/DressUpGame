@@ -23,8 +23,10 @@ export interface SwapResult extends ProcessResult {
   hide: Uint8Array; // キャンバス大の不透明度。着ているあいだドールを隠す所
 }
 
-// 範囲の外で、はっきり描き変えられた画素（ドールの上）がこの割合を超えたら、AI が脚（腕）ごと描き直した疑いがある
-const REPAINT_LIMIT = 0.6;
+// 範囲の外で、「描き変えられたのに肌の色に近い」画素（ドールの上）がこの割合を超えたら、AI が脚（腕）ごと描き直した疑いがある。
+// 肌の色に近いものだけを数える（長手袋やロングブーツは腕・脚のほとんどを覆うが、肌の色ではない）
+const REPAINT_LIMIT = 0.25;
+const SKIN_LIKE = 90;
 // 位置合わせの倍率がこの範囲の端に張りついたら、元の図と合っていない
 const SCALE_MIN = 0.93;
 const SCALE_MAX = 1.07;
@@ -185,6 +187,10 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
       }
     }
     const median = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1];
+    // 元の図の肌の色（ドールの画素の中央値）
+    const skinValues: number[][] = [[], [], []];
+    for (let p = 0; p < w * h; p += 5) if (refCut[p * 4 + 3] >= 250) for (let c = 0; c < 3; c++) skinValues[c].push(ref[p * 4 + c]);
+    const skin = (skinValues[0].length ? skinValues.map(median) : [224, 190, 170]) as Rgb;
     const gain = mine[0].length >= MIN_MATCH_PIXELS ? [0, 1, 2].map((c) => Math.max(0.8, Math.min(1.25, median(theirs[c]) / Math.max(1, median(mine[c]))))) : [1, 1, 1];
 
     for (let y = 0; y < h; y++) {
@@ -194,7 +200,7 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
         if (!inZone) {
           if (refCut[p * 4 + 3] >= 128) {
             body++;
-            if (diff[p] >= 128) changed++;
+            if (diff[p] >= 128 && pixelDistance(match.rgba, p * 4, skin) < SKIN_LIKE) changed++;
           }
           cut[p * 4 + 3] = Math.min(cut[p * 4 + 3], near[p] >= 128 ? 255 : near[p] * 2);
         }

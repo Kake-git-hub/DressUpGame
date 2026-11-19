@@ -158,6 +158,29 @@ describe('processSwap（本物の生成画像）', async () => {
     expect(result.warnings.map((w) => w.code)).toContain('touches-edge');
   });
 
+  it('脚のほとんどを覆う品目（ロングブーツ・長手袋）は、「描き直し」と警告しない', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
+      <rect x="250" y="120" width="520" height="840" fill="#7a3fb0"/></svg>`;
+    const painted = await sharp(reference).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
+    const result = await processSwap(painted, reference, doll, [tile], [zone], GREEN);
+    expect(result.warnings.map((w) => w.code)).not.toContain('repainted');
+  });
+
+  it('AI が脚の肌を塗り直したら（色が変わったら）、「描き直し」と警告する', async () => {
+    // 脚全体に、少し濃い肌色をうすく重ねる（輪郭や影を描き直したのと同じ）。足には靴を描く
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">
+      <rect x="0" y="0" width="${SIZE}" height="700" fill="#b06a48" fill-opacity="0.45"/>
+      <rect x="250" y="700" width="520" height="260" rx="40" fill="#7a3b1e"/></svg>`;
+    const overlay = await sharp(Buffer.from(svg)).png().toBuffer();
+    // 背景（緑）は塗らない: 脚の形の所だけに重ねる
+    const legs = await sharp(Buffer.from(doll.rgba.buffer), { raw: { width: SIZE, height: SIZE, channels: 4 } }).extractChannel(3).toBuffer();
+    const masked = await sharp(overlay).ensureAlpha().composite([{ input: legs, raw: { width: SIZE, height: SIZE, channels: 1 }, blend: 'dest-in' }]).png().toBuffer();
+    const shoes = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}"><rect x="250" y="700" width="520" height="260" rx="40" fill="#7a3b1e"/></svg>`)).png().toBuffer();
+    const painted = await sharp(reference).composite([{ input: masked }, { input: shoes }]).png().toBuffer();
+    const result = await processSwap(painted, reference, doll, [tile], [zone], GREEN);
+    expect(result.warnings.map((w) => w.code)).toContain('repainted');
+  });
+
   it('何も描かれていなければ「見つかりません」', async () => {
     const result = await processSwap(reference, reference, doll, [tile], [zone], GREEN);
     expect(result.warnings.map((w) => w.code)).toContain('empty');
@@ -167,6 +190,7 @@ describe('processSwap（本物の生成画像）', async () => {
     const flipped = await sharp(boots).flip().png().toBuffer();
     const result = await processSwap(flipped, reference, doll, [tile], [zone], GREEN);
     const codes = result.warnings.map((w) => w.code);
-    expect(codes.includes('repainted') || codes.includes('poor-fit')).toBe(true);
+    // 上下が逆の絵: 靴が上の端にある（端で切れた疑い）か、描き直し・位置ずれのどれかで気づく
+    expect(codes.some((c) => c === 'repainted' || c === 'poor-fit' || c === 'touches-edge')).toBe(true);
   });
 });
