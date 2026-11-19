@@ -26,6 +26,13 @@ const DESPILL_RAMP = 0.1;
 const DESPILL_DROP = 0.85;
 // 服の色がこれより近いと、背景・シルエットと区別できず欠けが疑われる
 const CLOSE_COLOR_DISTANCE = 60;
+// 背景色がこれ以上あざやか（最大の成分 − 最小の成分）なら、服に囲まれた背景色も消す（髪の房のすき間など）。
+// 白い背景では、服の白いハイライトと区別できないので消さない
+const CHROMATIC_SPREAD = 100;
+// 体の輪郭に沿った線くず（AI が描き足した輪郭線の消し残り）とみなす、線の太さの半分（px。画像の幅 400px につき 1）と、
+// 大きさの上限（画像の画素数をこれで割った数）
+const OUTLINE_DEPTH_PER = 400;
+const OUTLINE_DIVISOR = 100;
 
 export interface CutoutMasks {
   background: Uint8Array; // 1 = 背景として消した
@@ -37,10 +44,10 @@ export interface CutoutMasks {
  *  1. 背景色に近く、画像の縁からつながっている画素を消す
  *  2. シルエット色に近い画素と、背景とシルエットの境目（両者がまざった色）を消す
  *  3. 縁につながらない背景色のかたまりは、シルエットに接していれば消す（首飾りの内側など）。
- *     服だけに囲まれたかたまりは残す（白いハイライト）
+ *     服だけに囲まれたかたまりは、背景が白なら残し（白いハイライト）、色つきなら消す（髪の房のすき間）
  *  4. 消した領域のすぐ近くにある、背景色・シルエット色まじりの画素を消す
  *  5. ふちの画素から、まざった背景色・シルエット色を取り除き、その分だけ半透明にする
- *  6. 消し残りの小さなかけらを消す
+ *  6. 消し残りの小さなかけらと、体の輪郭に沿った細い線くずを消す
  */
 export function cutOutClothing(rgba: Pixels, width: number, height: number, keys: KeyColors): CutoutMasks {
   const total = width * height;
@@ -123,8 +130,9 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
     }
   }
 
-  // 3. 閉じ込められた背景: シルエットに接しているかたまりだけ消す
-  if (sil) {
+  // 3. 閉じ込められた背景: シルエットに接しているかたまりを消す。背景が色つきなら、接していなくても消す
+  const chromatic = Math.max(bg[0], bg[1], bg[2]) - Math.min(bg[0], bg[1], bg[2]) >= CHROMATIC_SPREAD;
+  if (sil || chromatic) {
     const visited = new Uint8Array(total);
     const component = new Int32Array(total);
     for (let start = 0; start < total; start++) {
@@ -150,10 +158,10 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
         if (p >= width) visit(p - width);
         if (p < total - width) visit(p + width);
       }
-      if (touches) for (let k = 0; k < size; k++) background[component[k]] = 1;
+      if (touches || chromatic) for (let k = 0; k < size; k++) background[component[k]] = 1;
     }
     // 新しく消した背景に接する境目も消す
-    for (let round = 0; round < MIX_REACH; round++) {
+    for (let round = 0; sil && round < MIX_REACH; round++) {
       const add: number[] = [];
       for (let p = 0; p < total; p++) if (mix[p] && !removed(p) && nearRemoved(p)) add.push(p);
       if (add.length === 0) break;
@@ -288,21 +296,30 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
   }
   despillKeys(rgba, width, height, keyList, near);
 
-  // 6. 消し残りの小さなかけら（境目に残った数画素）を消す
+  // 6. 消し残りの小さなかけら（境目に残った数画素）と、体の輪郭に沿った細い線くずを消す。
+  //    線くず = どの画素も消した領域のすぐそばにあり（細い）、シルエットと背景の両方に接している（輪郭の上にある）
   const minSize = Math.max(4, Math.round(total / SPECK_DIVISOR));
+  const outlineDepth = Math.min(BAND + 1, Math.max(2, Math.round(width / OUTLINE_DEPTH_PER)));
+  const outlineSize = Math.round(total / OUTLINE_DIVISOR);
   const seen = new Uint8Array(total);
   const piece = new Int32Array(total);
   for (let start = 0; start < total; start++) {
     if (seen[start] || rgba[start * 4 + 3] < 8) continue;
     let size = 0;
+    let thin = true;
+    let onSilhouette = false;
+    let onBackground = false;
     top = 0;
     stack[top++] = start;
     seen[start] = 1;
     while (top > 0) {
       const p = stack[--top];
       piece[size++] = p;
+      if (depth[p] === 0 || depth[p] > outlineDepth) thin = false;
       const x = p % width;
       const visit = (n: number) => {
+        if (silhouette[n]) onSilhouette = true;
+        else if (background[n]) onBackground = true;
         if (!seen[n] && rgba[n * 4 + 3] >= 8) {
           seen[n] = 1;
           stack[top++] = n;
@@ -313,7 +330,7 @@ export function cutOutClothing(rgba: Pixels, width: number, height: number, keys
       if (p >= width) visit(p - width);
       if (p < total - width) visit(p + width);
     }
-    if (size < minSize) {
+    if (size < minSize || (sil && thin && onSilhouette && onBackground && size < outlineSize)) {
       for (let k = 0; k < size; k++) {
         rgba[piece[k] * 4 + 3] = 0;
         background[piece[k]] = 1;

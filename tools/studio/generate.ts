@@ -4,6 +4,8 @@
  *  企画（Claude）→ 品目ごとに: 切り抜きやすい色を選ぶ → 型紙のシルエットを作る → 画像生成（Gemini）
  *  → 切り抜きと位置合わせ → 数値の検品 → 見た目の検品（Claude）→ 不合格なら理由を添えて作り直す
  *
+ * 顔（目・口・化粧）だけは作り方が違う: ドールの本物の頭の拡大図に描かせ、元の図との違いを取り出す（processFace.ts）。
+ *
  * できた候補は公開しない。人が採用したものだけが、別の API で登録される。
  */
 import sharp from 'sharp';
@@ -16,6 +18,7 @@ import type { ManifestDoll } from '../../src/content/manifest.ts';
 import { AiError } from './ai.ts';
 import type { ImageAi, TextAi } from './ai.ts';
 import type { Budget } from './budget.ts';
+import { faceCrop, isFaceCategory, processFace, renderHeadCloseup } from './processFace.ts';
 import { processGenerated } from './processGenerated.ts';
 import type { DollTemplate, ProcessWarning } from './processGenerated.ts';
 import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
@@ -51,6 +54,10 @@ export interface Candidate {
 // 1 品目あたりの生成回数の既定（1 = 自動の作り直しなし。値段を抑える）。STUDIO_MAX_ATTEMPTS で変えられる
 export const MAX_ATTEMPTS = 1;
 const MIN_REGION_SHARE = 0.8;
+// 髪として扱うカテゴリ（名前で決める）
+const isHairCategory = (label: string): boolean => /かみ|髪|ヘア|hair/i.test(label);
+// 頭の拡大図の背景（AI が塗り変えにくい、うすい無彩色）
+const FACE_BACKGROUND: Rgb = [233, 230, 242];
 
 const hexToRgb = (hex: string): Rgb | null => {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -114,6 +121,10 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this plan.',
       '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
       '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
+      '',
+      'Special categories:',
+      '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
+      '- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face.',
     ].join('\n'),
     schema: PLAN_SCHEMA,
   });
@@ -145,13 +156,36 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
     `Draw exactly one item on the mannequin: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
+    isHairCategory(categoryLabel)
+      ? `This item is a hairstyle worn like a wig. Draw only the hair. The face area of the head must stay the same flat ${colorName(silhouette)} (no eyes, no mouth, no skin). ` +
+        `Every gap between strands of hair must show the flat ${colorName(background)} background or the flat mannequin, never any other colour.`
+      : '',
     'Strict rules:',
     '- Keep the mannequin exactly as it is: same position, same size, same pose, same outline. Do not move, resize, redraw or restyle it.',
     `- Every part of the mannequin that the item does not cover must stay the same flat ${colorName(silhouette)}. Apart from the item itself, do not draw skin, a face, hair or anything else on it.`,
     `- The background must stay the same flat ${colorName(background)} with no shadows, gradients, floor, text or frame.`,
     `- The item itself must not contain ${colorName(silhouette)} or ${colorName(background)} or colours close to them.`,
+    '- Do not draw an outline, border or shadow around the mannequin itself.',
     '- Draw only this one item, worn naturally on the mannequin, fully visible and not cut off by the image edge.',
     '- Square image, same framing as the template.',
+    feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+// 顔の指示文。画像は、ドールの本物の頭の拡大図（顔はまだ無い）
+function facePrompt(item: PlannedItem, categoryLabel: string, style: string, feedback: string | null): string {
+  return [
+    'The image is a close-up of the blank head of a doll (no face yet) on a flat plain background. It is the base layer of a paper-doll dress-up game.',
+    `Paint this face onto the head: ${item.description}`,
+    `Item type: ${categoryLabel}.`,
+    style ? `Art style: ${style}` : '',
+    'Strict rules:',
+    '- Return the same image with only the facial features added: eyes, eyebrows, nose, mouth, cheeks and make-up, painted directly on the existing skin.',
+    '- Everything else must stay pixel-for-pixel the same: the head shape and outline, the skin colour and its shading, the ears, the neck and shoulders, the background, the framing, position and size. Do not repaint, recolour, smooth or relight the skin.',
+    '- Do not add hair, a hairline, a hat, glasses, earrings or any other object, and do not add text or a frame.',
+    '- Place the features where a face naturally sits on this head, facing the same direction as the head, at a natural size for it.',
     feedback ? `The previous attempt was rejected for this reason, fix it: ${feedback}` : '',
   ]
     .filter(Boolean)
@@ -225,15 +259,24 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
     candidate.status = 'working'; // 作り直し中は、前の回の画像を候補として見せない
     let result;
     try {
-      const keys = chooseKeyColors([...planned, ...avoid]);
-      const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
-      await ctx.budget.spend();
-      const generated = await ctx.image.generate({
-        prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
-        images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
-      });
-      result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette, parts: Object.values(ctx.data.parts) });
-      if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
+      if (isFaceCategory(label)) {
+        // 顔: 本物の頭の拡大図に描かせて、元の図との違いを取り出す
+        const crop = faceCrop(ctx.data.parts.head, ctx.template.canvasW, ctx.template.canvasH);
+        const reference = await renderHeadCloseup(ctx.template, crop, FACE_BACKGROUND);
+        await ctx.budget.spend();
+        const generated = await ctx.image.generate({ prompt: facePrompt(item, label, ctx.style, feedback), images: [reference] });
+        result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND);
+      } else {
+        const keys = chooseKeyColors([...planned, ...avoid]);
+        const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
+        await ctx.budget.spend();
+        const generated = await ctx.image.generate({
+          prompt: itemPrompt(item, label, ctx.style, keys.silhouette, keys.background, feedback, !!ctx.closeup),
+          images: ctx.closeup ? [silhouette, ctx.closeup] : [silhouette],
+        });
+        result = await processGenerated(generated, ctx.template, { silhouetteColor: keys.silhouette, parts: Object.values(ctx.data.parts) });
+        if (result.warnings.some((w) => w.code === 'color-too-close')) avoid.push(keys.silhouette, keys.background);
+      }
     } catch (error) {
       const message = (error as Error).message;
       // 内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す

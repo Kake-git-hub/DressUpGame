@@ -158,6 +158,31 @@ describe('cutOutClothing（かけら）', () => {
   });
 });
 
+describe('cutOutClothing（髪など、すき間の多い品目）', () => {
+  const BLUE: Rgba = [0, 0, 255, 255];
+  const BLOND: Rgba = [240, 200, 90, 255];
+  it('色つきの背景は、服だけに囲まれていても消える（髪の房のすき間）', () => {
+    const px = sample(BLUE, GREEN, BLOND);
+    rect(px, 42, 40, 4, 8, [14, 8, 207, 255]); // 体に接しない、髪に囲まれた背景色
+    cutOutClothing(px, W, H, detect(px));
+    expect(alpha(px, 43, 43)).toBe(0);
+    expect(alpha(px, 20, 45)).toBe(255); // 髪は残る
+  });
+  it('体の輪郭に沿って残った細い線（AI が描き足した輪郭線）は消える', () => {
+    const px = sample();
+    rect(px, 22, 66, 2, 20, [105, 108, 100, 255]); // 体の左のふちに沿った、幅 2px の灰色の線
+    cutOutClothing(px, W, H, detect(px));
+    for (let y = 66; y < 86; y++) for (let x = 22; x < 24; x++) expect(alpha(px, x, y)).toBe(0);
+    expect(alpha(px, 20, 45)).toBe(255);
+  });
+  it('体の内側だけにある細い飾り（首飾りのくさり）は残る', () => {
+    const px = sample();
+    rect(px, 26, 14, 12, 2, [200, 160, 40, 255]);
+    cutOutClothing(px, W, H, detect(px));
+    expect(alpha(px, 32, 14)).toBeGreaterThan(100);
+  });
+});
+
 describe('closeColorRatio', () => {
   it('黒シルエットに紺の服だと 0.5 を超える', () => {
     const px = sample(MAGENTA, BLACK, NAVY);

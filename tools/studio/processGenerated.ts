@@ -21,7 +21,7 @@ import type { ManifestImage } from '../../src/content/manifest.ts';
 
 export type { Alignment, KeyColors };
 
-export type WarningCode = 'no-silhouette' | 'poor-fit' | 'color-too-close' | 'empty' | 'touches-edge';
+export type WarningCode = 'no-silhouette' | 'poor-fit' | 'color-too-close' | 'empty' | 'touches-edge' | 'repainted';
 export interface ProcessWarning {
   code: WarningCode;
   message: string;
