@@ -29,6 +29,14 @@ nav button { border-radius: 6px 6px 0 0; border-bottom: none; }
 .card:focus-within, .card:focus { border-color: #6a4fd0; }
 .card-view canvas { width: 440px; height: 440px; border-radius: 6px; touch-action: none; background: repeating-conic-gradient(#dcdae6 0% 25%, #f1f0f6 0% 50%) 0 0 / 24px 24px; }
 .card-view canvas.brushing { cursor: crosshair; }
+.card-view canvas.moving { cursor: grab; }
+.card-stage { position: relative; width: 440px; height: 440px; }
+.card-stage canvas { display: block; }
+/* 調整の枠（ゲームの調整画面と同じ見た目）。枠そのものは押せない（下の絵をつかめる）。つまみだけ押せる */
+.card-frame { position: absolute; box-sizing: border-box; border: 2px dashed #ff69b4; border-radius: 4px; pointer-events: none; }
+.card-frame-handle { position: absolute; width: 26px; height: 26px; padding: 0; border: 2px solid #fff; border-radius: 50%; color: #fff; font-size: 14px; line-height: 22px; text-align: center; pointer-events: auto; touch-action: none; user-select: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+.card-frame-handle.scale { right: -13px; bottom: -13px; background: #ff69b4; cursor: nwse-resize; }
+.card-frame-handle.reset { right: -13px; top: -13px; background: #9370db; cursor: pointer; }
 .card-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 260px; }
 .card-side label { justify-content: space-between; max-width: 360px; }
 .group { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }

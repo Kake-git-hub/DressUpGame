@@ -12,9 +12,14 @@ describe('categoryKind / categoryRules', () => {
     expect(categoryRules('ヘアスタイル').join('\n')).toMatch(/facial features/i);
   });
   it('髪かざりや服は、どちらでもない', () => {
-    for (const label of ['かみかざり', 'トップス', 'くつ', 'ぼうし']) {
+    for (const label of ['かみかざり', 'トップス', 'くつした', 'ぼうし']) {
       expect(categoryKind(label)).toBeNull();
       expect(categoryRules(label)).toEqual([]);
     }
+  });
+  it('くつ・ブーツは靴として扱い、足を完全に覆うように描かせる。くつしたは靴ではない', () => {
+    for (const label of ['くつ', '靴', 'ブーツ', 'shoes']) expect(categoryKind(label)).toBe('shoes');
+    for (const label of ['くつした', 'ソックス', '靴下']) expect(categoryKind(label)).toBeNull();
+    expect(categoryRules('くつ').join('\n')).toMatch(/completely covering both feet/);
   });
 });

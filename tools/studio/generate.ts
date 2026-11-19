@@ -5,7 +5,7 @@
  *  → 切り抜きと位置合わせ → 数値の検品 → 見た目の検品（Claude がドールに着せた絵を見る）
  *  → 不合格なら、直してほしい点を画像生成への指示にして、1 回だけ自動で作り直す
  *
- * 顔（目・口・化粧）だけは作り方が違う: ドールの本物の頭の拡大図に描かせ、元の図との違いを取り出す（processFace.ts）。
+ * 顔だけは作り方が違う: ドールの本物の頭の拡大図に描かせ、その頭を肌ごと「お面」のように切り取る（processFace.ts）。
  *
  * できた候補は公開しない。人が採用したものだけが、別の API で登録される。
  */
@@ -114,7 +114,14 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       'Allowed categories (use the id exactly as written):',
       ...categories.map((c) => {
         const kind = categoryKind(c.label);
-        const note = kind === 'face' ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)' : kind === 'hair' ? ' (hairstyle only: hair and bangs. Never any facial features.)' : '';
+        const note =
+          kind === 'face'
+            ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
+            : kind === 'hair'
+              ? ' (hairstyle only: hair and bangs. Never any facial features.)'
+              : kind === 'shoes'
+                ? ' (closed shoes or boots that cover the whole foot. No sandals, open toes or bare insteps.)'
+                : '';
         return `- ${c.id}${note}`;
       }),
       '',
@@ -148,9 +155,12 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
 const FACE_LABEL = /かお|顔|face|メイク|makeup/i;
 const HAIR_LABEL = /^(かみ|髪|ヘア|hair)$|ヘアスタイル|かみがた|髪型|hair ?style/i;
 
-export function categoryKind(label: string): 'face' | 'hair' | null {
+const SHOES_LABEL = /くつ(?!した)|靴(?!下)|shoe|ブーツ|boot/i;
+
+export function categoryKind(label: string): 'face' | 'hair' | 'shoes' | null {
   if (HAIR_LABEL.test(label.trim())) return 'hair';
   if (FACE_LABEL.test(label)) return 'face';
+  if (SHOES_LABEL.test(label)) return 'shoes';
   return null;
 }
 
@@ -168,6 +178,15 @@ export function categoryRules(label: string): string[] {
         '- This item is the hairstyle only (hair, bangs, and the hair at the back), like a wig placed on the mannequin\'s head.',
         '- Do not draw eyes, eyebrows, nose, mouth or any other facial features. Faces are a separate item, so the face area must stay the flat mannequin colour where the hair does not cover it.',
         '- No hat or other accessories.',
+        '- The hair may be long and wide. Hair that hangs behind the body is fine: it will be placed behind the doll, so what matters is that the hair sits exactly on the head.',
+      ];
+    case 'shoes':
+      // 靴の内側（足が入る所）をシルエットの色のまま残させない。残ると、そこが切り抜かれて、ドールの足と形が合わずにのぞく
+      return [
+        '- Draw the shoes as solid, fully opaque objects seen straight from the front, completely covering both feet of the mannequin from the toes up to the top edge of the shoe.',
+        '- Inside the outline of each shoe, nothing of the mannequin may remain visible: no foot, toes, instep or ankle in the mannequin colour, and no visible shoe opening. Paint that whole area with the shoe itself.',
+        '- The top edge of each shoe is a clean line across the ankle or leg; the leg simply disappears into the shoe.',
+        '- Straps, ribbons or laces must lie on the shoe itself or be drawn as solid bands around the leg, not as thin lines with the mannequin colour showing between them.',
       ];
     default:
       return [];
@@ -227,11 +246,12 @@ function facePrompt(item: PlannedItem, categoryLabel: string, style: string, fee
     `Paint this face onto the head: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
-    'Strict rules:',
-    '- Return the same image with only the facial features added: eyes, eyebrows, nose, mouth, cheeks and make-up, painted directly on the existing skin.',
-    '- Everything else must stay pixel-for-pixel the same: the head shape and outline, the skin colour and its shading, the ears, the neck and shoulders, the background, the framing, position and size. Do not repaint, recolour, smooth or relight the skin.',
-    '- Do not add hair, a hairline, a hat, glasses, earrings or any other object, and do not add text or a frame.',
+    'The painted head will be cut out along the outline of the original head and laid over the doll like a mask, so:',
+    '- Keep the head exactly where it is: same position, same size, same outline, same angle. Do not move, resize, turn or reshape it.',
+    '- Paint the complete face on the existing skin: eyes, eyebrows, nose, mouth, cheeks and make-up. You may shade the skin of the face naturally, but keep the same overall skin colour so that the face still matches the neck and body.',
+    '- Do not add hair, a hairline, a hat, glasses, earrings or any other object, and do not add text or a frame. The top and sides of the head stay bald skin.',
     '- Place the features where a face naturally sits on this head, facing the same direction as the head, at a natural size for it.',
+    '- Leave the neck, shoulders and background as they are.',
     feedback ? `A previous attempt at this same face was inspected and rejected. Paint it again and fix these problems:\n${feedback}` : '',
   ]
     .filter(Boolean)
@@ -312,7 +332,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         const reference = await renderHeadCloseup(ctx.template, crop, FACE_BACKGROUND);
         await ctx.budget.spend();
         const generated = await ctx.image.generate({ prompt: facePrompt(item, label, ctx.style, feedback), images: [reference] });
-        result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND);
+        result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND, ctx.data.parts.head);
       } else {
         const keys = chooseKeyColors([...planned, ...avoid]);
         const silhouette = await renderSilhouette(ctx.template, keys.silhouette, keys.background);
@@ -394,6 +414,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
             '- extra objects, body parts or text are present, or the drawing is malformed.',
             categoryKind(label) === 'face' ? 'This item must be a face without any hair: set ok to false if any hair (bangs, sidelocks, hair outline) is drawn.' : '',
             categoryKind(label) === 'hair' ? 'This item must be a hairstyle without a face: set ok to false if eyes, a mouth or other facial features are drawn.' : '',
+            categoryKind(label) === 'shoes' ? 'These must be shoes that cover the feet completely: set ok to false if the doll\'s bare foot, toes or the outline of the foot shows through inside a shoe or sticks out of it.' : '',
             'Otherwise set ok to true.',
             'reason: explain briefly in Japanese (one sentence) what you saw.',
             'fix: if ok is false, write one to three short English sentences addressed to the image model that will redraw the item, saying exactly what to change ' +
