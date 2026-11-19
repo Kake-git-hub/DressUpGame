@@ -8,6 +8,7 @@ import {
   fromSavedOutfit,
   saveOutfit,
   loadOutfit,
+  isOutfitFromBeforeHairParts,
   OUTFIT_KEY,
   LEGACY_OUTFIT_KEY,
 } from '../services/outfitStorage';
@@ -119,5 +120,12 @@ describe('outfitStorage', () => {
     localStorage.setItem(LEGACY_OUTFIT_KEY, '{broken');
     expect(loadOutfit()).toEqual([]);
     expect(localStorage.getItem(LEGACY_OUTFIT_KEY)).toBeNull();
+  });
+
+  it('分ける前の保存かどうか: 新しい形式で保存したことが無ければ true', () => {
+    localStorage.setItem(OUTFIT_KEY, JSON.stringify([{ id: 'a', equipOrder: 0 }]));
+    expect(isOutfitFromBeforeHairParts()).toBe(true);
+    saveOutfit([{ ...item('a'), equipOrder: 0 }]);
+    expect(isOutfitFromBeforeHairParts()).toBe(false);
   });
 });

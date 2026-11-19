@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { drawOrder, effectiveLayer, isBehindDoll, moveLayer, sheetsAbove } from '../engine/layers';
+import { drawOrder, isBehindDoll, moveLayer, sheetsAbove } from '../engine/layers';
 import type { EquippedItem } from '../types';
 
 const make = (id: string, layer: number, extra: Partial<EquippedItem> = {}): EquippedItem =>
   ({ id, name: id, type: 'x', imageUrl: `${id}.png`, position: { x: 0, y: 0 }, baseZIndex: layer, layerOrder: layer, equipOrder: 0, ...extra }) as EquippedItem;
-const names = (items: EquippedItem[]) => drawOrder(items).map((s) => (s.kind === 'doll' ? 'DOLL' : `${s.item.id}:${s.kind}`));
+const names = (items: EquippedItem[]) => drawOrder(items).map((s) => (s.kind === 'doll' ? 'DOLL' : `${s.item.id}:front`));
 const apply = (items: EquippedItem[], id: string, direction: 1 | -1) => {
   const next = moveLayer(items, id, direction);
   return next === null ? items : items.map((i) => (i.id === id ? { ...i, layerAdjust: next } : i));
@@ -12,8 +12,7 @@ const apply = (items: EquippedItem[], id: string, direction: 1 | -1) => {
 
 describe('重なりの順番', () => {
   it('ふつうの服はドールの前、後ろ髪はドールの後ろに描く', () => {
-    const hair = make('hair', 11, { back: { url: 'b.png', box: { x: 0, y: 0, w: 1, h: 1 } } });
-    expect(names([hair, make('dress', 4)])).toEqual(['hair:back', 'DOLL', 'dress:front', 'hair:front']);
+    expect(names([make('hair', 11), make('backhair', -1), make('dress', 4)])).toEqual(['backhair:front', 'DOLL', 'dress:front', 'hair:front']);
   });
 
   it('いちばん下の服を「うしろへ」動かすと、ドールの後ろに回る', () => {
@@ -46,12 +45,16 @@ describe('重なりの順番', () => {
     expect(names(items)).toEqual(['a:front', 'b:front', 'c:front', 'DOLL']);
   });
 
-  it('ドールの後ろの服は、ほかの服の後ろ髪よりも後ろに描く', () => {
-    const hair = make('hair', 11, { back: { url: 'b.png', box: { x: 0, y: 0, w: 1, h: 1 } } });
-    const wings = make('wings', 11, { layerAdjust: -12 });
-    expect(names([hair, wings])).toEqual(['wings:front', 'hair:back', 'DOLL', 'hair:front']);
-    expect(sheetsAbove([hair, wings], 'wings').map((s) => s.kind)).toEqual(['back', 'doll', 'front']);
-    expect(sheetsAbove([hair, wings], 'hair')).toEqual([]);
-    expect(effectiveLayer(wings)).toBe(-1);
+  it('うしろがみ（ドールのすぐ後ろ）がいるとき、服を後ろへ回すと、まずドールとうしろがみのあいだ、次にうしろがみの後ろ', () => {
+    let items = [make('hair', 11), make('backhair', -1), make('wings', 5)];
+    items = apply(items, 'wings', -1);
+    expect(names(items)).toEqual(['backhair:front', 'wings:front', 'DOLL', 'hair:front']);
+    expect(sheetsAbove(items, 'wings').map((s) => s.kind)).toEqual(['doll', 'item']);
+    expect(sheetsAbove(items, 'hair')).toEqual([]);
+    items = apply(items, 'wings', -1);
+    expect(names(items)).toEqual(['wings:front', 'backhair:front', 'DOLL', 'hair:front']);
+    // うしろがみも、前へ動かせばドールの前に出せる
+    items = apply(items, 'backhair', 1);
+    expect(names(items)).toEqual(['wings:front', 'DOLL', 'backhair:front', 'hair:front']);
   });
 });

@@ -58,4 +58,27 @@ describe('resolveStartState', () => {
   it('ドールが 1 体も無ければ dollId は空', () => {
     expect(resolveStartState({ dolls: [], clothing: [], backgrounds: [] }, 'A', null, []).dollId).toBe('');
   });
+
+  describe('前髪とうしろがみに分ける前の保存', () => {
+    const hairContent: LoadedContent = {
+      ...content,
+      clothing: [{ ...item('A/hair', 'A'), backItemId: 'A/hair#back' }, { ...item('A/hair#back', 'A'), type: 'back' }, item('A/x', 'A')],
+    };
+    const saved = [{ id: 'A/x', equipOrder: 0 }, { id: 'A/hair', equipOrder: 1, adjustOffsetX: 5, adjustScale: 1.1, colorHue: 40, layerAdjust: 2 }];
+
+    it('髪を着ていたら、対のうしろがみも着せる（位置・大きさ・色は髪と同じ、重なりは引き継がない）', () => {
+      const { outfit } = resolveStartState(hairContent, 'A', null, saved, true);
+      expect(outfit.map((i) => i.id).sort()).toEqual(['A/hair', 'A/hair#back', 'A/x']);
+      const back = outfit.find((i) => i.id === 'A/hair#back')!;
+      expect(back).toMatchObject({ adjustOffsetX: 5, adjustScale: 1.1, colorHue: 40 });
+      expect(back.layerAdjust).toBeUndefined();
+      expect(back.equipOrder).toBeLessThan(1);
+      expect(back.equipOrder).toBeGreaterThan(0);
+    });
+
+    it('分けたあとの保存なら、うしろがみを足さない（外したうしろがみが戻らない）', () => {
+      const { outfit } = resolveStartState(hairContent, 'A', null, saved);
+      expect(outfit.map((i) => i.id)).toEqual(['A/x', 'A/hair']);
+    });
+  });
 });

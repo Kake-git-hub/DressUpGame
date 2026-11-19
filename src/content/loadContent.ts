@@ -23,6 +23,13 @@ export function resolveContentUrl(search: string, pageUrl: string): string {
   }
 }
 
+// 「後ろに描く分（back）」のある髪は、前髪と、うしろがみの 2 点に分けて読み込む。
+// うしろがみは別のカテゴリの 1 点なので、位置・大きさ・色・重なりを、前髪と別々に調整できる
+export const BACK_HAIR_TYPE = 'うしろがみ';
+// ドールのすぐ後ろ
+const BACK_HAIR_LAYER = -1;
+export const backItemId = (frontId: string): string => `${frontId}#back`;
+
 export interface LoadedContent {
   dolls: DollData[];
   clothing: ClothingItemData[];
@@ -91,8 +98,27 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
         canvasH: item.image.canvasH,
         box: item.image.box,
         ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
-        ...(item.back ? { back: { url: url(item.back.file), box: item.back.box } } : {}),
+        ...(item.back ? { backItemId: backItemId(item.id) } : {}),
       });
+      if (item.back) {
+        clothing.push({
+          id: backItemId(item.id),
+          name: item.name,
+          type: BACK_HAIR_TYPE,
+          imageUrl: url(item.back.file),
+          thumbnailUrl: url(item.back.file), // 専用のサムネイルは無いので、絵そのものを使う
+          position: { x: 0, y: 0 },
+          baseZIndex: BACK_HAIR_LAYER,
+          layerOrder: BACK_HAIR_LAYER,
+          categoryOrder: category.menuOrder + 0.5, // メニューでは、髪のすぐ次
+          allowOverlap: false,
+          movable: false,
+          dollId: doll.id,
+          canvasW: item.back.canvasW,
+          canvasH: item.back.canvasH,
+          box: item.back.box,
+        });
+      }
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));
   }

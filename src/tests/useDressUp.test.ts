@@ -278,4 +278,62 @@ describe('useDressUp', () => {
     const top = result.current.equippedItems.find((i) => i.id === 'top-1');
     expect(top?.equipOrder).toBe(8);
   });
+
+  describe('前髪と、対のうしろがみ', () => {
+    const geo = { position: { x: 0, y: 0 }, canvasW: 1024, canvasH: 1024, box: { x: 0, y: 0, w: 10, h: 10 } };
+    const hair = (id: string, withBack = true): ClothingItemData => ({
+      id, name: id, type: 'hair', imageUrl: `${id}.png`, baseZIndex: 11, layerOrder: 11, ...(withBack ? { backItemId: `${id}#back` } : {}), ...geo,
+    });
+    const backOf = (id: string): ClothingItemData => ({
+      id: `${id}#back`, name: id, type: 'backhair', imageUrl: `${id}b.png`, baseZIndex: -1, layerOrder: -1, ...geo,
+    });
+    const ids = (r: { current: { equippedItems: { id: string }[] } }) => r.current.equippedItems.map((i) => i.id);
+
+    it('髪を着せると、対のうしろがみも一緒に付く（うしろがみが先、前髪が最後に着た服）', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      expect(ids(result)).toEqual(['a#back', 'a']);
+      expect(result.current.getLastEquippedItem()?.id).toBe('a');
+    });
+
+    it('別の髪に替えると、うしろがみも替わる', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.equipItem(hair('b'), backOf('b')));
+      expect(ids(result)).toEqual(['b#back', 'b']);
+    });
+
+    it('うしろがみの無い髪に替えると、前の髪の対のうしろがみは外れる', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.equipItem(hair('c', false)));
+      expect(ids(result)).toEqual(['c']);
+    });
+
+    it('うしろがみだけを別のものに替えられる。そのあと髪を替えても、対でないうしろがみは、新しい対が無ければ残る', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.equipItem(backOf('b')));
+      expect(ids(result)).toEqual(['b#back', 'a']);
+      act(() => result.current.equipItem(hair('c', false)));
+      expect(ids(result)).toEqual(['b#back', 'c']);
+    });
+
+    it('うしろがみだけを調整しても、前髪は変わらない', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.updateItemAdjustment('a#back', { adjustOffsetY: 30, colorHue: 90 }));
+      const [back, front] = result.current.equippedItems;
+      expect(back).toMatchObject({ adjustOffsetY: 30, colorHue: 90 });
+      expect(front.adjustOffsetY).toBeUndefined();
+      expect(front.colorHue).toBeUndefined();
+    });
+
+    it('前髪だけ・うしろがみだけを脱がせられる', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.unequipItemById('a'));
+      expect(ids(result)).toEqual(['a#back']);
+    });
+  });
 });

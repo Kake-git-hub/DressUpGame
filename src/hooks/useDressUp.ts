@@ -44,8 +44,8 @@ export interface ItemAdjustment {
 export interface UseDressUpReturn {
   // 現在の状態
   state: DressUpState;
-  // 服を着せる
-  equipItem: (item: ClothingItemData) => void;
+  // 服を着せる。back は対のうしろがみ（前髪と一緒に着せる）
+  equipItem: (item: ClothingItemData, back?: ClothingItemData) => void;
   // 服を脱がせる
   unequipItem: (type: ClothingType) => void;
   // 着ている服を 1 着だけ脱がせる（重ね着できるカテゴリでも、ほかは残す）
@@ -81,29 +81,22 @@ export function useDressUp(
     }));
   }, []);
 
-  // 服を着せる（同じタイプの服は置き換え、ただしallowOverlap=trueのアイテムは重複可能）
-  const equipItem = useCallback((item: ClothingItemData) => {
+  // 服を着せる（同じタイプの服は置き換え、ただしallowOverlap=trueのアイテムは重複可能）。
+  // back（対のうしろがみ）があれば一緒に着せる。置き換えで脱げた髪の、対のうしろがみは外す
+  const equipItem = useCallback((item: ClothingItemData, back?: ClothingItemData) => {
     setState((prev) => {
-      let filteredItems: EquippedItem[];
-      
-      if (item.allowOverlap) {
-        // allowOverlap=trueの場合：同じIDのアイテムのみ除去（同じアイテムの再装備）
-        filteredItems = prev.equippedItems.filter((e) => e.id !== item.id);
-      } else {
-        // 通常：同じタイプのアイテムを除去
-        filteredItems = prev.equippedItems.filter((e) => e.type !== item.type);
-      }
+      // allowOverlap=true の場合は、同じIDのアイテムのみ除去（同じアイテムの再装備）
+      const replaces = (e: EquippedItem, added: ClothingItemData) => (added.allowOverlap ? e.id === added.id : e.type === added.type);
+      const orphans = new Set(prev.equippedItems.flatMap((e) => (replaces(e, item) && e.backItemId ? [e.backItemId] : [])));
+      const kept = prev.equippedItems.filter((e) => !replaces(e, item) && !orphans.has(e.id) && !(back && replaces(e, back)));
 
-      // 新しいアイテムを追加
-      const newEquippedItem: EquippedItem = {
-        ...item,
-        equipOrder: prev.equipCounter,
-      };
+      // うしろがみを先に、前髪を後に（「最後に着た服」は前髪）
+      const added = [...(back ? [back] : []), item].map((x, i): EquippedItem => ({ ...x, equipOrder: prev.equipCounter + i }));
 
       return {
         ...prev,
-        equippedItems: [...filteredItems, newEquippedItem],
-        equipCounter: prev.equipCounter + 1,
+        equippedItems: [...kept, ...added],
+        equipCounter: prev.equipCounter + added.length,
       };
     });
   }, []);

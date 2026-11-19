@@ -19,30 +19,22 @@ export function sortByLayer<T extends Layered & { equipOrder: number }>(items: T
   return [...items].sort((a, b) => effectiveLayer(a) - effectiveLayer(b) || a.equipOrder - b.equipOrder);
 }
 
-// 描く 1 枚: 服の上の分・服の下の分（後ろ髪など）・ドール
-export type Sheet = { kind: 'front' | 'back'; item: EquippedItem } | { kind: 'doll' };
+// 描く 1 枚: 服・ドール
+export type Sheet = { kind: 'item'; item: EquippedItem } | { kind: 'doll' };
 
 /**
- * 描く順番（下から）:
- *  ドールの後ろに回した服（それぞれ、下の分 → 上の分）→ ほかの服の下の分（後ろ髪）→ ドール → ほかの服の上の分
+ * 描く順番（下から）: ドールの後ろの服（うしろがみ・後ろに回した服）→ ドール → ほかの服
  */
 export function drawOrder(items: EquippedItem[]): Sheet[] {
   const sorted = sortByLayer(items);
-  const behind = sorted.filter(isBehindDoll);
-  const front = sorted.filter((i) => !isBehindDoll(i));
-  const withBack = (item: EquippedItem): Sheet[] => (item.back ? [{ kind: 'back', item }] : []);
-  return [
-    ...behind.flatMap((item): Sheet[] => [...withBack(item), { kind: 'front', item }]),
-    ...front.flatMap(withBack),
-    { kind: 'doll' },
-    ...front.map((item): Sheet => ({ kind: 'front', item })),
-  ];
+  const sheet = (item: EquippedItem): Sheet => ({ kind: 'item', item });
+  return [...sorted.filter(isBehindDoll).map(sheet), { kind: 'doll' }, ...sorted.filter((i) => !isBehindDoll(i)).map(sheet)];
 }
 
-// 調整中の服（の上の分）より手前に描くもの。調整画面が、キャンバスの代わりに重ねて描く
+// 調整中の服より手前に描くもの。調整画面が、キャンバスの代わりに重ねて描く
 export function sheetsAbove(items: EquippedItem[], adjustingId: string): Sheet[] {
   const order = drawOrder(items);
-  const index = order.findIndex((s) => s.kind === 'front' && s.item.id === adjustingId);
+  const index = order.findIndex((s) => s.kind === 'item' && s.item.id === adjustingId);
   return index < 0 ? [] : order.slice(index + 1);
 }
 

@@ -722,3 +722,41 @@ test('調整の × で脱がせても、調整は続き、残りの服に切り�
   expect(picker.x).toBeLessThan(40);
 });
 
+
+test('うしろがみは別の 1 点: 髪と一緒に付き、うしろがみだけを動かせる', async ({ page }) => {
+  const PURPLE: Rgba = [128, 0, 255, 255];
+  const SIDE_X = DOLL_X + (250 - IMG / 2) * BASE_SCALE; // トップスの左の外。うしろの分だけが見える所
+  await openApp(page);
+  // blue には「後ろに描く分」がある: 着せると、前の分（青）と、うしろがみ（むらさき）が付く
+  await dragItemToDoll(page, 'トップス', 'blue');
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+  await expectPixel(page, SIDE_X, TOP_Y, PURPLE);
+  await expect(page.locator('.palette-section button', { hasText: 'うしろがみ' })).toBeVisible();
+  // 調整: 一覧は上から「前の分 → ドール → うしろがみ」。最初は前の分を選んでいる
+  await page.locator('.tool-button').first().click();
+  const rows = page.locator('[data-testid="adjust-picker-items"] > *');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'adjust-picker-doll');
+  const pickerItems = page.getByTestId('adjust-picker-item');
+  await expect(pickerItems.nth(0)).toHaveClass(/on/);
+  // うしろがみを選んで、下へ動かす（ボトムスの高さへ）
+  await pickerItems.nth(1).click();
+  await expect(pickerItems.nth(1)).toHaveClass(/on/);
+  await page.mouse.move(SIDE_X, TOP_Y);
+  await page.mouse.down();
+  await page.mouse.move(SIDE_X, TOP_Y + 280 * BASE_SCALE, { steps: 6 });
+  await page.mouse.up();
+  await page.locator('.item-adjust-done-btn-small').click();
+  // うしろがみだけが動き、前の分はそのまま
+  await expectPixel(page, SIDE_X, BOTTOM_Y, PURPLE);
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+  expect(near(await canvasPixel(page, SIDE_X, TOP_Y), PURPLE)).toBe(false);
+  // 読み込み直しても、そのまま
+  await page.reload();
+  await expectPixel(page, SIDE_X, BOTTOM_Y, PURPLE);
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+  // 後ろの分の無い服に替えると、対のうしろがみも外れる
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expect.poll(async () => near(await canvasPixel(page, SIDE_X, BOTTOM_Y), PURPLE), { timeout: 10_000 }).toBe(false);
+});

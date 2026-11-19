@@ -16,6 +16,7 @@ export default async function globalSetup(): Promise<void> {
     const out = path.resolve('dist/e2e-content');
     await buildContent(presetDir, out);
     await addHide(out);
+    await addBack(out);
   } finally {
     await fs.rm(presetDir, { recursive: true, force: true });
   }
@@ -31,5 +32,19 @@ async function addHide(dir: string): Promise<void> {
   const green = manifest.dolls[0].items.find((i) => i.name === 'green');
   if (!green) throw new Error('e2e: green が見つかりません');
   green.hide = { file: 'files/e2e-hide.webp', canvasW: 1024, canvasH: 1024, box };
+  await fs.writeFile(file, JSON.stringify(manifest, null, 1));
+}
+
+// トップス（blue）に「ドールの後ろに描く分」を付ける（髪の、うしろがみと同じ仕組み）。
+// むらさきで、トップスより横に広い（x=200〜824）ので、左右にはみ出して見える
+async function addBack(dir: string): Promise<void> {
+  const box = { x: 200, y: 240, w: 624, h: 280 };
+  const image = await sharp({ create: { width: box.w, height: box.h, channels: 4, background: '#8000ff' } }).webp({ lossless: true }).toBuffer();
+  await fs.writeFile(path.join(dir, 'files', 'e2e-back.webp'), image);
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(file, 'utf8')) as { dolls: { items: { name: string; back?: unknown }[] }[] };
+  const blue = manifest.dolls[0].items.find((i) => i.name === 'blue');
+  if (!blue) throw new Error('e2e: blue が見つかりません');
+  blue.back = { file: 'files/e2e-back.webp', canvasW: 1024, canvasH: 1024, box };
   await fs.writeFile(file, JSON.stringify(manifest, null, 1));
 }

@@ -23,14 +23,14 @@ import {
   saveCurrentBackgroundId,
   loadCurrentBackgroundId,
 } from './services/stateStorage';
-import { saveOutfit, loadOutfit } from './services/outfitStorage';
+import { saveOutfit, loadOutfit, isOutfitFromBeforeHairParts } from './services/outfitStorage';
 import { playDressUpSound } from './services/sound';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.17.1';
+const APP_VERSION = '0.18.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -140,7 +140,13 @@ function App() {
         setAllBackgrounds(content.backgrounds);
         setAllClothing(content.clothing);
         // 保存されていたドール・背景・服装を、いまの素材と突き合わせて決める
-        const start = resolveStartState(content, loadCurrentDollId(), loadCurrentBackgroundId(), savedOutfitRef.current ?? []);
+        const start = resolveStartState(
+          content,
+          loadCurrentDollId(),
+          loadCurrentBackgroundId(),
+          savedOutfitRef.current ?? [],
+          isOutfitFromBeforeHairParts(),
+        );
         setCurrentDollId(start.dollId);
         saveCurrentDollId(start.dollId);
         setCurrentBackgroundId(start.backgroundId);
@@ -209,12 +215,11 @@ function App() {
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
-  // 調整中の服より手前のもの（服・後ろ髪・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない
+  // 調整中の服より手前のもの（服・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない
   const hiddenSheets = useMemo(() => {
     if (!isAdjustingItem || adjustingItemId === null) return undefined;
     const above = sheetsAbove(equippedItems, adjustingItemId);
-    const ids = (kind: 'front' | 'back') => above.flatMap((s) => (s.kind === kind ? [s.item.id] : []));
-    return { fronts: ids('front'), backs: ids('back'), doll: above.some((s) => s.kind === 'doll') };
+    return { items: above.flatMap((s) => (s.kind === 'item' ? [s.item.id] : [])), doll: above.some((s) => s.kind === 'doll') };
   }, [isAdjustingItem, adjustingItemId, equippedItems]);
 
   // 調整ボタンクリックで調整モード開始
@@ -324,12 +329,13 @@ function App() {
   // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
     (item: ClothingItemData) => {
-      equipItem(item);
+      // 髪なら、対のうしろがみも一緒に着せる
+      equipItem(item, item.backItemId ? allClothing.find((c) => c.id === item.backItemId) : undefined);
       dragPreviewRef.current?.hide();
       setFlash((prev) => ({ id: item.id, count: (prev?.count ?? 0) + 1 }));
       playDressUpSound();
     },
-    [equipItem]
+    [equipItem, allClothing]
   );
 
   // アイテムドラッグ中のコールバック（全アイテム対象）

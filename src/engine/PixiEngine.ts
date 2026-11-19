@@ -45,7 +45,7 @@ export function itemPivot(placed: Placed, texture: { width: number; height: numb
 export class PixiEngine {
   private app: Application | null = null;
   private backgroundContainer: Container | null = null;
-  private backContainer: Container | null = null; // ドールの下に描く分（後ろ髪など）
+  private backContainer: Container | null = null; // ドールの後ろの服（うしろがみ・後ろに回した服）
   private dollContainer: Container | null = null;
   private clothingContainer: Container | null = null;
   private faceContainer: Container | null = null;
@@ -104,7 +104,7 @@ export class PixiEngine {
       this.backgroundContainer.label = 'backgroundContainer';
       this.app.stage.addChild(this.backgroundContainer);
 
-      // ドールの下に描く分（後ろ髪など）。背景の上、ドールの下
+      // ドールの後ろの服（うしろがみ・後ろに回した服）。背景の上、ドールの下
       this.backContainer = new Container();
       this.backContainer.label = 'backContainer';
       this.app.stage.addChild(this.backContainer);
@@ -485,11 +485,11 @@ export class PixiEngine {
   }
 
   // 服を描画（imageUrlがあれば画像、なければプレースホルダー）。
-  // 描く順番（下から）: ドールの後ろに回した服 → ほかの服の下の分（後ろ髪）→ ドール → ほかの服の上の分（layers.ts の drawOrder と同じ）。
-  // hidden.fronts の服は上の分を、hidden.backs の服は下の分を描かない（調整中は画面側のプレビューが代わりに出る）
+  // 描く順番（下から）: ドールの後ろの服（うしろがみ・後ろに回した服）→ ドール → ほかの服（layers.ts の drawOrder と同じ）。
+  // hidden の服は描かない（調整中は画面側のプレビューが代わりに出る）
   async drawClothing(
     items: (ClothingItemData | EquippedItem)[],
-    hidden: { fronts?: ReadonlySet<string>; backs?: ReadonlySet<string> } | null = null,
+    hidden: ReadonlySet<string> | null = null,
   ): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
@@ -504,23 +504,20 @@ export class PixiEngine {
     // 新しい一時コンテナを作成（全ロード完了後に一括表示するため）
     const tempContainer = new Container();
     tempContainer.label = 'tempClothingContainer';
-    const backSprites: Sprite[] = []; // 服の下の分（後ろ髪など）
-    const behindSprites: Sprite[] = []; // ドールの後ろに回した服
+    const behindSprites: Sprite[] = []; // ドールの後ろの服（うしろがみ・後ろに回した服）
 
     // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
     const loadPromises = items.map(async (item) => {
-      // ドールの下に描く分。読めなくても、上の分は描く
-      const backTexture: Texture | null = item.back ? await Assets.load(item.back.url).catch(() => null) : null;
       if (item.imageUrl) {
         try {
           // キャッシュ済みならすぐに返る
           const texture = await Assets.load(item.imageUrl);
-          return { item, texture, backTexture, error: null };
+          return { item, texture, error: null };
         } catch (error) {
-          return { item, texture: null, backTexture, error };
+          return { item, texture: null, error };
         }
       }
-      return { item, texture: null, backTexture, error: null };
+      return { item, texture: null, error: null };
     });
 
     const drawId = ++this.clothingDrawId;
@@ -534,7 +531,7 @@ export class PixiEngine {
     }
 
     // ロード完了後、一時コンテナに描画
-    for (const { item, texture, backTexture, error } of loadedItems) {
+    for (const { item, texture, error } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
@@ -573,29 +570,7 @@ export class PixiEngine {
       };
 
       const behind = isBehindDoll(item as EquippedItem);
-      // ドールの下に描く分（後ろ髪など）: 上の分と同じ軸で、同じように動かす
-      if (backTexture && item.back && !hidden?.backs?.has(item.id)) {
-        backTexture.source.scaleMode = 'linear';
-        const baseScale = (this.app.screen.height * HEIGHT_RATIO) / 1024;
-        const front = itemPivot(item, texture ?? backTexture);
-        const box = item.back.box;
-        const canvasW = item.canvasW ?? backTexture.width;
-        const canvasH = item.canvasH ?? backTexture.height;
-        const backSprite = new Sprite(backTexture);
-        backSprite.anchor.set(0);
-        // 軸（上の分の中心）を、後ろの画像の上の座標に直す
-        backSprite.pivot.set(
-          ((canvasW / 2 + front.fromCanvasCenter.x - box.x) * backTexture.width) / box.w,
-          ((canvasH / 2 + front.fromCanvasCenter.y - box.y) * backTexture.height) / box.h,
-        );
-        backSprite.scale.set(((baseScale * s * adjustScale) * box.w) / backTexture.width, ((baseScale * s * adjustScale) * box.h) / backTexture.height);
-        backSprite.x = itemX + front.fromCanvasCenter.x * baseScale * s;
-        backSprite.y = itemY + front.fromCanvasCenter.y * baseScale * s;
-        backSprite.rotation = (adjustRotation * Math.PI) / 180;
-        if (colorHue !== 0) backSprite.filters = hueFilters();
-        (behind ? behindSprites : backSprites).push(backSprite);
-      }
-      if (hidden?.fronts?.has(item.id)) continue;
+      if (hidden?.has(item.id)) continue;
 
       // テクスチャがロード済みの場合はスプライトを作成
       if (texture) {
@@ -653,10 +628,10 @@ export class PixiEngine {
     }
     tempContainer.destroy();
 
-    // ドールの下に描く分を入れ替える
+    // ドールの後ろの服を入れ替える
     for (const child of this.backContainer.children) if (child instanceof Sprite) child.filters = null;
     this.backContainer.removeChildren().forEach((child) => child.destroy());
-    for (const sprite of [...behindSprites, ...backSprites]) this.backContainer.addChild(sprite);
+    for (const sprite of behindSprites) this.backContainer.addChild(sprite);
 
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
     this.cacheClothingContainer();

@@ -43,7 +43,7 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, testId
 }
 
 // 服 1 点を、キャンバス上と同じ所に重ねる。children は服と同じ向き・大きさで重なる（枠など）
-export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, testId, part = 'front', children }: {
+export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, testId, children }: {
   item: EquippedItem;
   look: ItemLook;
   geometry: CanvasGeometry;
@@ -52,13 +52,11 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
   className?: string;
   alwaysHue?: boolean; // 色相 0 でも HueCanvas で描く（スライダーの動きに追従させるため）
   testId?: string;
-  part?: 'front' | 'back'; // back = ドールの下に描く分（後ろ髪など）。上の分と同じ軸で動く
   children?: ReactNode;
 }) {
   const origin = itemOrigin(item, look, geometry, dollTransform);
   const { box, canvasW, canvasH } = item;
   const unit = geometry.unit;
-  const shown = part === 'back' && item.back ? { src: item.back.url, box: item.back.box } : { src: item.imageUrl, box };
   return (
     <div
       className={className}
@@ -80,12 +78,12 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
         }}
       >
         <PlacedImage
-          src={shown.src}
+          src={item.imageUrl}
           alt={item.name}
           hue={alwaysHue || look.hue !== 0 ? look.hue : undefined}
           canvasW={canvasW}
           canvasH={canvasH}
-          box={shown.box}
+          box={box}
           unit={unit}
           testId={testId}
         />

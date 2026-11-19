@@ -589,15 +589,14 @@ export function ItemAdjustPanel({
                 </div>
               </div>
             </PlacedItem>
-            {/* 調整中の服より手前のもの（服・後ろ髪・ドール）。キャンバスの代わりに、ここに重ねる */}
+            {/* 調整中の服より手前のもの（服・ドール）。キャンバスの代わりに、ここに重ねる */}
             {sheetsAbove(current, item.id).map((sheet, i) =>
               sheet.kind === 'doll' ? (
                 doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={51 + i} />
               ) : (
                 <PlacedItem
-                  key={`${sheet.item.id}:${sheet.kind}`}
+                  key={sheet.item.id}
                   item={sheet.item}
-                  part={sheet.kind}
                   look={lookOf(sheet.item)}
                   geometry={geometry}
                   dollTransform={dollTransform}

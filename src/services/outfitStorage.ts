@@ -16,6 +16,8 @@ export interface SavedOutfitEntry {
 }
 
 export const OUTFIT_KEY = 'dressup_outfit';
+// 髪を「前髪」と「うしろがみ」の 2 点に分けてから保存したことの目印
+const HAIR_PARTS_KEY = 'dressup_outfit_hair_parts';
 // 旧形式（アイテム全体＝画像URL入り）を保存していたキー
 export const LEGACY_OUTFIT_KEY = 'dressup_equipped_items';
 
@@ -75,6 +77,7 @@ export function fromSavedOutfit(saved: SavedOutfitEntry[], available: ClothingIt
 export function saveOutfit(items: EquippedItem[]): void {
   try {
     localStorage.setItem(OUTFIT_KEY, JSON.stringify(toSavedOutfit(items)));
+    localStorage.setItem(HAIR_PARTS_KEY, '1');
   } catch (error) {
     console.error('装備アイテム保存エラー:', error);
   }
@@ -94,5 +97,14 @@ export function loadOutfit(): SavedOutfitEntry[] {
   } catch (error) {
     console.error('装備アイテム読み込みエラー:', error);
     return [];
+  }
+}
+
+// 髪を 2 点に分ける前の保存か（そのころは、髪 1 点にうしろがみが含まれていた）
+export function isOutfitFromBeforeHairParts(): boolean {
+  try {
+    return localStorage.getItem(HAIR_PARTS_KEY) === null;
+  } catch {
+    return false;
   }
 }
