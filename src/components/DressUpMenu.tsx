@@ -548,7 +548,8 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: 'row',
     height: '100%',
     // Safari対応：vhフォールバック + dvh（CSS変数で上書き）
-    maxHeight: 'calc(var(--menu-vh, 100vh) - 24px)',
+    // 上のバーの分（--top-inset）だけ下がるので、その分低くする（下の端に寄りすぎない）
+    maxHeight: 'calc(var(--menu-vh, 100vh) - 24px - var(--top-inset, 0px))',
   },
   container: {
     backgroundColor: '#f8f9fa',

@@ -936,6 +936,12 @@ test('ホーム画面から開いたときは、上のバーの分（24px 以上
   const standalone = await tops();
   expect(standalone.menu).toBe(browser.menu + 24);
   expect(standalone.tool).toBe(96);
+  // メニューの下端は、ブラウザで開いたときと同じだけ、画面の下からあいている（下の端に寄りすぎない）
+  const menuBottom = async () => {
+    const box = (await page.getByTestId('menu-scroll-down').boundingBox())!;
+    return VIEW_H - (box.y + box.height);
+  };
+  expect(await menuBottom()).toBeGreaterThanOrEqual(12);
   expect(standalone.badge).toBeGreaterThanOrEqual(24);
   // 調整画面の上のボタンも下がる
   await page.locator('.tool-button').click();
