@@ -125,6 +125,8 @@ export const api = {
     send<{ items: PlannedItem[]; set: SetRef; missing: string[]; maxImages: number }>('POST', '/plan', { ...input, set: true }),
   startJob: (dollId: string, items: PlannedItem[], styleId: string, set?: SetRef) => send<{ id: string }>('POST', '/jobs', { dollId, items, styleId, ...(set ? { set } : {}) }),
   renameSet: (dollId: string, id: string, name: string) => send<SetRef>('PATCH', '/sets', { dollId, id, name }),
+  // セットを着たときの、服の重なりの順番（そのセットだけの値。null で服の重ね順に戻す）
+  setSetLayer: (dollId: string, id: string, item: string, layer: number | null) => send<SetRef>('POST', '/sets/layer', { dollId, id, item, layer }),
   // セットの並び（ids はそのドールのセットの全部を、新しい順に）
   reorderSets: (dollId: string, ids: string[]) => send<{ ok: true }>('POST', '/sets/order', { dollId, ids }),
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),

@@ -44,6 +44,13 @@ describe('outfitStorage', () => {
     expect(JSON.stringify(saved).length).toBeLessThanOrEqual(300);
   });
 
+  it('セットとして着せたときの重ね順（setLayer）も保存し、読み戻す', () => {
+    const equipped: EquippedItem = { ...item('a'), equipOrder: 1, setLayer: 30 };
+    const saved = toSavedOutfit([equipped]);
+    expect(saved).toEqual([{ id: 'a', equipOrder: 1, setLayer: 30 }]);
+    expect(fromSavedOutfit(saved, [item('a')])[0].setLayer).toBe(30);
+  });
+
   it('全部の調整値が入っていても 1 枚 300 バイト以下', () => {
     const equipped: EquippedItem = {
       ...item('custom-clothing-1794740732129-h2j7h-012'),

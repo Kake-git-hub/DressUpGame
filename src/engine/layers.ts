@@ -8,9 +8,10 @@ import type { EquippedItem } from '../types';
 
 export const DOLL_LAYER = 0;
 
-type Layered = Pick<EquippedItem, 'layerOrder' | 'baseZIndex' | 'layerAdjust'>;
+type Layered = Pick<EquippedItem, 'layerOrder' | 'baseZIndex' | 'layerAdjust' | 'setLayer'>;
 
-export const baseLayer = (item: Layered): number => item.layerOrder ?? item.baseZIndex ?? 0;
+// セットとして着せた服は、そのセットだけの重ね順（setLayer）が先
+export const baseLayer = (item: Layered): number => item.setLayer ?? item.layerOrder ?? item.baseZIndex ?? 0;
 export const effectiveLayer = (item: Layered): number => baseLayer(item) + (item.layerAdjust ?? 0);
 export const isBehindDoll = (item: Layered): boolean => effectiveLayer(item) < DOLL_LAYER;
 

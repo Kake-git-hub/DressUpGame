@@ -306,6 +306,18 @@ describe('resolveContentUrl', () => {
     expect(clothing.find((c) => c.id === m.dolls[0].items[0].id)!.sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ', order: 1 }]);
   });
 
+  it('セットごとの重ね順（layers）は、そのセットの印にだけ付く', async () => {
+    const m: Manifest = structuredClone(manifest);
+    const id = m.dolls[0].items[0].id;
+    m.dolls[0].sets = [{ id: 'アニメ/セット/やま', name: 'やま' }, { id: 'アニメ/セット/うみ', name: 'うみ', layers: { [id]: 30 } }];
+    m.dolls[0].items[0].set = ['アニメ/セット/うみ', 'アニメ/セット/やま'];
+    const { clothing } = await loadContent(BASE, okFetch(m));
+    expect(clothing.find((c) => c.id === id)!.sets).toEqual([
+      { id: 'アニメ/セット/うみ', name: 'うみ', order: 1, layer: 30 },
+      { id: 'アニメ/セット/やま', name: 'やま', order: 0 },
+    ]);
+  });
+
   it('いくつものセットに入っている服には、そのセットが全部付く。一覧に無いセットの印は捨てる', async () => {
     const m: Manifest = structuredClone(manifest);
     m.dolls[0].sets = [{ id: 'アニメ/セット/やま', name: 'やま' }, { id: 'アニメ/セット/うみ', name: 'うみ' }];

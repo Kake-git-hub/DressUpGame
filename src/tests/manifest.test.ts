@@ -135,6 +135,14 @@ describe('parseManifest', () => {
       m.dolls[0].items[0].set = ['無いセット'];
       expect(parseManifest(m).dolls[0].items[0]).not.toHaveProperty('set');
     });
+    it('セットごとの重ね順（layers）を読む。数でない値と、セットに入っていない服の分は捨てる', () => {
+      const m = withSet() as unknown as { dolls: { sets: { id: string; name: string; layers?: unknown }[]; items: { id: string }[] }[] };
+      const id = m.dolls[0].items[0].id;
+      m.dolls[0].sets[0].layers = { [id]: 30, 'ない服': 5, [m.dolls[0].items[1]?.id ?? 'x']: 'a' };
+      expect(parseManifest(m).dolls[0].sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ', layers: { [id]: 30 } }]);
+      m.dolls[0].sets[0].layers = [1, 2];
+      expect(parseManifest(m).dolls[0].sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ' }]);
+    });
     it('空の sets は出さない', () => {
       const m = valid();
       m.dolls[0].sets = [];

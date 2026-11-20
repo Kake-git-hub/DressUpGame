@@ -452,6 +452,12 @@ export class StudioApi {
         await this.store.reorderSets(b.dollId, b.ids);
         return json({ ok: true });
       }
+      case 'POST /api/sets/layer': {
+        // セットを着たときの、服の重なりの順番（そのセットだけの値）
+        const b = this.body<{ dollId: string; id: string; item: string; layer: number | null }>(req);
+        if (b.layer !== null && typeof b.layer !== 'number') throw new HttpError(400, 'layer は数値か null です');
+        return json(await this.store.setSetLayer(b.dollId, b.id, b.item, b.layer));
+      }
       case 'DELETE /api/items':
         await this.store.deleteItem(this.param(req, 'id'));
         return json({ ok: true });

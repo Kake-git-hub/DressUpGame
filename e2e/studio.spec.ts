@@ -459,11 +459,14 @@ test.describe('スタジオ', () => {
       await page.getByTestId('tab-library').click();
       const box = page.getByTestId('library-set');
       await expect(box.getByTestId('set-member')).toHaveCount(2);
-      // シャツを一番手前に（重ね順 30）
+      // シャツを一番手前に（重ね順 30）。このセットだけの値で、服そのものの重ね順は変えない
       const shirt = box.getByTestId('set-member').filter({ hasText: 'うみのシャツ' });
       await shirt.getByTestId('set-member-layer').fill('30');
       await shirt.getByTestId('set-member-layer').press('Enter');
-      await expect.poll(() => setItems().find((i) => i.name === 'うみのシャツ')?.layer).toBe(30);
+      const shirtId = () => setItems().find((i) => i.name === 'うみのシャツ')!.id;
+      const umiLayers = () => ((manifestNow().dolls[0] as { sets?: { name: string; layers?: Record<string, number> }[] }).sets ?? []).find((x) => x.name === 'うみのセット')?.layers;
+      await expect.poll(() => umiLayers()?.[shirtId()]).toBe(30);
+      expect(setItems().find((i) => i.name === 'うみのシャツ')?.layer).toBeUndefined();
       await expect(box.getByTestId('set-member').first()).toContainText('うみのシャツ');
       // 外す → 1 点。ほかの服を足す → 2 点
       await box.getByTestId('set-member').filter({ hasText: 'うみのかざり' }).getByTestId('set-member-remove').click();
@@ -486,6 +489,14 @@ test.describe('スタジオ', () => {
       await expect.poll(kazariSets).toEqual(['アニメ/セット/うみのセット', 'アニメ/セット/やまのセット']);
       await expect(kazari.getByTestId('item-set')).toHaveCount(2);
       await expect(page.getByTestId('library-set').nth(1).getByTestId('set-member')).toHaveCount(1);
+      // やまのセットでの かざり の重ね順は、うみのセットとは別の値（連動しない）
+      const yamaBox = page.getByTestId('library-set').filter({ has: page.locator('input[aria-label="セットのなまえ"][value="やまのセット"]') });
+      const kazariId = manifestNow().dolls[0].items.find((i) => i.name === 'うみのかざり')!.id;
+      const layersOf = (name: string) => ((manifestNow().dolls[0] as { sets?: { name: string; layers?: Record<string, number> }[] }).sets ?? []).find((x) => x.name === name)?.layers ?? {};
+      await yamaBox.getByTestId('set-member-layer').fill('40');
+      await yamaBox.getByTestId('set-member-layer').press('Enter');
+      await expect.poll(() => layersOf('やまのセット')[kazariId]).toBe(40);
+      expect(layersOf('うみのセット')[kazariId]).toBeUndefined();
       const boxes = page.getByTestId('library-set');
       await expect(boxes).toHaveCount(2);
       await expect(boxes.first().getByTestId('set-earlier')).toBeDisabled();
@@ -495,7 +506,6 @@ test.describe('スタジオ', () => {
       await boxes.first().getByTestId('set-later').click();
       await expect.poll(setNames).toEqual(['うみのセット', 'やまのセット']);
       // やまのセットの欄から外す: うみのセットには残り、やまのセットは空になって消える
-      const yamaBox = boxes.filter({ has: page.locator('input[aria-label="セットのなまえ"][value="やまのセット"]') });
       await expect(yamaBox.getByTestId('set-member')).toHaveCount(1);
       await yamaBox.getByTestId('set-member-remove').click();
       await expect.poll(kazariSets).toBe('アニメ/セット/うみのセット');

@@ -104,6 +104,12 @@ function pruneSets(manifest: Manifest): void {
     if (!doll.sets) continue;
     const used = new Set(doll.items.flatMap(itemSetIds));
     doll.sets = doll.sets.filter((x) => used.has(x.id));
+    // 重なりの順番は、いまセットに入っている服の分だけ残す（外した・消した服の分は捨てる）
+    for (const set of doll.sets) {
+      if (!set.layers) continue;
+      for (const id of Object.keys(set.layers)) if (!doll.items.some((i) => i.id === id && itemSetIds(i).includes(set.id))) delete set.layers[id];
+      if (Object.keys(set.layers).length === 0) delete set.layers;
+    }
     if (doll.sets.length === 0) delete doll.sets;
   }
 }
@@ -364,6 +370,24 @@ export class ContentStore {
         throw new ContentError('並び替えるセットが、ドールのセットと合いません。画面を読み直してください', 409);
       }
       doll.sets = ids.map((id) => current.find((x) => x.id === id)!);
+    });
+  }
+
+  // セットを着たときの、服の重なりの順番（そのセットだけの値。null で服の重ね順に戻す）
+  setSetLayer(dollId: string, setId: string, itemId: string, layer: number | null): Promise<ManifestSet> {
+    if (layer !== null && (typeof layer !== 'number' || !Number.isFinite(layer))) throw new ContentError('重ね順は数です');
+    return this.change((manifest) => {
+      const doll = ContentStore.doll(manifest, dollId);
+      const set = doll.sets?.find((x) => x.id === setId);
+      if (!set) throw new ContentError(`セット「${setId}」がありません`, 404);
+      const item = doll.items.find((i) => i.id === itemId);
+      if (!item || !itemSetIds(item).includes(setId)) throw new ContentError(`「${itemId}」は、このセットに入っていません`, 404);
+      const layers = { ...(set.layers ?? {}) };
+      if (layer === null) delete layers[itemId];
+      else layers[itemId] = layer;
+      if (Object.keys(layers).length > 0) set.layers = layers;
+      else delete set.layers;
+      return { ...set };
     });
   }
 

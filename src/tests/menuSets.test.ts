@@ -32,4 +32,13 @@ describe('menuSets', () => {
     expect(sets.map((s) => s.id)).toEqual(['umi', 'my:1']);
     expect(sets[0].items.map((i) => i.id)).toEqual(['b']);
   });
+  it('セットだけの重ね順は、そのセットの写しにだけ付き、並び（着せる順）にも効く。ほかのセットには付かない', () => {
+    const top = item('top', 5, [{ ...UMI, layer: 1 }, YAMA]);
+    const sets = menuSets([top, item('skirt', 3, [UMI]), item('hat', 9, [YAMA])]);
+    const umi = sets.find((x) => x.id === 'umi')!;
+    const yama = sets.find((x) => x.id === 'yama')!;
+    expect(umi.items.map((i) => [i.id, i.setLayer])).toEqual([['top', 1], ['skirt', undefined]]);
+    expect(yama.items.map((i) => [i.id, i.setLayer])).toEqual([['top', undefined], ['hat', undefined]]);
+    expect(top).not.toHaveProperty('setLayer'); // 元の服は変えない
+  });
 });

@@ -11,6 +11,11 @@ const apply = (items: EquippedItem[], id: string, direction: 1 | -1) => {
 };
 
 describe('重なりの順番', () => {
+  it('セットとして着せた服は、そのセットだけの重ね順（setLayer）で重なる', () => {
+    expect(names([make('top', 5, { setLayer: 2 }), make('skirt', 3)])).toEqual(['DOLL', 'top:front', 'skirt:front']);
+    expect(names([make('top', 5), make('skirt', 3)])).toEqual(['DOLL', 'skirt:front', 'top:front']);
+  });
+
   it('ふつうの服はドールの前、後ろ髪はドールの後ろに描く', () => {
     expect(names([make('hair', 11), make('backhair', -1), make('dress', 4)])).toEqual(['backhair:front', 'DOLL', 'dress:front', 'hair:front']);
   });
