@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContentStore } from '../content/manifestEdit.ts';
 import { dollPrompt } from './dollPrompt.ts';
 import { cutOutClothing } from '../../src/pipeline/cutout.ts';
-import { cutOutDoll, importDoll } from './makeDoll.ts';
+import { cutOutDoll, importDoll, replaceDollImage } from './makeDoll.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -31,7 +31,10 @@ describe('dollPrompt', () => {
     const prompt = dollPrompt([0, 255, 0], 'boy');
     expect(prompt).toMatch(/BOY/);
     expect(prompt).toMatch(/same pose/);
-    expect(prompt).toMatch(/sleeveless undershirt/);
+    // 下着は短パンだけ。上半身は何も着ない（作者の指定）
+    expect(prompt).toMatch(/only plain white fitted boxer shorts/);
+    expect(prompt).toMatch(/upper body is bare/);
+    expect(prompt).toMatch(/no undershirt/);
     expect(prompt).not.toMatch(/bandeau/);
     // 姿勢の条件は、女の子と同じ
     expect(prompt).toMatch(/palm facing the viewer/);
@@ -103,3 +106,58 @@ describe('importDoll', () => {
     await expect(importDoll(dir, 'だめ', noise)).rejects.toThrow(/背景/);
   });
 });
+
+describe('replaceDollImage', () => {
+  // 緑の背景（1000×1000）に立つ「ドール」: 肌色の体（x=400〜599、y=top〜899）。shirt があれば、その範囲を白く塗る
+  const figure = (top: number, shirt?: [number, number]) => {
+    const body = `<rect x="400" y="${top}" width="200" height="${900 - top}" fill="#fed0b4"/>`;
+    const white = shirt ? `<rect x="400" y="${shirt[0]}" width="200" height="${shirt[1] - shirt[0]}" fill="#f4f2ee"/>` : '';
+    return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="1000" height="1000" fill="#00ff00"/>${body}${white}</svg>`)).png().toBuffer();
+  };
+
+  it('ドールの絵だけを、同じ位置合わせのまま差し替える。ID・カテゴリ・服はそのまま、2 倍の元画像も付け替える', async () => {
+    const store = new ContentStore(dir);
+    await store.init();
+    const before = await figure(100, [300, 600]);
+    const doll = await importDoll(dir, 'おとこのこ', before);
+    const rgba = new Uint8ClampedArray(1024 * 1024 * 4);
+    for (let y = 300; y < 400; y++) for (let x = 450; x < 570; x++) rgba.set([200, 30, 30, 255], (y * 1024 + x) * 4);
+    const item = await store.addItem(doll.id, { category: 'トップス', name: 'ふく', rgba, width: 1024, height: 1024 });
+    const oldMaster = path.join(dir, 'studio', 'masters', `${path.basename(doll.image.file, '.webp')}.webp`);
+
+    // 新しい絵: シャツが無く、頭が 40px（元の絵で）低い
+    const replaced = await replaceDollImage(dir, doll.id, await figure(140), before);
+    expect(replaced.id).toBe(doll.id);
+    expect(replaced.categories).toEqual(doll.categories);
+    expect(replaced.items).toEqual([item]);
+    expect(replaced.image.file).not.toBe(doll.image.file);
+    // 位置合わせは前と同じ: 元の絵の 800px が 983px（1.229 倍）。足もとは動かず、頭だけ 40 × 1.229 = 49px 下がる
+    const { box } = doll.image;
+    expect(replaced.image.box.x).toBe(box.x);
+    expect(replaced.image.box.w).toBe(box.w);
+    expect(replaced.image.box.y + replaced.image.box.h).toBe(box.y + box.h);
+    expect(replaced.image.box.y - box.y).toBeGreaterThanOrEqual(48);
+    expect(replaced.image.box.y - box.y).toBeLessThanOrEqual(50);
+    // 白いシャツが無くなっている
+    const { data } = await sharp(path.join(dir, replaced.image.file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let white = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] >= 128 && data[i + 2] > 225) white++;
+    expect(white).toBe(0);
+    // 2 倍の元画像は、新しい名前で置き、古いものは消す
+    const master = await sharp(path.join(dir, 'studio', 'masters', `${path.basename(replaced.image.file, '.webp')}.webp`)).metadata();
+    expect([master.width, master.height]).toEqual([replaced.image.box.w * 2, replaced.image.box.h * 2]);
+    await expect(fs.access(oldMaster)).rejects.toThrow();
+    expect((await store.read()).dolls).toHaveLength(1);
+  }, 60_000);
+
+  it('無いドール・大きさの違う絵は断る', async () => {
+    const store = new ContentStore(dir);
+    await store.init();
+    const before = await figure(100);
+    const doll = await importDoll(dir, 'おとこのこ', before);
+    await expect(replaceDollImage(dir, 'いない', before, before)).rejects.toThrow(/いない/);
+    const small = await sharp(before).resize(500, 500).png().toBuffer();
+    await expect(replaceDollImage(dir, doll.id, small, before)).rejects.toThrow(/大きさ/);
+  }, 60_000);
+});
+

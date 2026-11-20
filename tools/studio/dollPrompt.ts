@@ -24,14 +24,15 @@ const pose = (background: Rgb): string[] => [
 /**
  * variant:
  *  girl（既定）… 見本の絵柄で、作りやすい姿勢のドールを新しく描かせる
- *  boy … 見本（作りやすい姿勢のドール）と同じ姿勢・大きさのまま、体つきと下着だけを男の子にする
+ *  boy … 見本（作りやすい姿勢のドール）と同じ姿勢・大きさのまま、体つきと下着だけを男の子にする。
+ *        下着は白い短パンだけで、上半身は何も着ない（作者の指定、2026-11-20）
  */
 export function dollPrompt(background: Rgb, variant: DollVariant = 'girl'): string {
   if (variant === 'boy') {
     return [
-      'The attached image is the base doll (a girl) of a paper-doll dress-up game for young children. Draw the matching BOY base doll of the same age: exactly the same art style, the same skin colour, the same pose, the same size and position in the image, the same thin clean dark-brown outlines and flat cel shading. Change only what is needed to make the figure read as a young boy:',
+      'The attached image is a base doll of a paper-doll dress-up game for young children. Draw the matching BOY base doll of the same age: exactly the same art style, the same skin colour, the same pose, the same size and position in the image, the same thin clean dark-brown outlines and flat cel shading. Change only what is needed to make the figure a young boy who wears nothing but shorts:',
       '- Body: a straight, flat torso with no waist curve and no flare at the hips; shoulders slightly wider than the hips; a slightly sturdier neck, arms and legs. Still a slim, child-like body, about 5.5 heads tall with the same large round head.',
-      '- Clothes: a plain white sleeveless undershirt (a fitted tank top that covers the chest and the belly down to the shorts) and plain white boxer shorts. No patterns, no logos, no pockets.',
+      '- Clothes: only plain white fitted boxer shorts, with no patterns, logos or pockets. The upper body is bare: no undershirt, no tank top, no top of any kind. Draw the bare chest and belly simply and modestly, like a mannequin: smooth flat skin in the same skin colour as the arms, with only short collarbone lines and a small navel, and no other detail.',
       ...pose(background),
     ].join('\n');
   }
