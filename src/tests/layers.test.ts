@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { drawOrder, isBehindDoll, moveLayer, sheetsAbove } from '../engine/layers';
+import { drawOrder, isBehindDoll, moveLayer, reorderLayer, sheetsAbove } from '../engine/layers';
 import type { EquippedItem } from '../types';
 
 const make = (id: string, layer: number, extra: Partial<EquippedItem> = {}): EquippedItem =>
@@ -56,5 +56,55 @@ describe('重なりの順番', () => {
     // うしろがみも、前へ動かせばドールの前に出せる
     items = apply(items, 'backhair', 1);
     expect(names(items)).toEqual(['wings:front', 'DOLL', 'backhair:front', 'hair:front']);
+  });
+});
+
+const reorder = (items: EquippedItem[], id: string, index: number) => {
+  const changes = reorderLayer(items, id, index)!;
+  return items.map((i) => {
+    const c = changes.find((x) => x.id === i.id);
+    return c ? { ...i, layerAdjust: c.layerAdjust } : i;
+  });
+};
+
+describe('重なりの並べ替え（ドラッグ）', () => {
+  const base = () => [make('socks', 1), make('dress', 4), make('hair', 11)]; // 下から DOLL, socks, dress, hair
+  it('いちばん上へ・まんなかへ・ドールのすぐ上へ入れられる', () => {
+    expect(names(reorder(base(), 'socks', 3))).toEqual(['DOLL', 'dress:front', 'hair:front', 'socks:front']);
+    expect(names(reorder(base(), 'hair', 2))).toEqual(['DOLL', 'socks:front', 'hair:front', 'dress:front']);
+    expect(names(reorder(base(), 'hair', 1))).toEqual(['DOLL', 'hair:front', 'socks:front', 'dress:front']);
+  });
+  it('ドールより下へ入れると、ドールの後ろに回る。上へ戻すと前に出る', () => {
+    const behind = reorder(base(), 'dress', 0);
+    expect(names(behind)).toEqual(['dress:front', 'DOLL', 'socks:front', 'hair:front']);
+    expect(isBehindDoll(behind.find((i) => i.id === 'dress')!)).toBe(true);
+    expect(names(reorder(behind, 'dress', 1))).toEqual(['DOLL', 'dress:front', 'socks:front', 'hair:front']);
+  });
+  it('ドールの後ろどうしでも、位置どおりに入る', () => {
+    const items = [make('a', 5, { layerAdjust: -7 }), make('b', 5, { layerAdjust: -6 }), make('c', 3)]; // a, b, DOLL, c
+    expect(names(reorder(items, 'c', 1))).toEqual(['a:front', 'c:front', 'b:front', 'DOLL']);
+    expect(names(reorder(items, 'c', 0))).toEqual(['c:front', 'a:front', 'b:front', 'DOLL']);
+  });
+  it('同じ重なりの値の服のあいだにも、位置どおりに入る（動かすのは、入れる服と、その上に続く同じ値の服だけ）', () => {
+    const items = [make('p', 11, { equipOrder: 1 }), make('q', 11, { equipOrder: 2 }), make('r', 11, { equipOrder: 3 }), make('x', 4)];
+    // 下から DOLL, x, p, q, r。x を p と q のあいだへ
+    const changes = reorderLayer(items, 'x', 2)!;
+    expect(changes.map((c) => c.id).sort()).toEqual(['q', 'r', 'x']);
+    expect(names(reorder(items, 'x', 2))).toEqual(['DOLL', 'p:front', 'x:front', 'q:front', 'r:front']);
+  });
+  it('重なりの値がドールと同じ（0）服の下、ドールのすぐ上にも入る', () => {
+    const items = [make('z', 0), make('y', 5)]; // DOLL, z, y
+    expect(names(reorder(items, 'y', 1))).toEqual(['DOLL', 'y:front', 'z:front']);
+  });
+  it('いまと同じ位置なら何も変えない。範囲の外は端に丸める。知らない id は null', () => {
+    expect(reorderLayer(base(), 'dress', 2)).toEqual([]);
+    expect(names(reorder(base(), 'socks', 99))).toEqual(['DOLL', 'dress:front', 'hair:front', 'socks:front']);
+    expect(names(reorder(base(), 'hair', -5))).toEqual(['hair:front', 'DOLL', 'socks:front', 'dress:front']);
+    expect(reorderLayer(base(), 'nope', 0)).toBeNull();
+  });
+  it('▲▼ で動かしたあとの値からでも、続けて並べ替えられる', () => {
+    let items = base();
+    items = items.map((i) => (i.id === 'socks' ? { ...i, layerAdjust: moveLayer(items, 'socks', 1)! } : i)); // DOLL, dress, socks, hair
+    expect(names(reorder(items, 'hair', 1))).toEqual(['DOLL', 'hair:front', 'dress:front', 'socks:front']);
   });
 });
