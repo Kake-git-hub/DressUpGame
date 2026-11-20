@@ -112,6 +112,13 @@ const PLAN_SCHEMA = {
   additionalProperties: false,
 };
 
+// 企画が返した色の並びから、#rrggbb を取り出す。
+// Gemini の文章のモデルは、1 つの文字列に何色も詰めて返すことがある（["#48d1cc','#f5f5f0"]）ので、文字列の中も探す
+function plannedColors(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values.flatMap((v) => (typeof v === 'string' ? (v.match(/#[0-9a-f]{6}(?![0-9a-f])/gi) ?? []) : [])).slice(0, 6);
+}
+
 // テーマから品目の一覧を作る
 export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string }): Promise<PlannedItem[]> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、単独では作らない
@@ -159,11 +166,85 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
   const seen = new Set<string>();
   const items = (result.items ?? [])
     .filter((i) => valid.has(i.category) && typeof i.name === 'string' && i.name.trim() && typeof i.description === 'string')
-    .map((i) => ({ category: i.category, name: i.name.trim().replace(/[\\/]/g, '').slice(0, 40), description: i.description, colors: (i.colors ?? []).filter((c) => hexToRgb(c)) }))
+    .map((i) => ({ category: i.category, name: i.name.trim().replace(/[\\/]/g, '').slice(0, 40), description: i.description, colors: plannedColors(i.colors) }))
     .filter((i) => i.name && !seen.has(i.name) && seen.add(i.name))
     .slice(0, input.count);
   if (items.length === 0) throw new AiError('品目を作れませんでした。テーマを変えてやり直してください', 422);
   return items;
+}
+
+const SET_SCHEMA = {
+  type: 'object',
+  properties: { name: { type: 'string' }, items: PLAN_SCHEMA.properties.items },
+  required: ['name', 'items'],
+  additionalProperties: false,
+};
+
+/**
+ * セット（同じテーマでそろえた 1 組）を企画する。頼んだカテゴリごとに 1 点。
+ * 返ってこなかったカテゴリは missing（ラベル）に入れて、あるものだけで進める。
+ */
+export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: string; categories: string[]; style: string }): Promise<{ name: string; items: PlannedItem[]; missing: string[] }> {
+  // うしろがみは、髪型の 1 枚から一緒にできるので、頼めない。頼んだ順に並べる
+  const categories = input.categories.flatMap((id) => doll.categories.filter((c) => c.id === id && !isBackHairCategory(c.label)));
+  if (categories.length < 2) throw new AiError('セットに入れるカテゴリを 2 つ以上選んでください', 400);
+  const result = await text.json<{ name: string; items: PlannedItem[] }>({
+    system:
+      'You plan one coordinated outfit set for a paper-doll dress-up game played by young children in Japan. ' +
+      'Each item is later drawn separately by an image model on a fixed mannequin and cut out automatically, so every item must be a single wearable piece that is clearly separable from the body. ' +
+      'Reply with JSON only.',
+    prompt: [
+      `Theme: ${input.theme}`,
+      `Art style: ${input.style || 'not specified'}`,
+      'Plan exactly one item for each of these categories (use the id exactly as written, one item per id, no other categories):',
+      ...categories.map((c) => {
+        const kind = categoryKind(c.label);
+        const note =
+          kind === 'face'
+            ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
+            : kind === 'hair'
+              ? ' (hairstyle only: hair and bangs, no longer than the hips. Never any facial features.)'
+              : kind === 'shoes'
+                ? ' (shoes must not be skin-coloured: no beige, nude or peach shoes.)'
+                : '';
+        return `- ${c.id}${note}`;
+      }),
+      '',
+      'The items are worn together as one outfit, so they must look like they belong together:',
+      '- First choose one shared palette of 3 to 5 colours and one or two shared motifs or decorations for the whole set.',
+      '- Every item uses colours from that palette and repeats at least one of the shared motifs or materials. State the colours and the motif explicitly in every description, because each item is drawn without seeing the others.',
+      '- Items must not duplicate each other (for example the top does not include a skirt, the dress does not include shoes).',
+      '',
+      NO_NAMES,
+      'If the theme itself names a character or a work, design an original set that only borrows the general mood and colours.',
+      '',
+      'Give:',
+      '- name: a short, friendly Japanese name for the whole set in hiragana/katakana only (no kanji), at most 12 characters.',
+      'and for each item:',
+      '- category: the id it was planned for.',
+      '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this set.',
+      '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
+      '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
+    ].join('\n'),
+    schema: SET_SCHEMA,
+  });
+  const names = new Set<string>();
+  const items: PlannedItem[] = [];
+  const missing: string[] = [];
+  for (const category of categories) {
+    // 同じカテゴリの 2 点目は使わない
+    const found = (result.items ?? []).find((i) => i.category === category.id && typeof i.name === 'string' && i.name.trim() && typeof i.description === 'string' && i.description.trim());
+    const name = found?.name.trim().replace(/[\\/]/g, '').slice(0, 40);
+    if (!found || !name || names.has(name)) {
+      missing.push(category.label);
+      continue;
+    }
+    names.add(name);
+    items.push({ category: category.id, name, description: found.description, colors: plannedColors(found.colors) });
+  }
+  if (items.length === 0) throw new AiError('セットを作れませんでした。テーマを変えてやり直してください', 422);
+  const setName = (typeof result.name === 'string' ? result.name : '').trim().replace(/[\\/]/g, '').slice(0, 24) || `${input.theme.replace(/[\\/]/g, '').slice(0, 16)}のセット`;
+  return { name: setName, items, missing };
 }
 
 // 顔と髪型は別のカテゴリで着せ替えるので、それぞれ相手の部分を描かせない

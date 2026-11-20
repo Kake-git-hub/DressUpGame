@@ -55,12 +55,18 @@ export interface JobCandidate {
   hasFront?: boolean; // 髪: 前髪の範囲がある（本物のドールに描かせた髪）
   hasUnder?: boolean; // くつ: 靴の中に見える肌の絵がある
 }
+// セット（同じテーマで一度に作った服の集まり）
+export interface SetRef {
+  id: string;
+  name: string;
+}
 export interface Job {
   id: string;
   kind: 'items' | 'backgrounds';
   done: boolean;
   error: string | null;
   candidates: JobCandidate[];
+  set?: SetRef; // セットとして作っているとき
 }
 
 export class ApiError extends Error {}
@@ -90,8 +96,9 @@ export const api = {
   status: () => get<Status>('/status'),
   content: () => get<Manifest>('/content'),
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
-  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string }) => send<ManifestItem>('POST', '/items', input),
-  updateItem: (change: { id: string; name?: string; category?: string }) => send<ManifestItem>('PATCH', '/items', change),
+  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string; set?: SetRef }) => send<ManifestItem>('POST', '/items', input),
+  // set: null で、セットから外す
+  updateItem: (change: { id: string; name?: string; category?: string; set?: null }) => send<ManifestItem>('PATCH', '/items', change),
   splitHair: (id: string) => send<ManifestItem>('POST', '/items/split-hair', { id }),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
@@ -105,7 +112,11 @@ export const api = {
   saveTemplate: (dollId: string, template: TemplateData) => send<TemplateData>('PUT', '/template', { dollId, template }),
   silhouetteUrl: (dollId: string, color: string, bg: string) => `${API_BASE}/silhouette?${q({ doll: dollId, color: color.replace('#', ''), bg: bg.replace('#', '') })}`,
   plan: (input: { dollId: string; theme: string; count: number; categories: string[]; styleId: string }) => send<{ items: PlannedItem[]; maxImages: number }>('POST', '/plan', input),
-  startJob: (dollId: string, items: PlannedItem[], styleId: string) => send<{ id: string }>('POST', '/jobs', { dollId, items, styleId }),
+  // セットの企画: 選んだカテゴリごとに 1 点。missing は、企画が返さなかったカテゴリの名前
+  planSet: (input: { dollId: string; theme: string; categories: string[]; styleId: string }) =>
+    send<{ items: PlannedItem[]; set: SetRef; missing: string[]; maxImages: number }>('POST', '/plan', { ...input, set: true }),
+  startJob: (dollId: string, items: PlannedItem[], styleId: string, set?: SetRef) => send<{ id: string }>('POST', '/jobs', { dollId, items, styleId, ...(set ? { set } : {}) }),
+  renameSet: (dollId: string, id: string, name: string) => send<SetRef>('PATCH', '/sets', { dollId, id, name }),
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）

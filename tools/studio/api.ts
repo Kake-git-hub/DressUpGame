@@ -25,7 +25,7 @@ import { AiError } from './ai.ts';
 import type { AiClients } from './ai.ts';
 import { BudgetError } from './budget.ts';
 import type { Budget } from './budget.ts';
-import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, planItems } from './generate.ts';
+import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, planItems, planSet } from './generate.ts';
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
 import { dollTemplateFromImage, loadDollTemplate, padTemplate, processGenerated, workPad } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
@@ -93,6 +93,7 @@ interface Job {
   done: boolean;
   error: string | null;
   candidates: (Candidate | BackgroundCandidate)[];
+  set?: { id: string; name: string }; // セットとして作っているとき（保存すると、候補の服にこの印が付く）
 }
 
 function parseColor(value: string | null, what: string): Rgb {
@@ -488,8 +489,9 @@ export class StudioApi {
       }
 
       case 'POST /api/items': {
-        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string }>(req);
+        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string; set?: { id: string; name: string } }>(req);
         if (typeof b.png !== 'string') throw new HttpError(400, 'png を指定してください');
+        const set = b.set === undefined ? undefined : this.setInput(b.set);
         let image;
         let hide: Uint8Array | null = null;
         let shape: Uint8Array | null = null;
@@ -536,7 +538,7 @@ export class StudioApi {
         const layers = await this.hairLayers(b.dollId, b.category, image, false, shape, front);
         // くつのサムネイルは、靴の中の肌も入れた絵から作る（靴の開きが透けて見えないように）
         const thumbFrom = under && !layers.thumbFrom ? withUnder(image.rgba, under) : layers.thumbFrom;
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...layers, thumbFrom, under, replaceId: b.replaceId, hide }));
+        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...layers, thumbFrom, under, replaceId: b.replaceId, hide, set }));
       }
       case 'POST /api/items/split-hair': {
         // 保存済みの髪（1 枚）を、前髪と後ろ髪に分け直す
@@ -552,8 +554,13 @@ export class StudioApi {
         return json(await this.store.addItem(doll.id, { category: item.category, name: item.name, ...layers, replaceId: item.id }));
       }
       case 'PATCH /api/items': {
-        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null }>(req);
-        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap }));
+        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null }>(req);
+        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap, ...(b.set === null ? { set: null } : {}) }));
+      }
+      case 'PATCH /api/sets': {
+        // セットの名前を変える
+        const b = this.body<{ dollId: string; id: string; name: string }>(req);
+        return json(await this.store.renameSet(b.dollId, b.id, b.name));
       }
       case 'DELETE /api/items':
         await this.store.deleteItem(this.param(req, 'id'));
@@ -627,22 +634,36 @@ export class StudioApi {
       }
 
       case 'POST /api/plan': {
-        const b = this.body<{ dollId: string; theme: string; count: number; categories?: string[]; styleId?: string }>(req);
+        const b = this.body<{ dollId: string; theme: string; count: number; categories?: string[]; styleId?: string; set?: boolean }>(req);
         const { text } = this.requireAi();
         const { doll } = await this.doll(b.dollId);
         const theme = typeof b.theme === 'string' ? b.theme.trim().slice(0, 400) : '';
         if (!theme) throw new HttpError(400, 'テーマを入力してください');
-        const count = Math.floor(Number(b.count));
         // 1 回の実行の上限に収まる数まで（案を作ったのに、生成で断られることが無いように）
         const most = Math.max(1, Math.min(MAX_ITEMS_PER_PLAN, Math.floor(this.options.budget.limits.perRun / this.maxAttempts)));
+        if (b.set === true) {
+          // セット: 選んだカテゴリごとに 1 点
+          const categories = [...new Set(Array.isArray(b.categories) ? b.categories.filter((c) => doll.categories.some((d) => d.id === c)) : [])];
+          if (categories.length < 2) throw new HttpError(400, 'セットに入れるカテゴリを 2 つ以上選んでください');
+          if (categories.length > most) throw new HttpError(400, `セットに入れるカテゴリは ${most} 個までにしてください（1 回に作れる画像の上限のため）`);
+          const planned = await planSet(text, doll, { theme, categories, style: findStyle(b.styleId).prompt });
+          return json({
+            items: planned.items,
+            set: { id: this.store.newSetId(doll, planned.name), name: planned.name },
+            missing: planned.missing,
+            maxImages: planned.items.length * this.maxAttempts,
+          });
+        }
+        const count = Math.floor(Number(b.count));
         if (!(count >= 1 && count <= most)) throw new HttpError(400, `品目数は 1〜${most} で指定してください`);
         const items = await planItems(text, doll, { theme, count, categories: b.categories, style: findStyle(b.styleId).prompt });
         return json({ items, maxImages: items.length * this.maxAttempts });
       }
       case 'POST /api/jobs': {
-        const b = this.body<{ dollId: string; items: PlannedItem[]; styleId?: string }>(req);
+        const b = this.body<{ dollId: string; items: PlannedItem[]; styleId?: string; set?: { id: string; name: string } }>(req);
         const { text, image } = this.requireAi();
         const { doll } = await this.doll(b.dollId);
+        const set = b.set === undefined ? undefined : this.setInput(b.set);
         if (!Array.isArray(b.items) || b.items.length === 0 || b.items.length > MAX_ITEMS_PER_PLAN) throw new HttpError(400, `品目は 1〜${MAX_ITEMS_PER_PLAN} 点で指定してください`);
         const items = b.items.map((i): PlannedItem => {
           if (!doll.categories.some((c) => c.id === i.category)) throw new HttpError(400, `カテゴリ「${i.category}」がありません`);
@@ -658,6 +679,7 @@ export class StudioApi {
         const job = this.startJob('items', doll.id, items.map((item): Candidate => ({ item, status: 'waiting', attempts: 0, warnings: [], notes: [] })), (c) =>
           generateCandidate({ text, image, budget: this.options.budget, doll, template, data, style, hi, maxAttempts: this.maxAttempts }, c as Candidate),
         );
+        if (set) job.set = set;
         return json({ id: job.id });
       }
       case 'POST /api/background-jobs': {
@@ -687,6 +709,7 @@ export class StudioApi {
           dollId: job.dollId,
           done: job.done,
           error: job.error,
+          ...(job.set ? { set: job.set } : {}),
           candidates: job.candidates.map((c) => ({
             item: c.item,
             status: c.status,
@@ -763,6 +786,15 @@ export class StudioApi {
   }
 
   // 候補を順に作る（同時に concurrency 件まで）。API はすぐ返し、進み具合は GET /api/jobs で見る
+  // セットの指定（ID と名前）を確かめる。名前や ID の決まりは、保存のとき（ContentStore）にも確かめる
+  private setInput(value: unknown): { id: string; name: string } {
+    const v = value as { id?: unknown; name?: unknown } | null;
+    if (typeof v !== 'object' || v === null || typeof v.id !== 'string' || !v.id || v.id.length > 200 || typeof v.name !== 'string' || !v.name.trim() || v.name.length > 80) {
+      throw new HttpError(400, 'セットの指定が正しくありません');
+    }
+    return { id: v.id, name: v.name.trim() };
+  }
+
   private startJob<T extends Candidate | BackgroundCandidate>(kind: Job['kind'], dollId: string | null, candidates: T[], work: (c: T) => Promise<void>): Job {
     const job: Job = { id: randomUUID(), kind, dollId, done: false, error: null, candidates };
     this.jobs.set(job.id, job);

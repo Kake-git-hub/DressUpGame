@@ -52,6 +52,18 @@ const fakeText: TextAi = {
     const props = (input.schema.properties ?? {}) as Record<string, unknown>;
     if (!('items' in props) && 'description' in props) return { description: 'A plain blue dress with ribbons.' } as T;
     if ('ok' in props) return (verdicts.shift() ?? { ok: true, reason: 'よくできています' }) as T;
+    // セットの企画（名前つき）: 同じカテゴリの 2 点目・無いカテゴリ・崩れた色の並び、を混ぜて返す
+    if ('name' in props && 'items' in props) {
+      return {
+        name: 'うみのセット',
+        items: [
+          { category: 'アクセサリー', name: 'かいがら', description: 'A shell necklace.', colors: ["#48d1cc','#f5f5f0','#1e3f66"] },
+          { category: 'トップス', name: 'あおいシャツ', description: 'A blue shirt.', colors: ['#2040c0'] },
+          { category: 'トップス', name: 'もうひとつ', description: 'Another shirt.', colors: [] },
+          { category: 'ない', name: 'むこう', description: 'x', colors: [] },
+        ],
+      } as T;
+    }
     if (/Number of backgrounds/.test(input.prompt)) return { items: [{ name: 'うみべ', description: 'A calm beach.' }, { name: 'おしろ', description: 'A castle hall.' }] } as T;
     return {
       items: [
@@ -779,3 +791,64 @@ describe('公開されている素材の取り込み', () => {
   });
 });
 
+
+describe('セット', () => {
+  type SetPlan = { items: { category: string; name: string; colors: string[] }[]; set: { id: string; name: string }; missing: string[]; maxImages: number };
+  const planSet = (categories: string[]) => ok<SetPlan>('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories });
+  const png = async () => (await sharp({ create: { width: 1024, height: 1024, channels: 4, background: '#c81e28' } }).png().toBuffer()).toString('base64');
+  const dollNow = async () => (await ok<{ dolls: { sets?: { id: string; name: string }[]; items: { id: string; name: string; set?: string }[] }[] }>('GET', '/api/content')).dolls[0];
+
+  it('企画: 頼んだカテゴリごとに 1 点（頼んだ順）。返ってこなかったカテゴリは missing。セットの名前と新しい ID が付く', async () => {
+    const p = await planSet(['トップス', 'アクセサリー', 'くつ']);
+    expect(p.items.map((i) => `${i.category}:${i.name}`)).toEqual(['トップス:あおいシャツ', 'アクセサリー:かいがら']);
+    expect(p.missing).toEqual(['くつ']);
+    expect(p.set).toEqual({ id: `${dollId}/セット/うみのセット`, name: 'うみのセット' });
+    expect(p.maxImages).toBe(4);
+    // 崩れた色の並び（1 つの文字列に 3 色）からも、色を取り出す
+    expect(p.items[1].colors).toEqual(['#48d1cc', '#f5f5f0', '#1e3f66']);
+    // 企画には、頼んだカテゴリと「そろえた 1 組」の指示が入る
+    const prompt = textCalls.at(-1)!.prompt;
+    expect(prompt).toMatch(/exactly one item for each/i);
+    expect(prompt).toMatch(/- トップス/);
+    expect(prompt).toMatch(/Never mention the name of any real or fictional character/);
+  });
+  it('企画: カテゴリは 2 個以上で、1 回の上限に収まる数まで。無いカテゴリは数えない', async () => {
+    expect((await call('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: ['トップス'] })).status).toBe(400);
+    expect((await call('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: ['トップス', 'ない'] })).status).toBe(400);
+    expect((await call('POST', '/api/plan', { dollId, theme: 'うみ', set: true })).status).toBe(400);
+    // 1 回の上限 10 枚 ÷ 2 回 = 5 点まで
+    const many = ['トップス', 'アクセサリー', 'くつ', 'ボトムス', 'ぼうし', 'ソックス'];
+    expect((await errorOf(call('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: many }))).error).toMatch(/5/);
+  });
+  it('同じ名前のセットがもうあれば、ID に -2 が付く', async () => {
+    const first = await planSet(['トップス', 'アクセサリー']);
+    await ok('POST', '/api/items', { dollId, category: 'トップス', name: 'あおいシャツ', png: await png(), set: first.set });
+    expect((await planSet(['トップス', 'アクセサリー'])).set.id).toBe(`${dollId}/セット/うみのセット-2`);
+  });
+  it('生成: セットを渡すと、進み具合と一緒に返る。形が違えば 400', async () => {
+    const p = await planSet(['トップス', 'アクセサリー']);
+    const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: p.items.map((i) => ({ ...i, description: 'A thing.' })), set: p.set });
+    expect((await ok<{ set?: object }>('GET', `/api/jobs?id=${id}`)).set).toEqual(p.set);
+    await api.waitForJob(id);
+    expect((await call('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A thing.', colors: [] }], set: { id: '', name: 'x' } })).status).toBe(400);
+    // セット無しの生成には、set が付かない
+    const plain = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'トップス', name: 'a', description: 'A thing.', colors: [] }] });
+    expect(await ok<object>('GET', `/api/jobs?id=${plain.id}`)).not.toHaveProperty('set');
+    await api.waitForJob(plain.id);
+  }, 60_000);
+  it('保存: セットを付けて保存すると一覧に入り、外す・名前を変える・最後の 1 点を消すとセットも消える', async () => {
+    const set = { id: `${dollId}/セット/うみ`, name: 'うみ' };
+    const a = await ok<{ id: string; set?: string }>('POST', '/api/items', { dollId, category: 'トップス', name: 'シャツ', png: await png(), set });
+    const b = await ok<{ id: string; set?: string }>('POST', '/api/items', { dollId, category: 'アクセサリー', name: 'かいがら', png: await png(), set });
+    expect(a.set).toBe(set.id);
+    expect((await dollNow()).sets).toEqual([set]);
+    expect(await ok<{ name: string }>('PATCH', '/api/sets', { dollId, id: set.id, name: 'なつのうみ' })).toEqual({ id: set.id, name: 'なつのうみ' });
+    expect((await call('PATCH', '/api/sets', { dollId, id: 'ない', name: 'x' })).status).toBe(404);
+    expect(await ok<object>('PATCH', '/api/items', { id: a.id, set: null })).not.toHaveProperty('set');
+    expect((await dollNow()).sets).toEqual([{ id: set.id, name: 'なつのうみ' }]);
+    await ok('DELETE', `/api/items?id=${encodeURIComponent(b.id)}`);
+    expect(await dollNow()).not.toHaveProperty('sets');
+    // 形の違うセットは 400
+    expect((await call('POST', '/api/items', { dollId, category: 'トップス', name: 'x', png: await png(), set: { id: 'a/../b', name: 'x' } })).status).toBe(400);
+  });
+});
