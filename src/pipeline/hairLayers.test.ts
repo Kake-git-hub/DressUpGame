@@ -123,6 +123,13 @@ describe('extractHair', () => {
     expect(rgb(hair.rgba, 40, 60)).toEqual([30, 120, 110]);
   });
 
+  it('ドールの上に太い髪が無くても、首より上の髪は前髪になる（前髪が空にならない）', () => {
+    const image = reference();
+    rect(image, 100, 5, 155, 38, BROWN); // 頭の上にのった髪（ドールの上には無い）
+    const hair = extractHair(image, reference(), dollAlpha(), S, S, GREEN, 110);
+    expect(hair.front[20 * S + 128]).toBe(255);
+  });
+
   it('髪が頭の上にしか無くても、1 つも無くても、落ちない', () => {
     const above = reference();
     rect(above, 100, 5, 155, 30, BROWN);

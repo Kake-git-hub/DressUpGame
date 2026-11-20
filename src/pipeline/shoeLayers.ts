@@ -45,6 +45,7 @@ const LINE_CLOSE = 3; // 肌に囲まれた、この太さまでの線（指の�
 const THIN = 2; // 渡した絵との違いのうち、これより細い線は、輪郭のずれとみなす
 const SHOE_CORE = 2; // この太さの芯を持たない靴のかけら（輪郭のずれの消し残り）は捨てる
 const HIDE_INSET = 2; // 隠す所は、新しい絵のふちよりこれだけ内側まで
+const HIDE_AROUND = 6; // 隠す所は、ドールのまわりこの幅まで
 const FEATHER = 10; // 肌の上の端を、足首の線からこの幅で少しずつ見せる
 const EDGE_REACH = 3;
 const EDGE_MARGIN = 0.03; // 絵の端のこの割合の帯は、AI が絵をずらすと渡した絵と合わなくなるので、数えない
@@ -171,7 +172,12 @@ export function extractShoe(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
     const picture = new Uint8Array(total);
     for (let p = 0; p < total; p++) picture[p] = shoeMask[p] | skinMask[p] | (!below(p) && solid[p] ? 1 : 0);
     const inside = erode(picture, width, height, px(HIDE_INSET));
-    for (let p = Math.max(0, zoneTop * width); p < total; p++) if (!inside[p]) hide[p] = 255;
+    // 隠すのはドールのまわりだけ（靴下の輪郭線がドールより少し外に出るので、少し広く）。
+    // 体から離れた所まで隠すと、くつより下に重なる長いスカートのすそまで消えてしまう
+    const dollMask = new Uint8Array(total);
+    for (let p = 0; p < total; p++) dollMask[p] = dollAlpha[p] >= 128 ? 1 : 0;
+    const nearDoll = dilate(dollMask, width, height, px(HIDE_AROUND));
+    for (let p = Math.max(0, zoneTop * width); p < total; p++) if (!inside[p] && nearDoll[p]) hide[p] = 255;
   }
 
   // 警告の材料

@@ -63,11 +63,18 @@ describe('extractShoe', () => {
   it('隠す所は、線より下で、新しい絵（靴＋肌）の外になる所だけ', () => {
     const r = extract(drawn());
     expect(r.hide[200 * S + 93]).toBe(255); // はだしの足が、靴より広かった所
-    expect(r.hide[200 * S + 20]).toBe(255);
     expect(r.hide[220 * S + 128]).toBe(0); // 靴の内側
     expect(r.hide[188 * S + 128]).toBe(0); // 肌（開き）の内側
     expect(r.hide[100 * S + 128]).toBe(0); // 線より上
     expect(r.hide[100 * S + 20]).toBe(0);
+  });
+
+  it('隠す所は、ドールのまわりだけ（体から離れた所は隠さない。くつより下の長いスカートのすそを切らない）', () => {
+    const r = extract(drawn());
+    expect(r.hide[200 * S + 20]).toBe(0); // ドールから遠い背景
+    expect(r.hide[200 * S + 230]).toBe(0);
+    expect(r.hide[200 * S + 93]).toBe(255); // はだしの足が、靴より広かった所（ドールの上）
+    expect(r.hide[200 * S + 89]).toBe(255); // ドールのふちのすぐ外（靴下の輪郭線のため、少し広く）
   });
 
   it('足首の線のすぐ下でも、靴と肌の内側は隠さない（線にそって、靴下やドールが細く欠けない）', () => {

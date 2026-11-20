@@ -278,9 +278,10 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
     });
   }
   const mask = new Uint8Array(total);
+  const neckRows = neckY === undefined ? 0 : Math.max(0, Math.min(height, Math.round(neckY))) * width;
   {
     const near = dilate(on, width, height, px(FRONT_GROW));
-    for (let p = 0; p < total; p++) mask[p] = on[p] || (outHair[p] && near[p]) ? 1 : 0;
+    for (let p = 0; p < total; p++) mask[p] = on[p] || (outHair[p] && near[p]) || (p < neckRows && any[p]) ? 1 : 0;
   }
   if (!mask.includes(1)) return new Uint8Array(total);
 

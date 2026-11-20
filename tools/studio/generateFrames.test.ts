@@ -103,8 +103,9 @@ describe('くつ（差し替え式）', () => {
     expect(box.y).toBeGreaterThan(parts.feet.y - 60);
     expect(box.y + box.h).toBeGreaterThanOrEqual(parts.feet.y + parts.feet.h);
     const hide = await pngToRgba(candidate.hide!);
-    const hideBox = alphaBBox(hide.rgba, hide.width, hide.height)!;
-    expect(hideBox.y).toBe(parts.feet.y);
+    // この靴は足をまるごとおおうので、隠す所は無いか、あっても足首の線より下だけ
+    const hideBox = alphaBBox(hide.rgba, hide.width, hide.height);
+    expect(hideBox === null || hideBox.y >= parts.feet.y).toBe(true);
   }, 60_000);
 });
 
