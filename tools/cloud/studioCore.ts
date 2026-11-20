@@ -35,6 +35,7 @@ export interface CoreDeps {
   limits: { perDay: number; maxAttempts: number }; // サーバー全体の 1 日の画像の上限、1 品目あたりの生成回数
   now: () => number;
   newId: () => string;
+  heartbeatMs?: number; // 作っている間、この間隔で「動いている」の合図を書く（既定 30 秒）
 }
 
 export interface UserView {
@@ -178,57 +179,65 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
 
   let current = await claim();
   if (!current) return;
-  const doll = await dollOf(deps, first.dollId).catch(() => null);
-  const { text, image } = deps.ai;
-  while (current) {
-    const c: CandidateDoc = current;
-    let change: Partial<CandidateDoc>;
-    let ok = false;
-    try {
-      if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
-      if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
-      const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
-      await generateCandidate(
-        {
-          text,
-          image,
-          budget: { spend: () => deps.store.spendImage(dayOf(deps.now()), deps.limits.perDay) },
-          doll,
-          template: await deps.content.assets.workTemplate(doll),
-          data: await deps.content.assets.workData(doll),
-          style: findStyle(first.styleId).prompt,
-          hi: await deps.content.assets.hiTemplate(doll),
-          maxAttempts: deps.limits.maxAttempts,
-        },
-        candidate,
-      );
-      if (!candidate.png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
-      // 保存用の絵と、見せる絵（切り抜き）を置き場に入れる
-      const prefix = jobPrefix(uid, jobId, c.index);
-      const layers: Partial<Record<LayerKind, string>> = {};
-      for (const kind of LAYERS) {
-        const data = candidate[kind];
-        if (!data) continue;
-        layers[kind] = `${prefix}${kind}.png`;
-        await deps.files.put(layers[kind]!, data, 'image/png');
+  // 作っている間は、「動いている」の合図を書き続ける（1 点に長くかかっても、止まったとみなされて二重に作られないように）
+  const beat = setInterval(() => {
+    void deps.store.updateJob(uid, jobId, (job) => (job.done ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
+  }, deps.heartbeatMs ?? 30_000);
+  try {
+    const doll = await dollOf(deps, first.dollId).catch(() => null);
+    const { text, image } = deps.ai;
+    while (current) {
+      const c: CandidateDoc = current;
+      let change: Partial<CandidateDoc>;
+      let ok = false;
+      try {
+        if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
+        if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
+        const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+        await generateCandidate(
+          {
+            text,
+            image,
+            budget: { spend: () => deps.store.spendImage(dayOf(deps.now()), deps.limits.perDay) },
+            doll,
+            template: await deps.content.assets.workTemplate(doll),
+            data: await deps.content.assets.workData(doll),
+            style: findStyle(first.styleId).prompt,
+            hi: await deps.content.assets.hiTemplate(doll),
+            maxAttempts: deps.limits.maxAttempts,
+          },
+          candidate,
+        );
+        if (!candidate.png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
+        // 保存用の絵と、見せる絵（切り抜き）を置き場に入れる
+        const prefix = jobPrefix(uid, jobId, c.index);
+        const layers: Partial<Record<LayerKind, string>> = {};
+        for (const kind of LAYERS) {
+          const data = candidate[kind];
+          if (!data) continue;
+          layers[kind] = `${prefix}${kind}.png`;
+          await deps.files.put(layers[kind]!, data, 'image/png');
+        }
+        const full = await pngToRgba(candidate.png);
+        const box = alphaBBox(full.rgba, full.width, full.height);
+        if (!box) throw new Error('絵が空でした');
+        const preview = { path: `${prefix}preview.png`, canvasW: full.width, canvasH: full.height, box };
+        await deps.files.put(preview.path, await sharp(candidate.png).extract({ left: box.x, top: box.y, width: box.w, height: box.h }).png().toBuffer(), 'image/png');
+        change = { status: 'done', notes: candidate.notes, preview, layers };
+        ok = true;
+      } catch (error) {
+        await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
+        change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`] };
       }
-      const full = await pngToRgba(candidate.png);
-      const box = alphaBBox(full.rgba, full.width, full.height);
-      if (!box) throw new Error('絵が空でした');
-      const preview = { path: `${prefix}preview.png`, canvasW: full.width, canvasH: full.height, box };
-      await deps.files.put(preview.path, await sharp(candidate.png).extract({ left: box.x, top: box.y, width: box.w, height: box.h }).png().toBuffer(), 'image/png');
-      change = { status: 'done', notes: candidate.notes, preview, layers };
-      ok = true;
-    } catch (error) {
-      await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
-      change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`] };
+      // できなかった分は、チケットを戻す（管理者は、もともと引いていない）
+      if (!ok) {
+        if (user.admin) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
+        else await deps.store.addTickets(uid, 1, `refund:${jobId}:${c.index}`, deps.now());
+      }
+      current = await claim({ index: c.index, change, refund: !ok });
     }
-    // できなかった分は、チケットを戻す（管理者は、もともと引いていない）
-    if (!ok) {
-      if (user.admin) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
-      else await deps.store.addTickets(uid, 1, `refund:${jobId}:${c.index}`, deps.now());
-    }
-    current = await claim({ index: c.index, change, refund: !ok });
+  } finally {
+    clearInterval(beat);
   }
 }
 

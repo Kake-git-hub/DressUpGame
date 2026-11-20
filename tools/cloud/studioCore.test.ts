@@ -21,6 +21,7 @@ let dollId: string;
 let imageCalls: number;
 let textCalls: number;
 let failImages: boolean;
+let imageGate: Promise<void> | null; // 絵ができるのを、ここで待たせる（長くかかる生成のまね）
 let clock: number;
 let ids: number;
 
@@ -40,6 +41,7 @@ async function dollPng(): Promise<Buffer> {
 const fakeImage: ImageAi = {
   async generate(input) {
     imageCalls++;
+    if (imageGate) await imageGate;
     if (failImages) throw new AiError('Gemini API のエラー（500）: boom');
     const meta = await sharp(input.images[0]).metadata();
     const w = meta.width!;
@@ -69,6 +71,7 @@ beforeEach(async () => {
   imageCalls = 0;
   textCalls = 0;
   failImages = false;
+  imageGate = null;
   clock = 1_000_000;
   ids = 0;
   deps = {
@@ -225,6 +228,30 @@ describe('生成を進める', () => {
     await Promise.all([runJob(deps, 'u1', jobId), runJob(deps, 'u1', jobId)]);
     expect(imageCalls).toBe(1);
     expect((await store.getJob('u1', jobId))!.candidates[0].status).toBe('done');
+  }, 60_000);
+  it('1 点に長くかかっていても、作っている間は「動いている」と分かる（呼び直されても、二重に作らない）', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    let release = () => {};
+    imageGate = new Promise((resolve) => (release = resolve));
+    deps.heartbeatMs = 10;
+    const first = runJob(deps, 'u1', jobId);
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    while (imageCalls === 0) await wait(10);
+    clock += 100_000;
+    await wait(60); // この間に、合図が更新される
+    clock += 100_000; // 始めてから 200 秒。合図が無ければ「止まっている」とみなされる長さ
+    await runJob(deps, 'u1', jobId);
+    expect(imageCalls).toBe(1);
+    release();
+    await first;
+    expect((await store.getJob('u1', jobId))!.candidates[0].status).toBe('done');
+    expect(imageCalls).toBe(1);
+    // 終わったら、合図は止まる
+    const beat = (await store.getJob('u1', jobId))!.heartbeat;
+    clock += 5_000;
+    await wait(40);
+    expect((await store.getJob('u1', jobId))!.heartbeat).toBe(beat);
   }, 60_000);
   it('途中で止まっていた仕事（作成中のまま 3 分たった）は、呼び直すと続きを進める。止まっていない仕事には手を出さない', async () => {
     await userWith('u1', 2);
