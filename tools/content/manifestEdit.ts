@@ -12,7 +12,7 @@ import sharp from 'sharp';
 import { parseManifest } from '../../src/content/manifest.ts';
 import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestItem } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
-import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeMask, uniqueId, encodeLayer } from './encode.ts';
+import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeLayer, encodeMask, encodeThumb, uniqueId } from './encode.ts';
 
 export class ContentError extends Error {
   readonly status: number;
@@ -61,6 +61,8 @@ export interface ItemInput {
   hide?: Uint8Array | Uint8ClampedArray | null; // 着ているあいだドールを隠す所（キャンバス大の不透明度）。null・無しなら隠さない
   back?: Pixels | null; // ドールの下に描く分（後ろ髪など。rgba と同じ大きさ）。null・無しなら持たない
   thumbFrom?: Pixels; // サムネイルにする絵（無ければ rgba）
+  backThumbFrom?: Pixels; // うしろがみのサムネイルにする絵（back があるときだけ使う）
+  under?: Pixels | null; // ドールのすぐ上に描く分（くつの中の肌など。rgba と同じ大きさ）。null・無しなら持たない
 }
 
 export class ContentStore {
@@ -149,9 +151,16 @@ export class ContentStore {
       const hide = input.hide ? await encodeMask(input.hide, doll.image.canvasW, doll.image.canvasH, this.writer) : null;
       if (input.back && input.back.length !== input.width * input.height * 4) throw new ContentError('後ろに描く画像の大きさがドールのキャンバスと違います');
       const back = input.back ? await encodeLayer(input.back, input.width, input.height, this.writer) : null;
+      const backThumb = back && input.backThumbFrom ? await encodeThumb(input.backThumbFrom, input.width, input.height, this.writer) : null;
+      if (input.under && input.under.length !== input.width * input.height * 4) throw new ContentError('ドールのすぐ上に描く画像の大きさがドールのキャンバスと違います');
+      const under = input.under ? await encodeLayer(input.under, input.width, input.height, this.writer) : null;
       if (existing) {
         if (back) existing.back = back;
         else delete existing.back;
+        if (backThumb) existing.backThumb = backThumb;
+        else delete existing.backThumb;
+        if (under) existing.under = under;
+        else delete existing.under;
         existing.name = name;
         existing.category = input.category;
         existing.image = encoded.image;
@@ -168,6 +177,8 @@ export class ContentStore {
         thumb: encoded.thumb,
         ...(hide ? { hide } : {}),
         ...(back ? { back } : {}),
+        ...(backThumb ? { backThumb } : {}),
+        ...(under ? { under } : {}),
       };
       doll.items.push(item);
       return item;

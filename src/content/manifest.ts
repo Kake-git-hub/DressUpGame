@@ -37,6 +37,10 @@ export interface ManifestItem {
   hide?: ManifestImage;
   // ドールの下（後ろ）に描く分。髪の「後ろ髪」など。image のほうはドールの上に描く（前髪）
   back?: ManifestImage;
+  // うしろがみ（back）のサムネイル。無ければ back の絵そのものを使う
+  backThumb?: string;
+  // ドールのすぐ上、ほかの服の下に描く分。くつの中に見える足の肌など。色スライダーはかけない
+  under?: ManifestImage;
 }
 
 export interface ManifestBackground {
@@ -150,6 +154,8 @@ function doll(v: unknown, path: string): ManifestDoll {
     if (r.overlap !== undefined) item.overlap = bool(r.overlap, `${p}.overlap`);
     if (r.hide !== undefined) item.hide = image(r.hide, `${p}.hide`);
     if (r.back !== undefined) item.back = image(r.back, `${p}.back`);
+    if (r.backThumb !== undefined) item.backThumb = str(r.backThumb, `${p}.backThumb`);
+    if (r.under !== undefined) item.under = image(r.under, `${p}.under`);
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);

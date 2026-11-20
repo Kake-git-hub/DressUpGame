@@ -165,6 +165,28 @@ describe('ドールと型紙', () => {
   });
 });
 
+describe('くつの肌（under）', () => {
+  it('肌の絵を一緒に送ると保存され、サムネイルは靴＋肌から作る。大きさが違えば 400', async () => {
+    const content = await ok<{ dolls: { image: { canvasW: number; canvasH: number } }[] }>('GET', '/api/content');
+    const { canvasW, canvasH } = content.dolls[0].image;
+    const layer = async (color: string, left: number, top: number, w: number, h: number) =>
+      sharp({ create: { width: canvasW, height: canvasH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        .composite([{ input: await sharp({ create: { width: w, height: h, channels: 4, background: color } }).png().toBuffer(), left, top }])
+        .png()
+        .toBuffer();
+    const shoe = await layer('#7a3b1e', 400, 900, 200, 80);
+    const under = await layer('#f0c8a8', 450, 880, 100, 40);
+    type WithUnder = { thumb: string; under?: { file: string; box: { x: number; y: number; w: number; h: number } } };
+    const saved = await ok<WithUnder>('POST', '/api/items', { dollId, category: 'くつ', name: 'ぱんぷす', png: shoe.toString('base64'), under: under.toString('base64') });
+    expect(saved.under?.box).toEqual({ x: 450, y: 880, w: 100, h: 40 });
+    // サムネイルの上の端は、肌（880）から始まる: 靴だけなら 200×80、肌も入れると 200×100
+    const thumb = await sharp(path.join(dir, 'content', saved.thumb)).metadata();
+    expect(thumb.height! / thumb.width!).toBeCloseTo(100 / 200, 1);
+    const small = await sharp(under).resize(100, 100).png().toBuffer();
+    expect((await call('POST', '/api/items', { dollId, category: 'くつ', name: 'ぱんぷす2', png: shoe.toString('base64'), under: small.toString('base64') })).status).toBe(400);
+  }, 30_000);
+});
+
 describe('髪（前髪と後ろ髪）', () => {
   // 頭の上にかぶり、体の左右に垂れる金色の髪（ドールのキャンバス大の PNG）
   async function hairPng(): Promise<string> {
@@ -199,6 +221,38 @@ describe('髪（前髪と後ろ髪）', () => {
     await fs.access(path.join(dir, 'content', hair.back!.file));
     const top = await ok<Saved>('POST', '/api/items', { dollId, category: 'トップス', name: 'きんのふく', png });
     expect(top.back).toBeUndefined();
+  }, 30_000);
+
+  it('前の範囲（front）を一緒に送ると、それで前髪・後ろ髪に分かれ、うしろがみのサムネイルが付く', async () => {
+    await addHairCategory();
+    const png = await hairPng();
+    // 前の範囲 = 頭の上にかぶった髪だけ（キャンバスの上から 12% まで）
+    const meta = await sharp(Buffer.from(png, 'base64')).metadata();
+    const band = Math.round(meta.height! * 0.12);
+    const front = await sharp({ create: { width: meta.width!, height: meta.height!, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: await sharp({ create: { width: meta.width!, height: band, channels: 4, background: '#ffffff' } }).png().toBuffer(), left: 0, top: 0 }])
+      .png()
+      .toBuffer();
+    type WithThumbs = Saved & { thumb: string; backThumb?: string };
+    const hair = await ok<WithThumbs>('POST', '/api/items', { dollId, category: 'ヘアスタイル', name: 'まえがみ', png, front: front.toString('base64') });
+    expect(hair.back).toBeDefined();
+    expect(hair.image.box.h).toBeLessThanOrEqual(band);
+    expect(hair.backThumb).toBeDefined();
+    // うしろがみのサムネイル: 体の所は、うすい灰むらさきの形（塗りつぶしは見えない）
+    const { data, info } = await sharp(path.join(dir, 'content', hair.backThumb!)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let body = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 200 && Math.abs(data[i] - 226) < 6 && Math.abs(data[i + 1] - 222) < 6 && Math.abs(data[i + 2] - 236) < 6) body++;
+    expect(body).toBeGreaterThan(info.width * info.height * 0.05);
+    // 前の範囲の大きさが違えば 400
+    const small = await sharp(front).resize(100, 100).png().toBuffer();
+    expect((await call('POST', '/api/items', { dollId, category: 'ヘアスタイル', name: 'まえがみ2', png, front: small.toString('base64') })).status).toBe(400);
+  }, 30_000);
+
+  it('前の範囲が無い髪（手持ちの絵）も、分けたときは、うしろがみのサムネイルが付く', async () => {
+    await addHairCategory();
+    const hair = await ok<Saved & { backThumb?: string }>('POST', '/api/items', { dollId, category: 'ヘアスタイル', name: 'きんぱつ', png: await hairPng() });
+    expect(hair.back).toBeDefined();
+    expect(hair.backThumb).toBeDefined();
   }, 30_000);
 
   it('保存済みの 1 枚の髪を、あとから分けられる。2 回目は断る', async () => {

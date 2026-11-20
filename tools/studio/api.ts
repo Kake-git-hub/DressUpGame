@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
 import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
+import { hairFromMask, hairThumbs } from '../../src/pipeline/hairLayers.ts';
 import { hairFrontBottom, splitHair, splitsHair } from '../../src/pipeline/hairSplit.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
@@ -82,6 +83,20 @@ function parseColor(value: string | null, what: string): Rgb {
   const m = /^#?([0-9a-f]{6})$/i.exec(value ?? '');
   if (!m) throw new HttpError(400, `${what}は rrggbb の形で指定してください`);
   return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
+}
+
+// 肌の絵の上に服を重ねた絵（サムネイル用）
+function withUnder(rgba: Uint8ClampedArray, under: Uint8ClampedArray): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(under);
+  for (let i = 0; i < out.length; i += 4) {
+    const a = rgba[i + 3] / 255;
+    if (a === 0) continue;
+    const b = out[i + 3] / 255;
+    const alpha = a + b * (1 - a);
+    for (let c = 0; c < 3; c++) out[i + c] = Math.round((rgba[i + c] * a + out[i + c] * b * (1 - a)) / alpha);
+    out[i + 3] = Math.round(alpha * 255);
+  }
+  return out;
 }
 
 export class StudioApi {
@@ -160,14 +175,17 @@ export class StudioApi {
     if (!doll) throw new HttpError(404, `ドール「${dollId}」がありません`);
     return { manifest, doll };
   }
-  // 髪のカテゴリなら、前髪（ドールの上）と後ろ髪（ドールの下）に分ける。ほかはそのまま
+  // 髪のカテゴリなら、前髪（ドールの上）と後ろ髪（ドールの下）に分ける。ほかはそのまま。
+  // front（前髪の範囲。本物のドールに描かせた髪の候補が持つ）があれば、それで分ける。無ければ、絵の形から分ける（splitHair）。
+  // 分けたら、サムネイルは「後ろ髪 → うすい体の形 → 前髪」、うしろがみのサムネイルは「後ろ髪 → うすい体の形」から作る（体の裏の塗りつぶしを見せない）
   private async hairLayers(
     dollId: string,
     category: string,
     image: { rgba: Uint8ClampedArray; width: number; height: number },
     force = false,
     shape: Uint8Array | null = null, // AI が描いた体と髪の形（画像と同じ大きさの不透明度）
-  ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray }> {
+    front: Uint8Array | null = null,
+  ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray; backThumbFrom?: Uint8ClampedArray }> {
     const { doll } = await this.doll(dollId);
     const label = doll.categories.find((c) => c.id === category)?.label ?? category;
     // うしろがみを別の品目として作るドールでは、髪は分けない（髪のカテゴリは前髪だけ）
@@ -178,11 +196,18 @@ export class StudioApi {
     if (template.canvasW !== image.width || template.canvasH !== image.height) return image; // 大きさの違いは、保存のときに断られる
     const alpha = new Uint8Array(image.width * image.height);
     for (let p = 0; p < alpha.length; p++) alpha[p] = template.rgba[p * 4 + 3];
-    // 前に残すのは、頭のまわりの前髪だけ
-    const head = (await this.templateData(doll)).parts.head;
-    const padY = Math.round((image.height - doll.image.canvasH) / 2);
-    const split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY, bodyShape: shape ?? undefined });
-    return split ? { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: image.rgba } : image;
+    let split: { front: Uint8ClampedArray; back: Uint8ClampedArray } | null;
+    if (front) {
+      split = hairFromMask(image.rgba, front, alpha, image.width, image.height);
+    } else {
+      // 前に残すのは、頭のまわりの前髪だけ
+      const head = (await this.templateData(doll)).parts.head;
+      const padY = Math.round((image.height - doll.image.canvasH) / 2);
+      split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY, bodyShape: shape ?? undefined });
+    }
+    if (!split) return image;
+    const thumbs = hairThumbs(split.front, split.back, alpha, image.width, image.height);
+    return { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: thumbs.hair, backThumbFrom: thumbs.back };
   }
   private async dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {
     const key = `${doll.id}\n${doll.image.file}`;
@@ -330,13 +355,27 @@ export class StudioApi {
       }
 
       case 'POST /api/items': {
-        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string }>(req);
+        const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string }>(req);
         if (typeof b.png !== 'string') throw new HttpError(400, 'png を指定してください');
         let image;
         let hide: Uint8Array | null = null;
         let shape: Uint8Array | null = null;
+        let front: Uint8Array | null = null;
+        let under: Uint8ClampedArray | null = null;
         try {
           image = await pngToRgba(Buffer.from(b.png, 'base64'));
+          // 髪の前髪の範囲（不透明度）と、くつの中の肌の絵。どちらも服と同じ大きさ
+          if (typeof b.front === 'string' && b.front) {
+            const f = await pngToRgba(Buffer.from(b.front, 'base64'));
+            if (f.width !== image.width || f.height !== image.height) throw new HttpError(400, '前髪の範囲の画像の大きさが服と違います');
+            front = new Uint8Array(f.width * f.height);
+            for (let p = 0; p < front.length; p++) front[p] = f.rgba[p * 4 + 3];
+          }
+          if (typeof b.under === 'string' && b.under) {
+            const u = await pngToRgba(Buffer.from(b.under, 'base64'));
+            if (u.width !== image.width || u.height !== image.height) throw new HttpError(400, '肌の画像の大きさが服と違います');
+            under = u.rgba;
+          }
           if (typeof b.shape === 'string' && b.shape) {
             const s = await pngToRgba(Buffer.from(b.shape, 'base64'));
             if (s.width === image.width && s.height === image.height) {
@@ -361,7 +400,10 @@ export class StudioApi {
           if (error instanceof HttpError) throw error;
           throw new HttpError(400, '画像を読めませんでした');
         }
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...(await this.hairLayers(b.dollId, b.category, image, false, shape)), replaceId: b.replaceId, hide }));
+        const layers = await this.hairLayers(b.dollId, b.category, image, false, shape, front);
+        // くつのサムネイルは、靴の中の肌も入れた絵から作る（靴の開きが透けて見えないように）
+        const thumbFrom = under && !layers.thumbFrom ? withUnder(image.rgba, under) : layers.thumbFrom;
+        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...layers, thumbFrom, under, replaceId: b.replaceId, hide }));
       }
       case 'POST /api/items/split-hair': {
         // 保存済みの髪（1 枚）を、前髪と後ろ髪に分け直す
@@ -521,6 +563,8 @@ export class StudioApi {
             hasImage: !!c.png,
             hasShape: 'shape' in c && !!c.shape,
             hasHide: 'hide' in c && !!c.hide,
+            hasFront: 'front' in c && !!c.front,
+            hasUnder: 'under' in c && !!c.under,
           })),
         });
       }
@@ -528,16 +572,9 @@ export class StudioApi {
         const job = this.job(this.param(req, 'id'));
         const candidate = job.candidates[Number(this.param(req, 'index'))];
         const kind = req.query.get('kind');
-        const data =
-          kind === 'source' && candidate && 'source' in candidate ? candidate.source : kind === 'shape'
-              ? candidate && 'shape' in candidate
-                ? candidate.shape
-                : undefined
-              : kind === 'hide'
-                ? candidate && 'hide' in candidate
-                  ? candidate.hide
-                  : undefined
-                : candidate?.png;
+        const layers: Record<string, Buffer | undefined> =
+          candidate && 'warnings' in candidate ? { source: candidate.source, shape: candidate.shape, hide: candidate.hide, front: candidate.front, under: candidate.under } : {};
+        const data = kind && kind !== 'png' ? layers[kind] : candidate?.png;
         if (!data) throw new HttpError(404, '画像がありません');
         return png(data);
       }

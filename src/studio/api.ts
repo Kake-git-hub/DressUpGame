@@ -44,6 +44,8 @@ export interface JobCandidate {
   hasImage: boolean;
   hasShape?: boolean;
   hasHide?: boolean; // 差し替え式の品目（くつ・てぶくろ）: 着ているあいだドールを隠す所がある
+  hasFront?: boolean; // 髪: 前髪の範囲がある（本物のドールに描かせた髪）
+  hasUnder?: boolean; // くつ: 靴の中に見える肌の絵がある
 }
 export interface Job {
   id: string;
@@ -80,7 +82,7 @@ export const api = {
   status: () => get<Status>('/status'),
   content: () => get<Manifest>('/content'),
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
-  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string }) => send<ManifestItem>('POST', '/items', input),
+  addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string }) => send<ManifestItem>('POST', '/items', input),
   updateItem: (change: { id: string; name?: string; category?: string }) => send<ManifestItem>('PATCH', '/items', change),
   splitHair: (id: string) => send<ManifestItem>('POST', '/items/split-hair', { id }),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
@@ -99,7 +101,7 @@ export const api = {
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）
-  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' | 'shape' | 'hide' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
+  jobImageUrl: (id: string, index: number, kind: 'png' | 'source' | 'shape' | 'hide' | 'front' | 'under' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
   publish: (message: string) => send<{ log: string }>('POST', '/publish', { message }),
 };
 

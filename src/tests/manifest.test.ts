@@ -58,6 +58,17 @@ describe('parseManifest', () => {
     expect(parseManifest(mutate((c) => (c.dolls[0].items[0].back = back))).dolls[0].items[0].back).toEqual(back);
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].back = { file: 'x' })))).toThrow();
   });
+  it('ドールのすぐ上に描く分（under）を保ち、形が違えば・キャンバスからはみ出せば Error', () => {
+    const under = { file: 'files/u.webp', canvasW: 1024, canvasH: 1024, box: { x: 440, y: 900, w: 140, h: 80 } };
+    expect(parseManifest(mutate((c) => (c.dolls[0].items[0].under = under))).dolls[0].items[0].under).toEqual(under);
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].under = { file: 'x' })))).toThrow();
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].under = { ...under, box: { x: 1000, y: 900, w: 140, h: 80 } })))).toThrow();
+  });
+  it('うしろがみのサムネイル（backThumb）を保ち、空文字なら Error', () => {
+    expect(parseManifest(mutate((c) => (c.dolls[0].items[0].backThumb = 'files/bt.webp'))).dolls[0].items[0].backThumb).toBe('files/bt.webp');
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].backThumb = '')))).toThrow();
+    expect(parseManifest(valid()).dolls[0].items[0].backThumb).toBeUndefined();
+  });
   it('layer の上書きが数値でなければ Error', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].layer = '5')))).toThrow();
   });

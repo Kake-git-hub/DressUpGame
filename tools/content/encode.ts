@@ -70,6 +70,17 @@ export async function encodeCutout(rgba: Pixels, width: number, height: number, 
   };
 }
 
+// サムネイルだけを書く（透明でない部分で切り抜き、192px 以内）。全部透明なら null
+export async function encodeThumb(rgba: Pixels, width: number, height: number, writer: FileWriter): Promise<string | null> {
+  const cropped = crop(rgba, width, height);
+  if (!cropped) return null;
+  const thumb = await cropped.image
+    .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 85, alphaQuality: 100 })
+    .toBuffer();
+  return writer.write(thumb, 'webp');
+}
+
 // 隠す所（白、不透明度が隠す強さ）: 必要な範囲だけを切り出して書く。何も無ければ null
 export async function encodeMask(alpha: Uint8Array | Uint8ClampedArray, width: number, height: number, writer: FileWriter): Promise<ManifestImage | null> {
   const rgba = new Uint8ClampedArray(width * height * 4);

@@ -81,6 +81,24 @@ describe('ContentStore', () => {
     expect(replaced.image.box).toEqual({ x: 100, y: 100, w: 50, h: 50 });
     expect((await store.read()).dolls[0].items).toHaveLength(1);
   });
+  it('肌の絵（under）を付けられ、under なしで置き換えると消える', async () => {
+    const added = await store.addItem(dollId, item('くつ', { under: canvas([450, 900, 100, 50]) }));
+    expect(added.under?.box).toEqual({ x: 450, y: 900, w: 100, h: 50 });
+    expect(await exists(added.under!.file)).toBe(true);
+    const replaced = await store.addItem(dollId, { ...item('くつ'), replaceId: added.id });
+    expect(replaced.under).toBeUndefined();
+    await expect(store.addItem(dollId, item('くつ2', { under: new Uint8ClampedArray(10) }))).rejects.toThrow();
+  });
+  it('後ろ髪のある品目に、うしろがみのサムネイル（backThumb）を付けられる。後ろ髪が無ければ付けない', async () => {
+    const hair = await store.addItem(dollId, item('かみ', { back: canvas([300, 200, 400, 600]), backThumbFrom: canvas([300, 200, 400, 600]) }));
+    expect(hair.backThumb).toBeDefined();
+    const meta = await sharp(path.join(dir, hair.backThumb!)).metadata();
+    expect(Math.max(meta.width!, meta.height!)).toBeLessThanOrEqual(192);
+    const plain = await store.addItem(dollId, item('ふく', { backThumbFrom: canvas([300, 200, 400, 600]) }));
+    expect(plain.backThumb).toBeUndefined();
+    const replaced = await store.addItem(dollId, { ...item('かみ'), replaceId: hair.id });
+    expect(replaced.backThumb).toBeUndefined();
+  });
   it('改名・カテゴリ移動で ID は変わらない', async () => {
     const first = await store.addItem(dollId, item('ふく'));
     const changed = await store.updateItem(first.id, { name: 'あたらしいなまえ', category: 'ドレス', layer: 7 });
