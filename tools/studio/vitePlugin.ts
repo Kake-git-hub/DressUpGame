@@ -45,7 +45,7 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
         contentDir,
         ai: createAiFromEnv(env),
         budget: new Budget(path.resolve('.studio/usage.json'), {
-          perDay: positive(env.STUDIO_DAILY_IMAGE_LIMIT, 60),
+          perDay: positive(env.STUDIO_DAILY_IMAGE_LIMIT, Infinity), // 既定は上限なし（開発者だけが使うため）
           perRun: positive(env.STUDIO_RUN_IMAGE_LIMIT, 30),
         }),
         maxAttempts: positive(env.STUDIO_MAX_ATTEMPTS, MAX_ATTEMPTS),

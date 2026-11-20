@@ -48,7 +48,7 @@ export function itemToClothing(
   category: ManifestCategory,
   item: ManifestItem,
   url: (file: string) => string,
-  set?: { id: string; name: string },
+  set?: { id: string; name: string; order?: number },
 ): ClothingItemData[] {
   const layer = item.layer ?? category.layer;
   const result: ClothingItemData[] = [
@@ -72,7 +72,7 @@ export function itemToClothing(
       ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
       ...(item.back ? { backItemId: backItemId(item.id) } : {}),
       // セットの印（うしろがみの分には付けない。髪と一緒に付くので）
-      ...(set ? { setId: set.id, setName: set.name } : {}),
+      ...(set ? { setId: set.id, setName: set.name, ...(set.order !== undefined ? { setOrder: set.order } : {}) } : {}),
     },
   ];
   if (item.back) {
@@ -154,12 +154,12 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
       box: doll.image.box,
     });
     const categories = new Map(doll.categories.map((c) => [c.id, c]));
-    const setNames = new Map((doll.sets ?? []).map((x) => [x.id, x.name]));
+    const setNames = new Map((doll.sets ?? []).map((x, order) => [x.id, { name: x.name, order }]));
     categoriesByDoll[doll.id] = doll.categories;
     for (const item of doll.items) {
       const category = categories.get(item.category);
       if (!category) continue; // parseManifest が保証しているので通らない
-      const set = item.set && setNames.has(item.set) ? { id: item.set, name: setNames.get(item.set)! } : undefined;
+      const set = item.set && setNames.has(item.set) ? { id: item.set, ...setNames.get(item.set)! } : undefined;
       clothing.push(...itemToClothing(doll.id, category, item, url, set));
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));

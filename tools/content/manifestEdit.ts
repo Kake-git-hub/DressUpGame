@@ -353,6 +353,18 @@ export class ContentStore {
     });
   }
 
+  // セットの並び（ゲームのメニューでの順番）を変える。ids はそのドールのセットの全部を、新しい順に
+  reorderSets(dollId: string, ids: string[]): Promise<void> {
+    return this.change((manifest) => {
+      const doll = ContentStore.doll(manifest, dollId);
+      const current = doll.sets ?? [];
+      if (!Array.isArray(ids) || ids.length !== current.length || new Set(ids).size !== ids.length || !ids.every((id) => current.some((x) => x.id === id))) {
+        throw new ContentError('並び替えるセットが、ドールのセットと合いません。画面を読み直してください', 409);
+      }
+      doll.sets = ids.map((id) => current.find((x) => x.id === id)!);
+    });
+  }
+
   deleteItem(itemId: string): Promise<void> {
     return this.change((manifest) => {
       const { doll } = ContentStore.findItem(manifest, itemId);

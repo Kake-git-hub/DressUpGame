@@ -11,7 +11,7 @@ export const CONTENT_BASE: string = (import.meta.env.VITE_STUDIO_CONTENT as stri
 export interface Status {
   contentDir: string;
   ai: { text: boolean; image: boolean };
-  budget: { usedToday: number; perDay: number; perRun: number; maxAttempts: number };
+  budget: { usedToday: number; perDay: number | null; perRun: number; maxAttempts: number }; // perDay: null で上限なし
   // behind: 公開されている素材のほうが何件新しいか（ほかの PC やクラウドから公開された分）
   git: { isRepo: boolean; branch: string | null; changedFiles: number; unusedFiles: number; behind: number };
 }
@@ -124,6 +124,8 @@ export const api = {
     send<{ items: PlannedItem[]; set: SetRef; missing: string[]; maxImages: number }>('POST', '/plan', { ...input, set: true }),
   startJob: (dollId: string, items: PlannedItem[], styleId: string, set?: SetRef) => send<{ id: string }>('POST', '/jobs', { dollId, items, styleId, ...(set ? { set } : {}) }),
   renameSet: (dollId: string, id: string, name: string) => send<SetRef>('PATCH', '/sets', { dollId, id, name }),
+  // セットの並び（ids はそのドールのセットの全部を、新しい順に）
+  reorderSets: (dollId: string, ids: string[]) => send<{ ok: true }>('POST', '/sets/order', { dollId, ids }),
   startBackgroundJob: (input: { dollId: string | null; theme: string; count: number; styleId: string }) => send<{ id: string }>('POST', '/background-jobs', input),
   job: (id: string) => get<Job>(`/jobs?${q({ id })}`),
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）

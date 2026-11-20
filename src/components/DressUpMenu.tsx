@@ -109,7 +109,12 @@ export function DressUpMenu({
       map.set(item.setId, set);
     }
     const layer = (i: ClothingItemData) => i.layerOrder ?? i.baseZIndex ?? 0;
-    return Array.from(map.values()).map((set) => ({ ...set, items: [...set.items].sort((a, b) => layer(a) - layer(b)) }));
+    // 並びは、セットの順番（スタジオで決めたもの）。順番の無いセット（自分の服など）は、あとに服の順で
+    const order = (set: MenuSet) => set.items.find((i) => i.setOrder !== undefined)?.setOrder ?? Infinity;
+    return Array.from(map.values())
+      .map((set, index) => ({ set, index }))
+      .sort((a, b) => order(a.set) - order(b.set) || a.index - b.index)
+      .map(({ set }) => ({ ...set, items: [...set.items].sort((a, b) => layer(a) - layer(b)) }));
   }, [items]);
   const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
   const dropSet = onSetDrop ?? (() => {});

@@ -943,6 +943,7 @@ export function ItemAdjustPanel({
                   onPointerMove={moveRowDrag}
                   onPointerUp={(e) => endRowDrag(e, true)}
                   onPointerCancel={(e) => endRowDrag(e, false)}
+                  onContextMenu={(e) => e.preventDefault()} // 長押しのメニューを出さない（並べ替えの長押しと重なる）
                   title={i.name}
                   data-dragging={rowDrag?.id === i.id ? 'true' : undefined}
                   data-testid="adjust-picker-item"

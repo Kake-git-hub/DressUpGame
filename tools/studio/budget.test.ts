@@ -30,6 +30,13 @@ describe('Budget', () => {
     await fs.writeFile(file, '{こわれた');
     expect(await budget.usedToday()).toBe(0);
   });
+  it('perDay が Infinity なら、1 日の上限はかからない（1 回の上限はかかる）', async () => {
+    const budget = new Budget(path.join(dir, 'usage.json'), { perDay: Infinity, perRun: 3 });
+    for (let k = 0; k < 100; k++) await budget.spend();
+    expect(await budget.usedToday()).toBe(100);
+    await expect(budget.check(3)).resolves.toBeUndefined();
+    await expect(budget.check(4)).rejects.toThrow(/1 回の実行/);
+  });
   it('check: 1 回の上限と、今日の残りを見る', async () => {
     const budget = new Budget(path.join(dir, 'usage.json'), { perDay: 4, perRun: 3 });
     await expect(budget.check(4)).rejects.toThrow(/1 回の実行/);

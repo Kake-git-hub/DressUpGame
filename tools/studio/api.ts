@@ -347,7 +347,7 @@ export class StudioApi {
         return json({
           contentDir: this.store.dir,
           ai: { text: !!this.options.ai.text, image: !!this.options.ai.image },
-          budget: { usedToday: await this.options.budget.usedToday(), ...this.options.budget.limits, maxAttempts: this.maxAttempts },
+          budget: { usedToday: await this.options.budget.usedToday(), ...this.options.budget.limits, perDay: Number.isFinite(this.options.budget.limits.perDay) ? this.options.budget.limits.perDay : null, maxAttempts: this.maxAttempts },
           git: { ...(await this.gitStatus()), unusedFiles: await this.store.countUnusedFiles() },
         });
       case 'GET /api/content':
@@ -443,6 +443,13 @@ export class StudioApi {
         // セットの名前を変える
         const b = this.body<{ dollId: string; id: string; name: string }>(req);
         return json(await this.store.renameSet(b.dollId, b.id, b.name));
+      }
+      case 'POST /api/sets/order': {
+        // セットの並び（ゲームのメニューでの順番）
+        const b = this.body<{ dollId: string; ids: string[] }>(req);
+        if (!Array.isArray(b.ids) || !b.ids.every((id) => typeof id === 'string')) throw new HttpError(400, 'ids を指定してください');
+        await this.store.reorderSets(b.dollId, b.ids);
+        return json({ ok: true });
       }
       case 'DELETE /api/items':
         await this.store.deleteItem(this.param(req, 'id'));
