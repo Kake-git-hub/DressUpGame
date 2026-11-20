@@ -6,7 +6,8 @@ import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContentStore } from '../content/manifestEdit.ts';
 import { dollPrompt } from './dollPrompt.ts';
-import { importDoll } from './makeDoll.ts';
+import { cutOutClothing } from '../../src/pipeline/cutout.ts';
+import { cutOutDoll, importDoll } from './makeDoll.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -59,6 +60,28 @@ describe('importDoll', () => {
     expect([master.width, master.height]).toEqual([doll.image.box.w * 2, doll.image.box.h * 2]);
     expect(master.hasAlpha).toBe(true);
   }, 60_000);
+
+  it('切り抜いたドールの輪郭線に、背景の緑が混ざらない。形（不透明度）は変えない', async () => {
+    // 緑の背景に、こげ茶の太い輪郭線で囲んだ肌色の丸（ふちは、なめらかに背景と混ざる）
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="#00ff00"/>
+      <circle cx="200" cy="200" r="120" fill="#fed6be" stroke="#3c2810" stroke-width="6"/></svg>`;
+    const image = await sharp(Buffer.from(svg)).png().toBuffer();
+    const { data } = await sharp(await cutOutDoll(image)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    // 比べる相手: 背景を抜いただけの絵（いままでの処理）
+    const raw = await sharp(image).removeAlpha().ensureAlpha().raw().toBuffer();
+    const plain = new Uint8ClampedArray(raw.buffer, raw.byteOffset, raw.byteLength);
+    cutOutClothing(plain, 400, 400, { background: [0, 255, 0], silhouette: null });
+    let greenish = 0;
+    let before = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      expect(data[i + 3]).toBe(plain[i + 3]);
+      if (data[i + 3] === 0) continue;
+      if (data[i + 1] > data[i] + 4 && data[i + 1] > data[i + 2] + 4) greenish++;
+      if (plain[i + 1] > plain[i] + 4 && plain[i + 1] > plain[i + 2] + 4) before++;
+    }
+    expect(before).toBeGreaterThan(20); // いままでの処理では、緑がかった輪郭が残っていた
+    expect(greenish).toBe(0);
+  });
 
   it('背景が単色でない画像は断る', async () => {
     const store = new ContentStore(dir);

@@ -119,6 +119,11 @@ export class ContentStore {
     return run;
   }
 
+  // 一覧を直接直す（道具のコマンド用）。読む → 変える → 検証して書く、を順番待ちに入れて行う。files への書き出しは writer で
+  edit<T>(fn: (manifest: Manifest, writer: FileWriter) => Promise<T> | T): Promise<T> {
+    return this.change((manifest) => fn(manifest, this.writer));
+  }
+
   private static doll(manifest: Manifest, dollId: string): ManifestDoll {
     const doll = manifest.dolls.find((d) => d.id === dollId);
     if (!doll) throw new ContentError(`ドール「${dollId}」がありません`, 404);

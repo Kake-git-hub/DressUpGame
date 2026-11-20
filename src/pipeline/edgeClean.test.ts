@@ -4,14 +4,14 @@ import type { Rgb } from './keyColors';
 
 const GREEN: Rgb = [0, 255, 0];
 const W = 24;
-const H = 5;
+const H = 11;
 // 1 行の絵を、H 行くり返す（上下の行も同じなので、近傍の探し方に左右されない）
 function rows(pixels: number[][]): Uint8ClampedArray {
   const rgba = new Uint8ClampedArray(W * H * 4);
   for (let y = 0; y < H; y++) pixels.forEach((px, x) => rgba.set(px, (y * W + x) * 4));
   return rgba;
 }
-const at = (rgba: Uint8ClampedArray, x: number) => Array.from(rgba.subarray((2 * W + x) * 4, (2 * W + x) * 4 + 4));
+const at = (rgba: Uint8ClampedArray, x: number) => Array.from(rgba.subarray((5 * W + x) * 4, (5 * W + x) * 4 + 4));
 const SKIN = [254, 214, 190, 255];
 const CLEAR = [0, 0, 0, 0];
 
@@ -64,6 +64,14 @@ describe('cleanKeyEdge', () => {
     cleanKeyEdge(rgba, W, H, [0, 0, 255], 3);
     const [r, g, b] = at(rgba, 1);
     expect(b).toBeLessThanOrEqual((r + g) / 2 + 8);
+  });
+
+  it('切り抜いた画像の端に接する線も直す（画像の外は透明とみなす）', () => {
+    const rgba = rows([[82, 84, 28, 255], [82, 60, 27, 255], ...Array.from({ length: W - 2 }, () => SKIN)]);
+    cleanKeyEdge(rgba, W, H, GREEN, 3);
+    const [r, g, b] = at(rgba, 0);
+    expect(g).toBeLessThanOrEqual((r + b) / 2 + 8);
+    expect(at(rgba, 5)).toEqual(SKIN);
   });
 
   it('背景が白のときは、何も変えない', () => {

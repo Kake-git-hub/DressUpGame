@@ -15,7 +15,8 @@
     "test:e2e:ui": "playwright test --ui",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "content:migrate": "tsx tools/content/migrate-preset.ts",
-    "studio": "vite --config vite.studio.config.ts"
+    "studio": "vite --config vite.studio.config.ts",
+    "content:fix": "tsx tools/content/fixContent.ts"
   },
   "dependencies": {
     "pixi.js": "^8.14.3",

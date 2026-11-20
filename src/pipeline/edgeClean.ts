@@ -27,6 +27,12 @@ export function cleanKeyEdge(rgba: Uint8ClampedArray, width: number, height: num
   const clear = new Uint8Array(total);
   for (let p = 0; p < total; p++) clear[p] = rgba[p * 4 + 3] < 128 ? 1 : 0;
   const edge = dilate(clear, width, height, reach);
+  // 切り抜いた画像は、外が透明。画像の端から reach px も、透明との境目とみなす
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (x < reach || y < reach || x >= width - reach || y >= height - reach) edge[y * width + x] = 1;
+    }
+  }
 
   for (let p = 0; p < total; p++) {
     const i = p * 4;

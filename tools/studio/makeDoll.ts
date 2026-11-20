@@ -13,6 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { cutOutClothing } from '../../src/pipeline/cutout.ts';
+import { cleanKeyEdge } from '../../src/pipeline/edgeClean.ts';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
@@ -44,13 +45,17 @@ function borderColor(data: Buffer, width: number, height: number): Rgb | null {
   return off > samples[0].length * 0.05 ? null : (median as Rgb);
 }
 
-// 単色の背景を抜いた PNG（元の大きさ）
+// 輪郭線から背景色の混ざりを取る幅（幅 1024 の絵で 3 px。絵の幅に合わせる）
+export const outlineReach = (width: number): number => Math.max(1, Math.round((3 * width) / 1024));
+
+// 単色の背景を抜いた PNG（元の大きさ）。輪郭線に混ざった背景色も取る（形は変えない）
 export async function cutOutDoll(image: Buffer): Promise<Buffer> {
   const { data, info } = await sharp(image).removeAlpha().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const background = borderColor(data, info.width, info.height);
   if (!background) throw new ContentError('背景が単色ではないようです。単色の背景に立つドールの画像を選んでください');
   const rgba = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
   cutOutClothing(rgba, info.width, info.height, { background, silhouette: null });
+  cleanKeyEdge(rgba, info.width, info.height, background, outlineReach(info.width));
   return sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }
 
