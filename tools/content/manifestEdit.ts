@@ -9,7 +9,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { parseManifest } from '../../src/content/manifest.ts';
+import { itemSetIds, parseManifest, setItemSets } from '../../src/content/manifest.ts';
 import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestImage, ManifestItem, ManifestSet } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
 import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeLayer, encodeMask, encodeThumb, uniqueId } from './encode.ts';
@@ -102,7 +102,7 @@ export async function encodeItemImages(doll: ManifestDoll, input: ItemInput, wri
 function pruneSets(manifest: Manifest): void {
   for (const doll of manifest.dolls) {
     if (!doll.sets) continue;
-    const used = new Set(doll.items.flatMap((i) => (i.set ? [i.set] : [])));
+    const used = new Set(doll.items.flatMap(itemSetIds));
     doll.sets = doll.sets.filter((x) => used.has(x.id));
     if (doll.sets.length === 0) delete doll.sets;
   }
@@ -210,7 +210,7 @@ export class ContentStore {
         existing.thumb = encoded.thumb;
         if (hide) existing.hide = hide;
         else delete existing.hide;
-        if (setId) existing.set = setId;
+        if (setId) setItemSets(existing, [...itemSetIds(existing), setId]);
         return existing;
       }
       const item: ManifestItem = {
@@ -231,8 +231,9 @@ export class ContentStore {
   }
 
   // 改名・カテゴリ移動・重ね順などの変更。ID は変えない。layer / overlap に null を渡すと、カテゴリの値に戻す。
-  // set: null でセットから外す。セットの ID で、そのセットに入れる。{ name } で、新しいセットを作って入れる
-  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string } }): Promise<ManifestItem> {
+  // set: null で全部のセットから外す。セットの ID で、そのセットにも入れる（ほかのセットからは外さない）。
+  // { name } で、新しいセットを作って入れる。leaveSet: そのセットだけから外す
+  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string }; leaveSet?: string }): Promise<ManifestItem> {
     return this.change((manifest) => {
       const { doll, item } = ContentStore.findItem(manifest, itemId);
       if (change.name !== undefined) item.name = checkPlainName(change.name, '名前');
@@ -248,12 +249,13 @@ export class ContentStore {
       else if (typeof change.set === 'string') {
         const id = change.set;
         if (!doll.sets?.some((x) => x.id === id)) throw new ContentError(`セット「${id}」がありません`, 404);
-        item.set = id;
+        setItemSets(item, [...itemSetIds(item), id]);
       } else if (change.set !== undefined) {
         const set = { id: this.newSetId(doll, change.set.name), name: checkPlainName(change.set.name, 'セットの名前') };
         doll.sets = [...(doll.sets ?? []), set];
-        item.set = set.id;
+        setItemSets(item, [...itemSetIds(item), set.id]);
       }
+      if (change.leaveSet !== undefined) setItemSets(item, itemSetIds(item).filter((id) => id !== change.leaveSet));
       return item;
     });
   }

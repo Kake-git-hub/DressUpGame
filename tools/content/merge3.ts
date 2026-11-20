@@ -96,7 +96,9 @@ export function mergeManifest(base: Json, local: Json, remote: Json): Json {
   const merged = merge3(base, local, remote);
   for (const doll of dollsOf(merged)) {
     const sameDoll = (m: Json) => dollsOf(m).find((d) => d.id === doll.id);
-    const used = new Set((Array.isArray(doll.items) ? doll.items : []).flatMap((i) => (isObject(i) && typeof i.set === 'string' ? [i.set] : [])));
+    // 服の印は、文字列か、文字列の並び（いくつものセットに入っている服）
+    const marks = (i: Json): string[] => (!isObject(i) ? [] : typeof i.set === 'string' ? [i.set] : Array.isArray(i.set) ? i.set.filter((x): x is string => typeof x === 'string') : []);
+    const used = new Set((Array.isArray(doll.items) ? doll.items : []).flatMap(marks));
     const kept = setsOf(doll).filter((x) => used.has(x.id));
     // 足りないセットは、手元 → 公開 の順に探す（名前は、手元にあれば手元のもの）
     for (const id of used) {

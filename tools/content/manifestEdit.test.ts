@@ -283,16 +283,34 @@ describe('ContentStore', () => {
       expect(c).not.toHaveProperty('set');
     });
 
-    it('差し替え（replaceId）: セットの指定が無ければ今の印を残し、あれば付け替える', async () => {
+    it('差し替え（replaceId）: セットの指定が無ければ今の印を残し、あればそのセットにも入れる', async () => {
       const doll = await dollOf();
       const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
       const same = await store.addItem(doll.id, item('シャツ', { replaceId: a.id }));
       expect(same.set).toBe(umi.id);
       const yama = { id: 'アニメ/セット/やま', name: 'やま' };
-      const moved = await store.addItem(doll.id, item('シャツ', { replaceId: a.id, set: yama }));
-      expect(moved.set).toBe(yama.id);
-      // うみ にはもう服が無いので、消える
+      const both = await store.addItem(doll.id, item('シャツ', { replaceId: a.id, set: yama }));
+      expect(both.set).toEqual([umi.id, yama.id]);
+      expect((await dollOf()).sets).toEqual([umi, yama]);
+    });
+
+    it('1 点の服を、いくつものセットに入れられる。1 つのセットだけから外せる（1 つなら文字列で書く）', async () => {
+      const doll = await dollOf();
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      const b = await store.addItem(doll.id, item('ぼうし', { set: umi }));
+      const made = await store.updateItem(a.id, { set: { name: 'やま' } });
+      const yama = (await dollOf()).sets!.find((x) => x.name === 'やま')!;
+      expect(made.set).toEqual([umi.id, yama.id]);
+      // 同じセットに 2 回入れても 1 つ
+      expect((await store.updateItem(a.id, { set: umi.id })).set).toEqual([umi.id, yama.id]);
+      // うみ だけから外す: やま には残る（文字列に戻る）。うみ には ぼうし が残るので、セットも残る
+      expect((await store.updateItem(a.id, { leaveSet: umi.id })).set).toBe(yama.id);
+      expect((await dollOf()).sets!.map((x) => x.id)).toEqual([umi.id, yama.id]);
+      // ぼうし も うみ から外すと、うみ は空になって消える
+      expect(await store.updateItem(b.id, { leaveSet: umi.id })).not.toHaveProperty('set');
       expect((await dollOf()).sets).toEqual([yama]);
+      // 読み直しても同じ（一覧ファイルの形として正しい）
+      expect((await store.read()).dolls[0].items.find((i) => i.id === a.id)!.set).toBe(yama.id);
     });
 
     it('最後の 1 点を消す・外すと、セットも消える。1 点残っていれば残る', async () => {
@@ -316,7 +334,7 @@ describe('ContentStore', () => {
       expect((await store.updateItem(b.id, { set: umi.id })).set).toBe(umi.id);
       const made = await store.updateItem(a.id, { set: { name: 'やま' } });
       const yama = (await dollOf()).sets!.find((x) => x.name === 'やま')!;
-      expect(made.set).toBe(yama.id);
+      expect(made.set).toEqual([umi.id, yama.id]);
       expect(yama.id).toBe(`${doll.id}/セット/やま`);
       await expect(store.updateItem(b.id, { set: 'ない' })).rejects.toThrow(/ありません/);
       expect((await store.read()).dolls[0].items.find((i) => i.id === b.id)!.set).toBe(umi.id);

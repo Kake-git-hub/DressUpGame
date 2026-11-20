@@ -77,7 +77,7 @@ describe('merge3（手元の変更を、公開されている新しい一覧に�
 });
 
 describe('mergeManifest（一覧ファイルを重ねたあと、セットの印とセットの一覧を合わせる）', () => {
-  type M = { dolls: { id: string; sets?: { id: string; name: string }[]; items: { id: string; set?: string }[] }[] };
+  type M = { dolls: { id: string; sets?: { id: string; name: string }[]; items: { id: string; set?: string | string[] }[] }[] };
   const S1 = { id: 'S1', name: 'うみ' };
   const S2 = { id: 'S2', name: 'やま' };
   const dollOf = (m: Json) => (m as unknown as M).dolls[0];
@@ -98,6 +98,14 @@ describe('mergeManifest（一覧ファイルを重ねたあと、セットの印
     expect(merged.items.map((i) => i.id)).toContain('n');
     expect(merged.items.find((i) => i.id === 'n')!.set).toBe('S1');
     expect(merged.sets).toEqual([S1]);
+  });
+  it('いくつものセットに入っている服（印が並び）でも、指しているセットは全部残る', () => {
+    const base = manifest(doll('アニメ', [item('a', { set: 'S1' })], { sets: [S1] }));
+    const local = manifest(doll('アニメ', [item('a', { set: ['S1', 'S2'] })], { sets: [S1, S2] }));
+    const remote = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('c')], { sets: [S1] }));
+    const merged = dollOf(mergeManifest(base, local, remote));
+    expect(merged.items.find((i) => i.id === 'a')!.set).toEqual(['S1', 'S2']);
+    expect(merged.sets).toEqual([S1, S2]);
   });
   it('2 点のセットを、手元と公開で 1 点ずつ消したら、空のセットは残さない', () => {
     const base = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('b', { set: 'S1' }), item('c')], { sets: [S1] }));

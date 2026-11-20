@@ -124,7 +124,7 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[]): Pro
         used.add(key);
         urls.set(name, url);
       }
-      const converted = itemToClothing(mine.dollId, category, mine.item, (file) => urls.get(file) ?? '', mine.set);
+      const converted = itemToClothing(mine.dollId, category, mine.item, (file) => urls.get(file) ?? '', mine.set ? [mine.set] : undefined);
       clothing.push(...converted.map((c) => ({ ...c, mine: true })));
     } catch (error) {
       console.error('自分の服を読めませんでした:', error);

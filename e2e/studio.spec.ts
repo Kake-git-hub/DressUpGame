@@ -478,10 +478,14 @@ test.describe('スタジオ', () => {
       await expect.poll(() => setItems().length).toBe(3);
       // 新しいセットを作り、▲ ▼ でセットの順番（ゲームのメニューでの順番）を変える
       const setNames = () => ((manifestNow().dolls[0] as { sets?: { name: string }[] }).sets ?? []).map((x) => x.name);
+      // うみのセットに入っている かざり を、やまのセットにも入れる（1 点が 2 つのセットに入る）
       page.once('dialog', (dialog) => void dialog.accept('やまのセット'));
-      const free = page.getByTestId('library-item').filter({ has: page.getByTestId('item-join-set') }).first();
-      await free.getByTestId('item-join-set').selectOption({ label: '＋ 新しいセット' });
+      await kazari.getByTestId('item-join-set').selectOption({ label: '＋ 新しいセット' });
       await expect.poll(setNames).toEqual(['うみのセット', 'やまのセット']);
+      const kazariSets = () => (manifestNow().dolls[0].items.find((i) => i.name === 'うみのかざり') as Item & { set?: string | string[] }).set;
+      await expect.poll(kazariSets).toEqual(['アニメ/セット/うみのセット', 'アニメ/セット/やまのセット']);
+      await expect(kazari.getByTestId('item-set')).toHaveCount(2);
+      await expect(page.getByTestId('library-set').nth(1).getByTestId('set-member')).toHaveCount(1);
       const boxes = page.getByTestId('library-set');
       await expect(boxes).toHaveCount(2);
       await expect(boxes.first().getByTestId('set-earlier')).toBeDisabled();
@@ -490,6 +494,12 @@ test.describe('スタジオ', () => {
       await expect(boxes.first().locator('input[aria-label="セットのなまえ"]')).toHaveValue('やまのセット');
       await boxes.first().getByTestId('set-later').click();
       await expect.poll(setNames).toEqual(['うみのセット', 'やまのセット']);
+      // やまのセットの欄から外す: うみのセットには残り、やまのセットは空になって消える
+      const yamaBox = boxes.filter({ has: page.locator('input[aria-label="セットのなまえ"][value="やまのセット"]') });
+      await expect(yamaBox.getByTestId('set-member')).toHaveCount(1);
+      await yamaBox.getByTestId('set-member-remove').click();
+      await expect.poll(kazariSets).toBe('アニメ/セット/うみのセット');
+      await expect.poll(setNames).toEqual(['うみのセット']);
     });
 
     test('ドールの範囲のタブで、ドールの名前を変え、ゲームに出さないようにできる', async ({ page }) => {

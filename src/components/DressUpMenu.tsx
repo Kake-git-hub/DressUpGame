@@ -6,6 +6,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
+import { menuSets } from './menuSets';
+import type { MenuSet } from './menuSets';
 
 interface DressUpMenuProps {
   items: ClothingItemData[];
@@ -99,23 +101,8 @@ export function DressUpMenu({
   // カテゴリ一覧
   const categories = useMemo(() => Array.from(groupedItems.keys()), [groupedItems]);
 
-  // セット: 同じ印（setId）の服をまとめる。パーツは、重なりの小さい順（着せる順）
-  const sets = useMemo(() => {
-    const map = new Map<string, MenuSet>();
-    for (const item of items) {
-      if (!item.setId || item.frontItemId) continue;
-      const set = map.get(item.setId) ?? { id: item.setId, name: item.setName ?? '', items: [] };
-      set.items.push(item);
-      map.set(item.setId, set);
-    }
-    const layer = (i: ClothingItemData) => i.layerOrder ?? i.baseZIndex ?? 0;
-    // 並びは、セットの順番（スタジオで決めたもの）。順番の無いセット（自分の服など）は、あとに服の順で
-    const order = (set: MenuSet) => set.items.find((i) => i.setOrder !== undefined)?.setOrder ?? Infinity;
-    return Array.from(map.values())
-      .map((set, index) => ({ set, index }))
-      .sort((a, b) => order(a.set) - order(b.set) || a.index - b.index)
-      .map(({ set }) => ({ ...set, items: [...set.items].sort((a, b) => layer(a) - layer(b)) }));
-  }, [items]);
+  // セット: 入っているセットごとにまとめる（1 点がいくつものセットに入っていてもよい）
+  const sets = useMemo(() => menuSets(items), [items]);
   const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
   const dropSet = onSetDrop ?? (() => {});
   
@@ -684,11 +671,6 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
 
 // セット（同じテーマで一度に作った服の集まり）のタイル。ドールへ運ぶと、パーツが全部着る。
 // 絵は、パーツのサムネイルを 4 つまで並べたもの（専用の絵は持たないので、パーツを消しても古くならない）
-export interface MenuSet {
-  id: string;
-  name: string;
-  items: ClothingItemData[];
-}
 const DraggableSet = memo(function DraggableSet({
   set,
   isWorn,

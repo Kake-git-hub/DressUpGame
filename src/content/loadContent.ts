@@ -2,7 +2,7 @@
  * 配信された素材（一覧ファイル）を取得して、アプリの型に変換する
  */
 import type { BackgroundData, ClothingItemData, DollData } from '../types';
-import { parseManifest } from './manifest';
+import { itemSetIds, parseManifest } from './manifest';
 import type { ManifestBackground, ManifestCategory, ManifestItem } from './manifest';
 
 export const DEFAULT_CONTENT_URL = 'https://kake-git-hub.github.io/DressUpGame-content/';
@@ -41,14 +41,14 @@ export interface LoadedContent {
 
 /**
  * 一覧の服 1 点を、アプリの服に変える。「後ろに描く分（back）」のある髪は、前髪とうしろがみの 2 点になる。
- * url: 一覧の中の絵の名前 → 読める URL。set: セットの印（ID と名前）
+ * url: 一覧の中の絵の名前 → 読める URL。sets: 入っているセット（ID と名前と順番）
  */
 export function itemToClothing(
   dollId: string,
   category: ManifestCategory,
   item: ManifestItem,
   url: (file: string) => string,
-  set?: { id: string; name: string; order?: number },
+  sets?: { id: string; name: string; order?: number }[],
 ): ClothingItemData[] {
   const layer = item.layer ?? category.layer;
   const result: ClothingItemData[] = [
@@ -72,7 +72,7 @@ export function itemToClothing(
       ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
       ...(item.back ? { backItemId: backItemId(item.id) } : {}),
       // セットの印（うしろがみの分には付けない。髪と一緒に付くので）
-      ...(set ? { setId: set.id, setName: set.name, ...(set.order !== undefined ? { setOrder: set.order } : {}) } : {}),
+      ...(sets && sets.length > 0 ? { sets } : {}),
     },
   ];
   if (item.back) {
@@ -159,8 +159,8 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
     for (const item of doll.items) {
       const category = categories.get(item.category);
       if (!category) continue; // parseManifest が保証しているので通らない
-      const set = item.set && setNames.has(item.set) ? { id: item.set, ...setNames.get(item.set)! } : undefined;
-      clothing.push(...itemToClothing(doll.id, category, item, url, set));
+      const sets = itemSetIds(item).flatMap((id) => (setNames.has(id) ? [{ id, ...setNames.get(id)! }] : []));
+      clothing.push(...itemToClothing(doll.id, category, item, url, sets));
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));
   }
