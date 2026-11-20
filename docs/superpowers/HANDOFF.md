@@ -1,4 +1,4 @@
-# 引き継ぎ（2026-11-20 時点、v0.27.0）
+# 引き継ぎ（2026-11-20 時点、v0.28.0）
 
 次のセッションは、まずこの文書を読む。必要になったら、下の文書を読む。
 
@@ -11,12 +11,12 @@
 
 | 項目 | 状態 |
 |---|---|
-| ゲームの版 | v0.26.0。**公開済み**（`main` = 作業ブランチ `claude/blissful-wozniak-9vofnl`。作者の了承「公開してよい」を得て取り込んだ、2026-11-20）。https://kake-git-hub.github.io/DressUpGame/ |
+| ゲームの版 | v0.28.0。**公開済み**（v0.28.0 は作業ブランチ `claude/magical-bohr-4quyms` から、作者の指示「マージして」で取り込んだ、2026-11-20。v0.27.0 までは `claude/blissful-wozniak-9vofnl`。作者の了承「公開してよい」を得て取り込んだ、2026-11-20）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `fb063ca`。**公開済み**）。ドール 4 体（アニメ 102 点・リアル 11 点・アニメ　その２ 127 点・おとこのこ 11 点）、背景 0 枚。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 617 件、E2E 76 件。すべて通過。型・ESLint エラー 0 |
+| テスト | ユニット 672 件、E2E 79 件、エミュレーター 18 件（`npm run firebase:test`）。すべて通過。型・ESLint エラー 0 |
 | 画像生成 | Gemini の呼び出しは本物で動いている（2026-11-19 から）。Claude API のキーは無いが、v0.25.0 から、企画と検品は Gemini の文章のモデル（`gemini-3.8-flash`）でも動く（スタジオの「テーマから作る」が、Gemini のキーだけで使える。本物で 1 組作って確かめた） |
 
-## 1-1. v0.27.0（作者の指示、2026-11-20。作業ブランチ `claude/magical-bohr-4quyms`）
+## 1-1. v0.28.0（作者の指示、2026-11-20。作業ブランチ `claude/magical-bohr-4quyms`）
 
 - ドールの `hidden: true`（ゲームに出さない。全部が非表示なら、服のあるドールを出す）。スタジオの「ドールの範囲」で名前と非表示を変える（`PATCH /api/dolls`）。
 - 一覧: カテゴリの中の服の並び替え（`POST /api/items/order`。`ContentStore.reorderItems`）、保存済みの服の位置と大きさ（`POST /api/items/transform`。服の中心を軸に倍率→移動。絵は描き直す。サムネイルはそのまま。画面は `src/studio/ItemPlacer.tsx`）。
@@ -36,7 +36,7 @@
 | B | v0.23.0 | 調整画面の重なりを、ドラッグで並べ替える | **公開済み**（計画: `plans/2026-11-20-stage-b-drag-layers.md`） |
 | C | v0.24.0 | 縦画面（メニューは下）。服の位置の調整値を「ドールの絵の px」に変える | **公開済み**（計画: `plans/2026-11-20-stage-c-portrait.md`） |
 | D | v0.25.0 | セット（同じテーマの複数パーツ。ばらばらのパーツとして扱う）。文章の AI を Gemini でも動かす | **公開済み**（計画: `plans/2026-11-20-stage-d-sets.md`） |
-| E | v0.26.0〜 | アプリ内スタジオ（Firebase）。チケット、自分だけの服、特定の利用者に届ける（PC のスタジオからも） | 計画あり: `plans/2026-11-20-stage-e-app-studio.md`（小段階 E1〜E4。**E1 は公開済み（v0.26.0）**。E2 は作者の用意を待たずに進められる。E3 からは、作者の `firebaseConfig` が要る。手順書 `docs/firebase-setup.md`） |
+| E | v0.26.0〜 | アプリ内スタジオ（Firebase）。チケット、自分だけの服、特定の利用者に届ける（PC のスタジオからも） | 計画: `plans/2026-11-20-stage-e-app-studio.md`（小段階 E1〜E4）。**E1（v0.26.0）と E2・E3（v0.27.0）は公開済み。作者がサーバーを載せるのを待っている**（手順書 `docs/firebase-setup.md` の 2 章）。載ったら、本物で 10 点ほど作って報告する。残りは E4（作者の画面・PC のスタジオからの「届ける」） |
 | F | 計画だけ | チケットの販売、アカウントの引き継ぎ、顔のアニメ化 | 作らない |
 
 作者が決めたこと: サーバーは Firebase（Blaze に切り替える前提）。生成も画像の処理もサーバー側。「つくる」は保護者（大人）が使う画面として分け、入口で確かめる（Gemini の利用の決まりが、18 歳未満向けのアプリでの利用を禁じているため。この分け方で足りるかは、販売の前に Google か専門家に確かめる）。服ごとの利用者の制限は、公開の素材では作らず、サーバーで「特定の利用者に届ける」として作る。
@@ -56,6 +56,19 @@
 セットで、まだできないこと: いまある服を、あとからセットに足す（「一覧」には「セットから外す」だけがある）。同じ名前のセットを、保存する前に 2 回企画すると、同じ ID になって 1 つのセットにまとまる（先に保存してから、次を企画すれば別になる）。古い版のスタジオ（`git pull` していない PC）で素材を保存すると、セットの印が消える（一覧を書き出すときに、知らない項目を落とすため）。セットを使う前に、どの PC も新しい版にすること。
 
 縦画面の作り（次に触る人へ）: 描画の計算は変えていない。縦では、キャンバスそのものを「画面の幅 × 正方形の一辺」にして上に置き、メニューの幅・右のボタンの幅を 0 で渡している（`src/components/layout.ts` の `computeLayout`）。服の位置の調整値は、状態と保存では「ドールの絵の px」、描画と調整画面に渡す直前に「キャンバスの px」に直す（`src/engine/units.ts`、`App.tsx` の `canvasItems`）。
+
+## 1-3. 段階 E2・E3（v0.27.0）: アプリを本物のサーバーにつないだ
+
+くわしくは、設計書の 8.9（結果・決めたこと・確かめられていないこと）。
+
+- **作者の Firebase**: プロジェクト `dressup-game-89f6e`（Blaze。匿名のログイン・Firestore・Storage を東京で有効にしてもらった）。設定の値は `src/cloud/firebaseConfig.ts`（公開してよい値）。
+- **サーバーは、まだ載っていない。** 載せるのは作者の PC から（`npm run firebase:login` → `firebase:key` → `firebase:deploy`。道具は `npx` で版を固定して呼ぶので、入れておかなくてよい。クラウドの作業環境からは載せられない）。載るまでは、`?studio=1` で開くと「サーバーから返事がありません（…準備ができていないかもしれません）」と出る。
+- 載ったあとに、こちらでやること: 作者に 10 点ほど作ってもらう（またはこちらで頼まれて作る）→ 使える割合と費用を報告 → うまくいかない所を直す。**本物の Firebase と本物の Gemini では、まだ 1 回も動かしていない**（エミュレーターと偽の Gemini で確かめた）。
+- 作者に見てもらうこと: (1) 手順書の 2 章が、そのとおりに通るか（つまずいた所の画面の文字をもらう）、(2) iPad のホーム画面のアプリで、版数を 5 回押して `studio` → 「✨」→ 利用者コードが出るか、(3) 管理者にしたあと、1 点とセットを作って、時間・できばえ・「使う」のあとメニューに出るか、(4) アプリを閉じて開き直しても、同じ利用者コードか。
+- 管理者は、Firestore の `system/config` の `adminCodes`（文字列）で決める（秘密の値 `ADMIN_USER_CODES` はやめた）。チケットを配る画面は E4。それまでは、管理画面で `users/{uid}` の `tickets` を書き換える（手順書 2-6）。
+- レビューで出て残したこと（小さいもの）は、設計書 8.9 の「残したこと」。E4 の計画を書くときに、いっしょに見る。
+- サーバーの部品を足したり版を上げたりしたら、`functions/package.json`（版は固定）と `functions/package-lock.json` も合わせる（`cd functions && npm install --package-lock-only`）。
+- 分かっている弱点: アプリ以外からの呼び出しを断る仕組み（App Check）が無い。起動のたびに、全部のドールの「自分の服」の絵を data: に直す（100 点を超えたら直す）。
 
 ## 2. 進行中: 「アニメ」を「アニメ　その２」にまとめる（作者の方針、2026-11-20）
 
@@ -112,7 +125,7 @@
 
 ## 4. 次にやること
 
-0. 1-2 章の計画の続き（段階 E から。作者の Firebase の用意が要る。手順書 `docs/firebase-setup.md` を渡した。作者から `firebaseConfig` をもらう。設計書 8.7。段階ごとに計画を書いてから実装する）。
+0. 1-3 章の続き: 作者がサーバーを載せたら、本物で確かめて報告する。そのあと E4（作者の画面: チケットを配る・服を届ける・取り消す、PC のスタジオからの「利用者に届ける」= `STUDIO_ADMIN_KEY`）。E4 の前に計画を書く。
 1. 作者の PC のスタジオの件と、「アニメ」をまとめる件（2 章）。「アニメ」を消すのは、段階 E を開ける前に済ませる。
 1. 作者に見てもらった結果の手直し（2-2 章の「作者に見てもらうこと」）。
 2. 「おとこのこ」の服を増やす（作者がスタジオで作る。頼まれれば、こちらで作る）。
@@ -146,7 +159,9 @@
 | `src/components/` | `layout.ts`（横・縦の配置の計算）、`AvatarCanvas.tsx`（キャンバス）、`DressUpMenu.tsx`（メニュー。縦は `PortraitMenu`）、`ItemAdjustPanel.tsx`（調整画面。プレビューは CSS で重ねる）、`PlacedItem.tsx`・`placement.ts`（キャンバスと同じ位置に重ねる計算）、`HueCanvas.tsx`（色変えのプレビュー） |
 | `src/pipeline/` | 画像処理の純粋関数。切り抜き（`cutout.ts`）、位置合わせ（`align.ts`・`partAlign.ts`）、体の部位（`bodyParts.ts`）、違いで取り出す（`diffMatte.ts`）、髪（`hairLayers.ts`・`hairSplit.ts`・`skinShadow.ts`）、くつ（`shoeLayers.ts`）、色変え（`hue.ts`・`recolor.ts`） |
 | `src/services/` | 端末に保存する小さな状態（服装・ドールの位置など） |
-| `src/appStudio/`、`src/cloud/` | アプリの中のスタジオ（保護者の確認・作る画面）と、その裏側の形・偽物・端末の中の自分の服 |
+| `src/appStudio/`、`src/cloud/` | アプリの中のスタジオ（保護者の確認・作る画面）と、その裏側: 形（`backend.ts`）、偽物（`fakeBackend.ts`）、本物（`remoteBackend.ts` = 段取り、`firebaseTransport.ts` = 匿名のログインと関数の呼び出し、`firebaseConfig.ts`）、サーバーとやり取りする形（`wire.ts`）、端末の中の自分の服（`library.ts`）と、サーバーとの合わせ方（`sync.ts`） |
+| `tools/cloud/` | サーバーの本体（Firebase に依らない）: `studioCore.ts`（利用者・チケット・生成の進行・保存）、`api.ts`（アプリからの呼び出しの受け口）、`store.ts`（置き場の形）と `memoryStore.ts`（テスト用）、`publicContent.ts`（公開の素材を読む） |
+| `functions/` | Firebase につなぐ層: `src/index.ts`（関数 `studio`・`studioRun`）、`src/firestoreStore.ts`・`src/storageFiles.ts`（置き場の本物）、`build.mjs`（1 つにまとめる）、`test/*.emu.ts`（エミュレーターのテスト）。決まりは、リポジトリの直下の `firestore.rules`・`storage.rules`（全部断る）、設定は `firebase.json`・`.firebaserc` |
 | `studio.html`、`src/studio/` | スタジオの画面（別ページ）。`Studio.tsx`（枠・取り込み・公開）、`Panels.tsx`（各タブ）、`ItemCard.tsx`（候補 1 点の編集と保存）、`api.ts`（API の呼び出し） |
 | `tools/studio/` | スタジオの API（`api.ts`）、開発サーバーへの組み込み（`vitePlugin.ts`）、自動生成（`generate.ts`）、品目ごとの処理（`processGenerated.ts`・`processHair.ts`・`processShoe.ts`・`processSwap.ts`・`processFace.ts`）、AI の呼び出し（`ai.ts`）、枚数の上限（`budget.ts`）、ドールづくり（`makeDoll.ts`・`dollPrompt.ts`）、キー無しで生成を回す（`tryItems.ts`） |
 | `tools/content/` | 画像の書き出し（`encode.ts`）、素材フォルダの編集（`manifestEdit.ts`）、1 回きりの手直し（`fixContent.ts`）、プリセットからの変換（`buildContent.ts`） |
@@ -157,6 +172,8 @@
 - 依存の導入: `npm ci`
 - ユニットテスト: `npx vitest run`　型: `npx tsc -b`　lint: `npx eslint .`
 - E2E: `npm run build` のあと `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --trace off`（クラウド環境では、導入済みの Chromium を使うためにこの環境変数が必要）。
+- エミュレーターのテスト: `npm run firebase:test`（関数をまとめ、Firebase のエミュレーターを起動して `functions/test/*.emu.ts` を走らせる。Java が要る。初回は、エミュレーターの本体をダウンロードする。クラウド環境で動く。1 分ほど）。ふだんの `npx vitest run` には入っていない。
+- E2E の `appStudioReal.spec.ts` は、Firebase 宛ての通信を全部受け止めて偽の返事を返す（本物のプロジェクトに、テストの利用者を作らない）。`?studio=1` を開く E2E を足すときは、必ず同じ受け止め（`fakeFirebase`）を使う。
 - クラウド環境は、このリポジトリ用の環境「DressUpGame」を使う（公開サイトと Gemini を開ける。開始時に `npm ci` と、隣への素材リポジトリの取得を自動で行う）。**隣の素材リポジトリは古いことがある**ので、最初に `git -C ../DressUpGame-content pull --ff-only` する（2026-11-20 のセッションでは 3 コミット古かった）。
 - 素材リポジトリへ push するには、セッションに `Kake-git-hub/DressUpGame-content` を追加する必要がある（読むだけなら不要）。
 - 画像生成を呼ぶとき: `NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy`（中継がキーを差し込む）。例: `STYLE_ID=anime NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy npx tsx tools/studio/tryItems.ts ../DressUpGame-content <ドールの ID> <品目の JSON> <出力フォルダ>`。処理だけを直して確かめるときは、出力フォルダの `raw-N.png` を `STUDIO_FAKE_IMAGE` に渡す（生成しない）。

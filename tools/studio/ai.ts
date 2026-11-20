@@ -229,16 +229,20 @@ export function createGeminiText(apiKey: string, model: string, fetchImpl: typeo
   };
 }
 
+// Gemini のモデルの既定（PC のスタジオも、サーバーの関数も、同じものを使う）
+export const GEMINI_TEXT_MODEL = 'gemini-3.8-flash';
+export const GEMINI_IMAGE_MODEL = 'gemini-nano-banana-2.1';
+
 // 文章（企画と検品）: Claude のキーがあれば Claude、無ければ Gemini のキーで Gemini。画像: Gemini
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
   return {
     text: env.ANTHROPIC_API_KEY
       ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5')
       : env.GEMINI_API_KEY
-        ? createGeminiText(env.GEMINI_API_KEY, env.STUDIO_GEMINI_TEXT_MODEL || 'gemini-3.8-flash')
+        ? createGeminiText(env.GEMINI_API_KEY, env.STUDIO_GEMINI_TEXT_MODEL || GEMINI_TEXT_MODEL)
         : null,
     image: env.GEMINI_API_KEY
-      ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1', fetch, IMAGE_SIZES.find((s) => s === env.STUDIO_GEMINI_IMAGE_SIZE?.toUpperCase()) ?? '1K')
+      ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || GEMINI_IMAGE_MODEL, fetch, IMAGE_SIZES.find((s) => s === env.STUDIO_GEMINI_IMAGE_SIZE?.toUpperCase()) ?? '1K')
       : null,
   };
 }

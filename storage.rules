@@ -1,0 +1,9 @@
+rules_version = '2';
+// アプリからは、絵を直接読み書きさせない。絵は、サーバーの関数（functions/）が渡す。
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

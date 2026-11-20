@@ -1,0 +1,14 @@
+{
+  "name": "dressup-functions",
+  "description": "アプリの中のスタジオのサーバー側（Cloud Functions）。中身は ../tools/cloud にあり、../functions/build.mjs で lib/index.cjs にまとめる",
+  "private": true,
+  "main": "lib/index.cjs",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "14.5.1",
+    "firebase-functions": "7.4.0",
+    "sharp": "0.34.5"
+  }
+}

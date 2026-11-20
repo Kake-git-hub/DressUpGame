@@ -301,7 +301,7 @@ test('端末の保存領域（IndexedDB）が応答しなくても、ゲーム�
   await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 12_000 });
 });
 
-test('つながっていないとき、スタジオはそう知らせる。本物の裏側がまだ無いときは「準備中」と出る', async ({ page }) => {
+test('つながっていないとき、スタジオはそう知らせる', async ({ page }) => {
   await open(page, FAKE, { offline: true } as never);
   await page.getByTestId('studio-button').click();
   await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
@@ -310,14 +310,6 @@ test('つながっていないとき、スタジオはそう知らせる。本�
   await expect(page.getByTestId('studio-problem')).toContainText('インターネット');
   await expect(page.getByTestId('studio-make')).toHaveCount(0);
   await page.getByTestId('studio-close').click();
-  // 本物（?studio=1）は、まだつながっていない
-  await page.goto(`${APP}&studio=1`);
-  await expect(page.getByTestId('studio-button')).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId('studio-button').click();
-  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
-  await page.getByTestId('adult-18').check();
-  await page.getByTestId('adult-open').click();
-  await expect(page.getByTestId('studio-unavailable')).toBeVisible();
 });
 
 test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あいことばを入れると、「つくる」のボタンが出る', async ({ page }) => {

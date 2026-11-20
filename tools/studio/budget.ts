@@ -10,6 +10,12 @@ export interface BudgetLimits {
   perRun: number;
 }
 
+// 画像を 1 枚作る前に呼ぶ。上限に達していたら BudgetError（生成の側は、これだけを知っていればよい。
+// PC のスタジオはファイルに、サーバーの関数は Firestore に、枚数を記録する）
+export interface ImageBudget {
+  spend(): Promise<void>;
+}
+
 export class BudgetError extends Error {
   readonly status = 429;
 }

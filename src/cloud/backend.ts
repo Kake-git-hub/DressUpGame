@@ -60,7 +60,11 @@ export interface MyItem {
   files: Record<string, Blob>;
   set?: SetRef;
   createdAt: number;
+  // どの利用者の服か（利用者コード）。端末の控えをサーバーに合わせるとき、ほかの利用者だったころの服を消さないために持つ
+  owner?: string;
 }
+// 一覧に載る中身（絵は含まない）
+export type MyItemInfo = Omit<MyItem, 'files' | 'owner'>;
 
 export type BackendErrorCode = 'offline' | 'no-tickets' | 'limit' | 'refused' | 'unknown';
 export class BackendError extends Error {
@@ -86,8 +90,10 @@ export interface StudioBackend {
   keep(jobId: string, index: number, name: string): Promise<MyItem>;
   // 「捨てる」
   discard(jobId: string, index: number): Promise<void>;
-  // 自分の服の一覧（サーバーにあるもの全部）
-  listMyItems(): Promise<MyItem[]>;
+  // 自分の服の一覧（サーバーにあるもの全部。絵は含まない）
+  listMyItems(): Promise<MyItemInfo[]>;
+  // 自分の服 1 点を、絵ごと取る
+  fetchMyItem(id: string): Promise<MyItem>;
   deleteMyItem(id: string): Promise<void>;
 }
 

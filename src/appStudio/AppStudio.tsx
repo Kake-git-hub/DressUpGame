@@ -7,13 +7,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioPreview, StudioTarget, StudioUser } from '../cloud/backend';
 import type { Library } from '../cloud/library';
+import { syncLibrary } from '../cloud/sync';
 import type { ManifestCategory } from '../content/manifest';
 import { isBackHairCategory } from '../pipeline/hairSplit';
 import { DEFAULT_STYLE_ID, STYLE_PRESETS } from '../studio/stylePresets';
 import type { DollData } from '../types';
 
 interface Props {
-  backend: StudioBackend | null; // null = まだ用意できていない
+  backend: StudioBackend | null; // null = 用意できなかった
   doll: DollData;
   categories: ManifestCategory[];
   library: Library;
@@ -101,8 +102,9 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     if (!backend) return;
     stops.push(backend.onUser((u) => !stopped && setUser(u)));
     void (async () => {
+      let signedIn: StudioUser;
       try {
-        const signedIn = await backend.signIn();
+        signedIn = await backend.signIn();
         if (stopped) return;
         setUser(signedIn);
         for (const job of await backend.pendingJobs()) {
@@ -110,15 +112,16 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
           stops.push(backend.watchJob(job.id, upsertJob));
         }
       } catch (e) {
-        if (!stopped) setProblem(messageOf(e));
+        // つながらないときは、確かめ方も添える
+        if (!stopped) setProblem(e instanceof BackendError && e.code === 'offline' ? `${e.message}（インターネットにつながっているか確かめて、開き直してください）` : messageOf(e));
         return;
       }
-      // 端末の控えを、サーバーの一覧に合わせる。できなくても、作ることはできる（知らせだけ出す）
+      // 端末の控えを、サーバーの一覧に合わせる（足りない服を取る・消した服を消す）。できなくても、作ることはできる（知らせだけ出す）
       try {
-        const items = await backend.listMyItems();
+        const synced = await syncLibrary(backend, library, signedIn.userCode);
         if (stopped) return;
-        await library.replaceAll(items);
-        await refreshLibrary();
+        if (synced.added > 0 || synced.removed > 0) await refreshLibrary();
+        if (synced.failed > 0) setError(`自分の服のうち ${synced.failed} 点を、この端末に取り込めませんでした。開き直すと、もう一度ためします。`);
       } catch (e) {
         if (!stopped) setError(messageOf(e));
       }
@@ -188,6 +191,8 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     .filter((job) => job.dollId === doll.id)
     .flatMap((job) => job.candidates.filter((c) => c.status !== 'kept' && c.status !== 'discarded' && !closed.includes(keyOf(job, c))).map((c) => ({ job, c })));
   const mine = myItems.filter((i) => i.dollId === doll.id);
+  // ほかのドールの服（公開をやめたドールの服も、ここで見て消せる）
+  const others = myItems.filter((i) => i.dollId !== doll.id);
 
   return (
     <div className="studio-overlay" data-testid="app-studio">
@@ -210,7 +215,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
           </p>
         ) : problem ? (
           <p className="studio-error" data-testid="studio-problem">
-            {problem}（インターネットにつながっているか確かめて、開き直してください）
+            {problem}
           </p>
         ) : (
           <>
@@ -311,6 +316,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
                             <>
                               <input value={names[key] ?? c.name} onChange={(e) => setNames((n) => ({ ...n, [key]: e.target.value }))} maxLength={20} aria-label="名前" data-testid="studio-candidate-name" />
                               {c.notes.length > 0 && <p className="studio-hint">{c.notes.join(' ')}</p>}
+                              {!c.preview && <p className="studio-hint">絵を読み込めませんでした。開き直すと、もう一度ためします（だめなら「捨てる」で消せます）。</p>}
                               <div className="studio-row">
                                 <button type="button" className="primary" disabled={working !== null} onClick={() => void keep(job, c)} data-testid="studio-keep">
                                   使う
@@ -347,6 +353,24 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
                 </div>
               )}
             </section>
+
+            {others.length > 0 && (
+              <section>
+                <h3>ほかのドールの服（{others.length} 点）</h3>
+                <p className="studio-hint">ドールを切り替えると着られます。いまは選べないドールの服も、ここで消せます。</p>
+                <div className="studio-my-items" data-testid="studio-other-items">
+                  {others.map((item) => (
+                    <figure key={item.id} data-testid="studio-other-item">
+                      <BlobImage blob={item.files[item.item.thumb]} alt={item.item.name} />
+                      <figcaption>{item.item.name}</figcaption>
+                      <button type="button" disabled={working !== null} onClick={() => window.confirm(`「${item.item.name}」を消しますか？`) && void remove(item)} data-testid="studio-other-delete">
+                        消す
+                      </button>
+                    </figure>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {user && (
               <p className="studio-hint">

@@ -26,7 +26,7 @@ import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
 import { AiError } from './ai.ts';
 import type { ImageAi, TextAi } from './ai.ts';
-import type { Budget } from './budget.ts';
+import type { ImageBudget } from './budget.ts';
 import { faceCrop, isFaceCategory, processFace, renderHeadCloseup } from './processFace.ts';
 import { pasteTile, pasteTileAlpha, renderFrame, tileTemplate, toTile } from './frame.ts';
 import { processGenerated } from './processGenerated.ts';
@@ -411,7 +411,7 @@ function facePrompt(item: PlannedItem, categoryLabel: string, style: string, fee
 export interface GenerateContext {
   text: TextAi;
   image: ImageAi;
-  budget: Budget;
+  budget: ImageBudget;
   doll: ManifestDoll;
   template: DollTemplate;
   data: TemplateData;
@@ -721,7 +721,7 @@ export interface BackgroundCandidate {
   notes: string[];
 }
 
-export async function generateBackground(ctx: { text: TextAi; image: ImageAi; budget: Budget; style: string }, candidate: BackgroundCandidate): Promise<void> {
+export async function generateBackground(ctx: { text: TextAi; image: ImageAi; budget: ImageBudget; style: string }, candidate: BackgroundCandidate): Promise<void> {
   candidate.status = 'working';
   // 内容の決まりで断られたら、説明文を書き直して 1 回だけやり直す
   for (let attempt = 1; attempt <= 2; attempt++) {

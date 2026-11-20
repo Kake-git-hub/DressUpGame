@@ -17,7 +17,6 @@ export interface Library {
   all(): Promise<MyItem[]>; // 作った順
   put(item: MyItem): Promise<void>;
   remove(id: string): Promise<void>;
-  replaceAll(items: MyItem[]): Promise<void>; // サーバーと合わせるとき: 中身を丸ごと入れ替える
 }
 
 const done = (tx: IDBTransaction) =>
@@ -78,11 +77,6 @@ export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ??
     },
     put: (item) => write((store) => void store.put(item)),
     remove: (id) => write((store) => void store.delete(id)),
-    replaceAll: (items) =>
-      write((store) => {
-        store.clear();
-        for (const item of items) store.put(item);
-      }),
   };
 }
 
@@ -97,14 +91,21 @@ function toDataUrl(source: Blob): Promise<string> {
   });
 }
 
+// data: に直した絵の覚え（服の ID・絵の名前・大きさ → URL）。服が増えた・減ったときに重ね直しても、同じ絵を読み直さない
+const dataUrls = new Map<string, string>();
+
 /**
  * 自分の服を、公開の素材に重ねる。そのドール・カテゴリの服として、公開の服のあとに並ぶ。
  * 絵は data: の URL にする（描画の部品が、そのまま読める）。
  * 公開の素材に無いドール・カテゴリの服、絵が欠けている服は、足さない（控えからは消さない）。
  */
 export async function mergeMyItems(content: LoadedContent, items: MyItem[]): Promise<LoadedContent> {
-  if (items.length === 0) return content;
+  if (items.length === 0) {
+    dataUrls.clear();
+    return content;
+  }
   const clothing = [...content.clothing];
+  const used = new Set<string>();
   for (const mine of items) {
     // 控えが 1 件壊れていても（中身が欠けているなど）、ほかの服は出す
     try {
@@ -115,12 +116,21 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[]): Pro
       const names = [...images.flatMap((i) => (i ? [i.file] : [])), mine.item.thumb, ...(mine.item.backThumb ? [mine.item.backThumb] : [])];
       if (names.some((name) => !(mine.files[name] instanceof Blob))) continue;
       const urls = new Map<string, string>();
-      for (const name of new Set(names)) urls.set(name, await toDataUrl(mine.files[name]));
+      for (const name of new Set(names)) {
+        const file = mine.files[name];
+        const key = `${mine.id}\n${name}\n${file.size}`;
+        const url = dataUrls.get(key) ?? (await toDataUrl(file));
+        dataUrls.set(key, url);
+        used.add(key);
+        urls.set(name, url);
+      }
       const converted = itemToClothing(mine.dollId, category, mine.item, (file) => urls.get(file) ?? '', mine.set);
       clothing.push(...converted.map((c) => ({ ...c, mine: true })));
     } catch (error) {
       console.error('自分の服を読めませんでした:', error);
     }
   }
+  // 消えた服の分は、忘れる
+  for (const key of [...dataUrls.keys()]) if (!used.has(key)) dataUrls.delete(key);
   return { ...content, clothing };
 }

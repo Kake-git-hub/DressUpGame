@@ -92,6 +92,13 @@ describe('偽物の裏側（開発とテスト用）', () => {
     expect(kept.set).toEqual(lastJob(backend, jobId).set);
     expect(lastJob(backend, jobId).candidates[0].status).toBe('kept');
     expect((await backend.listMyItems()).map((i) => i.id)).toEqual([kept.id]);
+    // 一覧には絵が入らない。1 点を、絵ごと取れる（持ち主の印つき）
+    expect((await backend.listMyItems())[0]).not.toHaveProperty('files');
+    const fetched = await backend.fetchMyItem(kept.id);
+    expect(fetched.files[fetched.item.image.file]).toBeInstanceOf(Blob);
+    expect(fetched.owner).toBe((await backend.signIn()).userCode);
+    expect(kept.owner).toBe(fetched.owner);
+    await expect(backend.fetchMyItem('my:nothing')).rejects.toMatchObject({ code: 'refused' });
     // 同じ候補を 2 回は使えない
     await expect(backend.keep(jobId, 0, 'x')).rejects.toBeInstanceOf(BackendError);
     await backend.deleteMyItem(kept.id);

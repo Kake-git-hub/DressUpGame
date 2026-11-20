@@ -13,6 +13,7 @@ import { parseManifest } from '../../src/content/manifest.ts';
 import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestImage, ManifestItem, ManifestSet } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
 import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeLayer, encodeMask, encodeThumb, uniqueId } from './encode.ts';
+import type { ImageWriter } from './encode.ts';
 
 export class ContentError extends Error {
   readonly status: number;
@@ -66,6 +67,35 @@ export interface ItemInput {
   // セット（同じテーマで一度に作った服の集まり）。その ID のセットがドールに無ければ作る。
   // 差し替え（replaceId）のときは、指定が無ければ今の印を残す
   set?: { id: string; name: string };
+}
+
+// 服の絵（服・サムネイル・隠す所・後ろに描く分・ドールのすぐ上に描く分）を書き出して、一覧に書く形にする。
+// 素材フォルダに保存するとき（ContentStore.addItem）と、サーバーの関数が利用者の置き場に保存するときの両方で使う
+export interface EncodedItemImages {
+  image: ManifestItem['image'];
+  thumb: string;
+  hide: ManifestItem['image'] | null;
+  back: ManifestItem['image'] | null;
+  backThumb: string | null;
+  under: ManifestItem['image'] | null;
+}
+export async function encodeItemImages(doll: ManifestDoll, input: ItemInput, writer: ImageWriter): Promise<EncodedItemImages> {
+  // 服のキャンバスは、ドールのキャンバスと同じか、まわりに同じ幅の余白を足したもの（中心が同じ）
+  const padX = (input.width - doll.image.canvasW) / 2;
+  const padY = (input.height - doll.image.canvasH) / 2;
+  if (padX < 0 || padX !== padY || !Number.isInteger(padX)) {
+    throw new ContentError(`画像の大きさ（${input.width}×${input.height}）がドールのキャンバス（${doll.image.canvasW}×${doll.image.canvasH}）と違います`);
+  }
+  const encoded = await encodeCutout(input.rgba, input.width, input.height, writer, input.thumbFrom);
+  if (!encoded) throw new ContentError('画像が全部透明です');
+  if (input.hide && input.hide.length !== doll.image.canvasW * doll.image.canvasH) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
+  const hide = input.hide ? await encodeMask(input.hide, doll.image.canvasW, doll.image.canvasH, writer) : null;
+  if (input.back && input.back.length !== input.width * input.height * 4) throw new ContentError('後ろに描く画像の大きさがドールのキャンバスと違います');
+  const back = input.back ? await encodeLayer(input.back, input.width, input.height, writer) : null;
+  const backThumb = back && input.backThumbFrom ? await encodeThumb(input.backThumbFrom, input.width, input.height, writer) : null;
+  if (input.under && input.under.length !== input.width * input.height * 4) throw new ContentError('ドールのすぐ上に描く画像の大きさがドールのキャンバスと違います');
+  const under = input.under ? await encodeLayer(input.under, input.width, input.height, writer) : null;
+  return { image: encoded.image, thumb: encoded.thumb, hide, back, backThumb, under };
 }
 
 // パーツが 1 点も残っていないセットを消す（sets が空になったら、項目ごと消す）
@@ -156,12 +186,6 @@ export class ContentStore {
     return this.change(async (manifest) => {
       const doll = ContentStore.doll(manifest, dollId);
       if (!doll.categories.some((c) => c.id === input.category)) throw new ContentError(`カテゴリ「${input.category}」がありません`, 404);
-      // 服のキャンバスは、ドールのキャンバスと同じか、まわりに同じ幅の余白を足したもの（中心が同じ）
-      const padX = (input.width - doll.image.canvasW) / 2;
-      const padY = (input.height - doll.image.canvasH) / 2;
-      if (padX < 0 || padX !== padY || !Number.isInteger(padX)) {
-        throw new ContentError(`画像の大きさ（${input.width}×${input.height}）がドールのキャンバス（${doll.image.canvasW}×${doll.image.canvasH}）と違います`);
-      }
       const existing = input.replaceId ? doll.items.find((i) => i.id === input.replaceId) : undefined;
       if (input.replaceId && !existing) throw new ContentError(`置き換えるアイテム「${input.replaceId}」がありません`, 404);
       // セット: 無ければ作る（名前は、最初に保存した服のときのもの）
@@ -171,15 +195,8 @@ export class ContentStore {
         setId = checkName(input.set.id, 'セットの ID', 200);
         if (!doll.sets?.some((x) => x.id === setId)) doll.sets = [...(doll.sets ?? []), { id: setId, name: checkPlainName(input.set.name, 'セットの名前') }];
       }
-      const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer, input.thumbFrom);
-      if (!encoded) throw new ContentError('画像が全部透明です');
-      if (input.hide && input.hide.length !== doll.image.canvasW * doll.image.canvasH) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
-      const hide = input.hide ? await encodeMask(input.hide, doll.image.canvasW, doll.image.canvasH, this.writer) : null;
-      if (input.back && input.back.length !== input.width * input.height * 4) throw new ContentError('後ろに描く画像の大きさがドールのキャンバスと違います');
-      const back = input.back ? await encodeLayer(input.back, input.width, input.height, this.writer) : null;
-      const backThumb = back && input.backThumbFrom ? await encodeThumb(input.backThumbFrom, input.width, input.height, this.writer) : null;
-      if (input.under && input.under.length !== input.width * input.height * 4) throw new ContentError('ドールのすぐ上に描く画像の大きさがドールのキャンバスと違います');
-      const under = input.under ? await encodeLayer(input.under, input.width, input.height, this.writer) : null;
+      const { image, thumb, hide, back, backThumb, under } = await encodeItemImages(doll, input, this.writer);
+      const encoded = { image, thumb };
       if (existing) {
         if (back) existing.back = back;
         else delete existing.back;
