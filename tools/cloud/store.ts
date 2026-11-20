@@ -1,0 +1,97 @@
+/**
+ * サーバーの置き場の形（利用者・チケット・生成の進み具合・自分の服）
+ *
+ * 本物は Firestore と Storage（functions/src/）。テストと手元の確認は、メモリの中の偽物（memoryStore.ts）。
+ * 「読んで、変えて、書く」が途中で割り込まれてはいけない操作（チケットを引く・進み具合を書き換える）は、
+ * この形の 1 つの操作にまとめてある（本物は、取り引きで行う）。
+ */
+import type { Box, ManifestItem } from '../../src/content/manifest.ts';
+
+export type CloudErrorCode = 'no-tickets' | 'limit' | 'refused' | 'unknown';
+// 利用者に伝える失敗（message は、そのまま画面に出す日本語）
+export class CloudError extends Error {
+  readonly code: CloudErrorCode;
+  constructor(code: CloudErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export interface UserDoc {
+  userCode: string;
+  tickets: number;
+  createdAt: number;
+}
+
+export type CandidateStatus = 'waiting' | 'working' | 'done' | 'failed' | 'kept' | 'discarded';
+export type LayerKind = 'png' | 'hide' | 'shape' | 'front' | 'under';
+export interface CandidateDoc {
+  index: number;
+  name: string;
+  categoryId: string;
+  description: string; // 画像の AI への指示（英語）
+  colors: string[];
+  status: CandidateStatus;
+  notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
+  // できた服の絵（切り抜き済み。置き場のパス）と、ドールのキャンバスの上での位置
+  preview?: { path: string; canvasW: number; canvasH: number; box: Box };
+  // 保存するときに使う絵（置き場のパス）
+  layers?: Partial<Record<LayerKind, string>>;
+}
+export interface SetRef {
+  id: string;
+  name: string;
+}
+export interface JobDoc {
+  id: string;
+  dollId: string;
+  theme: string;
+  styleId: string;
+  set?: SetRef;
+  done: boolean;
+  tickets: number; // 使った枚数（戻した分を引いたあと）
+  createdAt: number;
+  heartbeat: number; // 最後に進めた時刻（止まっている仕事を見分ける）
+  candidates: CandidateDoc[];
+}
+// 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける
+export interface ItemDoc {
+  id: string; // `my:` で始まる
+  dollId: string;
+  item: ManifestItem;
+  paths: Record<string, string>;
+  set?: SetRef;
+  createdAt: number;
+}
+
+export interface CloudStore {
+  getUser(uid: string): Promise<UserDoc | null>;
+  // 利用者を作る（もういれば、そのまま返す）。利用者コードは、ほかの利用者と重ならないものにする
+  createUser(uid: string, makeCode: () => string, now: number): Promise<UserDoc>;
+  findUidByCode(userCode: string): Promise<string | null>;
+  // チケットを引く。足りなければ CloudError('no-tickets')（引かない）。返り値は残り
+  charge(uid: string, cost: number, reason: string, now: number): Promise<number>;
+  // チケットを足す（戻す・配る）。返り値は残り
+  addTickets(uid: string, count: number, reason: string, now: number): Promise<number>;
+  // 台帳に書くだけ（管理者が使った分。残りは変えない）
+  note(uid: string, count: number, reason: string, now: number): Promise<void>;
+  // 画像を 1 枚作る前に呼ぶ。その日の上限に達していたら CloudError('limit')（数は増えない）
+  spendImage(day: string, perDay: number): Promise<void>;
+  createJob(uid: string, job: JobDoc): Promise<void>;
+  getJob(uid: string, jobId: string): Promise<JobDoc | null>;
+  // 進み具合を、読んで書き換える（割り込まれない）。change が null を返したら、何も書かない。返り値は、書いたあとの内容
+  updateJob(uid: string, jobId: string, change: (job: JobDoc) => JobDoc | null): Promise<JobDoc>;
+  listJobs(uid: string): Promise<JobDoc[]>; // 新しい順
+  putItem(uid: string, item: ItemDoc): Promise<void>;
+  getItem(uid: string, itemId: string): Promise<ItemDoc | null>;
+  listItems(uid: string): Promise<ItemDoc[]>; // 作った順
+  deleteItem(uid: string, itemId: string): Promise<void>;
+}
+
+// 絵の置き場
+export interface CloudFiles {
+  put(path: string, data: Buffer, contentType: string): Promise<void>;
+  get(path: string): Promise<Buffer | null>;
+  // prefix で始まるパスを全部消す
+  removeAll(prefix: string): Promise<void>;
+}
