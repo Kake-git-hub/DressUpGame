@@ -10,6 +10,7 @@
  * 穴を左右の髪の色で埋める。こうすると、AI の描いた体がドールより太くても細くても、すき間が出ない。
  */
 import type { Pixels } from './alpha';
+import { baseColorSource, fillSmooth } from './smoothFill';
 
 // うしろがみのカテゴリ（名前で決める）: 前髪とは別の品目として、最初からドールの後ろに描く 1 枚として作る
 export const isBackHairCategory = (label: string): boolean => /うしろ[がか]み|後ろ?髪|バックヘア|back ?hair/i.test(label);
@@ -181,7 +182,8 @@ export function splitHair(
 /**
  * 髪の全体に、体の形の穴を埋めた「マントのような 1 枚」を作る。
  * 埋めるのは、行ごとに、髪にはさまれた「体の下」と「髪と体のあいだの細いすき間」。
- * paint（体に隠れていた髪を描いた絵。髪のある所だけ不透明）があれば、その絵で埋める。無い所は、両側の髪の色をなめらかにつなぐ
+ * 色は、髪の地の色（輪郭線を除く）を、どの方向にもなめらかに広げたもの。行ごとに左右の色をつなぐと、横じまになる。
+ * paint（体に隠れていた髪を描いた絵。髪のある所だけ不透明）があれば、その絵で埋める
  */
 function fillBehindBody(
   rgba: Pixels,
@@ -227,7 +229,8 @@ function fillBehindBody(
     wave = next;
   }
 
-  // 行ごとに、髪にはさまれた区間の「体の下」と「細いすき間」を、両側の髪の色をなめらかにつないで埋める
+  // 行ごとに、髪にはさまれた区間の「体の下」と「細いすき間」を埋める
+  const region = new Uint8Array(total); // なめらかな色で埋める所
   const painted = new Uint8Array(total); // 描いた絵で埋めた所
   const inset = Math.max(1, Math.round(depth / 2)); // 色は、髪のふち（輪郭線）より少し内側から取る
   for (let y = 0; y < height; y++) {
@@ -265,7 +268,7 @@ function fillBehindBody(
       };
       const fillable = (k: number) => inside[row + k] === 1 || gap[row + k] === 1;
       if (!paint) {
-        for (let k = a; k <= b; k++) if (fillable(k)) joined(k, (row + k) * 4);
+        for (let k = a; k <= b; k++) if (fillable(k)) region[row + k] = 1;
         continue;
       }
       // 描いた絵があるとき: 絵に髪がある所は、その絵で埋める。絵に髪が無い所は、髪が無いものとして埋めない
@@ -289,6 +292,7 @@ function fillBehindBody(
       }
     }
   }
+  if (!paint) fillSmooth(back, region, baseColorSource(rgba, solid, width, height, inset), width, height);
   // 穴のふち（体の輪郭線だった所）: もとの髪のふちは、マネキンの色がにじんで線に見える。絵で埋めた所に接する数 px を、絵に置き換える
   if (paint) {
     const seam = distance(painted, solid, width, height, SEAM_WIDTH);

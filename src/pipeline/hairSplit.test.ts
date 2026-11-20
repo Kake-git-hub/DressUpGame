@@ -101,6 +101,31 @@ describe('splitHair', () => {
     rect(shape, 1, 50, 60, 59, 150, [0]); // AI の絵でも背景だった（髪と体のあいだの空き）
     expect(alpha(splitHair(px, doll(), W, H, DEPTH, { bodyShape: shape })!.back, 55, 100)).toBe(0);
   });
+  it('体の裏は、横じまにならない: 髪の線が行ごとに違っていても、縦にとなり合う画素の色の差が 3 以下', () => {
+    const px = hair();
+    // 髪の線: 2 行ごとに、左右の髪を暗い色にする（行ごとに色をつなぐと、体の裏に横じまが出る）
+    for (let y = 60; y <= 140; y += 2) {
+      rect(px, 4, 30, y, 62, y, [90, 60, 20, 255]);
+      rect(px, 4, 98, y, 130, y, [90, 60, 20, 255]);
+    }
+    const s = splitHair(px, doll(), W, H, DEPTH)!;
+    for (let y = 61; y <= 140; y++) {
+      for (let x = 66; x <= 94; x++) {
+        expect(alpha(s.back, x, y)).toBe(255);
+        for (let c = 0; c < 3; c++) expect(Math.abs(s.back[(y * W + x) * 4 + c] - s.back[((y - 1) * W + x) * 4 + c])).toBeLessThanOrEqual(3);
+      }
+    }
+  });
+  it('体の裏の色は、髪の線ではなく、髪の地の色', () => {
+    const px = hair();
+    // 髪のふちの線（体のすぐ横の 2 列だけ暗い）
+    rect(px, 4, 61, 50, 62, 150, [60, 40, 10, 255]);
+    rect(px, 4, 98, 50, 99, 150, [60, 40, 10, 255]);
+    const s = splitHair(px, doll(), W, H, DEPTH)!;
+    const i = (100 * W + 80) * 4;
+    expect(s.back[i]).toBeGreaterThan(200); // 金色の地（R 240）に近い
+    expect(s.back[i + 1]).toBeGreaterThan(160);
+  });
   it('体の内側に髪が無ければ null（分けない）', () => {
     const px = new Uint8ClampedArray(W * H * 4);
     rect(px, 4, 10, 10, 40, 150, GOLD);

@@ -7,6 +7,7 @@
  * どの方向にもなめらかな色になる。
  */
 import type { Pixels } from './alpha';
+import { erode } from './morph';
 
 // rgb: 幅 × 高さ × 3。weight: 0〜1（その画素の色をどれだけ信じるか）。戻り値: 全画素の色
 function pushPull(rgb: Float32Array, weight: Float32Array, width: number, height: number): Float32Array {
@@ -91,4 +92,27 @@ export function fillSmooth(rgba: Uint8ClampedArray, region: Uint8Array, source: 
     rgba[p * 4 + 2] = Math.round(field[p * 3 + 2]);
     rgba[p * 4 + 3] = 255;
   }
+}
+
+// 輪郭線より明るい画素を「地の色」とみなす、髪の明るさの中央値に対する割合
+const BASE_LIGHTNESS = 0.85;
+
+// 塗りつぶしの色のもとにする画素: ふちから inset px 内側の髪で、輪郭線（暗い線）でない所。無ければ、髪の全部
+export function baseColorSource(rgba: Pixels, solid: Uint8Array, width: number, height: number, inset: number): Uint8Array {
+  const lightness = (p: number) => rgba[p * 4] * 0.3 + rgba[p * 4 + 1] * 0.59 + rgba[p * 4 + 2] * 0.11;
+  const values: number[] = [];
+  for (let p = 0; p < solid.length; p++) if (solid[p]) values.push(lightness(p));
+  if (values.length === 0) return solid;
+  values.sort((a, b) => a - b);
+  const floor = values[values.length >> 1] * BASE_LIGHTNESS;
+  const inner = erode(solid, width, height, inset);
+  const source = new Uint8Array(solid.length);
+  let count = 0;
+  for (let p = 0; p < solid.length; p++) {
+    if (inner[p] && lightness(p) >= floor) {
+      source[p] = 1;
+      count++;
+    }
+  }
+  return count > 0 ? source : solid;
 }
