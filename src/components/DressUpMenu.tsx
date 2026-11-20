@@ -653,9 +653,12 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
     <div
       style={{ ...styles.itemButton, ...(isEquipped ? styles.itemButtonEquipped : {}), ...drag.dragStyle(size) }}
       data-draggable=""
+      data-mine={item.mine ? 'true' : undefined}
       {...drag.handlers}
     >
       <div style={styles.itemImageContainer}>
+        {/* 自分の服（この端末の利用者にだけ出る服）の印 */}
+        {item.mine && <div style={styles.mineBadge}>★</div>}
         <img
           src={item.thumbnailUrl || item.imageUrl}
           alt={item.name}
@@ -1043,6 +1046,15 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    pointerEvents: 'none',
+  },
+  mineBadge: {
+    position: 'absolute',
+    top: '-2px',
+    left: '-2px',
+    fontSize: '11px',
+    lineHeight: '12px',
+    color: '#f5a623',
     pointerEvents: 'none',
   },
   equippedBadge: {

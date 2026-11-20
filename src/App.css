@@ -1237,6 +1237,17 @@ textarea {
 .portrait-tools .reset-button-fixed {
   grid-column: 3;
 }
+/* 「つくる」のボタンが出ている端末では、4 つの場所（調整・写真・つくる・リセット） */
+.portrait-tools.with-studio {
+  grid-template-columns: repeat(4, 1fr);
+}
+.portrait-tools.with-studio .studio-open-button {
+  grid-column: 3;
+}
+.portrait-tools.with-studio .reset-button-fixed {
+  grid-column: 4;
+}
+
 .portrait-tools .tool-button,
 .portrait-tools .screenshot-button,
 .portrait-tools .reset-button-fixed {
@@ -1315,4 +1326,39 @@ textarea {
 }
 .app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn:active {
   transform: rotate(-90deg) scale(0.92);
+}
+
+/* 「つくる」（服を作る画面を開く）。教えた URL を開いた端末にだけ出る */
+.studio-open-button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex: none;
+  background: linear-gradient(135deg, #ffd24d 0%, #ff8fb0 100%);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 170, 80, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.studio-open-button:active {
+  transform: scale(0.9);
+}
+/* 服を作る画面を読み込んでいる間 */
+.studio-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(60, 40, 60, 0.45);
+  color: #fff;
+  font-size: 1.2rem;
 }

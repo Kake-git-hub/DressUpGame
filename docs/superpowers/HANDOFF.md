@@ -1,4 +1,4 @@
-# 引き継ぎ（2026-11-20 時点、v0.25.0）
+# 引き継ぎ（2026-11-20 時点、v0.26.0）
 
 次のセッションは、まずこの文書を読む。必要になったら、下の文書を読む。
 
@@ -11,9 +11,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| ゲームの版 | v0.25.0。**公開済み**（`main` = 作業ブランチ `claude/blissful-wozniak-9vofnl`。作者の了承「公開してよい」を得て取り込んだ、2026-11-20）。https://kake-git-hub.github.io/DressUpGame/ |
+| ゲームの版 | v0.26.0。**公開済み**（`main` = 作業ブランチ `claude/blissful-wozniak-9vofnl`。作者の了承「公開してよい」を得て取り込んだ、2026-11-20）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `fb063ca`。**公開済み**）。ドール 4 体（アニメ 102 点・リアル 11 点・アニメ　その２ 127 点・おとこのこ 11 点）、背景 0 枚。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 592 件、E2E 62 件。すべて通過。型・ESLint エラー 0 |
+| テスト | ユニット 621 件、E2E 71 件。すべて通過。型・ESLint エラー 0 |
 | 画像生成 | Gemini の呼び出しは本物で動いている（2026-11-19 から）。Claude API のキーは無いが、v0.25.0 から、企画と検品は Gemini の文章のモデル（`gemini-3.8-flash`）でも動く（スタジオの「テーマから作る」が、Gemini のキーだけで使える。本物で 1 組作って確かめた） |
 
 ## 1-2. 進行中の大きな計画: アプリ内スタジオ・縦画面・セット（2026-11-20 に作者と決めた）
@@ -26,7 +26,7 @@
 | B | v0.23.0 | 調整画面の重なりを、ドラッグで並べ替える | **公開済み**（計画: `plans/2026-11-20-stage-b-drag-layers.md`） |
 | C | v0.24.0 | 縦画面（メニューは下）。服の位置の調整値を「ドールの絵の px」に変える | **公開済み**（計画: `plans/2026-11-20-stage-c-portrait.md`） |
 | D | v0.25.0 | セット（同じテーマの複数パーツ。ばらばらのパーツとして扱う）。文章の AI を Gemini でも動かす | **公開済み**（計画: `plans/2026-11-20-stage-d-sets.md`） |
-| E | v0.26.0〜 | アプリ内スタジオ（Firebase）。チケット、自分だけの服、特定の利用者に届ける（PC のスタジオからも） | 計画あり: `plans/2026-11-20-stage-e-app-studio.md`（小段階 E1〜E4。E1・E2 は作者の用意を待たずに進められる。E3 からは、作者の `firebaseConfig` が要る。手順書 `docs/firebase-setup.md`） |
+| E | v0.26.0〜 | アプリ内スタジオ（Firebase）。チケット、自分だけの服、特定の利用者に届ける（PC のスタジオからも） | 計画あり: `plans/2026-11-20-stage-e-app-studio.md`（小段階 E1〜E4。**E1 は公開済み（v0.26.0）**。E2 は作者の用意を待たずに進められる。E3 からは、作者の `firebaseConfig` が要る。手順書 `docs/firebase-setup.md`） |
 | F | 計画だけ | チケットの販売、アカウントの引き継ぎ、顔のアニメ化 | 作らない |
 
 作者が決めたこと: サーバーは Firebase（Blaze に切り替える前提）。生成も画像の処理もサーバー側。「つくる」は保護者（大人）が使う画面として分け、入口で確かめる（Gemini の利用の決まりが、18 歳未満向けのアプリでの利用を禁じているため。この分け方で足りるかは、販売の前に Google か専門家に確かめる）。服ごとの利用者の制限は、公開の素材では作らず、サーバーで「特定の利用者に届ける」として作る。
@@ -36,6 +36,10 @@
 段階 B で作者に見てもらうこと: iPad で、調整画面の左の一覧の絵を指でつかんで上下に動かしたときの手ざわり（動き始め、離したときの入り方）。服をたくさん着たとき（一覧が画面に収まらないとき。iPad の横で 9 点くらいから）は、動きが変わる: すばやくなぞると一覧が流れ、絵を長く押してから（0.25 秒。絵が浮く）動かすと並べ替え。浮かせた絵を一覧の端へ持っていくと、一覧が流れ続ける（こちらでは、指での操作はまねた入力でしか確かめていない）。
 
 段階 C で作者に見てもらうこと: iPad とスマホを縦に持って、(1) 服を上へドラッグして着せられるか（服の行を出たところから、絵が指に付いてくる）、服がたくさんあるカテゴリで行を横になぞって流せるか（はっきり横に動かしたときだけ流れる。斜めならドラッグ）、(2) 持ち替えたときに服がずれないか、(3) 更新の前に調整していた服装が、同じ位置で出るか、(4) 縦の調整画面（一覧を左右に動かす、色、↺・✓）、(5) スマホでは背景の正方形が小さめ（画面の幅）で、下が服の行 3 段になる。これでよいか。こちらでは、実機の指の操作と、ホーム画面から開いたときの上下のあき（時計の表示・ホームの線）は確かめられていない。
+
+段階 E1（v0.26.0）で作者に見てもらうこと: `https://kake-git-hub.github.io/DressUpGame/?studio=fake` を開く（その端末にだけ「✨」が出るようになる。消すときは `?studio=0`）。保護者の確認の画面と、服を作る画面の流れ・言葉・分かりやすさを見てもらう。**確認用なので、絵は色の四角で、AI は使わない。チケットも端末の中だけのにせもの**（残りを戻すには、端末の Safari の設定からこのサイトのデータを消す）。作った「自分の服」は、その端末にだけ残る。
+
+アプリのスタジオの作り（次に触る人へ）: 画面は `src/appStudio/`（`index.tsx` が入口で、動的に読み込む。`AdultGate.tsx`・`AppStudio.tsx`）。裏側は `src/cloud/backend.ts` の形（`StudioBackend`）だけを知る。いまあるのは偽物（`fakeBackend.ts`）だけで、本物（Firebase）は `createBackend.ts` の `real` の所に入れる（いまは null = 「準備中」）。自分の服の控えは IndexedDB（`library.ts`。データベース名 `dressup-library`）で、`mergeMyItems` が公開の素材に重ねる（絵は data: の URL）。
 
 段階 D で作者に見てもらうこと: PC のスタジオ（`git pull` して起動し直す）の「テーマから作る」で「セット」を作ってみる（Gemini のキーだけでよい）。公開すると、ゲームのメニューの先頭に「セット」が出る。こちらで本物で 1 組作った結果（「アニメ　その２」、テーマ「うみのおひめさま」、トップス・ボトムス・くつ・ぼうし。70 秒、画像 5 枚。ぼうしは検品で 1 回作り直しになり、警告が付いたので「ぜんぶ保存」では保存されず、確かめ待ちで残った）は `docs/superpowers/specs/2026-11-20-sets/`。**この 1 組は、素材リポジトリには入れていない**（こちらの作業用の写しに保存しただけ）。
 
@@ -132,6 +136,7 @@
 | `src/components/` | `layout.ts`（横・縦の配置の計算）、`AvatarCanvas.tsx`（キャンバス）、`DressUpMenu.tsx`（メニュー。縦は `PortraitMenu`）、`ItemAdjustPanel.tsx`（調整画面。プレビューは CSS で重ねる）、`PlacedItem.tsx`・`placement.ts`（キャンバスと同じ位置に重ねる計算）、`HueCanvas.tsx`（色変えのプレビュー） |
 | `src/pipeline/` | 画像処理の純粋関数。切り抜き（`cutout.ts`）、位置合わせ（`align.ts`・`partAlign.ts`）、体の部位（`bodyParts.ts`）、違いで取り出す（`diffMatte.ts`）、髪（`hairLayers.ts`・`hairSplit.ts`・`skinShadow.ts`）、くつ（`shoeLayers.ts`）、色変え（`hue.ts`・`recolor.ts`） |
 | `src/services/` | 端末に保存する小さな状態（服装・ドールの位置など） |
+| `src/appStudio/`、`src/cloud/` | アプリの中のスタジオ（保護者の確認・作る画面）と、その裏側の形・偽物・端末の中の自分の服 |
 | `studio.html`、`src/studio/` | スタジオの画面（別ページ）。`Studio.tsx`（枠・取り込み・公開）、`Panels.tsx`（各タブ）、`ItemCard.tsx`（候補 1 点の編集と保存）、`api.ts`（API の呼び出し） |
 | `tools/studio/` | スタジオの API（`api.ts`）、開発サーバーへの組み込み（`vitePlugin.ts`）、自動生成（`generate.ts`）、品目ごとの処理（`processGenerated.ts`・`processHair.ts`・`processShoe.ts`・`processSwap.ts`・`processFace.ts`）、AI の呼び出し（`ai.ts`）、枚数の上限（`budget.ts`）、ドールづくり（`makeDoll.ts`・`dollPrompt.ts`）、キー無しで生成を回す（`tryItems.ts`） |
 | `tools/content/` | 画像の書き出し（`encode.ts`）、素材フォルダの編集（`manifestEdit.ts`）、1 回きりの手直し（`fixContent.ts`）、プリセットからの変換（`buildContent.ts`） |

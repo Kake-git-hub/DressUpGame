@@ -5,7 +5,7 @@
  * 横でも縦でも遊べる（配置は src/components/layout.ts）。
  * ドール・服・背景の画像は、別リポジトリ（DressUpGame-content）から配信されたものを読む。
  */
-import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlash } from './components';
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
@@ -14,6 +14,10 @@ import { sheetsAbove } from './engine/layers';
 import { adjustBaseId, partnerOf } from './engine/pairs';
 import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
+import { mergeMyItems, openLibrary } from './cloud/library';
+import { readStudioMode } from './appStudio/unlock';
+import type { LoadedContent } from './content/loadContent';
+import type { ManifestCategory } from './content/manifest';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
 import { resolveStartState } from './content/startState';
@@ -60,6 +64,14 @@ function readViewport(): Viewport {
 
 // 旧方式（アプリ内取り込み）のデータを、状態を読む前に片付ける
 cleanupLegacyData();
+
+// アプリの中のスタジオ（服を作る画面）。作者が教えた URL を開いた端末にだけ、ボタンを出す。
+// 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
+const STUDIO_MODE = readStudioMode(window.location.search);
+const StudioRoot = lazy(() => import('./appStudio'));
+// 端末の中の「自分の服」（スタジオで作った服の控え）
+const library = openLibrary();
+const NO_CATEGORIES: ManifestCategory[] = [];
 
 // 素材の置き場所
 const CONTENT_URL = resolveContentUrl(window.location.search, window.location.href);
@@ -159,12 +171,27 @@ function App() {
     savedOutfitRef.current = loadOutfit(stageUnit(Math.min(vw, vh)));
   }
 
+  // 公開の素材（自分の服を重ねる前）と、ドールごとのカテゴリ
+  const publicContentRef = useRef<LoadedContent | null>(null);
+  const [categoriesByDoll, setCategoriesByDoll] = useState<Record<string, ManifestCategory[]>>({});
+  // 自分の服が増えた・減ったとき: 公開の素材に重ね直す
+  const refreshMyItems = useCallback(async () => {
+    const base = publicContentRef.current;
+    if (!base) return;
+    setAllClothing((await mergeMyItems(base, await library.all())).clothing);
+  }, []);
+  const [studioOpen, setStudioOpen] = useState(false);
+
   // 配信された素材の一覧を読み込む
   useEffect(() => {
     let cancelled = false;
     loadContent(CONTENT_URL)
-      .then((content) => {
+      .then(async (publicContent) => {
+        // 端末の中の自分の服を、公開の素材に重ねる（読めなければ、公開の素材だけで進む）
+        const content = await mergeMyItems(publicContent, await library.all()).catch(() => publicContent);
         if (cancelled) return;
+        publicContentRef.current = publicContent;
+        setCategoriesByDoll(publicContent.categories ?? {});
         setAllDolls(content.dolls);
         setAllBackgrounds(content.backgrounds);
         setAllClothing(content.clothing);
@@ -505,6 +532,12 @@ function App() {
       {equippedItems.length > 0 ? '👗' : '📐'}
     </button>
   );
+  // 服を作る画面（教えた URL を開いた端末にだけ出る）
+  const studioButton = STUDIO_MODE && currentDoll && (
+    <button className="studio-open-button" onClick={() => setStudioOpen(true)} title="服を作る（おとなの方へ）" data-testid="studio-button">
+      ✨
+    </button>
+  );
 
   return (
     <div className="app" data-orientation={layout.orientation}>
@@ -542,7 +575,12 @@ function App() {
         )}
 
         {/* ツールボタン（調整モードでないとき表示）- avatar-sectionの外に配置 */}
-        {!portrait && !isAdjustingItem && adjustButton && <div className="tool-buttons">{adjustButton}</div>}
+        {!portrait && !isAdjustingItem && adjustButton && (
+          <div className="tool-buttons">
+            {adjustButton}
+            {studioButton}
+          </div>
+        )}
 
         {/* ドレスアップメニュー - アイテム調整中は非表示。縦では画面の下（カテゴリ → 服 → ボタンの行） */}
         {!isAdjustingItem && (
@@ -568,9 +606,10 @@ function App() {
               onSetDrop={handleSetDrop}
             />
             {portrait && (
-              <div className="portrait-tools" data-testid="portrait-tools">
+              <div className={`portrait-tools${studioButton ? ' with-studio' : ''}`} data-testid="portrait-tools">
                 {adjustButton}
                 {screenshotButton}
+                {studioButton}
                 {resetButton}
               </div>
             )}
@@ -615,6 +654,20 @@ function App() {
             rightOffset={layout.rightOffset}
           />
         ))}
+
+      {/* 服を作る画面（開いたときに読み込む） */}
+      {studioOpen && STUDIO_MODE && currentDoll && (
+        <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
+          <StudioRoot
+            mode={STUDIO_MODE}
+            doll={currentDoll}
+            categories={categoriesByDoll[currentDoll.id] ?? NO_CATEGORIES}
+            library={library}
+            onClose={() => setStudioOpen(false)}
+            onLibraryChanged={refreshMyItems}
+          />
+        </Suspense>
+      )}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />
