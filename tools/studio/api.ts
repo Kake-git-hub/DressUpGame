@@ -18,7 +18,7 @@ import { hairFrontBottom, splitHair, splitsHair } from '../../src/pipeline/hairS
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
-import { merge3 } from '../content/merge3.ts';
+import { merge3, mergeManifest } from '../content/merge3.ts';
 import type { Json } from '../content/merge3.ts';
 import { parseManifest } from '../../src/content/manifest.ts';
 import { AiError } from './ai.ts';
@@ -402,7 +402,9 @@ export class StudioApi {
       const full = path.join(dir, file);
       if (SYNC_MERGED.includes(file)) {
         const text = await fs.readFile(full, 'utf8');
-        const merged = merge3(await show('HEAD', file), JSON.parse(text) as Json, await show('@{upstream}', file));
+        // 一覧ファイルは、重ねたあとにセットの印とセットの一覧を合わせる
+        const merge = file === 'manifest.json' ? mergeManifest : merge3;
+        const merged = merge(await show('HEAD', file), JSON.parse(text) as Json, await show('@{upstream}', file));
         if (file === 'manifest.json') parseManifest(merged); // アプリが読めない一覧にはしない
         merges.push({ file, text, merged, tracked: !untracked });
       } else if (untracked && (await this.git('hash-object', '--', file)) === (await this.git('rev-parse', `@{upstream}:${file}`))) {

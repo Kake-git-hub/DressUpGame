@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { merge3 } from './merge3.ts';
+import { merge3, mergeManifest } from './merge3.ts';
 import type { Json } from './merge3.ts';
 
 type Obj = { [key: string]: Json };
@@ -59,5 +59,50 @@ describe('merge3（手元の変更を、公開されている新しい一覧に�
     expect(merge3(b, l, r)).toEqual({ アニメ: { parts: { head: { x: 5 } } }, おとこのこ: { parts: { head: { x: 9 } } } });
     // もとが無い（どちらにも新しくできたファイル）
     expect(merge3(undefined, { a: 1 }, { b: 2 })).toEqual({ a: 1, b: 2 });
+  });
+});
+
+describe('mergeManifest（一覧ファイルを重ねたあと、セットの印とセットの一覧を合わせる）', () => {
+  type M = { dolls: { id: string; sets?: { id: string; name: string }[]; items: { id: string; set?: string }[] }[] };
+  const S1 = { id: 'S1', name: 'うみ' };
+  const S2 = { id: 'S2', name: 'やま' };
+  const dollOf = (m: Json) => (m as unknown as M).dolls[0];
+
+  it('手元で最後のセットを消していても、公開で増えたセットと、その印の付いた服は残る', () => {
+    const base = manifest(doll('アニメ', [item('a', { set: 'S1' })], { sets: [S1] }));
+    const local = manifest(doll('アニメ', [])); // a を消した → セットも消えた（sets の項目ごと無い）
+    const remote = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('b', { set: 'S2' })], { sets: [S1, S2] }));
+    const merged = dollOf(mergeManifest(base, local, remote));
+    expect(merged.items).toEqual([item('b', { set: 'S2' })]);
+    expect(merged.sets).toEqual([S2]);
+  });
+  it('公開でセットが消えていても、手元でそのセットに足した服があれば、セットは残る', () => {
+    const base = manifest(doll('アニメ', [item('a', { set: 'S1' })], { sets: [S1] }));
+    const local = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('n', { set: 'S1' })], { sets: [S1] }));
+    const remote = manifest(doll('アニメ', [])); // a を消して公開した → セットも消えた
+    const merged = dollOf(mergeManifest(base, local, remote));
+    expect(merged.items.map((i) => i.id)).toContain('n');
+    expect(merged.items.find((i) => i.id === 'n')!.set).toBe('S1');
+    expect(merged.sets).toEqual([S1]);
+  });
+  it('2 点のセットを、手元と公開で 1 点ずつ消したら、空のセットは残さない', () => {
+    const base = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('b', { set: 'S1' }), item('c')], { sets: [S1] }));
+    const local = manifest(doll('アニメ', [item('b', { set: 'S1' }), item('c')], { sets: [S1] }));
+    const remote = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('c')], { sets: [S1] }));
+    const merged = dollOf(mergeManifest(base, local, remote));
+    expect(merged.items).toEqual([item('c')]);
+    expect(merged).not.toHaveProperty('sets');
+  });
+  it('セットの無い一覧・ドールは、merge3 と同じ結果', () => {
+    const base = manifest(doll('アニメ', [item('a'), item('b')]), doll('リアル', [item('r')]));
+    const local = manifest(doll('アニメ', [item('a')]), doll('リアル', [item('r')]));
+    const remote = manifest(doll('アニメ', [item('a'), item('b'), item('c')]), doll('リアル', [item('r'), item('r2')]));
+    expect(mergeManifest(base, local, remote)).toEqual(merge3(base, local, remote));
+  });
+  it('名前は、手元で変えていれば手元、そうでなければ公開のもの', () => {
+    const base = manifest(doll('アニメ', [item('a', { set: 'S1' })], { sets: [S1] }));
+    const local = manifest(doll('アニメ', [item('a', { set: 'S1' })], { sets: [{ id: 'S1', name: 'なつのうみ' }] }));
+    const remote = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('b', { set: 'S1' })], { sets: [S1] }));
+    expect(dollOf(mergeManifest(base, local, remote)).sets).toEqual([{ id: 'S1', name: 'なつのうみ' }]);
   });
 });

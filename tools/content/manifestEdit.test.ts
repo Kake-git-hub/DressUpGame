@@ -246,6 +246,32 @@ describe('ContentStore', () => {
       expect((await store.updateItem(c.id, { name: 'あかいくつ' })).set).toBe(umi.id);
     });
 
+    it('ほかのドールの同じ名前のセットには触らない。カテゴリを移しても印は残る', async () => {
+      const first = await dollOf();
+      const other = await store.addDoll({ name: 'べつのドール', data: await png(300, 600, [100, 50, 100, 500], '#f0c0a0') });
+      const setA = { id: store.newSetId(first, 'うみ'), name: 'うみ' };
+      const setB = { id: store.newSetId(other, 'うみ'), name: 'うみ' };
+      expect(setA.id).not.toBe(setB.id);
+      const a = await store.addItem(first.id, item('シャツ', { set: setA }));
+      const b = await store.addItem(other.id, item('シャツ', { set: setB }));
+      // 1 体目の最後の 1 点を消す: 1 体目のセットだけが消える
+      await store.deleteItem(a.id);
+      const dolls = (await store.read()).dolls;
+      expect(dolls.find((d) => d.id === first.id)).not.toHaveProperty('sets');
+      expect(dolls.find((d) => d.id === other.id)!.sets).toEqual([setB]);
+      // カテゴリを移しても、印は残る
+      const moved = await store.updateItem(b.id, { category: 'アクセサリー' });
+      expect(moved.set).toBe(setB.id);
+      expect((await store.read()).dolls.find((d) => d.id === other.id)!.sets).toEqual([setB]);
+    });
+
+    it('セットの ID は 200 文字まで（ドールの ID + 名前で、80 文字を超えることがある）', async () => {
+      const doll = await dollOf();
+      const long = { id: `${doll.id}/セット/${'あ'.repeat(120)}`, name: 'ながい' };
+      expect((await store.addItem(doll.id, item('シャツ', { set: long }))).set).toBe(long.id);
+      await expect(store.addItem(doll.id, item('べつ', { set: { id: 'x'.repeat(201), name: 'x' } }))).rejects.toThrow();
+    });
+
     it('renameSet は名前だけを変える（ID と服の印はそのまま）。無いセット・使えない名前は Error', async () => {
       const doll = await dollOf();
       const a = await store.addItem(doll.id, item('シャツ', { set: umi }));

@@ -812,6 +812,44 @@ describe('セット', () => {
     expect(prompt).toMatch(/- トップス/);
     expect(prompt).toMatch(/Never mention the name of any real or fictional character/);
   });
+  it('企画: うしろがみのカテゴリは頼めない。カテゴリが違えば、同じ名前の服があってもよい。セットの名前が無ければ、テーマから付ける', async () => {
+    await ok('PUT', '/api/categories', { dollId, category: { label: 'うしろがみ', layer: -1, menuOrder: 20, overlap: false, movable: false } });
+    const custom: TextAi = {
+      async json<T>(input: { prompt: string }): Promise<T> {
+        textCalls.push({ system: '', prompt: input.prompt });
+        return {
+          name: '  ',
+          items: [
+            { category: 'トップス', name: 'おそろい', description: 'A shirt.', colors: [] },
+            { category: 'アクセサリー', name: 'おそろい', description: 'A ribbon.', colors: [] },
+            { category: 'うしろがみ', name: 'うしろ', description: 'Hair.', colors: [] },
+          ],
+        } as T;
+      },
+    };
+    makeApi({ text: custom, image: fakeImage });
+    const p = await ok<SetPlan>('POST', '/api/plan', { dollId, theme: 'うみ/そら', set: true, categories: ['トップス', 'アクセサリー', 'うしろがみ'] });
+    expect(p.items.map((i) => `${i.category}:${i.name}`)).toEqual(['トップス:おそろい', 'アクセサリー:おそろい']);
+    expect(p.missing).toEqual([]);
+    expect(textCalls.at(-1)!.prompt).not.toMatch(/- うしろがみ/);
+    expect(p.set.name).toBe('うみそらのセット');
+  });
+  it('企画: 長すぎるセットの名前は切り、切った所の空白は残さない', async () => {
+    const custom: TextAi = {
+      async json<T>(): Promise<T> {
+        return {
+          name: `${'あ'.repeat(23)} いうえお`,
+          items: [
+            { category: 'トップス', name: 'a', description: 'A shirt.', colors: [] },
+            { category: 'アクセサリー', name: 'b', description: 'A ribbon.', colors: [] },
+          ],
+        } as T;
+      },
+    };
+    makeApi({ text: custom, image: fakeImage });
+    const p = await ok<SetPlan>('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: ['トップス', 'アクセサリー'] });
+    expect(p.set.name).toBe('あ'.repeat(23));
+  });
   it('企画: カテゴリは 2 個以上で、1 回の上限に収まる数まで。無いカテゴリは数えない', async () => {
     expect((await call('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: ['トップス'] })).status).toBe(400);
     expect((await call('POST', '/api/plan', { dollId, theme: 'うみ', set: true, categories: ['トップス', 'ない'] })).status).toBe(400);

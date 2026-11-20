@@ -36,8 +36,8 @@ export const DEFAULT_CATEGORIES: ManifestCategory[] = [
 ];
 
 // ID・名前に使えない形: 空、前後の空白、制御文字、親フォルダへの移動、バックスラッシュ、先頭や末尾の /
-export function checkName(value: unknown, what: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 80) throw new ContentError(`${what}は 1〜80 文字で入力してください`);
+export function checkName(value: unknown, what: string, max = 80): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > max) throw new ContentError(`${what}は 1〜${max} 文字で入力してください`);
   // eslint-disable-next-line no-control-regex
   if (value !== value.trim() || /[\u0000-\u001f\\]/.test(value) || value.split('/').some((part) => part === '' || part === '.' || part === '..')) {
     throw new ContentError(`${what}に使えない文字が入っています: ${JSON.stringify(value)}`);
@@ -167,7 +167,8 @@ export class ContentStore {
       // セット: 無ければ作る（名前は、最初に保存した服のときのもの）
       let setId: string | undefined;
       if (input.set) {
-        setId = checkName(input.set.id, 'セットの ID');
+        // セットの ID は「ドールの ID/セット/名前」なので、名前より長い
+        setId = checkName(input.set.id, 'セットの ID', 200);
         if (!doll.sets?.some((x) => x.id === setId)) doll.sets = [...(doll.sets ?? []), { id: setId, name: checkPlainName(input.set.name, 'セットの名前') }];
       }
       const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer, input.thumbFrom);

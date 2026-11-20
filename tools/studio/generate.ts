@@ -228,22 +228,22 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
     ].join('\n'),
     schema: SET_SCHEMA,
   });
-  const names = new Set<string>();
   const items: PlannedItem[] = [];
   const missing: string[] = [];
   for (const category of categories) {
     // 同じカテゴリの 2 点目は使わない
     const found = (result.items ?? []).find((i) => i.category === category.id && typeof i.name === 'string' && i.name.trim() && typeof i.description === 'string' && i.description.trim());
     const name = found?.name.trim().replace(/[\\/]/g, '').slice(0, 40);
-    if (!found || !name || names.has(name)) {
+    // 服の ID はカテゴリごとなので、別のカテゴリに同じ名前の服があってもよい
+    if (!found || !name) {
       missing.push(category.label);
       continue;
     }
-    names.add(name);
     items.push({ category: category.id, name, description: found.description, colors: plannedColors(found.colors) });
   }
   if (items.length === 0) throw new AiError('セットを作れませんでした。テーマを変えてやり直してください', 422);
-  const setName = (typeof result.name === 'string' ? result.name : '').trim().replace(/[\\/]/g, '').slice(0, 24) || `${input.theme.replace(/[\\/]/g, '').slice(0, 16)}のセット`;
+  const plain = (value: string, max: number) => value.replace(/[\\/]/g, '').trim().slice(0, max).trim();
+  const setName = plain(typeof result.name === 'string' ? result.name : '', 24) || `${plain(input.theme, 16)}のセット`;
   return { name: setName, items, missing };
 }
 

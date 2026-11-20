@@ -63,9 +63,11 @@ interface Props {
   onRedo?: () => void;
   set?: SetRef; // セットとして作った候補（保存すると、この印が付く）
   ref?: Ref<ItemCardHandle>;
+  // 絵の読み込みが終わって、保存できるようになった（「ぜんぶ保存」を、それまで押せないようにする）
+  onReady?: () => void;
 }
 
-export function ItemCard({ doll, source, onSaved, onDiscard, onRedo, set, ref }: Props) {
+export function ItemCard({ doll, source, onSaved, onDiscard, onRedo, set, ref, onReady }: Props) {
   // 服のキャンバス。AI で作った服は、ドールのキャンバスのまわりに余白を足した大きさ（中心は同じ）で届く。
   // 読み込むまでは、ドールのキャンバスの大きさにしておく
   const [size, setSize] = useState({ w: doll.image.canvasW, h: doll.image.canvasH });
@@ -417,6 +419,13 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo, set, ref }:
   };
 
   const sameName = doll.items.find((i) => i.name === name.trim() && i.category === category);
+  const onReadyRef = useRef(onReady);
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  });
+  useEffect(() => {
+    if (ready) onReadyRef.current?.();
+  }, [ready]);
   const [skipped, setSkipped] = useState(false); // 「ぜんぶ保存」で飛ばされた
   const save = async (replaceId?: string): Promise<boolean> => {
     const cut = cutRef.current;

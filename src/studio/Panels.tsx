@@ -184,8 +184,10 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
   const isBackground = target === BACKGROUND;
   const isSet = target === SET;
   const most = isBackground ? Math.min(10, status.budget.perRun) : Math.max(1, Math.floor(status.budget.perRun / status.budget.maxAttempts));
-  const maxImages = isBackground ? count * 2 : (isSet ? setCats.length : count) * status.budget.maxAttempts;
-  const setReady = setCats.length >= 2 && setCats.length <= most;
+  // セットに入れるカテゴリのうち、いまもあるもの（覚えていたカテゴリが、あとで消されていることがある）
+  const setChosen = categories.filter((c) => setCats.includes(c.id) && !isBackHairCategory(c.label)).map((c) => c.id);
+  const maxImages = isBackground ? count * 2 : (isSet ? setChosen.length : count) * status.budget.maxAttempts;
+  const setReady = setChosen.length >= 2 && setChosen.length <= most;
 
   const chooseStyle = (id: string) => {
     setStyleId(id);
@@ -220,7 +222,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
       }
       if (isSet) {
         // セット: 選んだカテゴリごとに 1 点を、そろえて企画する。画像は 1 点ずつ作る
-        const planned = await api.planSet({ dollId: doll.id, theme, categories: categories.filter((c) => setCats.includes(c.id)).map((c) => c.id), styleId });
+        const planned = await api.planSet({ dollId: doll.id, theme, categories: setChosen, styleId });
         await startItems(planned.items, styleId, planned.set, planned.missing);
         return;
       }
@@ -273,7 +275,9 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
                 </label>
               ))}
             <span className="hint">
-              選んだものごとに 1 点、色と飾りをそろえて作ります（2〜{most} 個）。できた服は、ふつうの服として 1 点ずつ着られます。
+              {most >= 2
+                ? `選んだものごとに 1 点、色と飾りをそろえて作ります（2〜${most} 個。いま ${setChosen.length} 個）。できた服は、ふつうの服として 1 点ずつ着られます。`
+                : '1 回に作れる画像の上限が小さいので、セットは作れません（STUDIO_RUN_IMAGE_LIMIT を大きくしてください）。'}
             </span>
           </div>
         )}
@@ -324,11 +328,14 @@ function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: strin
   const job = useJob(id);
   const [hidden, setHidden] = useState<number[]>([]);
   const [savingAll, setSavingAll] = useState(false);
+  const [readyCards, setReadyCards] = useState<string[]>([]); // 絵の読み込みが終わったカード（「候補の番号-何回目の生成か」）
   const cards = useRef(new Map<number, ItemCardHandle>());
   if (!job) return <p>準備中…</p>;
   const hide = (i: number) => setHidden((list) => [...list, i]);
   // カードとして出ている候補
   const shown = job.candidates.flatMap((c, i) => (!hidden.includes(i) && c.hasImage && c.status !== 'working' && c.status !== 'waiting' ? [i] : []));
+  // 出ているカードが全部、読み込み終わっているか（終わるまでは「ぜんぶ保存」を押せない）
+  const allReady = shown.every((i) => readyCards.includes(`${i}-${job.candidates[i].attempts}`));
   // まだ保存していない候補を、いまの名前・カテゴリで順に保存する（確かめが要るカードは飛ばして、そのカードに知らせる）
   const saveAll = async () => {
     setSavingAll(true);
@@ -348,8 +355,8 @@ function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: strin
       )}
       {shown.length >= 2 && (
         <div className="row">
-          <button className="primary" onClick={() => void saveAll()} disabled={savingAll} data-testid="save-all">
-            {savingAll ? '保存中…' : `ぜんぶ保存（${shown.length} 点）`}
+          <button className="primary" onClick={() => void saveAll()} disabled={savingAll || !allReady} data-testid="save-all">
+            {savingAll ? '保存中…' : !allReady ? '読み込み中…' : `ぜんぶ保存（${shown.length} 点）`}
           </button>
           <span className="hint">いまの名前・カテゴリ・位置のまま保存します。確かめが要るカードは残ります。</span>
         </div>
@@ -376,6 +383,7 @@ function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: strin
               }}
               doll={doll}
               set={job.set}
+              onReady={() => setReadyCards((list) => (list.includes(`${i}-${c.attempts}`) ? list : [...list, `${i}-${c.attempts}`]))}
               source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), shapeUrl: c.hasShape ? api.jobImageUrl(id, i, 'shape', c.attempts) : null, hideUrl: c.hasHide ? api.jobImageUrl(id, i, 'hide', c.attempts) : null, frontUrl: c.hasFront ? api.jobImageUrl(id, i, 'front', c.attempts) : null, underUrl: c.hasUnder ? api.jobImageUrl(id, i, 'under', c.attempts) : null, warnings: c.warnings, notes: c.notes }}
               onDiscard={() => hide(i)}
               onSaved={() => { hide(i); void onChanged(); }}
@@ -515,7 +523,7 @@ export function Library({ doll, onChanged }: Common) {
           </div>
           {(doll.sets ?? []).map((x) => (
             <div key={x.id} className="row" data-testid="library-set">
-              <input defaultValue={x.name} aria-label="セットのなまえ" onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
+              <input defaultValue={x.name} aria-label="セットのなまえ" onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
               <span>{doll.items.filter((i) => i.set === x.id).length} 点</span>
             </div>
           ))}

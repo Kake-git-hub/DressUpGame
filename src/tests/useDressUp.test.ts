@@ -355,3 +355,63 @@ describe('useDressUp', () => {
     });
   });
 });
+
+// セットを着せる = パーツを続けて 1 点ずつ着せる（App の handleSetDrop と同じ呼び方）
+describe('セットをまとめて着せる（続けて equipItem を呼ぶ）', () => {
+  const make = (id: string, type: string, extra: Partial<ClothingItemData> = {}): ClothingItemData => ({
+    id,
+    name: id,
+    type,
+    imageUrl: `/${id}.png`,
+    position: { x: 0, y: 0 },
+    baseZIndex: 10,
+    canvasW: 1024,
+    canvasH: 1024,
+    box: { x: 0, y: 0, w: 1024, h: 1024 },
+    ...extra,
+  });
+  const backHair = make('hair#back', 'うしろがみ', { frontItemId: 'hair' });
+  const hair = make('hair', 'hair', { backItemId: 'hair#back' });
+  const ribbon = make('ribbon', 'accessory', { allowOverlap: true });
+  const set = [make('skirt', 'bottom'), make('shirt', 'top'), ribbon, hair];
+  const dressSet = (current: ReturnType<typeof useDressUp>) => {
+    for (const part of set) current.equipItem(part, part.backItemId ? backHair : undefined);
+  };
+  const ids = (items: { id: string }[]) => items.map((i) => i.id).sort();
+
+  it('1 回の操作で続けて着せても、全部のパーツが着る（髪は、うしろがみも一緒）', () => {
+    const { result } = renderHook(() => useDressUp());
+    act(() => dressSet(result.current));
+    expect(ids(result.current.equippedItems)).toEqual(['hair', 'hair#back', 'ribbon', 'shirt', 'skirt']);
+    // 着せた順（equipOrder）は、全部ちがう
+    expect(new Set(result.current.equippedItems.map((i) => i.equipOrder)).size).toBe(5);
+  });
+
+  it('すでに着ている服: 同じカテゴリは入れ替わり、重ね着できるカテゴリの別の服と、関係ないカテゴリの服は残る。前の髪のうしろがみは外れる', () => {
+    const { result } = renderHook(() => useDressUp());
+    const oldBack = make('old-hair#back', 'うしろがみ', { frontItemId: 'old-hair' });
+    act(() => {
+      result.current.equipItem(make('old-shirt', 'top'));
+      result.current.equipItem(make('pin', 'accessory', { allowOverlap: true }));
+      result.current.equipItem(make('shoes', 'shoes'));
+      result.current.equipItem(make('old-hair', 'hair', { backItemId: 'old-hair#back' }), oldBack);
+    });
+    act(() => dressSet(result.current));
+    expect(ids(result.current.equippedItems)).toEqual(['hair', 'hair#back', 'pin', 'ribbon', 'shirt', 'shoes', 'skirt']);
+  });
+
+  it('1 点ずつ別々の操作で着せたときと、同じ結果になる', () => {
+    const together = renderHook(() => useDressUp());
+    act(() => dressSet(together.result.current));
+    const oneByOne = renderHook(() => useDressUp());
+    for (const part of set) act(() => oneByOne.result.current.equipItem(part, part.backItemId ? backHair : undefined));
+    expect(together.result.current.equippedItems.map((i) => [i.id, i.equipOrder])).toEqual(oneByOne.result.current.equippedItems.map((i) => [i.id, i.equipOrder]));
+  });
+
+  it('セットをもう一度着せても、服は増えない', () => {
+    const { result } = renderHook(() => useDressUp());
+    act(() => dressSet(result.current));
+    act(() => dressSet(result.current));
+    expect(ids(result.current.equippedItems)).toEqual(['hair', 'hair#back', 'ribbon', 'shirt', 'skirt']);
+  });
+});

@@ -125,7 +125,14 @@ describe('parseManifest', () => {
       m.dolls[0].sets = [];
       expect(parseManifest(m).dolls[0]).not.toHaveProperty('sets');
     });
-    it('sets の形が違えば・ID が重なれば・set が文字列でなければ Error', () => {
+    it('set が文字列でなくても、その印を捨てるだけ（一覧ごと読めなくはしない）', () => {
+      for (const bad of [5, null, '', { id: 'x' }]) {
+        const m = withSet() as unknown as { dolls: { items: { set: unknown }[] }[] };
+        m.dolls[0].items[0].set = bad;
+        expect(parseManifest(m).dolls[0].items[0]).not.toHaveProperty('set');
+      }
+    });
+    it('sets の形が違えば・ID が重なれば Error', () => {
       const bad = withSet() as unknown as { dolls: { sets: unknown; items: { set: unknown }[] }[] };
       bad.dolls[0].sets = [{ id: 'a', name: '' }];
       expect(() => parseManifest(bad)).toThrow(/sets\[0\]\.name/);
@@ -133,9 +140,6 @@ describe('parseManifest', () => {
       expect(() => parseManifest(bad)).toThrow(/sets/);
       bad.dolls[0].sets = 'x';
       expect(() => parseManifest(bad)).toThrow(/sets/);
-      const bad2 = withSet() as unknown as { dolls: { items: { set: unknown }[] }[] };
-      bad2.dolls[0].items[0].set = 5;
-      expect(() => parseManifest(bad2)).toThrow(/set/);
     });
   });
 });

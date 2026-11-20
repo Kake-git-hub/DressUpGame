@@ -286,16 +286,15 @@ test.describe('スタジオ', () => {
       expect(saved.under?.box).toMatchObject({ x: 585, y: 1035 });
     });
 
-    test('セット: カテゴリを選んで一括で作り、ぜんぶ保存すると、どの服にもセットの印が付く。一覧で外せて、最後の 1 点を消すとセットも消える', async ({ page }) => {
-      page.on('dialog', (d) => void d.accept());
-      const set = { id: 'アニメ/セット/うみのセット', name: 'うみのセット' };
+    // セットの生成の API を差し替える。返すのは、企画と生成に送られた中身の控え
+    const SET = { id: 'アニメ/セット/うみのセット', name: 'うみのセット' };
+    async function fakeSetJob(page: Page) {
       const parts = [
         { category: 'トップス', name: 'うみのシャツ', png: await layer([{ x: 500, y: 350, w: 230, h: 200, color: '#2060c0' }]) },
         { category: 'アクセサリー', name: 'うみのかざり', png: await layer([{ x: 560, y: 300, w: 110, h: 40, color: '#40c0c0' }]) },
       ];
       const planItems = parts.map((p) => ({ category: p.category, name: p.name, description: 'test', colors: [] }));
-      let planBody: Record<string, unknown> | null = null;
-      let jobBody: Record<string, unknown> | null = null;
+      const sent: { plan: Record<string, unknown> | null; job: Record<string, unknown> | null } = { plan: null, job: null };
       await page.route('**/api/status', async (route) => {
         try {
           const real = await (await route.fetch()).json();
@@ -305,17 +304,17 @@ test.describe('スタジオ', () => {
         }
       });
       await page.route('**/api/plan', (route) => {
-        planBody = route.request().postDataJSON() as Record<string, unknown>;
-        return route.fulfill({ json: { items: planItems, set, missing: ['くつ'], maxImages: 4 } });
+        sent.plan = route.request().postDataJSON() as Record<string, unknown>;
+        return route.fulfill({ json: { items: planItems, set: SET, missing: ['くつ'], maxImages: 4 } });
       });
       await page.route('**/api/jobs', (route) => {
-        jobBody = route.request().postDataJSON() as Record<string, unknown>;
+        sent.job = route.request().postDataJSON() as Record<string, unknown>;
         return route.fulfill({ json: { id: 'fakeset' } });
       });
       await page.route('**/api/jobs?id=fakeset', (route) =>
         route.fulfill({
           json: {
-            id: 'fakeset', kind: 'items', dollId: 'アニメ', done: true, error: null, set,
+            id: 'fakeset', kind: 'items', dollId: 'アニメ', done: true, error: null, set: SET,
             candidates: planItems.map((item) => ({ item, status: 'passed', attempts: 1, notes: [], warnings: [], hasImage: true, hasShape: false, hasHide: false, hasFront: false, hasUnder: false })),
           },
         }),
@@ -326,6 +325,14 @@ test.describe('スタジオ', () => {
         const kind = q.get('kind') ?? 'png';
         return part && (kind === 'png' || kind === 'source') ? route.fulfill({ body: part.png, contentType: 'image/png' }) : route.fulfill({ status: 404, json: { error: 'ない' } });
       });
+      return sent;
+    }
+    const dollNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')).dolls[0] as { sets?: { id: string; name: string }[]; items: { id: string; name: string; set?: string }[] };
+
+    test('セット: カテゴリを選んで一括で作り、ぜんぶ保存すると、どの服にもセットの印が付く。一覧で外せて、最後の 1 点を消すとセットも消える', async ({ page }) => {
+      page.on('dialog', (d) => void d.accept());
+      const set = SET;
+      const sent = await fakeSetJob(page);
       await page.reload();
       await page.getByTestId('tab-generate').click();
       await page.getByTestId('theme').fill('うみ');
@@ -346,16 +353,18 @@ test.describe('スタジオ', () => {
       }
       await page.getByTestId('make').click();
       await expect(page.getByTestId('item-card')).toHaveCount(2);
-      expect(planBody!.set).toBe(true);
-      expect((planBody!.categories as string[]).sort()).toEqual(['アクセサリー', 'くつ', 'トップス'].sort());
-      expect(jobBody!.set).toEqual(set);
+      expect(sent.plan!.set).toBe(true);
+      expect((sent.plan!.categories as string[]).sort()).toEqual(['アクセサリー', 'くつ', 'トップス'].sort());
+      expect(sent.job!.set).toEqual(set);
       // 企画が返さなかったカテゴリを知らせる。カードにセットの名前が出る
       await expect(page.getByTestId('set-missing')).toContainText('くつ');
       await expect(page.getByTestId('card-set').first()).toContainText('うみのセット');
-      // ぜんぶ保存
+      // ぜんぶ保存（絵の読み込みが終わるまでは押せない）
+      await expect(page.getByTestId('save-all')).toBeEnabled();
+      await expect(page.getByTestId('save-all')).toContainText('ぜんぶ保存（2 点）');
       await page.getByTestId('save-all').click();
       await expect(page.getByTestId('item-card')).toHaveCount(0);
-      const manifest = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')).dolls[0] as { sets?: { id: string; name: string }[]; items: { id: string; name: string; set?: string }[] };
+      const manifest = dollNow;
       await expect.poll(() => manifest().items.filter((i) => i.set === set.id).map((i) => i.name).sort()).toEqual(['うみのかざり', 'うみのシャツ']);
       expect(manifest().sets).toEqual([set]);
       // 一覧: セットの名前の欄と、服ごとの「セットから外す」
@@ -364,9 +373,9 @@ test.describe('スタジオ', () => {
       await expect(setRow).toHaveCount(1);
       await expect(setRow.locator('input')).toHaveValue('うみのセット');
       await expect(setRow).toContainText('2 点');
-      // 名前を変える
+      // 名前を変える（Enter で決まる）
       await setRow.locator('input').fill('なつのうみ');
-      await setRow.locator('input').blur();
+      await setRow.locator('input').press('Enter');
       await expect.poll(() => manifest().sets?.[0]?.name).toBe('なつのうみ');
       // 1 点を外す → セットは残る（1 点）
       await page.locator('[data-testid="library-item"]', { has: page.locator('input[value="うみのシャツ"]') }).getByTestId('leave-set').click();
@@ -376,6 +385,31 @@ test.describe('スタジオ', () => {
       await page.locator('[data-testid="library-item"]', { has: page.locator('input[value="うみのかざり"]') }).getByRole('button', { name: '消す' }).click();
       await expect(page.getByTestId('library-set')).toHaveCount(0);
       expect(manifest().sets).toBeUndefined();
+    });
+
+    test('セット: 「ぜんぶ保存」は、同じ名前の服があるカードを飛ばして知らせる。そのカードは、あとから自分で保存でき、セットの印も付く', async ({ page }) => {
+      // 前のテストで、セットから外した「うみのシャツ」が残っている
+      expect(dollNow().items.some((i) => i.name === 'うみのシャツ' && !i.set)).toBe(true);
+      await fakeSetJob(page);
+      await page.reload();
+      await page.getByTestId('tab-generate').click();
+      await page.getByTestId('theme').fill('うみ');
+      await page.getByTestId('target-set').click();
+      await page.getByTestId('make').click();
+      await expect(page.getByTestId('item-card')).toHaveCount(2);
+      await expect(page.getByTestId('save-all')).toBeEnabled();
+      await page.getByTestId('save-all').click();
+      // かざりは保存され、シャツのカードは残って、知らせが出る
+      await expect(page.getByTestId('item-card')).toHaveCount(1);
+      await expect(page.getByTestId('card-name')).toHaveValue('うみのシャツ');
+      await expect(page.getByTestId('card-skipped')).toBeVisible();
+      await expect.poll(() => dollNow().items.filter((i) => i.set === SET.id).map((i) => i.name)).toEqual(['うみのかざり']);
+      // 自分で保存する（別の服として追加）: セットの印が付く
+      await page.getByTestId('card-save').click();
+      await page.getByTestId('card-conflict').getByRole('button', { name: '別の服として追加' }).click();
+      await expect(page.getByTestId('item-card')).toHaveCount(0);
+      await expect.poll(() => dollNow().items.filter((i) => i.set === SET.id).map((i) => i.name).sort()).toEqual(['うみのかざり', 'うみのシャツ']);
+      expect(dollNow().items.filter((i) => i.name === 'うみのシャツ')).toHaveLength(2);
     });
   });
 });

@@ -175,11 +175,8 @@ function doll(v: unknown, path: string): ManifestDoll {
     if (r.back !== undefined) item.back = image(r.back, `${p}.back`);
     if (r.backThumb !== undefined) item.backThumb = str(r.backThumb, `${p}.backThumb`);
     if (r.under !== undefined) item.under = image(r.under, `${p}.under`);
-    // セットの印。一覧に無いセットを指していたら、印を捨てる（服はそのまま使える）
-    if (r.set !== undefined) {
-      const setId = str(r.set, `${p}.set`);
-      if (setIds.has(setId)) item.set = setId;
-    }
+    // セットの印。一覧に無いセットを指していたら（形が違っていても）、印を捨てる（服はそのまま使える）
+    if (typeof r.set === 'string' && setIds.has(r.set)) item.set = r.set;
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);

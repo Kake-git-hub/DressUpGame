@@ -58,3 +58,34 @@ function mergeKeyed(base: Keyed[], local: Keyed[], remote: Keyed[]): Json[] {
   }
   return merged;
 }
+
+type SetEntry = { id: string; name: string };
+type DollLike = { id?: Json; items?: Json; sets?: Json };
+const dollsOf = (manifest: Json): DollLike[] => (isObject(manifest) && Array.isArray(manifest.dolls) ? (manifest.dolls.filter(isObject) as DollLike[]) : []);
+const setsOf = (doll: DollLike | undefined): SetEntry[] =>
+  Array.isArray(doll?.sets) ? doll.sets.flatMap((x) => (isObject(x) && typeof x.id === 'string' && typeof x.name === 'string' ? [{ id: x.id, name: x.name }] : [])) : [];
+
+/**
+ * 一覧ファイル（manifest.json）を重ねる。merge3 のあと、セットの印（服の set）とセットの一覧（ドールの sets）を合わせる。
+ *
+ * セットの一覧は、パーツが無くなると項目ごと消える。そのため、片方で「最後のセットを消した」ことが
+ * 「sets を丸ごと消した」と見えて、もう片方で増えたセットまで消えてしまう（服の印だけが残る）。
+ * そこで、重ねたあとに、服が指しているセットを手元・公開の一覧から足し直し、どの服も指していないセットを消す。
+ */
+export function mergeManifest(base: Json, local: Json, remote: Json): Json {
+  const merged = merge3(base, local, remote);
+  for (const doll of dollsOf(merged)) {
+    const sameDoll = (m: Json) => dollsOf(m).find((d) => d.id === doll.id);
+    const used = new Set((Array.isArray(doll.items) ? doll.items : []).flatMap((i) => (isObject(i) && typeof i.set === 'string' ? [i.set] : [])));
+    const kept = setsOf(doll).filter((x) => used.has(x.id));
+    // 足りないセットは、手元 → 公開 の順に探す（名前は、手元にあれば手元のもの）
+    for (const id of used) {
+      if (kept.some((x) => x.id === id)) continue;
+      const found = [...setsOf(sameDoll(local)), ...setsOf(sameDoll(remote))].find((x) => x.id === id);
+      if (found) kept.push(found);
+    }
+    if (kept.length > 0) doll.sets = kept;
+    else delete doll.sets;
+  }
+  return merged;
+}
