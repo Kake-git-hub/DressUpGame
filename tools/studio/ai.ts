@@ -149,9 +149,94 @@ export function createGemini(apiKey: string, model: string, fetchImpl: typeof fe
   };
 }
 
+// Gemini が受け付ける JSON Schema は一部だけ。additionalProperties は、どの深さからも取り除く（渡された schema は書き換えない）
+function forGemini(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(forGemini);
+  if (typeof schema !== 'object' || schema === null) return schema;
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== 'additionalProperties')
+      .map(([key, value]) => [key, forGemini(value)]),
+  );
+}
+
+interface GeminiTextInteraction {
+  steps?: { type?: string; content?: { type?: string; text?: string }[] }[];
+  status?: string;
+  error?: { message?: string };
+}
+
+/**
+ * Gemini の文章（Interactions API、REST）。企画と検品を、Claude のキーが無くても行えるようにする。
+ * 形は公式の説明（https://ai.google.dev/gemini-api/docs/structured-output、2026-11-20 確認）に合わせた:
+ *   response_format に type: "text"・mime_type: "application/json"・schema（JSON Schema）を渡すと、その形の JSON が文章で返る。
+ * 本物で 1 回呼んで、返答の形（steps の最後の model_output に text）を確かめた（2026-11-20）。
+ */
+export function createGeminiText(apiKey: string, model: string, fetchImpl: typeof fetch = fetch): TextAi {
+  return {
+    async json<T>(input: { system: string; prompt: string; images?: Buffer[]; schema: Record<string, unknown> }): Promise<T> {
+      const body = {
+        model,
+        system_instruction: input.system,
+        input: [
+          ...(input.images ?? []).map((data) => ({ type: 'image', mime_type: 'image/png', data: data.toString('base64') })),
+          { type: 'text', text: input.prompt },
+        ],
+        response_format: { type: 'text', mime_type: 'application/json', schema: forGemini(input.schema) },
+      };
+      let response: Response;
+      try {
+        response = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/interactions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey, 'api-revision': '2026-05-20' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
+        });
+      } catch (error) {
+        throw new AiError(`Gemini API に接続できませんでした（${(error as Error).message}）`);
+      }
+      const json = (await response.json().catch(() => ({}))) as GeminiTextInteraction;
+      if (!response.ok) {
+        const detail = json.error?.message ?? '';
+        if (response.status === 429) {
+          if (/spend(ing)? cap/i.test(detail)) {
+            throw new AiError('Gemini API の月の上限額に達しています。Google AI Studio の「Spend」（https://ai.studio/spend）で上限を確かめてください', 429);
+          }
+          throw new AiError('Gemini API の利用制限に達しました。少し待ってからやり直してください', 429);
+        }
+        if (response.status === 401 || response.status === 403) throw new AiError('Gemini API のキーが正しくありません（GEMINI_API_KEY）', 500);
+        if (response.status === 400 && /prohibited|blocked|safety|policy/i.test(detail)) {
+          throw new AiError('Gemini API がこの依頼を受け付けませんでした。テーマを変えてみてください', 422);
+        }
+        throw new AiError(`Gemini API のエラー（${response.status}）: ${detail || '詳細なし'}`);
+      }
+      // 最後に出てきた文章を使う
+      let text: string | undefined;
+      for (const step of json.steps ?? []) {
+        if (step.type !== 'model_output') continue;
+        for (const block of step.content ?? []) if (block.type === 'text' && block.text) text = block.text;
+      }
+      if (!text) {
+        if (/prohibited|blocked|safety/i.test(json.status ?? '')) throw new AiError('Gemini API がこの依頼を受け付けませんでした。テーマを変えてみてください', 422);
+        throw new AiError('Gemini API から返答がありませんでした');
+      }
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new AiError('Gemini API の返答を読み取れませんでした');
+      }
+    },
+  };
+}
+
+// 文章（企画と検品）: Claude のキーがあれば Claude、無ければ Gemini のキーで Gemini。画像: Gemini
 export function createAiFromEnv(env: NodeJS.ProcessEnv = process.env): AiClients {
   return {
-    text: env.ANTHROPIC_API_KEY ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5') : null,
+    text: env.ANTHROPIC_API_KEY
+      ? createClaude(env.ANTHROPIC_API_KEY, env.STUDIO_CLAUDE_MODEL || 'claude-opus-5-5')
+      : env.GEMINI_API_KEY
+        ? createGeminiText(env.GEMINI_API_KEY, env.STUDIO_GEMINI_TEXT_MODEL || 'gemini-3.8-flash')
+        : null,
     image: env.GEMINI_API_KEY
       ? createGemini(env.GEMINI_API_KEY, env.STUDIO_GEMINI_MODEL || 'gemini-nano-banana-2.1', fetch, IMAGE_SIZES.find((s) => s === env.STUDIO_GEMINI_IMAGE_SIZE?.toUpperCase()) ?? '1K')
       : null,
