@@ -180,6 +180,7 @@ test.describe('スタジオ', () => {
     await expect(page.getByTestId('generate-unavailable')).toContainText('ANTHROPIC_API_KEY');
     // テーマ + 絵柄 + 作るもの（カテゴリか背景）+ 枚数。選んだ絵柄は次に開いたときも残る
     await expect(page.getByTestId('count')).toHaveValue('1');
+    await expect(page.getByTestId('style-manga')).toHaveText('マンガ');
     await page.getByTestId('style-pastel').click();
     await page.getByTestId('target-background').click();
     await expect(page.getByText('全部のドールで使う背景にする')).toBeVisible();

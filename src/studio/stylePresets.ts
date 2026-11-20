@@ -15,6 +15,11 @@ export const STYLE_PRESETS: StylePreset[] = [
     prompt: 'Japanese anime illustration: clean, confident dark outlines, cel shading with soft shadows and small highlights, bright and clear colours.',
   },
   {
+    id: 'manga',
+    label: 'マンガ',
+    prompt: 'Japanese manga illustration in full colour: expressive black ink line art with varied line weight, screentone-style dot shading and fine hatching for shadows, flat clean colours with crisp white highlights.',
+  },
+  {
     id: 'real',
     label: 'リアル',
     prompt: 'Semi-realistic digital painting: detailed fabric textures and folds, natural soft lighting and shading, thin or no outlines.',
