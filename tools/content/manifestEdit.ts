@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { parseManifest } from '../../src/content/manifest.ts';
-import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestItem } from '../../src/content/manifest.ts';
+import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestItem, ManifestSet } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
 import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeLayer, encodeMask, encodeThumb, uniqueId } from './encode.ts';
 
@@ -63,6 +63,19 @@ export interface ItemInput {
   thumbFrom?: Pixels; // サムネイルにする絵（無ければ rgba）
   backThumbFrom?: Pixels; // うしろがみのサムネイルにする絵（back があるときだけ使う）
   under?: Pixels | null; // ドールのすぐ上に描く分（くつの中の肌など。rgba と同じ大きさ）。null・無しなら持たない
+  // セット（同じテーマで一度に作った服の集まり）。その ID のセットがドールに無ければ作る。
+  // 差し替え（replaceId）のときは、指定が無ければ今の印を残す
+  set?: { id: string; name: string };
+}
+
+// パーツが 1 点も残っていないセットを消す（sets が空になったら、項目ごと消す）
+function pruneSets(manifest: Manifest): void {
+  for (const doll of manifest.dolls) {
+    if (!doll.sets) continue;
+    const used = new Set(doll.items.flatMap((i) => (i.set ? [i.set] : [])));
+    doll.sets = doll.sets.filter((x) => used.has(x.id));
+    if (doll.sets.length === 0) delete doll.sets;
+  }
 }
 
 export class ContentStore {
@@ -112,6 +125,7 @@ export class ContentStore {
     const run = this.queue.then(async () => {
       const manifest = await this.read();
       const result = await fn(manifest);
+      pruneSets(manifest);
       await this.save(manifest);
       return result;
     });
@@ -150,6 +164,12 @@ export class ContentStore {
       }
       const existing = input.replaceId ? doll.items.find((i) => i.id === input.replaceId) : undefined;
       if (input.replaceId && !existing) throw new ContentError(`置き換えるアイテム「${input.replaceId}」がありません`, 404);
+      // セット: 無ければ作る（名前は、最初に保存した服のときのもの）
+      let setId: string | undefined;
+      if (input.set) {
+        setId = checkName(input.set.id, 'セットの ID');
+        if (!doll.sets?.some((x) => x.id === setId)) doll.sets = [...(doll.sets ?? []), { id: setId, name: checkPlainName(input.set.name, 'セットの名前') }];
+      }
       const encoded = await encodeCutout(input.rgba, input.width, input.height, this.writer, input.thumbFrom);
       if (!encoded) throw new ContentError('画像が全部透明です');
       if (input.hide && input.hide.length !== doll.image.canvasW * doll.image.canvasH) throw new ContentError('隠す所の大きさがドールのキャンバスと違います');
@@ -172,6 +192,7 @@ export class ContentStore {
         existing.thumb = encoded.thumb;
         if (hide) existing.hide = hide;
         else delete existing.hide;
+        if (setId) existing.set = setId;
         return existing;
       }
       const item: ManifestItem = {
@@ -184,14 +205,16 @@ export class ContentStore {
         ...(back ? { back } : {}),
         ...(backThumb ? { backThumb } : {}),
         ...(under ? { under } : {}),
+        ...(setId ? { set: setId } : {}),
       };
       doll.items.push(item);
       return item;
     });
   }
 
-  // 改名・カテゴリ移動・重ね順などの変更。ID は変えない。layer / overlap に null を渡すと、カテゴリの値に戻す
-  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null }): Promise<ManifestItem> {
+  // 改名・カテゴリ移動・重ね順などの変更。ID は変えない。layer / overlap に null を渡すと、カテゴリの値に戻す。
+  // set に null を渡すと、セットから外す
+  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null }): Promise<ManifestItem> {
     return this.change((manifest) => {
       const { doll, item } = ContentStore.findItem(manifest, itemId);
       if (change.name !== undefined) item.name = checkPlainName(change.name, '名前');
@@ -203,7 +226,23 @@ export class ContentStore {
       else if (change.layer !== undefined) item.layer = change.layer;
       if (change.overlap === null) delete item.overlap;
       else if (change.overlap !== undefined) item.overlap = change.overlap;
+      if (change.set === null) delete item.set;
       return item;
+    });
+  }
+
+  // 新しいセットの ID（ドールの中で重ならない）。セットそのものは、最初の服を保存したときにできる
+  newSetId(doll: ManifestDoll, name: string): string {
+    return uniqueId(`${doll.id}/セット/${checkPlainName(name, 'セットの名前')}`, new Set((doll.sets ?? []).map((x) => x.id)));
+  }
+
+  // セットの名前を変える（ID と、服の印はそのまま）
+  renameSet(dollId: string, setId: string, name: string): Promise<ManifestSet> {
+    return this.change((manifest) => {
+      const set = ContentStore.doll(manifest, dollId).sets?.find((x) => x.id === setId);
+      if (!set) throw new ContentError(`セット「${setId}」がありません`, 404);
+      set.name = checkPlainName(name, 'セットの名前');
+      return { ...set };
     });
   }
 

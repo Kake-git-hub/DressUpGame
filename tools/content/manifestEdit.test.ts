@@ -193,4 +193,68 @@ describe('ContentStore', () => {
     expect(await store.readStudioData('templates', {})).toEqual({ a: 1 });
     await expect(store.writeStudioData('../x', {})).rejects.toThrow();
   });
+
+  describe('セット', () => {
+    const umi = { id: 'アニメ/セット/うみ', name: 'うみ' };
+    const dollOf = async () => (await store.read()).dolls[0];
+
+    it('newSetId は「ドール/セット/名前」。同じ名前のセットがあれば -2 を付ける', async () => {
+      const doll = await dollOf();
+      expect(store.newSetId(doll, 'うみ')).toBe(`${doll.id}/セット/うみ`);
+      doll.sets = [{ id: `${doll.id}/セット/うみ`, name: 'うみ' }];
+      expect(store.newSetId(doll, 'うみ')).toBe(`${doll.id}/セット/うみ-2`);
+      expect(() => store.newSetId(doll, 'a/b')).toThrow();
+    });
+
+    it('セットを付けて保存すると、セットができて、服に印が付く。2 点目は同じセットに入る', async () => {
+      const doll = await dollOf();
+      const set = { id: store.newSetId(doll, 'うみ'), name: 'うみ' };
+      const a = await store.addItem(doll.id, item('シャツ', { set }));
+      const b = await store.addItem(doll.id, item('ぼうし', { set }));
+      const after = await dollOf();
+      expect(after.sets).toEqual([set]);
+      expect(a.set).toBe(set.id);
+      expect(b.set).toBe(set.id);
+      // セットを付けない服には印が無い
+      const c = await store.addItem(doll.id, item('べつ'));
+      expect(c).not.toHaveProperty('set');
+    });
+
+    it('差し替え（replaceId）: セットの指定が無ければ今の印を残し、あれば付け替える', async () => {
+      const doll = await dollOf();
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      const same = await store.addItem(doll.id, item('シャツ', { replaceId: a.id }));
+      expect(same.set).toBe(umi.id);
+      const yama = { id: 'アニメ/セット/やま', name: 'やま' };
+      const moved = await store.addItem(doll.id, item('シャツ', { replaceId: a.id, set: yama }));
+      expect(moved.set).toBe(yama.id);
+      // うみ にはもう服が無いので、消える
+      expect((await dollOf()).sets).toEqual([yama]);
+    });
+
+    it('最後の 1 点を消す・外すと、セットも消える。1 点残っていれば残る', async () => {
+      const doll = await dollOf();
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      const b = await store.addItem(doll.id, item('ぼうし', { set: umi }));
+      await store.deleteItem(a.id);
+      expect((await dollOf()).sets).toEqual([umi]);
+      const left = await store.updateItem(b.id, { set: null });
+      expect(left).not.toHaveProperty('set');
+      expect(await dollOf()).not.toHaveProperty('sets');
+      // 名前だけの変更では、印は変わらない
+      const c = await store.addItem(doll.id, item('くつ', { set: umi }));
+      expect((await store.updateItem(c.id, { name: 'あかいくつ' })).set).toBe(umi.id);
+    });
+
+    it('renameSet は名前だけを変える（ID と服の印はそのまま）。無いセット・使えない名前は Error', async () => {
+      const doll = await dollOf();
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      expect(await store.renameSet(doll.id, umi.id, 'なつのうみ')).toEqual({ id: umi.id, name: 'なつのうみ' });
+      const after = await dollOf();
+      expect(after.sets).toEqual([{ id: umi.id, name: 'なつのうみ' }]);
+      expect(after.items.find((i) => i.id === a.id)!.set).toBe(umi.id);
+      await expect(store.renameSet(doll.id, '無い', 'x')).rejects.toThrow(/セット/);
+      await expect(store.renameSet(doll.id, umi.id, 'a/b')).rejects.toThrow();
+    });
+  });
 });
