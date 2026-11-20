@@ -15,14 +15,16 @@ export interface Tile {
 
 export const FRAME_SIZE = 1024;
 const PANEL_GAP = 64; // 手の図: 左右の 2 枚のあいだの、背景だけの帯（px）
-export type FrameKind = 'upper' | 'feet' | 'hands';
+// hair: 本物のドールの上半身（髪）。upper: 上半身のシルエット（ぼうし）。枠の範囲は同じ
+export type FrameKind = 'hair' | 'upper' | 'feet' | 'hands';
 
 // カテゴリ名から、拡大図の種類を決める。全身の図で作るもの（服・靴下）と、別の作り方をする顔は null
 export function frameKind(label: string): FrameKind | null {
   if (/くつした|靴下|ソックス|タイツ|sock/i.test(label)) return null;
   if (/くつ|靴|shoe|ブーツ|boot/i.test(label)) return 'feet';
   if (/てぶくろ|手袋|glove/i.test(label)) return 'hands';
-  if (/ぼうし|帽子|hat|かんむり|ティアラ|かみ|まえがみ|髪|ヘア|hair/i.test(label)) return 'upper';
+  if (/ぼうし|帽子|hat|かんむり|ティアラ/i.test(label)) return 'upper';
+  if (/かみ|まえがみ|髪|ヘア|hair/i.test(label)) return 'hair';
   return null;
 }
 
@@ -39,7 +41,7 @@ function fit(cx: number, top: number, w: number, h: number, canvasW: number, can
 export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, canvasH: number): Tile[] {
   const tall = parts.feet.y + parts.feet.h - parts.head.y;
   const full: Box = { x: 0, y: 0, w: FRAME_SIZE, h: FRAME_SIZE };
-  if (kind === 'upper') {
+  if (kind === 'upper' || kind === 'hair') {
     // キャンバスの上端から腰の下まで
     const size = parts.hips.y + parts.hips.h;
     return [{ from: fit(parts.head.x + parts.head.w / 2, 0, size, size, canvasW, canvasH), to: full }];

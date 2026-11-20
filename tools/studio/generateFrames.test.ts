@@ -127,23 +127,52 @@ describe('てぶくろ（差し替え式）', () => {
   }, 60_000);
 });
 
-describe('ヘアスタイル（上半身の拡大図）', () => {
-  it('上半身のシルエットの拡大図に描かせ、キャンバスの頭の位置に戻す', async () => {
-    const [tile] = frameTiles('upper', parts, doll.canvasW, doll.canvasH);
+describe('ヘアスタイル（本物のドールの上半身に描かせる）', () => {
+  it('本物の上半身の拡大図（顔なし）を 1 枚渡し、髪の全体と前の範囲ができる', async () => {
+    const [tile] = frameTiles('hair', parts, doll.canvasW, doll.canvasH);
     const head = toTile(parts.head, tile);
-    const { calls, candidate } = await run(
-      'ヘアスタイル',
-      (size) => svg(size, `<ellipse cx="${head.x + head.w / 2}" cy="${head.y + head.h * 0.25}" rx="${head.w * 0.7}" ry="${head.h * 0.4}" fill="#3a2414"/>`),
-      ['#3a2414'],
-    );
+    const inspected: Buffer[] = [];
+    const inspector: TextAi = {
+      json: async <T>(input: { images?: Buffer[] }) => {
+        if (input.images?.[0]) inspected.push(input.images[0]);
+        return { ok: true, reason: 'よい', fix: '' } as T;
+      },
+    };
+    const calls: { prompt: string; images: Buffer[] }[] = [];
+    const image: ImageAi = {
+      async generate(input) {
+        calls.push(input);
+        const size = (await sharp(input.images[0]).metadata()).width!;
+        // 頭の上半分をおおい、頭の左右にもはみ出す髪
+        const hair = svg(size, `<ellipse cx="${head.x + head.w / 2}" cy="${head.y + head.h * 0.25}" rx="${head.w * 0.7}" ry="${head.h * 0.4}" fill="#3a2414"/>`);
+        return sharp(input.images[0]).composite([{ input: Buffer.from(hair) }]).png().toBuffer();
+      },
+    };
+    const candidate: Candidate = { item: { category: 'ヘアスタイル', name: 'てすと', description: 'Short dark brown hair.', colors: ['#3a2414'] }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+    const budget = new Budget(path.join(dir, 'budget-hair.json'), { perDay: 9, perRun: 9 });
+    await generateCandidate({ text: inspector, image, budget, doll: manifestDoll, template: doll, data: { parts, regions: {} }, style: '' }, candidate);
+
     expect(calls).toHaveLength(1);
+    expect(await budget.usedToday()).toBe(1);
+    expect(calls[0].images).toHaveLength(1);
     const meta = await sharp(calls[0].images[0]).metadata();
     expect([meta.width, meta.height]).toEqual([1024, 1024]);
     expect(calls[0].prompt).toMatch(/upper half/);
-    // 頭の中心は、単色のシルエット
+    expect(calls[0].prompt).toMatch(/blank face/);
+    expect(calls[0].prompt).not.toMatch(/silhouette/);
+    // 頭の中心は、本物のドールの肌の色（単色の人形型ではない）。背景は、はっきりした単色
     const centre = await pixel(calls[0].images[0], head.x + Math.round(head.w / 2), head.y + Math.round(head.h / 2));
-    expect(Math.max(...centre) - Math.min(...centre)).toBeGreaterThanOrEqual(255 - 128);
+    expect(centre[0]).toBeGreaterThan(200);
+    expect(centre[0]).toBeGreaterThan(centre[2]);
+    const corner = await pixel(calls[0].images[0], 5, 5);
+    expect(Math.max(...corner) - Math.min(...corner)).toBe(255);
+
+    expect(candidate.notes).toEqual([]);
+    expect(candidate.status).toBe('passed');
+    expect(candidate.front).toBeDefined();
     expect(candidate.hide).toBeUndefined();
+    expect(candidate.under).toBeUndefined();
+    expect(candidate.shape).toBeUndefined();
     const item = await pngToRgba(candidate.png!);
     expect([item.width, item.height]).toEqual([doll.canvasW, doll.canvasH]);
     const box = alphaBBox(item.rgba, item.width, item.height)!;
@@ -151,6 +180,62 @@ describe('ヘアスタイル（上半身の拡大図）', () => {
     expect(Math.abs(cx - (parts.head.x + parts.head.w / 2))).toBeLessThan(6);
     expect(Math.abs(box.w - parts.head.w * 1.4)).toBeLessThan(10);
     expect(box.y).toBeLessThan(parts.head.y + parts.head.h * 0.2);
+    // 前の範囲は、髪のある所だけ
+    const front = await pngToRgba(candidate.front!);
+    let frontPixels = 0;
+    for (let p = 0; p < front.width * front.height; p++) {
+      if (front.rgba[p * 4 + 3] < 128) continue;
+      frontPixels++;
+      expect(item.rgba[p * 4 + 3]).toBeGreaterThan(0);
+    }
+    expect(frontPixels).toBeGreaterThan(500);
+    // 見た目の検品には、ドールに着せた絵（後ろ髪 → ドール → 前髪）を渡す: 頭の上は髪の色、顔は肌の色
+    expect(inspected).toHaveLength(1);
+    const shown = await sharp(inspected[0]).resize(doll.canvasW, doll.canvasH).png().toBuffer();
+    const top = await pixel(shown, Math.round(parts.head.x + parts.head.w / 2), Math.round(parts.head.y + parts.head.h * 0.15));
+    expect(top[0]).toBeLessThan(110);
+    const face = await pixel(shown, Math.round(parts.head.x + parts.head.w / 2), Math.round(parts.head.y + parts.head.h * 0.75));
+    expect(face[0]).toBeGreaterThan(200);
+  }, 60_000);
+
+  it('うしろがみのカテゴリの品目は、画像を作らずに断る（髪型と一緒にできるため）', async () => {
+    const withBack = { ...manifestDoll, categories: [...manifestDoll.categories, category('うしろがみ')] } as ManifestDoll;
+    let calls = 0;
+    const image: ImageAi = { generate: async () => { calls++; throw new Error('呼ばれないはず'); } };
+    const candidate: Candidate = { item: { category: 'うしろがみ', name: 'てすと', description: 'Long back hair.', colors: [] }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+    const budget = new Budget(path.join(dir, 'budget-back.json'), { perDay: 9, perRun: 9 });
+    await generateCandidate({ text, image, budget, doll: withBack, template: doll, data: { parts, regions: {} }, style: '' }, candidate);
+    expect(candidate.status).toBe('failed');
+    expect(candidate.notes.join('')).toMatch(/髪型と一緒に作られます/);
+    expect(calls).toBe(0);
+    expect(await budget.usedToday()).toBe(0);
+  });
+});
+
+describe('くつ（靴・肌・隠す所）', () => {
+  it('靴の開きに見える肌は、別の絵（肌）として候補に付く', async () => {
+    const [tile] = frameTiles('feet', parts, doll.canvasW, doll.canvasH);
+    const feet = toTile(parts.feet, tile);
+    const image: ImageAi = {
+      async generate(input) {
+        const size = (await sharp(input.images[0]).metadata()).width!;
+        // 足を、茶色の靴に描き替える。まん中に、脚と同じ肌の色の開き
+        const skin = await pixel(input.images[0], feet.x + Math.round(feet.w * 0.25), Math.round(feet.y * 0.3));
+        const shoe = svg(size, `<rect x="${feet.x - 20}" y="${feet.y - 4}" width="${feet.w + 40}" height="${feet.h + 20}" rx="30" fill="#7a3b1e"/>
+          <rect x="${feet.x + feet.w * 0.3}" y="${feet.y - 4}" width="${feet.w * 0.4}" height="${feet.h * 0.5}" fill="rgb(${skin.join(',')})"/>`);
+        return sharp(input.images[0]).composite([{ input: Buffer.from(shoe) }]).png().toBuffer();
+      },
+    };
+    const candidate: Candidate = { item: { category: 'くつ', name: 'てすと', description: 'Brown pumps.', colors: ['#7a3b1e'] }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+    await generateCandidate({ text, image, budget: new Budget(path.join(dir, 'budget-pumps.json'), { perDay: 9, perRun: 9 }), doll: manifestDoll, template: doll, data: { parts, regions: {} }, style: '' }, candidate);
+    expect(candidate.status).toBe('passed');
+    expect(candidate.hide).toBeDefined();
+    expect(candidate.under).toBeDefined();
+    const under = await pngToRgba(candidate.under!);
+    const box = alphaBBox(under.rgba, under.width, under.height)!;
+    expect(box.y).toBeGreaterThanOrEqual(parts.feet.y);
+    expect(box.x).toBeGreaterThan(parts.feet.x);
+    expect(box.x + box.w).toBeLessThan(parts.feet.x + parts.feet.w);
   }, 60_000);
 });
 
@@ -166,5 +251,21 @@ describe('企画の指示', () => {
     await planItems(planner, manifestDoll, { theme: 'うみ', count: 1, style: '' });
     expect(prompt).not.toMatch(/No sandals/);
     expect(prompt).toMatch(/no longer than the hips/);
+    expect(prompt).toMatch(/must not be skin-coloured/);
+  });
+
+  it('うしろがみのカテゴリは、作れるカテゴリに入れない。髪は、前髪だけにしない', async () => {
+    let prompt = '';
+    const planner: TextAi = {
+      json: async <T>(input: { prompt: string }) => {
+        prompt = input.prompt;
+        return { items: [{ category: 'ヘアスタイル', name: 'かみ', description: 'Hair.', colors: [] }, { category: 'うしろがみ', name: 'うしろ', description: 'Back hair.', colors: [] }] } as T;
+      },
+    };
+    const withBack = { ...manifestDoll, categories: [...manifestDoll.categories, category('うしろがみ')] } as ManifestDoll;
+    const items = await planItems(planner, withBack, { theme: 'うみ', count: 2, style: '' });
+    expect(prompt).not.toMatch(/- うしろがみ/);
+    expect(prompt).not.toMatch(/front hair only/i);
+    expect(items.map((i) => i.category)).toEqual(['ヘアスタイル']);
   });
 });

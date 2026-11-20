@@ -2,7 +2,7 @@
  * 髪を前髪と後ろ髪に分けるテスト
  */
 import { describe, expect, it } from 'vitest';
-import { capeHair, isBackHairCategory, isHairCategory, splitHair, splitsHair } from './hairSplit';
+import { isBackHairCategory, isHairCategory, splitHair, splitsHair } from './hairSplit';
 
 const W = 160;
 const H = 200;
@@ -130,39 +130,6 @@ describe('splitHair', () => {
     const px = new Uint8ClampedArray(W * H * 4);
     rect(px, 4, 10, 10, 40, 150, GOLD);
     expect(splitHair(px, doll(), W, H, DEPTH)).toBeNull();
-  });
-});
-
-describe('capeHair（うしろがみ）', () => {
-  // マネキンのまわりに描かれた後ろ髪: 体の左右と、頭の上。体の所は、あいている
-  function around(): Uint8ClampedArray {
-    const px = new Uint8ClampedArray(W * H * 4);
-    rect(px, 4, 30, 10, 59, 150, GOLD);
-    rect(px, 4, 101, 10, 130, 150, GOLD);
-    rect(px, 4, 30, 10, 130, 19, GOLD);
-    return px;
-  }
-  const RED = [200, 0, 0, 255];
-  const color = (px: Uint8ClampedArray, x: number, y: number) => Array.from(px.subarray((y * W + x) * 4, (y * W + x) * 4 + 4));
-
-  it('描いた絵が無ければ、体の下を左右の髪の色でつないで埋める。髪より下の体は埋めない', () => {
-    const back = capeHair(around(), doll(), W, H);
-    expect(color(back, 80, 100)).toEqual(GOLD);
-    expect(alpha(back, 80, 170)).toBe(0);
-    expect(color(back, 40, 100)).toEqual(GOLD); // もとの髪はそのまま
-  });
-  it('描いた絵があれば、体の下はその絵で埋める。絵に髪が無い所は埋めない（細いすき間だけ、色をつなぐ）。輪郭はもとの髪のまま', () => {
-    const paint = new Uint8ClampedArray(W * H * 4);
-    rect(paint, 4, 0, 0, W - 1, 120, RED); // 髪より広く、途中（y=120）まで描いてある
-    rect(paint, 4, 62, 50, 63, 60, [0, 0, 0, 0]); // 絵のふちの、細いすき間
-    const back = capeHair(around(), doll(), W, H, { paint });
-    expect(color(back, 80, 100)).toEqual(RED); // 体の下: 描いた絵
-    expect(alpha(back, 80, 140)).toBe(0); // 絵に髪が無い所: 髪は無い
-    expect(color(back, 62, 55)).toEqual(GOLD); // 細いすき間: 色をつなぐ
-    expect(color(back, 40, 100)).toEqual(GOLD); // もとの髪は、絵で上書きしない
-    expect(color(back, 58, 100)).toEqual(RED); // ただし、穴のふちの数 px は、絵に置き換える（輪郭線のにじみを消す）
-    expect(alpha(back, 10, 100)).toBe(0); // 髪の外には広げない
-    expect(alpha(back, 80, 170)).toBe(0);
   });
 });
 

@@ -33,8 +33,6 @@ const CORE_PER = 400;
 const FRAGMENT_DIVISOR = 1000;
 // 体のふちの帯で、髪を「前」とみなすには、まわりのこの範囲（px）の体がすべて髪で隠れていること
 const COVER_REACH = 2;
-// 描いた絵で穴を埋めるとき、穴のふちで、もとの髪を絵に置き換える幅（px）
-const SEAM_WIDTH = 4;
 // 後ろ髪で、体の外にある「体と髪のあいだのすき間」を埋める幅の上限（画像の幅に対する割合）
 const GAP_SHARE = 0.02;
 
@@ -175,15 +173,14 @@ export function splitHair(
   const frontPixels = new Uint8ClampedArray(total * 4);
   for (let p = 0; p < total; p++) if (front[p]) frontPixels.set(rgba.subarray(p * 4, p * 4 + 4), p * 4);
 
-  const back = fillBehindBody(rgba, inside, nearBody, width, height, depth, shape, null);
+  const back = fillBehindBody(rgba, inside, nearBody, width, height, depth, shape);
   return { front: frontPixels, back };
 }
 
 /**
  * 髪の全体に、体の形の穴を埋めた「マントのような 1 枚」を作る。
  * 埋めるのは、行ごとに、髪にはさまれた「体の下」と「髪と体のあいだの細いすき間」。
- * 色は、髪の地の色（輪郭線を除く）を、どの方向にもなめらかに広げたもの。行ごとに左右の色をつなぐと、横じまになる。
- * paint（体に隠れていた髪を描いた絵。髪のある所だけ不透明）があれば、その絵で埋める
+ * 色は、髪の地の色（輪郭線を除く）を、どの方向にもなめらかに広げたもの。行ごとに左右の色をつなぐと、横じまになる
  */
 function fillBehindBody(
   rgba: Pixels,
@@ -193,7 +190,6 @@ function fillBehindBody(
   height: number,
   depth: number,
   shape: ArrayLike<number> | null,
-  paint: Pixels | null,
 ): Uint8ClampedArray {
   const total = width * height;
   const back = new Uint8ClampedArray(rgba);
@@ -231,7 +227,6 @@ function fillBehindBody(
 
   // 行ごとに、髪にはさまれた区間の「体の下」と「細いすき間」を埋める
   const region = new Uint8Array(total); // なめらかな色で埋める所
-  const painted = new Uint8Array(total); // 描いた絵で埋めた所
   const inset = Math.max(1, Math.round(depth / 2)); // 色は、髪のふち（輪郭線）より少し内側から取る
   for (let y = 0; y < height; y++) {
     const row = y * width;
@@ -253,72 +248,10 @@ function fillBehindBody(
       const a = x;
       while (x <= last && !solid[row + x]) x++;
       const b = x - 1;
-      // 両側の髪の色（ふちから少し内側。髪が細ければ、ふちの色）
-      const colorAt = (edge: number, step: -1 | 1) => {
-        let q = edge;
-        for (let k = 0; k < inset && q + step >= 0 && q + step < width && solid[row + q + step]; k++) q += step;
-        return (row + q) * 4;
-      };
-      const left = colorAt(a - 1, -1);
-      const right = colorAt(b + 1, 1);
-      const joined = (k: number, q: number) => {
-        const t = (k - a + 1) / (b - a + 2);
-        for (let c = 0; c < 3; c++) back[q + c] = Math.round(rgba[left + c] * (1 - t) + rgba[right + c] * t);
-        back[q + 3] = 255;
-      };
-      const fillable = (k: number) => inside[row + k] === 1 || gap[row + k] === 1;
-      if (!paint) {
-        for (let k = a; k <= b; k++) if (fillable(k)) region[row + k] = 1;
-        continue;
-      }
-      // 描いた絵があるとき: 絵に髪がある所は、その絵で埋める。絵に髪が無い所は、髪が無いものとして埋めない
-      // （脚の後ろなど。切り抜きの残りかすを両端にして、体を塗りつぶさないように）。
-      // ただし、絵のふちと髪のあいだにできる細いすき間（絵の位置が少し違う分）は、両側の色でつなぐ
-      let k = a;
-      while (k <= b) {
-        const q = (row + k) * 4;
-        if (!fillable(k)) {
-          k++;
-        } else if (paint[q + 3] >= 128) {
-          for (let c = 0; c < 3; c++) back[q + c] = paint[q + c];
-          back[q + 3] = 255;
-          painted[row + k] = 1;
-          k++;
-        } else {
-          const start = k;
-          while (k <= b && fillable(k) && paint[(row + k) * 4 + 3] < 128) k++;
-          if (k - start <= gapLimit) for (let m = start; m < k; m++) joined(m, (row + m) * 4);
-        }
-      }
+      for (let k = a; k <= b; k++) if (inside[row + k] === 1 || gap[row + k] === 1) region[row + k] = 1;
     }
   }
-  if (!paint) fillSmooth(back, region, baseColorSource(rgba, solid, width, height, inset), width, height);
-  // 穴のふち（体の輪郭線だった所）: もとの髪のふちは、マネキンの色がにじんで線に見える。絵で埋めた所に接する数 px を、絵に置き換える
-  if (paint) {
-    const seam = distance(painted, solid, width, height, SEAM_WIDTH);
-    for (let p = 0; p < total; p++) {
-      if (seam[p] === 0 || paint[p * 4 + 3] < 128) continue;
-      for (let c = 0; c < 3; c++) back[p * 4 + c] = paint[p * 4 + c];
-    }
-  }
+  fillSmooth(back, region, baseColorSource(rgba, solid, width, height, inset), width, height);
   return back;
 }
 
-/**
- * うしろがみ: マネキンのまわりに描かれた髪（rgba）から、体の形の穴を埋めた 1 枚を作る。
- * paint は、マネキンを消して髪を描き足した絵（髪のある所だけ不透明）。位置や大きさが少し違っていても、穴の中の模様として使うだけなので、輪郭は rgba のまま
- */
-export function capeHair(
-  rgba: Pixels,
-  dollAlpha: Uint8Array | Uint8ClampedArray,
-  width: number,
-  height: number,
-  options: { bodyShape?: ArrayLike<number>; paint?: Pixels } = {},
-): Uint8ClampedArray {
-  const depth = Math.max(2, Math.round(width / DEPTH_PER));
-  const total = width * height;
-  const inside = new Uint8Array(total);
-  for (let p = 0; p < total; p++) inside[p] = dollAlpha[p] >= 128 ? 1 : 0;
-  const fromInside = distance(inside, null, width, height, Math.max(1, Math.round(depth / 2)));
-  return fillBehindBody(rgba, inside, (p) => inside[p] === 1 || fromInside[p] > 0, width, height, depth, options.bodyShape ?? null, options.paint ?? null);
-}

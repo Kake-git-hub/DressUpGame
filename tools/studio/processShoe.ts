@@ -82,6 +82,9 @@ export async function processShoe(generated: Buffer, reference: Buffer, doll: Do
     if (rgba[i] < 8) rgba[i] = 0;
     if (under[i] < 8) under[i] = 0;
   }
+  // 隠す所は、足首の線より上へにじませない（縮めたときのぼけで、線の 1px 上がうすく消えるのを防ぐ）
+  const lineY = Math.max(0, Math.min(canvasH, Math.min(...zones.map((z) => z.y))));
+  hide.fill(0, 0, lineY * canvasW);
 
   const warnings: ProcessWarning[] = [];
   if (!alphaBBox(rgba, canvasW, canvasH) || sum.drawn < sum.area / EMPTY_DIVISOR) {

@@ -413,89 +413,30 @@ describe('テーマからの自動生成', () => {
     expect((await ok<{ dolls: { items: unknown[] }[] }>('GET', '/api/content')).dolls[0].items).toHaveLength(1);
     expect((await call('GET', `/api/jobs/image?id=${id}&index=9`)).status).toBe(404);
   }, 60_000);
-  describe('うしろがみ（別の品目として作る）', () => {
-    // 偽の画像生成。1 枚目: マネキンのまわり（画像の上から 10〜30%、横 30〜70% の背景）に赤い髪を描く。2 枚目: マネキンを消した絵として、全面が青の絵を返す
-    const backHairAi = (reveal: 'ok' | 'fail'): ImageAi => ({
-      async generate(input) {
-        imageCalls.push(input);
-        if (/remove the mannequin/.test(input.prompt)) {
-          if (reveal === 'fail') throw new AiError('画像を返しませんでした', 422, true);
-          const meta = await sharp(input.images[0]).metadata();
-          return sharp({ create: { width: meta.width!, height: meta.height!, channels: 3, background: '#2040c0' } }).png().toBuffer();
-        }
-        const { data, info } = await sharp(input.images[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-        const w = info.width;
-        const bg = [data[0], data[1], data[2]];
-        for (let y = Math.round(info.height * 0.1); y < info.height * 0.3; y++) {
-          for (let x = Math.round(w * 0.3); x < w * 0.7; x++) {
-            const i = (y * w + x) * 4;
-            if (data[i] === bg[0] && data[i + 1] === bg[1] && data[i + 2] === bg[2]) data.set([200, 30, 40, 255], i);
-          }
-        }
-        return sharp(data, { raw: { width: w, height: info.height, channels: 4 } }).png().toBuffer();
-      },
-    });
+  describe('うしろがみのカテゴリ', () => {
     const backHairItem = { category: 'うしろがみ', name: 'あかいうしろがみ', description: 'Long red back hair.', colors: ['#c81e28'] };
-    const count = async (png: Buffer) => {
-      const { data } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      let red = 0, blue = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i + 3] < 128) continue;
-        if (data[i] > 150 && data[i + 2] < 100) red++;
-        if (data[i + 2] > 150 && data[i] < 100) blue++;
-      }
-      return { red, blue };
-    };
     const addBackHairCategory = () => ok('PUT', '/api/categories', { dollId, category: { label: 'うしろがみ', layer: -1, menuOrder: 12, overlap: false, movable: false } });
 
-    it('2 枚作る: マネキンのまわりの髪と、マネキンを消した髪。体の形の穴は 2 枚目の絵で埋まり、1 枚の品目として保存できる', async () => {
-      makeApi({ text: fakeText, image: backHairAi('ok') });
+    it('自動では作らない（髪型と一緒にできる）: 画像を使わず、理由を残して失敗にする', async () => {
       await addBackHairCategory();
       const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [backHairItem] });
       await api.waitForJob(id);
       const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
-      expect(c).toMatchObject({ status: 'passed', attempts: 1, hasImage: true, notes: [] });
-      expect(imageCalls).toHaveLength(2);
-      expect(await budget.usedToday()).toBe(2);
-      // 1 枚目: マネキンは前に立ったまま、後ろの髪だけを描かせる
-      expect(imageCalls[0].prompt).toMatch(/BACK HAIR only/);
-      expect(imageCalls[0].prompt).toMatch(/Nothing is drawn on top of the mannequin/);
-      // 2 枚目: 1 枚目の絵を渡して、マネキンを消させる
-      expect(imageCalls[1].images).toHaveLength(1);
-      const png = (await call('GET', `/api/jobs/image?id=${id}&index=0`)).body as Buffer;
-      const { red, blue } = await count(png);
-      expect(red).toBeGreaterThan(1000); // もとの髪
-      expect(blue).toBeGreaterThan(1000); // 体の下は、2 枚目の絵
-      // 検品には、ドールの後ろに置くものだと伝える
-      expect(textCalls.find((t) => /quality inspector/.test(t.system))!.prompt).toMatch(/placed BEHIND the doll/);
-      // 保存: 前髪・後ろ髪には分けず、1 枚のまま
+      expect(c).toMatchObject({ status: 'failed', hasImage: false });
+      expect(c.notes.join('')).toMatch(/髪型と一緒に作られます/);
+      expect(imageCalls).toHaveLength(0);
+      expect(await budget.usedToday()).toBe(0);
+    }, 60_000);
+
+    it('手持ちの絵を、うしろがみのカテゴリに保存することはできる（前髪・後ろ髪には分けない）', async () => {
+      await addBackHairCategory();
+      const png = await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        .composite([{ input: await sharp({ create: { width: 300, height: 500, channels: 4, background: { r: 200, g: 30, b: 40, alpha: 1 } } }).png().toBuffer(), left: 362, top: 60 }])
+        .png()
+        .toBuffer();
       const saved = await ok<{ back?: unknown; category: string }>('POST', '/api/items', { dollId, category: 'うしろがみ', name: 'あかいうしろがみ', png: png.toString('base64') });
+      expect(saved.category).toBe('うしろがみ');
       expect(saved.back).toBeUndefined();
-    }, 60_000);
-
-    it('2 枚目が作れなければ、穴は左右の髪の色でつないで埋め、その旨を注記に残す', async () => {
-      makeApi({ text: fakeText, image: backHairAi('fail') });
-      await addBackHairCategory();
-      const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [backHairItem] });
-      await api.waitForJob(id);
-      const c = (await ok<JobView>('GET', `/api/jobs?id=${id}`)).candidates[0];
-      expect(c).toMatchObject({ status: 'passed', attempts: 1, hasImage: true });
-      expect(c.notes).toHaveLength(1);
-      expect(c.notes[0]).toMatch(/左右の色でつないで埋めました/);
-      const { red, blue } = await count((await call('GET', `/api/jobs/image?id=${id}&index=0`)).body as Buffer);
-      expect(blue).toBe(0);
-      expect(red).toBeGreaterThan(2000);
-    }, 60_000);
-
-    it('うしろがみのカテゴリがあるドールでは、髪のカテゴリは前髪だけを描かせ、保存のときに分けない', async () => {
-      await ok('PUT', '/api/categories', { dollId, category: { label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false } });
-      await addBackHairCategory();
-      const { id } = await ok<{ id: string }>('POST', '/api/jobs', { dollId, items: [{ category: 'ヘアスタイル', name: 'まえがみ', description: 'Blonde bangs.', colors: ['#f0c85a'] }] });
-      await api.waitForJob(id);
-      expect(imageCalls[0].prompt).toMatch(/FRONT HAIR only/);
-      const png = (await call('GET', `/api/jobs/image?id=${id}&index=0`)).body as Buffer;
-      const hair = await ok<{ back?: unknown }>('POST', '/api/items', { dollId, category: 'ヘアスタイル', name: 'きんぱつ', png: png.toString('base64') });
-      expect(hair.back).toBeUndefined();
     }, 60_000);
   });
 
