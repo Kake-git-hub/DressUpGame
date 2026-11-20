@@ -2,6 +2,7 @@
  * 服が隠すドールの部分（手袋・くつの下からはみ出す指先など）
  */
 import type { Box, EquippedItem } from '../types';
+import { defaultLimbs } from '../pipeline/limbZones';
 import { effectiveLayer, isBehindDoll } from './layers';
 
 export interface Hide {
@@ -20,10 +21,17 @@ export function activeHides(items: EquippedItem[], adjustingItemId: string | nul
   return items.filter((item) => !!item.hide && !isBehindDoll(item) && inPlace(item, adjustingItemId)).map((item) => item.hide!);
 }
 
+// 同じ手足の服か（くつと靴下、手袋どうし）。カテゴリ名で見る
+const sameLimb = (a: EquippedItem, b: EquippedItem): boolean => {
+  const limbs = defaultLimbs(b.type);
+  return defaultLimbs(a.type).some((limb) => limbs.includes(limb));
+};
+
 /**
  * 隠す所を、ドールと、ほかの服に分けて返す。
  *  doll: ドールから消す所（activeHides と同じ）
- *  items: 服の ID → その服から消す所。隠す所を持つ服より重なりが下で、ドールより前にある服（くつの下の靴下など）。
+ *  items: 服の ID → その服から消す所。隠す所を持つ服より重なりが下で、ドールより前にあり、同じ手足の服（くつの下の靴下など）。
+ *         ドレスやスカートからは消さない（隠す所は手首・足首から先の四角なので、すそや身ごろが四角くえぐれる）。
  *         箱は、その服のキャンバス上の位置に直してある（服のキャンバスは、ドールのキャンバスのまわりに余白を足したもの）。
  *         動かした・調整中の服からは消さない（消す形が服とずれるため）
  */
@@ -35,7 +43,7 @@ export function hidesFor(items: EquippedItem[], adjustingItemId: string | null, 
     const dx = (target.canvasW - dollCanvas.w) / 2;
     const dy = (target.canvasH - dollCanvas.h) / 2;
     const masks = hiders
-      .filter((hider) => hider.id !== target.id && effectiveLayer(target) < effectiveLayer(hider))
+      .filter((hider) => hider.id !== target.id && effectiveLayer(target) < effectiveLayer(hider) && sameLimb(target, hider))
       .map((hider) => ({ url: hider.hide!.url, box: { ...hider.hide!.box, x: hider.hide!.box.x + dx, y: hider.hide!.box.y + dy } }));
     if (masks.length > 0) clipped.set(target.id, masks);
   }
