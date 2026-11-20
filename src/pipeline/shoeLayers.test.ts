@@ -70,6 +70,11 @@ describe('extractShoe', () => {
     expect(r.hide[100 * S + 20]).toBe(0);
   });
 
+  it('足首の線のすぐ下でも、靴と肌の内側は隠さない（線にそって、靴下やドールが細く欠けない）', () => {
+    const r = extract(drawn());
+    for (let y = LINE; y < LINE + 4; y++) expect(r.hide[y * S + 128]).toBe(0);
+  });
+
   it('肌の上の端は、足首の線から少しずつ見えてくる（継ぎ目を作らない）', () => {
     const r = extract(drawn());
     expect(alpha(r.under, 128, LINE)).toBe(0);

@@ -167,8 +167,9 @@ export function extractShoe(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
   // 隠す所
   const hide = new Uint8Array(total);
   {
+    // 線より上の脚（背景でない所）も「絵」に入れて細らせる。線そのものを絵のふちとみなすと、線のすぐ下が細く隠れてしまう
     const picture = new Uint8Array(total);
-    for (let p = 0; p < total; p++) picture[p] = shoeMask[p] | skinMask[p];
+    for (let p = 0; p < total; p++) picture[p] = shoeMask[p] | skinMask[p] | (!below(p) && solid[p] ? 1 : 0);
     const inside = erode(picture, width, height, px(HIDE_INSET));
     for (let p = Math.max(0, zoneTop * width); p < total; p++) if (!inside[p]) hide[p] = 255;
   }

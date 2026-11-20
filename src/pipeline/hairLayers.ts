@@ -11,7 +11,7 @@
 import { alphaBBox } from './alpha';
 import type { Pixels } from './alpha';
 import { cutOutClothing } from './cutout';
-import { cleanKeyEdge } from './edgeClean';
+import { cleanKeyEdge, cleanKeySpill } from './edgeClean';
 import type { Rgb } from './keyColors';
 import { components, dilate, erode } from './morph';
 import { baseColorSource, fillSmooth } from './smoothFill';
@@ -224,6 +224,7 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
     }
   }
   cleanKeyEdge(rgba, width, height, background, px(EDGE_REACH));
+  cleanKeySpill(rgba, width, height, background);
 
   // 重ね直して、AI の絵と比べる: 背景 → 後ろ髪 → ドール → 前髪
   let unlike = 0;

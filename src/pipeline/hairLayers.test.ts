@@ -95,6 +95,34 @@ describe('extractHair', () => {
     expect(alpha(hair.rgba, 128, 70)).toBe(255);
   });
 
+  it('髪の房のすき間に混ざった背景色（細い筋）は、髪の色から取り除く', () => {
+    const CYAN: Rgb = [0, 255, 255];
+    const ref = new Uint8ClampedArray(S * S * 4);
+    rect(ref, 0, 0, S - 1, S - 1, CYAN);
+    rect(ref, DOLL.x0, DOLL.y0, DOLL.x1, DOLL.y1, SKIN);
+    const image = new Uint8ClampedArray(ref);
+    rect(image, 20, 20, 235, 100, [20, 20, 28]); // 黒い髪
+    rect(image, 60, 30, 61, 90, [100, 171, 140]); // 房のすき間に、背景のシアンが混ざった細い筋（ドールの外）
+    rect(image, 128, 30, 129, 90, [90, 160, 150]); // 同じ筋（ドールの上）
+    const hair = extractHair(image, ref, dollAlpha(), S, S, CYAN);
+    for (const x of [60, 128]) {
+      const [r, g, b] = rgb(hair.rgba, x, 60);
+      expect(alpha(hair.rgba, x, 60)).toBe(255);
+      expect(Math.min(g, b) - r).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('髪そのものが背景色に近い色合い（青緑の髪）なら、色は変えない', () => {
+    const CYAN: Rgb = [0, 255, 255];
+    const ref = new Uint8ClampedArray(S * S * 4);
+    rect(ref, 0, 0, S - 1, S - 1, CYAN);
+    rect(ref, DOLL.x0, DOLL.y0, DOLL.x1, DOLL.y1, SKIN);
+    const image = new Uint8ClampedArray(ref);
+    rect(image, 20, 20, 235, 100, [30, 120, 110]);
+    const hair = extractHair(image, ref, dollAlpha(), S, S, CYAN);
+    expect(rgb(hair.rgba, 40, 60)).toEqual([30, 120, 110]);
+  });
+
   it('髪が頭の上にしか無くても、1 つも無くても、落ちない', () => {
     const above = reference();
     rect(above, 100, 5, 155, 30, BROWN);

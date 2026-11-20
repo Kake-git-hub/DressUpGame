@@ -71,3 +71,38 @@ export function cleanKeyEdge(rgba: Uint8ClampedArray, width: number, height: num
     }
   }
 }
+
+// 背景色の混ざりの強さ: 背景色の強い成分（高）の最小 − 弱い成分（低）の平均。背景が白など、低が無ければ null
+function keyChannels(key: Rgb): { high: number[]; low: number[] } | null {
+  const high = [0, 1, 2].filter((c) => key[c] >= 128);
+  const low = [0, 1, 2].filter((c) => key[c] < 128);
+  return high.length && low.length ? { high, low } : null;
+}
+const spillOf = (rgba: Uint8ClampedArray, i: number, ch: { high: number[]; low: number[] }) =>
+  Math.min(...ch.high.map((c) => rgba[i + c])) - ch.low.reduce((sum, c) => sum + rgba[i + c], 0) / ch.low.length;
+
+// 混ざりがこれより強い画素を直す。品目の主な色そのものがこれだけ背景色に寄っていれば、何もしない
+const SPILL_MIN = 24;
+
+/**
+ * 品目の中に残った、背景色の混ざり（髪の房のすき間に見える背景色の細い筋など）を取る。rgba をその場で直す。
+ * スタジオは、品目の色から遠い背景色を選ぶので、品目の中で背景色の色合いがはっきり強い画素は、混ざりとみなせる。
+ * 品目の主な色（不透明な画素の中央値）が背景色の色合いなら、品目の色かもしれないので何もしない
+ */
+export function cleanKeySpill(rgba: Uint8ClampedArray, width: number, height: number, key: Rgb): void {
+  const ch = keyChannels(key);
+  if (!ch) return;
+  const total = width * height;
+  const values: number[] = [];
+  for (let p = 0; p < total; p++) if (rgba[p * 4 + 3] >= 128) values.push(spillOf(rgba, p * 4, ch));
+  if (values.length === 0) return;
+  values.sort((a, b) => a - b);
+  if (values[values.length >> 1] > 0) return;
+  for (let p = 0; p < total; p++) {
+    const i = p * 4;
+    if (rgba[i + 3] === 0 || spillOf(rgba, i, ch) <= SPILL_MIN) continue;
+    const limit = Math.round(ch.low.reduce((sum, c) => sum + rgba[i + c], 0) / ch.low.length) + SPILL_MARGIN;
+    for (const c of ch.high) if (rgba[i + c] > limit) rgba[i + c] = limit;
+  }
+}
+
