@@ -69,6 +69,24 @@ describe('processSwap（本物の生成画像）', async () => {
     expect(greenish / item).toBeLessThan(0.005);
   });
 
+  it('範囲の外の細い線（AI がずらして描き直した輪郭線）は、品目につながっていても、ちぎれていても入れない', async () => {
+    const gen = await rawRgb(pumps);
+    // すねの上に、足首の品目につながる細い線（幅 10px。枠の幅 1024px では、19px より細いものが「細い」）と、離れた短い線を描き足す
+    let x0 = -1;
+    for (let x = 0; x < SIZE && x0 < 0; x++) if (doll.mask[(ZONE_TOP - 1) * SIZE + x] && doll.mask[(ZONE_TOP - 1) * SIZE + x + 30]) x0 = x + 15;
+    expect(x0).toBeGreaterThan(0);
+    const line = (x: number, y0: number, y1: number) => {
+      for (let y = y0; y < y1; y++) for (let k = 0; k < 10; k++) gen.set([60, 40, 30], ((y * SIZE + x + k) * 4));
+    };
+    line(x0, ZONE_TOP - 220, ZONE_TOP + 10);
+    line(x0 + 4, ZONE_TOP - 400, ZONE_TOP - 340);
+    const drawn = await sharp(gen, { raw: { width: SIZE, height: SIZE, channels: 4 } }).png().toBuffer();
+    const result = await processSwap(drawn, reference, doll, [tile], [zone], GREEN);
+    let kept = 0;
+    for (let y = ZONE_TOP - 400; y < ZONE_TOP - 30; y++) for (let x = x0 - 2; x < x0 + 16; x++) if (opaque(result.rgba, y * SIZE + x)) kept++;
+    expect(kept).toBe(0);
+  });
+
   it('ブーツ: 足首より上の筒とファーもアイテムになる', async () => {
     const result = await processSwap(boots, reference, doll, [tile], [zone], GREEN);
     expect(result.warnings).toEqual([]);

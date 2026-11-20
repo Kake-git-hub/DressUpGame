@@ -119,6 +119,11 @@ function plannedColors(values: unknown): string[] {
   return values.flatMap((v) => (typeof v === 'string' ? (v.match(/#[0-9a-f]{6}(?![0-9a-f])/gi) ?? []) : [])).slice(0, 6);
 }
 
+// 髪の長さ: ふつうは腰まで。テーマがロングヘアを頼んだときだけ、ひざまで（説明に "knee-length" と書かせ、それを見て枠を広げる）
+const HAIR_LENGTH_RULE =
+  'The hair is no longer than the hips, unless the theme asks for long hair (for example ロング, ロングヘア, ながいかみ, かみがながい, long hair, a princess with very long hair): then make it long hair that reaches the knees, and write the word "knee-length" in the description.';
+export const isLongHair = (description: string): boolean => /knee[- ]?length|to the knees|reach(es|ing)? (down )?(to )?the knees/i.test(description);
+
 // テーマから品目の一覧を作る
 export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string }): Promise<PlannedItem[]> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、単独では作らない
@@ -140,7 +145,7 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
           kind === 'face'
             ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
             : kind === 'hair'
-              ? ' (hairstyle only: hair and bangs, no longer than the hips. Never any facial features.)'
+              ? ` (hairstyle only: hair and bangs. ${HAIR_LENGTH_RULE} Never any facial features.)`
               : kind === 'shoes'
                 ? ' (shoes must not be skin-coloured: no beige, nude or peach shoes.)'
                 : '';
@@ -158,7 +163,7 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       '',
       'Special categories:',
       '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
-      '- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. The hair is no longer than the hips.',
+      `- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. ${HAIR_LENGTH_RULE}`,
     ].join('\n'),
     schema: PLAN_SCHEMA,
   });
@@ -203,7 +208,7 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
           kind === 'face'
             ? ' (face only: eyes, eyebrows, nose, mouth, blush. Never any hair.)'
             : kind === 'hair'
-              ? ' (hairstyle only: hair and bangs, no longer than the hips. Never any facial features.)'
+              ? ` (hairstyle only: hair and bangs. ${HAIR_LENGTH_RULE} Never any facial features.)`
               : kind === 'shoes'
                 ? ' (shoes must not be skin-coloured: no beige, nude or peach shoes.)'
                 : '';
@@ -325,9 +330,13 @@ function itemPrompt(item: PlannedItem, categoryLabel: string, style: string, sil
 
 // 髪の指示文。画像は、ドールの本物の上半身の拡大図（顔なし）
 export function hairPrompt(item: PlannedItem, categoryLabel: string, style: string, background: Rgb, feedback: string | null): string {
+  const long = isLongHair(item.description);
   return [
-    `The image is a close-up of the upper half (head to hips) of a bald doll with a blank face, for a paper-doll dress-up game, on a flat ${colorName(background)} background.`,
+    long
+      ? `The image shows a bald doll with a blank face from the head down to just below the knees, for a paper-doll dress-up game, on a flat ${colorName(background)} background.`
+      : `The image is a close-up of the upper half (head to hips) of a bald doll with a blank face, for a paper-doll dress-up game, on a flat ${colorName(background)} background.`,
     `Give the doll this hairstyle: ${item.description}`,
+    long ? 'This is long hair: the longest strands hang straight down behind the body and end at the knees, above the bottom edge of the image.' : '',
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
     'Draw the complete hairstyle on the doll the way it would naturally look: the bangs and the hair on top of the head in front of the head, and the hair that falls behind the neck, shoulders and back hidden behind the body where the body is in front of it.',
@@ -352,7 +361,7 @@ function swapPrompt(item: PlannedItem, categoryLabel: string, style: string, bac
   return [
     feet
       ? `The image is a close-up of the lower legs and bare feet of a doll for a paper-doll dress-up game, on a flat ${colorName(background)} background.`
-      : `The image shows two panels side by side: close-ups of the two forearms and bare hands of a doll for a paper-doll dress-up game (left panel: the arm on the left side of the doll, right panel: the arm on the right side), on a flat ${colorName(background)} background.`,
+      : `The image shows two panels side by side: close-ups of the two bare arms (from the shoulder to the fingertips) of a doll for a paper-doll dress-up game (left panel: the arm on the left side of the doll, right panel: the arm on the right side), on a flat ${colorName(background)} background. The inner edge of each panel also shows a narrow strip of the doll's body.`,
     feet ? `Put this pair of shoes on the feet: ${item.description}` : `Put this pair of gloves on the two hands, the same glove mirrored on each hand: ${item.description}`,
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
@@ -362,7 +371,7 @@ function swapPrompt(item: PlannedItem, categoryLabel: string, style: string, bac
     'Strict rules:',
     feet
       ? '- Keep both legs exactly as they are above the shoes: same position, size, outline and skin colour.'
-      : '- Keep both arms exactly as they are above the gloves: same position, size, angle, outline and skin colour. Keep each arm in its own panel.',
+      : '- Keep both arms exactly as they are above the gloves, and keep the strip of the body exactly as it is (draw nothing on it): same position, size, angle, outline and skin colour. Keep each arm in its own panel.',
     '- Keep the same framing. Do not zoom, crop, move or rotate anything.',
     `- The background stays the same flat ${colorName(background)} with no shadow, floor, gradient, text or frame.`,
     `- The item must not contain ${colorName(background)} or colours close to it.`,
@@ -502,7 +511,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND, ctx.data.parts.head);
       } else if (frame === 'hair') {
         // 髪: 本物の上半身の拡大図（顔なし）に描かせて、元の図との違いを取り出す
-        const [tile] = frameTiles('hair', ctx.data.parts, canvasW, canvasH);
+        const [tile] = frameTiles('hair', ctx.data.parts, canvasW, canvasH, { longHair: isLongHair(item.description) });
         const skin = skinColor(ctx.template.rgba, canvasW, canvasH, ctx.data.parts.head);
         const background = chooseBackground([...planned, ...avoid, skin, [255, 255, 255]]);
         const reference = await renderFrame(hi.template, hi.scale, [tile], background, null);

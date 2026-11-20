@@ -70,6 +70,18 @@ describe('hidesFor', () => {
     expect(result.items.has('ソックス')).toBe(false);
   });
 
+  it('手袋の隠す所は、ドールからは消すが、手袋より下のドレスからは消さない（ドレスが四角くえぐれない）', () => {
+    const gloveHide = { url: 'glove-hide.webp', box: { x: 285, y: 487, w: 455, h: 73 } };
+    const result = hidesFor([item('ドレス', 3), item('てぶくろ', 8, { hide: gloveHide })], null, DOLL);
+    expect(result.doll).toEqual([gloveHide]);
+    expect(result.items.has('ドレス')).toBe(false);
+  });
+
+  it('靴の隠す所は、靴下・タイツからは消すが、長いスカートからは消さない', () => {
+    const result = hidesFor([item('タイツ', 1), item('くつした', 1), item('スカート', 1), shoe()], null, DOLL);
+    expect([...result.items.keys()].sort()).toEqual(['くつした', 'タイツ']);
+  });
+
   it('隠す所を持つ服が無ければ、どちらも空（古い素材）', () => {
     const result = hidesFor([sock(), item('トップス', 4)], null, DOLL);
     expect(result.doll).toEqual([]);
