@@ -145,6 +145,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       files: { image: blob, thumb: blob },
       ...(saved.set ? { set: saved.set } : {}),
       createdAt: saved.createdAt,
+      owner: state.user.userCode,
     };
   };
 
@@ -226,7 +227,13 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     },
     async listMyItems() {
       online();
-      return Promise.all(state.items.map(toMyItem));
+      return (await Promise.all(state.items.map(toMyItem))).map(({ id, dollId, item, set, createdAt }) => ({ id, dollId, item, ...(set ? { set } : {}), createdAt }));
+    },
+    async fetchMyItem(id) {
+      online();
+      const saved = state.items.find((i) => i.id === id);
+      if (!saved) throw new BackendError('refused', 'この服は見つかりません');
+      return toMyItem(saved);
     },
     async deleteMyItem(id) {
       online();

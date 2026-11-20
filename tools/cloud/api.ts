@@ -4,6 +4,7 @@
  * アプリは、Firestore や Storage を直接は読まない（決まりで全部断る）。どの読み書きも、ここを通る。
  * 絵は、base64 にして返す（アプリが、置き場の CORS の設定なしで受け取れるように）。
  */
+import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { deleteItem, discard, keep, listItems, listJobs, signIn, startJob } from './studioCore.ts';
@@ -12,25 +13,9 @@ import type { CoreDeps, Target, UserView } from './studioCore.ts';
 // 止まっている仕事（作成中のまま進んでいない）かどうかを、アプリに知らせるための目安
 const STALE_MS = 150_000;
 
-export interface CandidateView {
-  index: number;
-  name: string;
-  categoryId: string;
-  status: JobDoc['candidates'][number]['status'];
-  notes: string[];
-  preview?: { canvasW: number; canvasH: number; box: { x: number; y: number; w: number; h: number } };
-}
-export interface JobView {
-  id: string;
-  dollId: string;
-  set?: { id: string; name: string };
-  done: boolean;
-  tickets: number;
-  createdAt: number;
-  candidates: CandidateView[];
-  stalled: boolean; // 終わっていないのに、しばらく進んでいない（アプリが「進める」を呼び直す）
-}
-export type ItemView = Pick<ItemDoc, 'id' | 'dollId' | 'item' | 'set' | 'createdAt'>;
+export type CandidateView = WireCandidate;
+export type JobView = WireJob;
+export type ItemView = WireItem;
 
 const jobView = (job: JobDoc, now: number): JobView => ({
   id: job.id,
@@ -118,7 +103,7 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
     case 'itemFiles': {
       const item = await deps.store.getItem(uid, str(d.id, 100));
       if (!item) throw refused('この服は見つかりません');
-      return { files: await filesOf(deps, item) };
+      return { item: itemView(item), files: await filesOf(deps, item) };
     }
     case 'deleteItem':
       await deleteItem(deps, uid, str(d.id, 100));

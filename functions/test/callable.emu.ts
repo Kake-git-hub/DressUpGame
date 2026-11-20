@@ -113,8 +113,8 @@ describe('サーバーの関数（エミュレーター）', () => {
     expect((await me.call<{ jobs: JobView[] }>({ op: 'jobs' })).jobs).toEqual([]);
 
     expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items.map((i) => i.id)).toEqual([kept.item.id]);
-    const again = await me.call<{ files: Record<string, string> }>({ op: 'itemFiles', id: kept.item.id });
-    expect(again.files).toEqual(kept.files);
+    const again = await me.call<{ item: ItemView; files: Record<string, string> }>({ op: 'itemFiles', id: kept.item.id });
+    expect(again).toEqual({ item: kept.item, files: kept.files });
 
     // ほかの利用者からは、仕事も服も見えない
     const other = await client();

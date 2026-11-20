@@ -46,19 +46,11 @@ describe('端末の中の「自分の服」（IndexedDB）', () => {
     expect(items[0].item.name).toBe('あたらしい');
   });
 
-  it('replaceAll は、中身を丸ごと入れ替える（サーバーと合わせるとき）', async () => {
-    const library = openLibrary(factory);
-    await library.put(myItem('my:1'));
-    await library.replaceAll([myItem('my:2'), myItem('my:3')]);
-    expect((await library.all()).map((i) => i.id)).toEqual(['my:2', 'my:3']);
-  });
-
   it('IndexedDB が使えない端末では、読むと空（落ちない）。書くと、保存できなかったことが分かる（黙って失わない）', async () => {
     const library = openLibrary(null);
     expect(await library.all()).toEqual([]);
     await expect(library.put(myItem('my:1'))).rejects.toThrow(/保存できません/);
     await expect(library.remove('my:1')).rejects.toThrow(/保存できません/);
-    await expect(library.replaceAll([])).rejects.toThrow(/保存できません/);
     const broken = { open: () => { throw new Error('使えません'); } } as unknown as IDBFactory;
     expect(await openLibrary(broken).all()).toEqual([]);
     await expect(openLibrary(broken).put(myItem('my:1'))).rejects.toThrow(/保存できません/);

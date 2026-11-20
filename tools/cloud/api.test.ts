@@ -109,7 +109,8 @@ describe('アプリからの呼び出し', () => {
     expect(JSON.stringify(kept.item)).not.toMatch(/users\/u1/);
     expect((await call<{ jobs: JobView[] }>('u1', { op: 'jobs' })).jobs).toEqual([]);
     expect((await call<{ items: ItemView[] }>('u1', { op: 'items' })).items.map((i) => i.id)).toEqual([kept.item.id]);
-    expect(Object.keys((await call<{ files: Record<string, string> }>('u1', { op: 'itemFiles', id: kept.item.id })).files)).toHaveLength(2);
+    const again = await call<{ item: ItemView; files: Record<string, string> }>('u1', { op: 'itemFiles', id: kept.item.id });
+    expect(again).toEqual({ item: kept.item, files: kept.files });
     await call('u1', { op: 'deleteItem', id: kept.item.id });
     expect((await call<{ items: ItemView[] }>('u1', { op: 'items' })).items).toEqual([]);
   }, 60_000);

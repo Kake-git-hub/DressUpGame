@@ -17,7 +17,6 @@ export interface Library {
   all(): Promise<MyItem[]>; // 作った順
   put(item: MyItem): Promise<void>;
   remove(id: string): Promise<void>;
-  replaceAll(items: MyItem[]): Promise<void>; // サーバーと合わせるとき: 中身を丸ごと入れ替える
 }
 
 const done = (tx: IDBTransaction) =>
@@ -78,11 +77,6 @@ export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ??
     },
     put: (item) => write((store) => void store.put(item)),
     remove: (id) => write((store) => void store.delete(id)),
-    replaceAll: (items) =>
-      write((store) => {
-        store.clear();
-        for (const item of items) store.put(item);
-      }),
   };
 }
 
