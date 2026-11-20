@@ -684,25 +684,25 @@ describe('公開されている素材の取り込み', () => {
     git(other, 'commit', '-q', '-m', 'ドールを追加');
     git(other, 'push', '-q');
   }
-  type Sync = { updated: boolean; behind: number; message: string };
+  type Sync = { state: string; updated: boolean; behind: number; message: string };
   const dollNames = async () => (await ok<{ dolls: { name: string }[] }>('GET', '/api/content')).dolls.map((d) => d.name);
 
   it('ほかの場所から公開されたドールが、取り込むと一覧に出る', async () => {
     await publishFromElsewhere();
     expect(await dollNames()).toEqual(['テスト']);
     const r = await ok<Sync>('POST', '/api/sync', {});
-    expect(r).toMatchObject({ updated: true, behind: 0 });
+    expect(r).toMatchObject({ state: 'updated', updated: true, behind: 0 });
     expect(r.message).toMatch(/1 件/);
     expect(await dollNames()).toEqual(['テスト', 'あたらしいドール']);
     // もう一度は、何もしない
-    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ state: 'latest', updated: false, behind: 0 });
   });
 
   it('未公開の変更があるときは、取り込まずに知らせる（手元の変更を壊さない）', async () => {
     await publishFromElsewhere();
     await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
     const r = await ok<Sync>('POST', '/api/sync', {});
-    expect(r).toMatchObject({ updated: false, behind: 1 });
+    expect(r).toMatchObject({ state: 'blocked', updated: false, behind: 1 });
     expect(r.message).toMatch(/未公開の変更/);
     expect(await dollNames()).toEqual(['テスト']);
     // 状態にも、公開されているほうが新しいことが出る
@@ -710,10 +710,10 @@ describe('公開されている素材の取り込み', () => {
   });
 
   it('git の作業フォルダでない・公開先が無いときは、何もしない（エラーにしない）', async () => {
-    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ state: 'no-repo', updated: false, behind: 0 });
     const content = path.join(dir, 'content');
     git(content, 'init', '-q', '-b', 'main');
-    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+    expect(['latest', 'offline']).toContain((await ok<Sync>('POST', '/api/sync', {})).state);
     expect((await ok<{ git: { behind: number } }>('GET', '/api/status')).git.behind).toBe(0);
   });
 });

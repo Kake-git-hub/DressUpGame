@@ -15,6 +15,13 @@ export interface Status {
   // behind: 公開されている素材のほうが何件新しいか（ほかの PC やクラウドから公開された分）
   git: { isRepo: boolean; branch: string | null; changedFiles: number; unusedFiles: number; behind: number };
 }
+// state: updated = 取り込んだ / latest = もう最新 / blocked = 新しいものがあるが取り込めない / offline = 確かめられない / no-repo = git の作業フォルダでない
+export interface SyncResult {
+  state: 'updated' | 'latest' | 'blocked' | 'offline' | 'no-repo';
+  updated: boolean;
+  behind: number;
+  message: string;
+}
 export interface Warning {
   code: string;
   message: string;
@@ -105,7 +112,7 @@ export const api = {
   jobImageUrl: (id: string, index: number, kind: 'png' | 'source' | 'shape' | 'hide' | 'front' | 'under' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
   publish: (message: string) => send<{ log: string }>('POST', '/publish', { message }),
   // 公開されている素材（ほかの PC やクラウドから公開された分）を取り込む
-  sync: () => send<{ updated: boolean; behind: number; message: string }>('POST', '/sync', {}),
+  sync: () => send<SyncResult>('POST', '/sync', {}),
 };
 
 export const contentUrl = (file: string) => `${CONTENT_BASE}${file}`;

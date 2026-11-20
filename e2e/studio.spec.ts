@@ -37,6 +37,14 @@ test.describe('スタジオ', () => {
     await expect(page.getByRole('heading', { name: 'きせかえスタジオ' })).toBeVisible();
   });
 
+  test('版数と、素材の取り込みの結果が、いつも画面に出る', async ({ page }) => {
+    // ドールが出てこないときに、スタジオが新しいか・素材を取り込めたかを、作者が画面で確かめられる
+    await expect(page.getByTestId('studio-version')).toHaveText(/^v\d+\.\d+\.\d+$/);
+    // テストの素材フォルダは git の作業フォルダではない
+    await expect(page.getByTestId('sync-note')).toContainText('素材の取り込み');
+    await expect(page.getByTestId('sync-note')).toContainText('git の作業フォルダではない');
+  });
+
   test('ドールを追加すると、範囲ができる', async ({ page }) => {
     // ドールが無い間は、ほかのタブは使えない
     await expect(page.getByTestId('tab-add')).toBeDisabled();

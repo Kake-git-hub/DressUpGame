@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Manifest } from '../content/manifest';
 import { ApiError, api } from './api';
-import type { Status } from './api';
+import type { Status, SyncResult } from './api';
+import { APP_VERSION } from '../version';
 import { AddItems, Backgrounds, DollPanel, Generate, Library } from './Panels';
 
 const TABS = [
@@ -22,10 +23,10 @@ const load = (): Promise<[Status, Manifest] | string> =>
   Promise.all([api.status(), api.content()]).catch((e: unknown) => (e instanceof ApiError ? e.message : String(e)));
 
 // 公開されている素材（ほかの PC やクラウドから公開された新しいドールなど）を取り込んでから、状態と一覧を読む。
-// 知らせる文は、取り込んだとき・取り込めなかったときだけ（最新なら null）
-async function syncAndLoad(): Promise<[string | null, [Status, Manifest] | string]> {
+// 取り込みの結果は、いつも画面に出す（ドールが出てこないときに、理由が分かるように）
+async function syncAndLoad(): Promise<[SyncResult | null, [Status, Manifest] | string]> {
   const synced = await api.sync().catch(() => null);
-  return [synced && (synced.updated || synced.behind > 0) ? synced.message : null, await load()];
+  return [synced, await load()];
 }
 
 export function Studio() {
@@ -35,7 +36,7 @@ export function Studio() {
   const [dollId, setDollId] = useState('');
   const [tab, setTab] = useState<Tab>('generate');
   const [publishing, setPublishing] = useState(false);
-  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [synced, setSynced] = useState<SyncResult | null>(null);
 
   const apply = useCallback((result: [Status, Manifest] | string) => {
     if (typeof result === 'string') {
@@ -50,8 +51,8 @@ export function Studio() {
   const reload = useCallback(() => load().then(apply), [apply]);
   const [syncing, setSyncing] = useState(false);
   const applySynced = useCallback(
-    ([note, result]: [string | null, [Status, Manifest] | string]) => {
-      setSyncNote(note);
+    ([note, result]: [SyncResult | null, [Status, Manifest] | string]) => {
+      setSynced(note);
       setSyncing(false);
       apply(result);
     },
@@ -82,6 +83,7 @@ export function Studio() {
     <div className="studio">
       <header>
         <h1>きせかえスタジオ</h1>
+        <span className="hint" data-testid="studio-version">v{APP_VERSION}</span>
         <label>
           ドール
           <select value={dollId} onChange={(e) => setDollId(e.target.value)} data-testid="doll-select">
@@ -109,10 +111,10 @@ export function Studio() {
         ))}
       </nav>
       {error && <p className="error">{error}</p>}
-      {syncNote && (
-        <p className={status.git.behind > 0 ? 'error' : 'hint'} data-testid="sync-note">
-          {syncNote}
-          {status.git.behind > 0 && (
+      {synced && (
+        <p className={synced.state === 'blocked' || synced.state === 'offline' ? 'error' : 'hint'} data-testid="sync-note">
+          素材の取り込み: {synced.message}
+          {(synced.state === 'blocked' || synced.state === 'offline') && (
             <button disabled={syncing} onClick={() => { setSyncing(true); void syncAndLoad().then(applySynced); }}>
               もう一度取り込む
             </button>

@@ -28,10 +28,9 @@ import { saveOutfit, loadOutfit, isOutfitFromBeforeHairParts } from './services/
 import { playDressUpSound } from './services/sound';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
+import { APP_VERSION } from './version';
 import './App.css';
 
-// アプリバージョン
-const APP_VERSION = '0.21.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;

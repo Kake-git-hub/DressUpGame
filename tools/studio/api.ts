@@ -54,6 +54,15 @@ export interface StudioOptions {
   maxAttempts?: number; // 1 品目あたりの生成回数（作り直しを含む）。既定は MAX_ATTEMPTS
 }
 
+// 公開されている素材の取り込みの結果。
+// state: updated = 取り込んだ / latest = もう最新 / blocked = 新しいものがあるが取り込めない / offline = 確かめられない / no-repo = git の作業フォルダでない
+export interface SyncResult {
+  state: 'updated' | 'latest' | 'blocked' | 'offline' | 'no-repo';
+  updated: boolean;
+  behind: number;
+  message: string;
+}
+
 class HttpError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -316,28 +325,33 @@ export class StudioApi {
    * 手元に未公開の変更があるとき・手元だけの記録があるときは、何も変えずに知らせる（手元の作業を壊さない）。
    * つながらない・公開先が無いときも、エラーにしない
    */
-  async sync(): Promise<{ updated: boolean; behind: number; message: string }> {
+  async sync(): Promise<SyncResult> {
     const before = await this.gitStatus();
-    if (!before.isRepo) return { updated: false, behind: 0, message: '素材フォルダが git の作業フォルダではないので、公開されている素材は確かめていません' };
+    if (!before.isRepo) return { state: 'no-repo', updated: false, behind: 0, message: `素材フォルダ（${this.store.dir}）が git の作業フォルダではないので、公開されている素材は確かめていません` };
     try {
       // つながらない回線で、スタジオの起動を長く待たせない
       await this.gitWithin(SYNC_FETCH_TIMEOUT_MS, 'fetch', '--quiet');
     } catch {
-      return { updated: false, behind: before.behind, message: '公開されている素材を確かめられませんでした（インターネットにつながっていないか、公開先がありません）' };
+      return { state: 'offline', updated: false, behind: before.behind, message: '公開されている素材を確かめられませんでした（インターネットにつながっていないか、公開先がありません）' };
     }
     const { behind, changedFiles } = await this.gitStatus();
-    if (behind === 0) return { updated: false, behind: 0, message: '素材は最新です' };
+    if (behind === 0) return { state: 'latest', updated: false, behind: 0, message: '素材は、公開されているものと同じ（最新）です' };
     if (changedFiles > 0) {
-      return { updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、未公開の変更が ${changedFiles} 件あるので取り込めません（このまま「公開」しても、公開先のほうが新しいので失敗します）` };
+      return {
+        state: 'blocked',
+        updated: false,
+        behind,
+        message: `公開されている素材のほうが ${behind} 件新しいですが、未公開の変更が ${changedFiles} 件あるので取り込めません（このまま「公開」しても、公開先のほうが新しいので失敗します）`,
+      };
     }
     try {
       await this.git('merge', '--ff-only', '--quiet', '@{upstream}');
     } catch {
-      return { updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、手元にだけある記録（前回 push できなかった分）があるので、自動では取り込めません` };
+      return { state: 'blocked', updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、手元にだけある記録（前回 push できなかった分）があるので、自動では取り込めません` };
     }
     // ドールの画像が変わったかもしれないので、読み込んだ型を捨てる
     this.templates.clear();
-    return { updated: true, behind: 0, message: `公開されている新しい素材を ${behind} 件取り込みました` };
+    return { state: 'updated', updated: true, behind: 0, message: `公開されている新しい素材を ${behind} 件取り込みました` };
   }
 
   private async route(req: ApiRequest): Promise<ApiResponse> {

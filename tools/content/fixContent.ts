@@ -5,6 +5,8 @@
  *     ドールの画像・2 倍の元画像（studio/masters）・顔の品目の、輪郭線に混ざった背景の緑を取る（形は変えない）
  *   npm run content:fix -- back-thumbs <素材フォルダ>
  *     後ろ髪のある品目に、うしろがみのサムネイル（体の裏の塗りつぶしを、うすい体の形で隠した絵）を足す
+ *   npm run content:fix -- copy-items <素材フォルダ> <もとのドールの ID> <さきのドールの ID>
+ *     もとのドールの服を全部、さきのドールにも置く（ドールをまとめるとき用。位置はそのままなので、体の形が違う所は合わない）
  *   npm run content:fix -- hair-shadows <素材フォルダ> [ドールの ID]
  *     前髪と後ろ髪に分かれた髪から、髪が肌に落とした影（前髪の下の額など）を取る（色スライダーで、影だけが色変わりしないように）
  *
@@ -19,7 +21,7 @@ import { cleanKeyEdge } from '../../src/pipeline/edgeClean.ts';
 import { fillUnderDoll, hairThumbs } from '../../src/pipeline/hairLayers.ts';
 import { skinShadowMask } from '../../src/pipeline/skinShadow.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
-import { encodeCutout, encodeLayer, encodeThumb } from './encode.ts';
+import { encodeCutout, encodeLayer, encodeThumb, uniqueId } from './encode.ts';
 import type { FileWriter } from './encode.ts';
 import { ContentError, ContentStore } from './manifestEdit.ts';
 
@@ -119,6 +121,41 @@ export async function addBackThumbs(contentDir: string): Promise<number> {
   });
 }
 
+/**
+ * もとのドールの服を全部、さきのドールにも置く（もとの服は消さない）。
+ * 絵は同じファイルを指す（増えない）。位置・隠す所・重ね順の上書きはそのまま。さきに無いカテゴリは、もとの設定で作る。
+ * さきに同じ絵の服がもうあれば、写さない（2 回実行しても増えない）
+ */
+export async function copyItems(contentDir: string, fromDollId: string, toDollId: string): Promise<{ copied: number; skipped: number; categories: string[] }> {
+  if (fromDollId === toDollId) throw new ContentError('もとのドールと、さきのドールが同じです');
+  const store = new ContentStore(contentDir);
+  return store.edit((manifest) => {
+    const from = manifest.dolls.find((d) => d.id === fromDollId);
+    const to = manifest.dolls.find((d) => d.id === toDollId);
+    if (!from) throw new ContentError(`ドール「${fromDollId}」がありません`, 404);
+    if (!to) throw new ContentError(`ドール「${toDollId}」がありません`, 404);
+    const categories: string[] = [];
+    for (const category of from.categories) {
+      if (to.categories.some((c) => c.id === category.id) || !from.items.some((i) => i.category === category.id)) continue;
+      to.categories.push({ ...category });
+      categories.push(category.id);
+    }
+    const used = new Set(to.items.map((i) => i.id));
+    const have = new Set(to.items.map((i) => i.image.file));
+    let copied = 0;
+    let skipped = 0;
+    for (const item of from.items) {
+      if (have.has(item.image.file)) {
+        skipped++;
+        continue;
+      }
+      to.items.push({ ...structuredClone(item), id: uniqueId(`${to.id}/${item.category}/${item.name}`, used) });
+      copied++;
+    }
+    return { copied, skipped, categories };
+  });
+}
+
 const MIN_SHADOW_PIXELS = 20;
 
 // 前髪と後ろ髪に分かれた髪から、髪が肌に落とした影を取る。直した品目の ID と、取った画素数を返す
@@ -181,12 +218,15 @@ async function main(args: string[]): Promise<void> {
     console.log(`ドール: ${result.doll}／元画像: ${result.master ?? '（なし）'}／顔: ${result.faces} 点`);
   } else if (command === 'back-thumbs' && rest.length === 1) {
     console.log(`うしろがみのサムネイルを ${await addBackThumbs(rest[0])} 点に足しました`);
+  } else if (command === 'copy-items' && rest.length === 3) {
+    const result = await copyItems(rest[0], rest[1], rest[2]);
+    console.log(`${result.copied} 点を写しました（もう写してあった ${result.skipped} 点は、そのまま）${result.categories.length ? `。足したカテゴリ: ${result.categories.join('、')}` : ''}`);
   } else if (command === 'hair-shadows' && (rest.length === 1 || rest.length === 2)) {
     const fixed = await removeHairShadows(rest[0], rest[1]);
     for (const f of fixed) console.log(`${f.id}: 影を ${f.removed} 画素取りました`);
     console.log(`${fixed.length} 点を直しました`);
   } else {
-    console.log('使い方:\n  fixContent.ts outline <素材フォルダ> <ドールの ID> [顔のカテゴリの ID]\n  fixContent.ts back-thumbs <素材フォルダ>\n  fixContent.ts hair-shadows <素材フォルダ> [ドールの ID]');
+    console.log('使い方:\n  fixContent.ts outline <素材フォルダ> <ドールの ID> [顔のカテゴリの ID]\n  fixContent.ts back-thumbs <素材フォルダ>\n  fixContent.ts hair-shadows <素材フォルダ> [ドールの ID]\n  fixContent.ts copy-items <素材フォルダ> <もとのドールの ID> <さきのドールの ID>');
     process.exitCode = 1;
   }
 }

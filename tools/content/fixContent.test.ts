@@ -8,7 +8,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { THUMB_BODY } from '../../src/pipeline/hairLayers.ts';
-import { addBackThumbs, cleanDollOutline, removeHairShadows } from './fixContent.ts';
+import { addBackThumbs, cleanDollOutline, copyItems, removeHairShadows } from './fixContent.ts';
 import { ContentStore } from './manifestEdit.ts';
 
 let dir: string;
@@ -200,3 +200,53 @@ describe('removeHairShadows', () => {
     expect(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8')).toBe(once);
   });
 });
+
+describe('copyItems', () => {
+  const setup = async () => {
+    const from = await store.addDoll({ name: 'もと', data: await outlined(300, 600, [100, 50, 100, 500]) });
+    const to = await store.addDoll({ name: 'さき', data: await outlined(300, 600, [100, 50, 100, 500]) });
+    await store.createCategory(from.id, { id: 'かばん', label: 'かばん', layer: 12, menuOrder: 20, overlap: true, movable: false });
+    const top = await store.addItem(from.id, { category: 'トップス', name: 'ふく', rgba: canvasOf([400, 300, 200, 100]), width: 1024, height: 1024, hide: new Uint8Array(1024 * 1024).fill(255, 0, 5000) });
+    await store.updateItem(top.id, { layer: 7 });
+    const bag = await store.addItem(from.id, { category: 'かばん', name: 'かばん', rgba: canvasOf([600, 400, 80, 80]), width: 1024, height: 1024 });
+    // さきのドールにも、同じ名前の服がある
+    const own = await store.addItem(to.id, { category: 'トップス', name: 'ふく', rgba: canvasOf([400, 300, 200, 100], 1024, [10, 10, 200]), width: 1024, height: 1024 });
+    return { from, to, top, bag, own };
+  };
+
+  it('もとのドールの服を、さきのドールに写す。もとはそのまま。無いカテゴリは作る。絵のファイルは同じものを指す', async () => {
+    const { from, to, top, bag, own } = await setup();
+    const filesBefore = (await fs.readdir(path.join(dir, 'files'))).length;
+    expect(await copyItems(dir, from.id, to.id)).toEqual({ copied: 2, skipped: 0, categories: ['かばん'] });
+
+    const manifest = await store.read();
+    const source = manifest.dolls.find((d) => d.id === from.id)!;
+    const target = manifest.dolls.find((d) => d.id === to.id)!;
+    expect(source.items).toHaveLength(2); // もとは消さない
+    expect(target.items.map((i) => i.id)).toEqual([own.id, `${to.id}/トップス/ふく-2`, `${to.id}/かばん/かばん`]);
+    // 名前・絵・隠す所・重ね順の上書きは、そのまま
+    const copied = target.items[1];
+    expect(copied).toMatchObject({ name: 'ふく', category: 'トップス', layer: 7 });
+    expect(copied.image).toEqual(manifest.dolls[0].items.find((i) => i.id === top.id)!.image);
+    expect(copied.hide).toBeDefined();
+    expect(target.items[2].image.file).toBe(bag.image.file);
+    expect(target.categories.find((c) => c.id === 'かばん')).toMatchObject({ label: 'かばん', layer: 12, menuOrder: 20, overlap: true });
+    expect((await fs.readdir(path.join(dir, 'files'))).length).toBe(filesBefore);
+  });
+
+  it('2 回目は、もう写してある服を写さない', async () => {
+    const { from, to } = await setup();
+    await copyItems(dir, from.id, to.id);
+    const once = await fs.readFile(path.join(dir, 'manifest.json'), 'utf8');
+    expect(await copyItems(dir, from.id, to.id)).toEqual({ copied: 0, skipped: 2, categories: [] });
+    expect(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8')).toBe(once);
+  });
+
+  it('無いドール・同じドールは断る', async () => {
+    const { from } = await setup();
+    await expect(copyItems(dir, from.id, 'いない')).rejects.toThrow(/いない/);
+    await expect(copyItems(dir, 'いない', from.id)).rejects.toThrow(/いない/);
+    await expect(copyItems(dir, from.id, from.id)).rejects.toThrow(/同じ/);
+  });
+});
+
