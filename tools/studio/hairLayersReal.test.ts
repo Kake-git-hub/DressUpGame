@@ -1,0 +1,104 @@
+// @vitest-environment node
+/**
+ * 髪の取り出し: 本物の生成画像（2026-11-20 の試作。AI の絵と、渡した拡大図）で確かめる
+ */
+import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import sharp from 'sharp';
+import { extractHair, fillUnderDoll } from '../../src/pipeline/hairLayers.ts';
+import { pixelDistance } from '../../src/pipeline/keyColors.ts';
+import type { Rgb } from '../../src/pipeline/keyColors.ts';
+
+const SIZE = 1024;
+const GREEN: Rgb = [0, 255, 0];
+const BLUE: Rgb = [0, 0, 255];
+const file = (name: string) => path.join(import.meta.dirname, 'fixtures', 'diff', name);
+
+async function raw(name: string): Promise<Uint8ClampedArray> {
+  const data = await sharp(fs.readFileSync(file(name))).removeAlpha().ensureAlpha().resize(SIZE, SIZE, { fit: 'fill' }).raw().toBuffer();
+  return new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+}
+// 元の図で、背景でない所がドール
+function dollOf(reference: Uint8ClampedArray, background: Rgb): Uint8Array {
+  const alpha = new Uint8Array(SIZE * SIZE);
+  for (let p = 0; p < alpha.length; p++) if (pixelDistance(reference, p * 4, background) >= 70) alpha[p] = 255;
+  return alpha;
+}
+async function load(slug: string, background: Rgb) {
+  const reference = await raw(`${slug}-ref.webp`);
+  const image = await raw(`${slug}-gen.webp`);
+  const doll = dollOf(reference, background);
+  return { doll, hair: extractHair(image, reference, doll, SIZE, SIZE, background) };
+}
+
+describe('extractHair（本物の生成画像）', async () => {
+  const pink = await load('h1-pink', GREEN);
+  const brown = await load('h2-brown', GREEN);
+  const braids = await load('h3-braids', BLUE);
+  const all = { 'うすいピンクのツインテール': pink, '茶色のロング': brown, '金の三つ編み': braids };
+
+  for (const [name, { doll, hair }] of Object.entries(all)) {
+    it(`${name}: 重ね直すと AI の絵に戻り、髪から離れた描き変えは無い`, () => {
+      expect(hair.unlike).toBeLessThan(0.02);
+      expect(hair.stray).toBeLessThan(0.01);
+      expect(hair.closeToSkin).toBeLessThan(0.25);
+    });
+    it(`${name}: 体の裏の塗りつぶしは、体の外に 1px も出ない`, () => {
+      const back = fillUnderDoll(hair.rgba, doll, SIZE, SIZE);
+      let outside = 0;
+      let filled = 0;
+      for (let p = 0; p < SIZE * SIZE; p++) {
+        if (back[p * 4 + 3] === 0 || hair.rgba[p * 4 + 3] > 0) continue;
+        filled++;
+        if (doll[p] < 128) outside++;
+      }
+      expect(outside).toBe(0);
+      expect(filled).toBeGreaterThan(20000); // 頭と胴の裏が塗られている
+    });
+  }
+
+  it('三つ編み: 体の前にたれた三つ編みが、前の範囲に入る', () => {
+    let belowChin = 0;
+    for (let y = Math.round(SIZE * 0.32); y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (braids.hair.front[y * SIZE + x]) belowChin++;
+    expect(belowChin).toBeGreaterThan(5000);
+  });
+
+  it('ツインテール: 前の範囲は、ほとんどが頭のまわり（体の後ろの髪は前にしない）', () => {
+    let total = 0;
+    let head = 0;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        if (!pink.hair.front[y * SIZE + x]) continue;
+        total++;
+        if (y < SIZE * 0.42) head++;
+      }
+    }
+    expect(total).toBeGreaterThan(10000);
+    expect(head / total).toBeGreaterThan(0.9);
+  });
+
+  it('うすいピンク（肌に近い色）の前髪が、欠けずに取り出せる', () => {
+    let band = 0;
+    let opaque = 0;
+    for (let y = Math.round(SIZE * 0.24); y < SIZE * 0.29; y++) {
+      for (let x = Math.round(SIZE * 0.44); x < SIZE * 0.56; x++) {
+        band++;
+        if (pink.hair.rgba[(y * SIZE + x) * 4 + 3] >= 128) opaque++;
+      }
+    }
+    expect(opaque / band).toBeGreaterThan(0.95);
+  });
+
+  it('髪のふちに、背景の緑が残らない', () => {
+    let greenish = 0;
+    let solid = 0;
+    for (let p = 0; p < SIZE * SIZE; p++) {
+      const i = p * 4;
+      if (brown.hair.rgba[i + 3] < 128) continue;
+      solid++;
+      if (brown.hair.rgba[i + 1] - Math.max(brown.hair.rgba[i], brown.hair.rgba[i + 2]) > 25) greenish++;
+    }
+    expect(greenish / solid).toBeLessThan(0.002);
+  });
+});
