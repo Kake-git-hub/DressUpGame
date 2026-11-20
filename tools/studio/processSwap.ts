@@ -28,8 +28,8 @@ export interface SwapResult extends ProcessResult {
 const REPAINT_LIMIT = 0.25;
 const SKIN_LIKE = 90;
 // 位置合わせの倍率がこの範囲の端に張りついたら、元の図と合っていない
-const SCALE_MIN = 0.93;
-const SCALE_MAX = 1.07;
+export const SCALE_MIN = 0.93;
+export const SCALE_MAX = 1.07;
 // 元の図との違い（diffMatte の不透明度）を、この px だけ太らせて使う（品目のふちのやわらかい所を欠かさない）
 const GROW = 3;
 // 肌の色合わせ: 変わっていない画素がこれより少なければ、合わせない
@@ -49,7 +49,8 @@ const TOP_BAND_SHARE = 0.03;
 // 元の図と違う画素が、枠の画素数をこれで割った数より少なければ「何も描かれていない」
 const EMPTY_DIVISOR = 1500;
 
-async function tileOf(image: Buffer, tile: Tile): Promise<Uint8ClampedArray> {
+// AI の絵（どんな大きさでも）を枠の大きさにそろえ、tile の分を取り出す（不透明の RGBA）
+export async function tileOf(image: Buffer, tile: Tile): Promise<Uint8ClampedArray> {
   const data = await sharp(image)
     .removeAlpha()
     .ensureAlpha()

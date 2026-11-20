@@ -96,12 +96,15 @@ export function matchToReference(image: Pixels, reference: Pixels, width: number
   const a = shrink(image, width, height, coarseW);
   const b = shrink(reference, width, height, coarseW);
   let best = { scale: 1, dx: 0, dy: 0, cost: cost(a, b, 1, 0, 0, 1) };
+  // 倍率 1（ずれただけ）の中でいちばん合う所も覚えておく。粗い絵では、ずれを少しの縮小と取り違えることがある
+  let bestUnit = best;
   const limit = Math.round(coarseW * SHIFT_LIMIT);
   for (const scale of SCALE_STEPS) {
     for (let dy = -limit; dy <= limit; dy++) {
       for (let dx = -limit; dx <= limit; dx++) {
         const c = cost(a, b, scale, dx, dy, 1);
         if (c < best.cost) best = { scale, dx, dy, cost: c };
+        if (scale === 1 && c < bestUnit.cost) bestUnit = { scale, dx, dy, cost: c };
       }
     }
   }
@@ -113,15 +116,19 @@ export function matchToReference(image: Pixels, reference: Pixels, width: number
   const identity = cost(fa, fb, 1, 0, 0, step);
   let fine = { scale: 1, dx: 0, dy: 0, cost: identity };
   const reach = Math.ceil(up) + 1;
-  for (const ds of [-0.01, -0.005, 0, 0.005, 0.01]) {
-    const scale = best.scale + ds;
-    for (let dy = Math.round(best.dy * up) - reach; dy <= Math.round(best.dy * up) + reach; dy++) {
-      for (let dx = Math.round(best.dx * up) - reach; dx <= Math.round(best.dx * up) + reach; dx++) {
-        const c = cost(fa, fb, scale, dx, dy, step);
-        if (c < fine.cost) fine = { scale, dx, dy, cost: c };
+  const refine = (from: { scale: number; dx: number; dy: number }, scales: number[]) => {
+    for (const ds of scales) {
+      const scale = from.scale + ds;
+      for (let dy = Math.round(from.dy * up) - reach; dy <= Math.round(from.dy * up) + reach; dy++) {
+        for (let dx = Math.round(from.dx * up) - reach; dx <= Math.round(from.dx * up) + reach; dx++) {
+          const c = cost(fa, fb, scale, dx, dy, step);
+          if (c < fine.cost) fine = { scale, dx, dy, cost: c };
+        }
       }
     }
-  }
+  };
+  refine(best, [-0.01, -0.005, 0, 0.005, 0.01]);
+  if (bestUnit.scale !== best.scale || bestUnit.dx !== best.dx || bestUnit.dy !== best.dy) refine(bestUnit, [0]);
   if (!(fine.cost < identity * (1 - MIN_GAIN))) {
     return { rgba: new Uint8ClampedArray(image), scale: 1, dx: 0, dy: 0 };
   }

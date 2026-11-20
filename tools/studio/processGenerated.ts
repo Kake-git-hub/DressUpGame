@@ -42,6 +42,8 @@ export interface ProcessResult {
   shape: Uint8Array | null;
   closeColorRatio: number;
   warnings: ProcessWarning[];
+  // 髪を本物のドールに描かせたとき: 前髪としてドールの上に描く範囲（キャンバス大の不透明度）。rgba は髪の全体
+  front?: Uint8Array | null;
 }
 
 // ドールをキャンバス全体に戻した画像と、その形
