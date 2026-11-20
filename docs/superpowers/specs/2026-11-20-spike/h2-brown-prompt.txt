@@ -1,0 +1,12 @@
+The image is a close-up of the upper half (head to hips) of a bald doll with a blank face, for a paper-doll dress-up game, on a flat pure bright green (#00FF00) background.
+Give the doll this hairstyle: Very long straight chestnut brown hair reaching the hips, parted in the middle, with long side locks framing the face.
+Art style: Japanese anime style, clean thin dark outlines, flat cel shading with soft highlights
+Draw the complete hairstyle on the doll the way it would naturally look: the bangs and the hair on top of the head in front of the head, and the hair that falls behind the neck, shoulders and back hidden behind the body where the body is in front of it.
+Strict rules:
+- Keep the doll exactly as it is: same position, size, pose, outline, skin colour and underwear. Do not move, resize, redraw or restyle it. Keep the same framing; do not zoom or crop.
+- The face stays completely blank: no eyes, eyebrows, nose, mouth or blush. Faces are a separate item.
+- Draw only the hair (a small hair ornament is fine if the description asks for one). No hat, no clothes, no other objects.
+- The background stays the same flat pure bright green (#00FF00) with no shadow, gradient, text or frame. Every gap between strands of hair shows the flat background or the doll.
+- The hair must not contain pure bright green (#00FF00) or colours close to it.
+- The whole hairstyle fits inside the image with a clear margin on every side, and ends above the bottom edge.
+- Same art style and thin dark outlines as the doll.
