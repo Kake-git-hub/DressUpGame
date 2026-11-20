@@ -24,6 +24,8 @@ interface ItemAdjustPanelProps {
   onRemove?: (itemId: string) => void; // 枠の × で服を脱がせる
   onSelect?: (itemId: string) => void; // 別の服の調整に切り替える（いまの調整は先に反映される）
   onLayerChange?: (itemId: string, layerAdjust: number) => void; // 調整中でない服の、重なりの前後を変える（一覧のドラッグ）
+  // 縦画面では、一覧・色・ボタンを画面の下に置き、一覧は横並び（左が手前）になる
+  orientation?: 'landscape' | 'portrait';
   onAdjust: (adjustment: ItemAdjustment) => void;
   onClose: () => void;
   canvasWidth: number;
@@ -73,6 +75,7 @@ export function ItemAdjustPanel({
   onRemove,
   onSelect,
   onLayerChange,
+  orientation = 'landscape',
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -296,10 +299,21 @@ export function ItemAdjustPanel({
   const EDGE_SCROLL_PX = 24; // 一覧の端からこの幅に指があるあいだ、一覧を流し続ける
   const EDGE_SCROLL_STEP = 6; // 1 フレームに流す量
   const pickerItemsRef = useRef<HTMLDivElement>(null);
+  // 一覧の向き: 横画面は縦並び（上が手前）、縦画面は横並び（左が手前）。ドラッグも、その向きで見る
+  const horizontal = orientation === 'portrait';
+  const pointerPos = (e: { clientX: number; clientY: number }) => (horizontal ? e.clientX : e.clientY);
+  const rectStart = (r: DOMRect) => (horizontal ? r.left : r.top);
+  const rectSize = (r: DOMRect) => (horizontal ? r.width : r.height);
+  const getScroll = (el: HTMLElement) => (horizontal ? el.scrollLeft : el.scrollTop);
+  const setScroll = (el: HTMLElement, value: number) => {
+    if (horizontal) el.scrollLeft = value;
+    else el.scrollTop = value;
+  };
+  const scrollRange = (el: HTMLElement) => Math.max(0, horizontal ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight);
   const rowDragRef = useRef<{
     id: string;
     pointerId: number;
-    startY: number;
+    startY: number; // 一覧の向きでの位置（横画面は上下、縦画面は左右）
     lastY: number;
     startScroll: number;
     maxScroll: number; // 流せる上限（つかんだ時点。動かしている行は transform で外へ出るので、あとからは測れない）
@@ -330,7 +344,7 @@ export function ItemAdjustPanel({
     const d = rowDragRef.current;
     const container = pickerItemsRef.current;
     if (!d || !container) return;
-    const dy = d.lastY - d.startY + (container.scrollTop - d.startScroll);
+    const dy = d.lastY - d.startY + (getScroll(container) - d.startScroll);
     const own = d.slots[d.from] + dy;
     // いちばん近い行の位置に入る（となりの行までの半分を越えたら、入れ替わる）
     let to = 0;
@@ -344,10 +358,12 @@ export function ItemAdjustPanel({
     const container = pickerItemsRef.current;
     if (!d || !container || d.mode !== 'drag') return;
     const box = container.getBoundingClientRect();
-    const before = container.scrollTop;
-    if (d.lastY < box.top + EDGE_SCROLL_PX) container.scrollTop = Math.max(0, before - EDGE_SCROLL_STEP);
-    else if (d.lastY > box.bottom - EDGE_SCROLL_PX) container.scrollTop = Math.min(d.maxScroll, before + EDGE_SCROLL_STEP);
-    if (container.scrollTop !== before) updateRowDrag();
+    const before = getScroll(container);
+    const near = rectStart(box);
+    const far = near + rectSize(box);
+    if (d.lastY < near + EDGE_SCROLL_PX) setScroll(container, Math.max(0, before - EDGE_SCROLL_STEP));
+    else if (d.lastY > far - EDGE_SCROLL_PX) setScroll(container, Math.min(d.maxScroll, before + EDGE_SCROLL_STEP));
+    if (getScroll(container) !== before) updateRowDrag();
     d.frame = requestAnimationFrame(edgeScroll);
   };
   const stopRowDragTimers = () => {
@@ -366,19 +382,19 @@ export function ItemAdjustPanel({
     if (from < 0) return;
     const rects = rows.map((r) => r.getBoundingClientRect());
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    const pitch = rects.length > 1 ? Math.abs(rects[1].top - rects[0].top) : rects[0].height;
+    const pitch = rects.length > 1 ? Math.abs(rectStart(rects[1]) - rectStart(rects[0])) : rectSize(rects[0]);
     // 一覧が収まらないときの指: 押し続けてから並べ替える。マウスは（ホイールで流せるので）いつでもすぐ並べ替える
-    const holdToDrag = e.pointerType !== 'mouse' && container.scrollHeight > container.clientHeight + 1;
+    const holdToDrag = e.pointerType !== 'mouse' && scrollRange(container) > 1;
     rowDragRef.current = {
       id,
       pointerId: e.pointerId,
-      startY: e.clientY,
-      lastY: e.clientY,
-      startScroll: container.scrollTop,
-      maxScroll: Math.max(0, container.scrollHeight - container.clientHeight),
+      startY: pointerPos(e),
+      lastY: pointerPos(e),
+      startScroll: getScroll(container),
+      maxScroll: scrollRange(container),
       from,
       to: from,
-      slots: rects.map((r) => r.top + r.height / 2),
+      slots: rects.map((r) => rectStart(r) + rectSize(r) / 2),
       pitch,
       mode: 'pending',
       holdToDrag,
@@ -401,16 +417,16 @@ export function ItemAdjustPanel({
     const d = rowDragRef.current;
     const container = pickerItemsRef.current;
     if (!d || !container || e.pointerId !== d.pointerId) return;
-    d.lastY = e.clientY;
+    d.lastY = pointerPos(e);
     if (d.mode === 'pending') {
-      if (Math.abs(e.clientY - d.startY) < DRAG_START_PX) return;
+      if (Math.abs(d.lastY - d.startY) < DRAG_START_PX) return;
       if (d.holdTimer !== null) clearTimeout(d.holdTimer);
       d.holdTimer = null;
       d.mode = d.holdToDrag ? 'scroll' : 'drag';
     }
     d.moved = true;
     if (d.mode === 'scroll') {
-      container.scrollTop = Math.max(0, Math.min(d.maxScroll, d.startScroll - (e.clientY - d.startY)));
+      setScroll(container, Math.max(0, Math.min(d.maxScroll, d.startScroll - (d.lastY - d.startY))));
       return;
     }
     updateRowDrag();
@@ -438,10 +454,11 @@ export function ItemAdjustPanel({
   // 行の見た目: 動かしている行は指に付いていき、ほかの行は場所をあける。index は一覧の上からの番号（ドールの行も数える）
   const rowStyle = (index: number): React.CSSProperties | undefined => {
     if (!rowDrag) return undefined;
-    if (index === rowDrag.from) return { transform: `translateY(${rowDrag.dy}px)` };
+    const translate = horizontal ? 'translateX' : 'translateY';
+    if (index === rowDrag.from) return { transform: `${translate}(${rowDrag.dy}px)` };
     const order = index < rowDrag.from ? index : index - 1; // ほかの行の中での番号
     const next = order < rowDrag.to ? order : order + 1; // 入れたあとの番号
-    return next === index ? undefined : { transform: `translateY(${(next - index) * rowDrag.pitch}px)` };
+    return next === index ? undefined : { transform: `${translate}(${(next - index) * rowDrag.pitch}px)` };
   };
 
   // 枠の角の「拡大・回転」つまみ（シールの調整と同じ操作）

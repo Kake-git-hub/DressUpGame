@@ -464,41 +464,43 @@ function App() {
     );
   }
 
+  const portrait = layout.orientation === 'portrait';
+
+  // ボタン（横では画面の右、縦では下のボタンの行に置く）
+  const screenshotButton = currentDoll && (
+    <button className="screenshot-button" onClick={handleScreenshot} title="スクショ" data-testid="screenshot-button">
+      📷
+    </button>
+  );
+  // リセットボタン（服を着ている場合のみ表示）
+  const resetButton = equippedItems.length > 0 && (
+    <button
+      className="reset-button-fixed"
+      onClick={() => {
+        if (window.confirm('きせかえをリセットしますか？')) {
+          handleReset();
+        }
+      }}
+      title="リセット"
+    >
+      🔄
+    </button>
+  );
+  const adjustButton = currentDoll && (
+    <button className="tool-button" onClick={handleAdjustButtonClick} title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}>
+      {equippedItems.length > 0 ? '👗' : '📐'}
+    </button>
+  );
+
   return (
     <div className="app" data-orientation={layout.orientation}>
       {versionBadge}
 
       {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
-      {currentDoll && !isAdjustingItem && (
-        <button
-          className="screenshot-button"
-          onClick={handleScreenshot}
-          title="スクショ"
-          data-testid="screenshot-button"
-        >
-          📷
-        </button>
-      )}
+      {!portrait && !isAdjustingItem && screenshotButton}
 
       {/* 右下ボタングループ - 調整中は非表示 */}
-      {!isAdjustingItem && (
-        <div className="bottom-right-buttons">
-          {/* リセットボタン（服を着ている場合のみ表示） */}
-          {equippedItems.length > 0 && (
-            <button
-              className="reset-button-fixed"
-              onClick={() => {
-                if (window.confirm('きせかえをリセットしますか？')) {
-                  handleReset();
-                }
-              }}
-              title="リセット"
-            >
-              🔄
-            </button>
-          )}
-        </div>
-      )}
+      {!portrait && !isAdjustingItem && <div className="bottom-right-buttons">{resetButton}</div>}
 
       <main className="app-main">
         {/* ドールが存在する場合のみ表示 */}
@@ -507,7 +509,7 @@ function App() {
             ref={avatarSectionRef}
             className="avatar-section"
             // 縦: キャンバスは上のあきの下に、正方形の高さで置く（横は CSS のまま）
-            style={layout.orientation === 'portrait' ? { top: layout.canvas.top, height: layout.canvas.height } : undefined}
+            style={portrait ? { top: layout.canvas.top, height: layout.canvas.height } : undefined}
           >
             <AvatarCanvas
               ref={avatarCanvasRef}
@@ -526,21 +528,11 @@ function App() {
         )}
 
         {/* ツールボタン（調整モードでないとき表示）- avatar-sectionの外に配置 */}
-        {currentDoll && !isAdjustingItem && (
-          <div className="tool-buttons">
-            <button
-              className="tool-button"
-              onClick={handleAdjustButtonClick}
-              title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}
-            >
-              {equippedItems.length > 0 ? '👗' : '📐'}
-            </button>
-          </div>
-        )}
+        {!portrait && !isAdjustingItem && adjustButton && <div className="tool-buttons">{adjustButton}</div>}
 
-        {/* ドレスアップメニュー - アイテム調整中は非表示 */}
+        {/* ドレスアップメニュー - アイテム調整中は非表示。縦では画面の下（カテゴリ → 服 → ボタンの行） */}
         {!isAdjustingItem && (
-          <section className="palette-section">
+          <section className="palette-section" style={portrait ? { height: layout.menuHeight } : undefined}>
             <DressUpMenu
               items={filteredClothing}
               onItemDrop={handleItemDrop}
@@ -555,7 +547,16 @@ function App() {
               onDragMove={handleDragMove}
               onDragEnd={handleDragEnd}
               onBackgroundDragEnd={handleDragEnd}
+              layout={layout.orientation}
+              itemRows={layout.itemRows}
             />
+            {portrait && (
+              <div className="portrait-tools" data-testid="portrait-tools">
+                {adjustButton}
+                {screenshotButton}
+                {resetButton}
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -579,6 +580,7 @@ function App() {
           onRemove={handleAdjustRemove}
           onSelect={setAdjustingItemId}
           onLayerChange={(id, layerAdjust) => updateItemAdjustment(id, { layerAdjust })}
+          orientation={layout.orientation}
         />
       )}
 

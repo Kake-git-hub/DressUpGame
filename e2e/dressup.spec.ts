@@ -1179,3 +1179,183 @@ test('更新の前に保存した服装（調整値が画面の px）は、同�
   expect(saved.units).toBe('doll');
   expect(saved.x).toBeCloseTo(ADJUST_DX / BASE_SCALE, 3);
 });
+
+test.describe('縦画面', () => {
+  const PW = 820;
+  const PH = 1180;
+  const P_UNIT = (PW * 0.9) / 1024; // 縦では、正方形の一辺 = 画面の幅
+  const P_DOLL_X = PW / 2;
+  const pY = (y: number) => PW / 2 + (y - IMG / 2) * P_UNIT;
+
+  async function openPortrait(page: Page, width = PW, height = PH): Promise<void> {
+    await openApp(page);
+    await page.setViewportSize({ width, height });
+    await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
+    await expect(page.getByTestId('portrait-categories')).toBeVisible();
+  }
+  const selectCategory = (page: Page, label: string) => page.getByTestId('portrait-categories').getByRole('button', { name: label }).click();
+  const itemBox = async (page: Page, name: string) => (await page.getByTestId('portrait-items').locator(`img[alt="${name}"]`).boundingBox())!;
+
+  test('メニューは下にあり、服を上へドラッグして着せる。メニューの上で離すと着ない', async ({ page }) => {
+    await openPortrait(page);
+    const categories = page.getByTestId('portrait-categories');
+    await expect(categories.getByRole('button', { name: 'トップス' })).toBeVisible();
+    await expect(categories.getByRole('button', { name: 'ボトムス' })).toBeVisible();
+    // 3 つの行は、キャンバスの下に、上から カテゴリ → 服 → ボタン の順
+    const canvas = (await page.getByTestId('avatar-canvas').boundingBox())!;
+    const cat = (await categories.boundingBox())!;
+    const items = (await page.getByTestId('portrait-items').boundingBox())!;
+    const tools = (await page.getByTestId('portrait-tools').boundingBox())!;
+    expect(canvas.y + canvas.height).toBeLessThanOrEqual(cat.y + 0.5);
+    expect(cat.y + cat.height).toBeLessThanOrEqual(items.y + 0.5);
+    expect(items.y + items.height).toBeLessThanOrEqual(tools.y + 0.5);
+    expect(tools.y + tools.height).toBeLessThanOrEqual(PH + 0.5);
+    // 縦の服は、横になぞると一覧が流れる設定（上へ動かすとドラッグ）
+    await selectCategory(page, 'トップス');
+    await expect(categories.getByRole('button', { name: 'トップス' })).toHaveAttribute('aria-pressed', 'true');
+    const red = await itemBox(page, 'red');
+    expect(await page.getByTestId('portrait-items').locator('img[alt="red"]').evaluate((el) => getComputedStyle(el.closest('[data-draggable]')!).touchAction)).toBe('pan-x');
+    // 上へドラッグして着せる
+    await page.mouse.move(red.x + red.width / 2, red.y + red.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X, pY(380), { steps: 6 });
+    await page.mouse.up();
+    await expectPixel(page, P_DOLL_X, pY(380), RED);
+    // メニューの上で離すと着ない（青に替わらない）
+    const blue = await itemBox(page, 'blue');
+    await page.mouse.move(blue.x + blue.width / 2, blue.y + blue.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(blue.x + blue.width / 2, cat.y + 20, { steps: 4 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    await expectPixel(page, P_DOLL_X, pY(380), RED);
+    // ボタンの行: 調整・写真・リセット
+    const toolRow = page.getByTestId('portrait-tools');
+    await expect(toolRow.locator('.screenshot-button')).toBeVisible();
+    await expect(toolRow.locator('.reset-button-fixed')).toBeVisible();
+    await toolRow.locator('.tool-button').click();
+    await expect(page.locator('.item-adjust-done-btn-small')).toBeVisible();
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expect(toolRow.locator('.tool-button')).toBeVisible();
+    // リセットで脱げる
+    await toolRow.locator('.reset-button-fixed').click();
+    await expectPixel(page, P_DOLL_X, pY(380), SKIN);
+  });
+
+  test('背景を選べる。ドールを切り替える欄がある', async ({ page }) => {
+    await openPortrait(page);
+    await expect(page.getByTestId('portrait-categories').locator('select')).toBeVisible();
+    await selectCategory(page, 'はいけい');
+    const bg = (await page.getByTestId('portrait-items').locator('img').first().boundingBox())!;
+    await page.mouse.move(bg.x + bg.width / 2, bg.y + bg.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X, 200, { steps: 6 });
+    await page.mouse.up();
+    await expectPixel(page, 20, BG_Y, BG);
+    // 「なし」で外れる
+    await page.getByTestId('portrait-items').getByRole('button', { name: /なし/ }).click();
+    await expect.poll(async () => near(await canvasPixel(page, 20, BG_Y), BG)).toBe(false);
+  });
+
+  test('せまくて低い画面（360×640）でも、キャンバスと 3 つの行が重ならず、画面の中に収まる', async ({ page }) => {
+    await openPortrait(page, 360, 640);
+    // 出てくるときの動きが終わるまで待つ
+    await expect.poll(async () => (await page.getByTestId('avatar-canvas').boundingBox())?.y).toBe(0);
+    const round = (box: { x: number; y: number; width: number; height: number }) => ({ x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) });
+    const canvas = round((await page.getByTestId('avatar-canvas').boundingBox())!);
+    const cat = (await page.getByTestId('portrait-categories').boundingBox())!;
+    const items = (await page.getByTestId('portrait-items').boundingBox())!;
+    const tools = (await page.getByTestId('portrait-tools').boundingBox())!;
+    expect(canvas).toEqual({ x: 0, y: 0, width: 360, height: 360 });
+    expect(canvas.y + canvas.height).toBeLessThanOrEqual(cat.y + 0.5);
+    expect(cat.y + cat.height).toBeLessThanOrEqual(items.y + 0.5);
+    expect(items.y + items.height).toBeLessThanOrEqual(tools.y + 0.5);
+    expect(tools.y + tools.height).toBeLessThanOrEqual(640.5);
+    for (const box of [cat, items, tools]) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(360.5);
+    }
+    // ボタンは 3 つとも押せる大きさで、画面の中
+    for (const selector of ['.tool-button', '.screenshot-button']) {
+      const b = (await page.getByTestId('portrait-tools').locator(selector).boundingBox())!;
+      expect(b.width).toBeGreaterThanOrEqual(40);
+      expect(b.x + b.width).toBeLessThanOrEqual(360);
+    }
+  });
+
+  test('調整画面: 一覧と色・ボタンは下にあり、一覧は左右に動かして並べ替える。持ち替えても、服はドールに対して同じ位置', async ({ page }) => {
+    await openPortrait(page);
+    for (const [category, name] of [['トップス', 'red'], ['ボトムス', 'green']] as const) {
+      await selectCategory(page, category);
+      const box = await itemBox(page, name);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(P_DOLL_X, pY(500), { steps: 6 });
+      await page.mouse.up();
+    }
+    await expectPixel(page, P_DOLL_X, pY(660), GREEN);
+    await page.getByTestId('portrait-tools').locator('.tool-button').click();
+    // 一覧は、キャンバスの下に横並び（左が手前）
+    const rows = page.locator('[data-testid="adjust-picker-items"] > *');
+    const names = () => rows.evaluateAll((els) => els.map((el) => (el.getAttribute('title') ?? '').slice(0, 3)));
+    await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+    const r0 = (await rows.nth(0).boundingBox())!;
+    const r1 = (await rows.nth(1).boundingBox())!;
+    expect(Math.abs(r0.y - r1.y)).toBeLessThan(1);
+    expect(r1.x).toBeGreaterThan(r0.x + r0.width - 1);
+    expect(r0.y).toBeGreaterThanOrEqual(PW); // 正方形（高さ = 幅）より下
+    // 色のスライダーと ✓ ↺ も、キャンバスより下
+    for (const selector of ['.item-adjust-done-btn-small', '.item-adjust-reset-btn-small', '.hue-slider-vertical']) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(PW);
+      expect(box.y + box.height).toBeLessThanOrEqual(PH);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(PW);
+    }
+    const slider = (await page.locator('.hue-slider-vertical').boundingBox())!;
+    expect(slider.width).toBeGreaterThan(slider.height * 2); // 横向きのスライダー
+    // 行を右へ動かして、となりと入れ替える
+    await page.mouse.move(r0.x + r0.width / 2, r0.y + r0.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(r0.x + r0.width / 2 + (r1.x - r0.x) * 0.7, r0.y + r0.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(names).toEqual(['gre', 'red', 'ドール']);
+    // 調整中の服（ボトムス）を右へ動かして確定
+    const DX = 150;
+    await page.mouse.move(P_DOLL_X, pY(660));
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X + DX, pY(660), { steps: 6 });
+    await page.mouse.up();
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expectPixel(page, P_DOLL_X + DX + 120, pY(660), GREEN);
+    // 横に持ち替える: ドールに対して同じ位置（ずれは、縮尺の比 だけ変わる）
+    await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+    await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
+    const k = BASE_SCALE / P_UNIT;
+    await expectPixel(page, DOLL_X + (DX + 120) * k, BOTTOM_Y, GREEN);
+    await expect.poll(async () => near(await canvasPixel(page, DOLL_X - 200 * k, BOTTOM_Y), GREEN), { timeout: 10_000 }).toBe(false);
+  });
+
+  test('調整画面を開いたまま持ち替えても、落ちずに調整を続けられる', async ({ page }) => {
+    await openPortrait(page);
+    await selectCategory(page, 'トップス');
+    const box = await itemBox(page, 'red');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X, pY(380), { steps: 6 });
+    await page.mouse.up();
+    await page.getByTestId('portrait-tools').locator('.tool-button').click();
+    await expect(page.locator('.item-adjust-done-btn-small')).toBeVisible();
+    await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+    await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
+    await expect(page.locator('.item-adjust-done-btn-small')).toBeVisible();
+    await expect(page.getByTestId('adjust-picker-item')).toHaveCount(1);
+    // 横の調整画面として動く: 動かして確定
+    await page.mouse.move(DOLL_X, TOP_Y);
+    await page.mouse.down();
+    await page.mouse.move(DOLL_X + ADJUST_DX, TOP_Y, { steps: 6 });
+    await page.mouse.up();
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  });
+});

@@ -22,6 +22,9 @@ interface DressUpMenuProps {
   onDragEnd?: () => void;
   onBackgroundDragMove?: (bg: BackgroundData, position: Position) => void;
   onBackgroundDragEnd?: () => void;
+  // 縦画面では、画面の下に「カテゴリの行」と「服の行（itemRows 段）」を横に流して並べる
+  layout?: 'landscape' | 'portrait';
+  itemRows?: number;
 }
 
 export function DressUpMenu({
@@ -39,6 +42,8 @@ export function DressUpMenu({
   onDragEnd,
   onBackgroundDragMove,
   onBackgroundDragEnd,
+  layout = 'landscape',
+  itemRows = 1,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
@@ -92,6 +97,30 @@ export function DressUpMenu({
     if (!selectedCategoryLandscape) return [];
     return groupedItems.get(selectedCategoryLandscape) ?? [];
   }, [selectedCategoryLandscape, groupedItems]);
+
+  // 縦画面: カテゴリの行はいつも出ていて、選んだカテゴリの服がその下に並ぶ
+  if (layout === 'portrait') {
+    return (
+      <PortraitMenu
+        groupedItems={groupedItems}
+        equippedIds={equippedIds}
+        equippedTypes={equippedTypes}
+        itemRows={itemRows}
+        onItemDrop={onItemDrop}
+        dolls={dolls}
+        currentDollId={currentDollId}
+        onDollChange={onDollChange}
+        dropTargetId={dropTargetId}
+        backgrounds={backgrounds}
+        currentBackgroundId={currentBackgroundId}
+        onBackgroundChange={onBackgroundChange}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+        onBackgroundDragMove={onBackgroundDragMove}
+        onBackgroundDragEnd={onBackgroundDragEnd}
+      />
+    );
+  }
 
   // 背景選択画面（横画面）
   if (showBackgrounds) {
@@ -272,6 +301,146 @@ export function DressUpMenu({
 }
 
 // ドラッグ可能なアイテムコンポーネント（メモ化で再レンダリング軽減）
+// 縦画面の、下のメニュー
+const PORTRAIT_BACKGROUND = '__background';
+const PORTRAIT_TILE = 72; // 服 1 点の大きさ（行の高さ 84px に収まる）
+
+interface PortraitMenuProps {
+  groupedItems: Map<string, ClothingItemData[]>;
+  equippedIds: Set<string>;
+  equippedTypes: Set<string>;
+  itemRows: number;
+  onItemDrop: (item: ClothingItemData) => void;
+  dolls: DollData[];
+  currentDollId: string;
+  onDollChange: (dollId: string) => void;
+  dropTargetId: string;
+  backgrounds: BackgroundData[];
+  currentBackgroundId: string | null;
+  onBackgroundChange?: (backgroundId: string | null) => void;
+  onDragMove?: (item: ClothingItemData, position: Position) => void;
+  onDragEnd?: () => void;
+  onBackgroundDragMove?: (bg: BackgroundData, position: Position) => void;
+  onBackgroundDragEnd?: () => void;
+}
+
+function PortraitMenu({
+  groupedItems,
+  equippedIds,
+  equippedTypes,
+  itemRows,
+  onItemDrop,
+  dolls,
+  currentDollId,
+  onDollChange,
+  dropTargetId,
+  backgrounds,
+  currentBackgroundId,
+  onBackgroundChange,
+  onDragMove,
+  onDragEnd,
+  onBackgroundDragMove,
+  onBackgroundDragEnd,
+}: PortraitMenuProps) {
+  const categories = Array.from(groupedItems.keys());
+  const [chosen, setChosen] = useState<string | null>(null);
+  // 選んだカテゴリが無くなったら（ドールを替えたとき）、先頭のカテゴリに戻す
+  const selected =
+    chosen === PORTRAIT_BACKGROUND && backgrounds.length > 0
+      ? PORTRAIT_BACKGROUND
+      : chosen !== null && groupedItems.has(chosen)
+        ? chosen
+        : (categories[0] ?? (backgrounds.length > 0 ? PORTRAIT_BACKGROUND : null));
+  const items = selected && selected !== PORTRAIT_BACKGROUND ? (groupedItems.get(selected) ?? []) : [];
+  // 服は、上から下へ段を埋めてから右へ進む（横に流す）
+  const grid: CSSProperties = { gridTemplateRows: `repeat(${Math.max(1, itemRows)}, ${PORTRAIT_TILE}px)` };
+
+  return (
+    <div className="portrait-menu" data-menu="dressup-menu">
+      <div className="portrait-categories" data-testid="portrait-categories">
+        <select className="portrait-doll-select" value={currentDollId} onChange={(e) => onDollChange(e.target.value)} disabled={dolls.length === 0} aria-label="ドール">
+          {dolls.length === 0 ? (
+            <option value="">ドールなし</option>
+          ) : (
+            dolls.map((doll) => (
+              <option key={doll.id} value={doll.id}>
+                {doll.name}
+              </option>
+            ))
+          )}
+        </select>
+        {backgrounds.length > 0 && (
+          <button
+            type="button"
+            className={`portrait-category${currentBackgroundId ? ' worn' : ''}`}
+            aria-pressed={selected === PORTRAIT_BACKGROUND}
+            onClick={() => setChosen(PORTRAIT_BACKGROUND)}
+          >
+            <span className="portrait-category-thumb" aria-hidden="true">🖼️</span>
+            <span className="portrait-category-label">はいけい</span>
+          </button>
+        )}
+        {categories.map((category) => {
+          const first = groupedItems.get(category)?.[0];
+          return (
+            <button
+              key={category}
+              type="button"
+              className={`portrait-category${equippedTypes.has(category) ? ' worn' : ''}`}
+              aria-pressed={selected === category}
+              onClick={() => setChosen(category)}
+            >
+              <span className="portrait-category-thumb">
+                {first && <img src={first.thumbnailUrl || first.imageUrl} alt="" draggable={false} loading="lazy" />}
+              </span>
+              <span className="portrait-category-label">{category}</span>
+            </button>
+          );
+        })}
+        {categories.length === 0 && <p className="portrait-empty">まだ ふくが ありません</p>}
+      </div>
+      <div className="portrait-items" data-testid="portrait-items" style={grid}>
+        {selected === PORTRAIT_BACKGROUND ? (
+          <>
+            {currentBackgroundId !== null && (
+              <button type="button" className="portrait-none" onClick={() => onBackgroundChange?.(null)}>
+                ✕ なし
+              </button>
+            )}
+            {backgrounds.map((bg) => (
+              <DraggableBackground
+                key={bg.id}
+                bg={bg}
+                isSelected={currentBackgroundId === bg.id}
+                onDrop={onBackgroundChange ?? (() => {})}
+                dropTargetId={dropTargetId}
+                onDragMove={onBackgroundDragMove}
+                onDragEnd={onBackgroundDragEnd}
+                size={PORTRAIT_TILE}
+                touchAction="pan-x"
+              />
+            ))}
+          </>
+        ) : (
+          items.map((item) => (
+            <DraggableItem
+              key={item.id}
+              item={item}
+              isEquipped={equippedIds.has(item.id)}
+              onDrop={onItemDrop}
+              dropTargetId={dropTargetId}
+              onDragMove={onDragMove}
+              onDragEnd={onDragEnd}
+              size={PORTRAIT_TILE}
+              touchAction="pan-x"
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface DraggableItemProps {
   item: ClothingItemData;
   isEquipped: boolean;
@@ -279,9 +448,12 @@ interface DraggableItemProps {
   dropTargetId: string;
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
+  size?: number; // 縦画面の大きさ（無ければ、横のメニューの大きさ）
+  // 縦画面では 'pan-x': 横になぞると一覧が流れ、上へ動かすとドラッグになる
+  touchAction?: CSSProperties['touchAction'];
 }
 
-const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd }: DraggableItemProps) {
+const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, touchAction = 'none' }: DraggableItemProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
@@ -353,8 +525,10 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
         ...(isDragging ? styles.itemDragging : {}),
         transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
         cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
+        touchAction,
+        ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
       }}
+      data-draggable=""
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -391,6 +565,8 @@ const DraggableBackground = memo(function DraggableBackground({
   dropTargetId,
   onDragMove,
   onDragEnd,
+  size,
+  touchAction = 'none',
 }: {
   bg: BackgroundData;
   isSelected: boolean;
@@ -398,6 +574,8 @@ const DraggableBackground = memo(function DraggableBackground({
   dropTargetId: string;
   onDragMove?: (bg: BackgroundData, position: Position) => void;
   onDragEnd?: () => void;
+  size?: number;
+  touchAction?: CSSProperties['touchAction'];
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
@@ -469,8 +647,10 @@ const DraggableBackground = memo(function DraggableBackground({
         ...(isDragging ? styles.itemDragging : {}),
         transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
         cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
+        touchAction,
+        ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
       }}
+      data-draggable=""
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

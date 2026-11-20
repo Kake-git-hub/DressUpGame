@@ -1094,3 +1094,214 @@ textarea {
   border-radius: 28px;
   cursor: pointer;
 }
+
+/* ---------- 縦画面（メニュー類は下） ---------- */
+
+/* 下のメニュー全体: カテゴリの行 → 服の行 → ボタンの行。高さは配置の計算（layout.ts）が決める */
+.app[data-orientation='portrait'] .palette-section {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: env(safe-area-inset-bottom, 0px);
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.92);
+  border-top: 1px solid #ffd3e6;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 10;
+}
+.portrait-menu {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* カテゴリの行（横に流す） */
+.portrait-categories {
+  flex: none;
+  height: 84px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px));
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.portrait-doll-select {
+  flex: none;
+  max-width: 120px;
+  height: 44px;
+  padding: 0 6px;
+  font-size: 14px;
+  border: 2px solid #ffb6d9;
+  border-radius: 10px;
+  background: #fff;
+}
+.portrait-category {
+  flex: none;
+  width: 68px;
+  height: 72px;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 2px solid #eee;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.portrait-category[aria-pressed='true'] {
+  border-color: #ff69b4;
+  background: #ffe8f3;
+}
+.portrait-category.worn .portrait-category-label::after {
+  content: ' ✓';
+  color: #ff69b4;
+}
+.portrait-category-thumb {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+.portrait-category-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.portrait-category-label {
+  flex: none;
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 12px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.portrait-empty {
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+}
+/* 服の行（横に流す。上から下へ段を埋めてから右へ） */
+.portrait-items {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 72px;
+  align-content: center;
+  gap: 12px 8px;
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px));
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.portrait-none {
+  width: 72px;
+  height: 72px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #dc3545;
+  background: #ffe5e5;
+  border: 2px solid #dc3545;
+  border-radius: 8px;
+  cursor: pointer;
+}
+/* ボタンの行（調整・写真・リセット） */
+.portrait-tools {
+  flex: none;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 12px;
+  border-top: 1px solid #ffe3ef;
+}
+.portrait-tools .tool-button,
+.portrait-tools .screenshot-button,
+.portrait-tools .reset-button-fixed {
+  position: static;
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+/* 縦画面の調整画面: 一覧・色・ボタンは下（メニューがあった所）にまとめる */
+/* いちばん下の行: ↺（元に戻す）・色のスライダー・✓（おわり） */
+.app[data-orientation='portrait'] .item-adjust-top-buttons {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: env(safe-area-inset-bottom, 0px);
+  height: 64px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+  background: rgba(255, 255, 255, 0.92);
+  border-top: 1px solid #ffe3ef;
+}
+.app[data-orientation='portrait'] .item-adjust-reset-btn-small {
+  order: 1;
+  flex: none;
+}
+.app[data-orientation='portrait'] .item-adjust-hue-slider {
+  order: 2;
+  flex: 1;
+  min-width: 0;
+  flex-direction: row;
+  margin-top: 0;
+  padding: 4px 10px;
+  gap: 8px;
+  box-shadow: none;
+  background: transparent;
+}
+.app[data-orientation='portrait'] .item-adjust-done-btn-small {
+  order: 3;
+  flex: none;
+  margin-left: auto; /* 色のスライダーが無い（ドールの調整）ときも、右に寄せる */
+}
+.app[data-orientation='portrait'] .hue-slider-vertical {
+  writing-mode: horizontal-tb;
+  direction: ltr;
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 32px;
+}
+/* その上の行: 重なりの一覧（横並び。左が手前） */
+.app[data-orientation='portrait'] .item-adjust-picker {
+  top: auto;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px + 8px);
+  transform: none;
+  flex-direction: row;
+  max-height: none;
+  padding: 6px 8px;
+}
+.app[data-orientation='portrait'] .item-adjust-picker-items {
+  flex: 1;
+  min-width: 0;
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* ▲▼ は、左（まえへ）・右（うしろへ）を向ける */
+.app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn {
+  width: 40px;
+  height: 52px;
+  transform: rotate(-90deg);
+}
+.app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn:active {
+  transform: rotate(-90deg) scale(0.92);
+}
