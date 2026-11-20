@@ -5,11 +5,11 @@ import { isBackHairCategory, isHairCategory } from '../pipeline/hairSplit';
 import { useEffect, useRef, useState } from 'react';
 import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
-import type { Job, PlannedItem, Status, TemplateData } from './api';
+import type { Job, PlannedItem, SetRef, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
 import { forgetParts } from './partsCache';
 import { STYLE_PRESETS, findStyle } from './stylePresets';
-import type { CardSource } from './ItemCard';
+import type { CardSource, ItemCardHandle } from './ItemCard';
 
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : String(e));
 const stem = (file: string) => file.replace(/\.[^.]+$/, '').replace(/[\\/]/g, '').slice(0, 40);
@@ -123,6 +123,9 @@ const STATUS_LABEL = { waiting: '待ち', working: '作成中…', passed: '合�
 /* ---------- テーマから作る ---------- */
 
 const BACKGROUND = '__background'; // 「作るもの」で背景を選んだとき
+const SET = '__set'; // 「作るもの」でセット（同じテーマの複数パーツ）を選んだとき
+// セットに最初から入れないカテゴリ（顔と、うしろがみ）
+const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
 const remember = {
   get: (key: string): string | null => {
     try {
@@ -145,6 +148,8 @@ interface StartedJob {
   kind: 'items' | 'backgrounds';
   styleId: string;
   owner: string | null; // 背景を採用したときの持ち主（null = 全部のドールで使う）
+  set?: SetRef; // セットとして作っている
+  missing?: string[]; // セットの企画が返さなかったカテゴリ
 }
 
 export function Generate({ doll, status, onChanged }: Common & { status: Status }) {
@@ -153,8 +158,23 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
   const [styleId, setStyleId] = useState(() => findStyle(remember.get('style')).id);
   const [target, setTarget] = useState(() => {
     const saved = remember.get(`target.${doll.id}`);
-    return saved && (saved === BACKGROUND || doll.categories.some((c) => c.id === saved)) ? saved : (categories[0]?.id ?? BACKGROUND);
+    return saved && (saved === BACKGROUND || saved === SET || doll.categories.some((c) => c.id === saved)) ? saved : (categories[0]?.id ?? BACKGROUND);
   });
+  // セットに入れるカテゴリ（ドールごとに覚える）。最初は、かお・うしろがみ以外の全部
+  const [setCats, setSetCats] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(remember.get(`setCategories.${doll.id}`) ?? 'null') as unknown;
+      if (Array.isArray(saved)) return saved.filter((id): id is string => typeof id === 'string' && doll.categories.some((c) => c.id === id));
+    } catch {
+      // 覚えていた内容が読めなければ、最初の選び方に戻す
+    }
+    return doll.categories.filter((c) => !isFaceLabel(c.label) && !isBackHairCategory(c.label)).map((c) => c.id);
+  });
+  const toggleSetCat = (id: string, on: boolean) => {
+    const next = on ? [...setCats.filter((x) => x !== id), id] : setCats.filter((x) => x !== id);
+    setSetCats(next);
+    remember.set(`setCategories.${doll.id}`, JSON.stringify(next));
+  };
   const [count, setCount] = useState(1);
   const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -162,8 +182,10 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
   const [jobs, setJobs] = useState<StartedJob[]>([]);
   const available = status.ai.text && status.ai.image;
   const isBackground = target === BACKGROUND;
+  const isSet = target === SET;
   const most = isBackground ? Math.min(10, status.budget.perRun) : Math.max(1, Math.floor(status.budget.perRun / status.budget.maxAttempts));
-  const maxImages = isBackground ? count * 2 : count * status.budget.maxAttempts;
+  const maxImages = isBackground ? count * 2 : (isSet ? setCats.length : count) * status.budget.maxAttempts;
+  const setReady = setCats.length >= 2 && setCats.length <= most;
 
   const chooseStyle = (id: string) => {
     setStyleId(id);
@@ -183,9 +205,9 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
     }
     setBusy(false);
   };
-  const startItems = async (items: PlannedItem[], style: string) => {
-    const { id } = await api.startJob(doll.id, items, style);
-    setJobs((list) => [{ id, kind: 'items', styleId: style, owner: doll.id }, ...list]);
+  const startItems = async (items: PlannedItem[], style: string, set?: SetRef, missing?: string[]) => {
+    const { id } = await api.startJob(doll.id, items, style, set);
+    setJobs((list) => [{ id, kind: 'items', styleId: style, owner: doll.id, set, missing }, ...list]);
     void onChanged();
   };
   const make = () =>
@@ -196,6 +218,12 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
         void onChanged();
         return;
       }
+      if (isSet) {
+        // セット: 選んだカテゴリごとに 1 点を、そろえて企画する。画像は 1 点ずつ作る
+        const planned = await api.planSet({ dollId: doll.id, theme, categories: categories.filter((c) => setCats.includes(c.id)).map((c) => c.id), styleId });
+        await startItems(planned.items, styleId, planned.set, planned.missing);
+        return;
+      }
       const { items } = await api.plan({ dollId: doll.id, theme, count, categories: [target], styleId });
       await startItems(items, styleId);
     });
@@ -204,7 +232,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
     <section>
       {!available && (
         <p className="error" data-testid="generate-unavailable">
-          自動生成を使うには、スタジオのサーバーを起動する PC の環境変数に ANTHROPIC_API_KEY（Claude）と GEMINI_API_KEY（Gemini）を設定してください。キーは画面には入力しません。
+          自動生成を使うには、スタジオのサーバーを起動する PC の環境変数に GEMINI_API_KEY（Gemini）を設定してください（ANTHROPIC_API_KEY は無くても動きます。あれば、企画と検品に Claude を使います）。キーは画面には入力しません。
         </p>
       )}
       <div className="form generate-form">
@@ -230,18 +258,38 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
           <button type="button" role="radio" aria-checked={isBackground} className={isBackground ? 'chip on' : 'chip'} onClick={() => chooseTarget(BACKGROUND)} data-testid="target-background">
             背景
           </button>
+          <button type="button" role="radio" aria-checked={isSet} className={isSet ? 'chip on' : 'chip'} onClick={() => chooseTarget(SET)} data-testid="target-set" title="同じテーマで、選んだカテゴリごとに 1 点ずつ、そろえて作る">
+            セット
+          </button>
         </div>
+        {isSet && (
+          <div className="chips" data-testid="set-categories">
+            <span className="chips-label">セットに入れるもの</span>
+            {categories
+              .filter((c) => !isBackHairCategory(c.label))
+              .map((c) => (
+                <label key={c.id}>
+                  <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => toggleSetCat(c.id, e.target.checked)} /> {c.label}
+                </label>
+              ))}
+            <span className="hint">
+              選んだものごとに 1 点、色と飾りをそろえて作ります（2〜{most} 個）。できた服は、ふつうの服として 1 点ずつ着られます。
+            </span>
+          </div>
+        )}
         {isBackground && (
           <label>
             <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> 全部のドールで使う背景にする（外すと「{doll.name}」専用）
           </label>
         )}
         <div className="row">
-          <label>
-            枚数
-            <input type="number" min={1} max={most} value={count} onChange={(e) => setCount(Math.max(1, Math.min(most, Math.floor(Number(e.target.value)) || 1)))} data-testid="count" />
-          </label>
-          <button className="primary" onClick={() => void make()} disabled={busy || !available || !theme.trim()} data-testid="make">
+          {!isSet && (
+            <label>
+              枚数
+              <input type="number" min={1} max={most} value={count} onChange={(e) => setCount(Math.max(1, Math.min(most, Math.floor(Number(e.target.value)) || 1)))} data-testid="count" />
+            </label>
+          )}
+          <button className="primary" onClick={() => void make()} disabled={busy || !available || !theme.trim() || (isSet && !setReady)} data-testid="make">
             {busy ? '準備中…' : '作る'}
           </button>
           <span className="hint">
@@ -253,7 +301,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
       {error && <p className="error">{error}</p>}
       {jobs.map((job) =>
         job.kind === 'items' ? (
-          <JobCards key={job.id} id={job.id} doll={doll} onChanged={onChanged} onRedo={(item) => void guard(() => startItems([item], job.styleId))} />
+          <JobCards key={job.id} id={job.id} doll={doll} onChanged={onChanged} missing={job.missing} onRedo={(item) => void guard(() => startItems([item], job.styleId, job.set))} />
         ) : (
           <BackgroundJob key={job.id} id={job.id} owner={job.owner} onChanged={onChanged} />
         ),
@@ -272,16 +320,40 @@ function Instruction({ text }: { text: string }) {
   );
 }
 
-function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo: (item: PlannedItem) => void }) {
+function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: string; onRedo: (item: PlannedItem) => void; missing?: string[] }) {
   const job = useJob(id);
   const [hidden, setHidden] = useState<number[]>([]);
+  const [savingAll, setSavingAll] = useState(false);
+  const cards = useRef(new Map<number, ItemCardHandle>());
   if (!job) return <p>準備中…</p>;
   const hide = (i: number) => setHidden((list) => [...list, i]);
+  // カードとして出ている候補
+  const shown = job.candidates.flatMap((c, i) => (!hidden.includes(i) && c.hasImage && c.status !== 'working' && c.status !== 'waiting' ? [i] : []));
+  // まだ保存していない候補を、いまの名前・カテゴリで順に保存する（確かめが要るカードは飛ばして、そのカードに知らせる）
+  const saveAll = async () => {
+    setSavingAll(true);
+    for (const i of shown) await cards.current.get(i)?.saveIfReady();
+    setSavingAll(false);
+  };
   return (
     <div className="job" data-testid="job">
       <h3>
+        {job.set && <span data-testid="job-set">セット「{job.set.name}」: </span>}
         {job.done ? 'できた候補' : '作成中…'}（{job.candidates.filter((c) => c.status === 'passed' || c.status === 'flagged').length} / {job.candidates.length}）
       </h3>
+      {missing && missing.length > 0 && (
+        <p className="hint" data-testid="set-missing">
+          企画に入らなかったもの: {missing.join('、')}（要るときは、そのカテゴリを選んで 1 点ずつ作ってください）
+        </p>
+      )}
+      {shown.length >= 2 && (
+        <div className="row">
+          <button className="primary" onClick={() => void saveAll()} disabled={savingAll} data-testid="save-all">
+            {savingAll ? '保存中…' : `ぜんぶ保存（${shown.length} 点）`}
+          </button>
+          <span className="hint">いまの名前・カテゴリ・位置のまま保存します。確かめが要るカードは残ります。</span>
+        </div>
+      )}
       {job.candidates.map((c, i) => {
         if (hidden.includes(i)) return null;
         if (!c.hasImage || c.status === 'working' || c.status === 'waiting') {
@@ -298,7 +370,12 @@ function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo
         return (
           <div key={`${i}-${c.attempts}`}>
             <ItemCard
+              ref={(handle) => {
+                if (handle) cards.current.set(i, handle);
+                else cards.current.delete(i);
+              }}
               doll={doll}
+              set={job.set}
               source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), shapeUrl: c.hasShape ? api.jobImageUrl(id, i, 'shape', c.attempts) : null, hideUrl: c.hasHide ? api.jobImageUrl(id, i, 'hide', c.attempts) : null, frontUrl: c.hasFront ? api.jobImageUrl(id, i, 'front', c.attempts) : null, underUrl: c.hasUnder ? api.jobImageUrl(id, i, 'under', c.attempts) : null, warnings: c.warnings, notes: c.notes }}
               onDiscard={() => hide(i)}
               onSaved={() => { hide(i); void onChanged(); }}
@@ -430,6 +507,20 @@ export function Library({ doll, onChanged }: Common) {
   return (
     <section>
       {error && <p className="error">{error}</p>}
+      {(doll.sets ?? []).length > 0 && (
+        <div className="category" data-testid="library-sets">
+          <div className="row">
+            <b>セット</b>
+            <span className="hint">同じテーマで一度に作った服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。服は 1 点ずつ消せて、最後の 1 点が無くなるとセットも消えます。</span>
+          </div>
+          {(doll.sets ?? []).map((x) => (
+            <div key={x.id} className="row" data-testid="library-set">
+              <input defaultValue={x.name} aria-label="セットのなまえ" onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
+              <span>{doll.items.filter((i) => i.set === x.id).length} 点</span>
+            </div>
+          ))}
+        </div>
+      )}
       <p className="hint">「重ね順」は大きいほど手前。「並び順」はメニューでの順番（小さいほど先）。</p>
       {categories.map((c) => {
         const items = doll.items.filter((i) => i.category === c.id);
@@ -460,6 +551,12 @@ export function Library({ doll, onChanged }: Common) {
                     <button title="後ろ髪をドールの下に描くようにする（ドールの輪郭線が髪で削られなくなる）" onClick={() => void guard(() => api.splitHair(item.id))} data-testid="split-hair">前髪と後ろ髪に分ける</button>
                   )}
                   {item.back && <span className="hint">前髪・後ろ髪</span>}
+                  {item.set && (
+                    <>
+                      <span className="hint">セット: {doll.sets?.find((x) => x.id === item.set)?.name ?? ''}</span>
+                      <button onClick={() => void guard(() => api.updateItem({ id: item.id, set: null }))} data-testid="leave-set">セットから外す</button>
+                    </>
+                  )}
                   <button onClick={() => confirm(`「${item.name}」を消しますか？`) && void guard(() => api.deleteItem(item.id))}>消す</button>
                 </figure>
               ))}

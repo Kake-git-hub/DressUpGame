@@ -2,7 +2,8 @@
  * 服の候補 1 点のカード: ドールに着せたプレビュー、微調整、手直し、カテゴリと名前、保存
  * 手で入れた画像にも、自動生成の候補にも使う。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { Ref } from 'react';
 import type { ManifestDoll } from '../content/manifest';
 import { alphaBBox } from '../pipeline/alpha';
 import type { Box } from '../pipeline/alpha';
@@ -12,7 +13,7 @@ import { hairFrontBottom, isBackHairCategory, splitHair, splitsHair } from '../p
 import { defaultLimbs, hideMask, limbZones } from '../pipeline/limbZones';
 import type { Limb } from '../pipeline/limbZones';
 import { ApiError, api, blobToBase64, contentUrl } from './api';
-import type { Warning } from './api';
+import type { SetRef, Warning } from './api';
 import { loadParts } from './partsCache';
 
 
@@ -48,15 +49,23 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+// 「ぜんぶ保存」から呼ぶ: いまの名前・カテゴリで保存する。保存したら true。
+// 確かめが要るカード（同じ名前の服がある・警告を確かめていない・まだ読み込み中）は保存せず、カードに知らせを出して false
+export interface ItemCardHandle {
+  saveIfReady: () => Promise<boolean>;
+}
+
 interface Props {
   doll: ManifestDoll;
   source: CardSource;
   onSaved: () => void;
   onDiscard: () => void;
   onRedo?: () => void;
+  set?: SetRef; // セットとして作った候補（保存すると、この印が付く）
+  ref?: Ref<ItemCardHandle>;
 }
 
-export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
+export function ItemCard({ doll, source, onSaved, onDiscard, onRedo, set, ref }: Props) {
   // 服のキャンバス。AI で作った服は、ドールのキャンバスのまわりに余白を足した大きさ（中心は同じ）で届く。
   // 読み込むまでは、ドールのキャンバスの大きさにしておく
   const [size, setSize] = useState({ w: doll.image.canvasW, h: doll.image.canvasH });
@@ -408,12 +417,13 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   };
 
   const sameName = doll.items.find((i) => i.name === name.trim() && i.category === category);
-  const save = async (replaceId?: string) => {
+  const [skipped, setSkipped] = useState(false); // 「ぜんぶ保存」で飛ばされた
+  const save = async (replaceId?: string): Promise<boolean> => {
     const cut = cutRef.current;
-    if (!cut) return;
+    if (!cut) return false;
     if (sameName && !replaceId && !conflict) {
       setConflict(true);
-      return;
+      return false;
     }
     setSaving(true);
     setError(null);
@@ -442,15 +452,26 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
         const shapeBlob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
         if (shapeBlob) shape = await blobToBase64(shapeBlob);
       }
-      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined, shape, front, under });
+      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined, shape, front, under, ...(set ? { set } : {}) });
       onSaved();
+      return true;
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : String(e));
       setSaving(false);
+      return false;
     }
   };
 
   const blocked = !ready || saving || !name.trim() || !category || (problems.length > 0 && !confirmed);
+  useImperativeHandle(ref, () => ({
+    saveIfReady: async () => {
+      if (blocked || sameName) {
+        setSkipped(true);
+        return false;
+      }
+      return save();
+    },
+  }));
   return (
     <div className="card" data-testid="item-card" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="card-view">
@@ -527,6 +548,16 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
               <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} data-testid="card-confirm" /> 内容を確かめました
             </label>
           </div>
+        )}
+        {set && (
+          <p className="hint" data-testid="card-set">
+            セット: {set.name}
+          </p>
+        )}
+        {skipped && (
+          <p className="error" data-testid="card-skipped">
+            このカードは「ぜんぶ保存」で保存しませんでした（同じ名前の服がある・確かめが要る、など）。内容を確かめて、このカードの「保存」を押してください。
+          </p>
         )}
         <label>
           カテゴリ
