@@ -4,6 +4,7 @@
 import { isBackHairCategory, isHairCategory } from '../pipeline/hairSplit';
 import { useEffect, useRef, useState } from 'react';
 import type { Box, Manifest, ManifestDoll } from '../content/manifest';
+import { itemSetIds } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
 import type { Job, PlannedItem, SetRef, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
@@ -547,6 +548,8 @@ export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: 
 const NEW_SET = '__new-set';
 
 export function Library({ doll, onChanged }: Common) {
+  // 服が入っているセットの名前（「、」でつなぐ）
+  const setNames = (item: { set?: string | string[] }) => itemSetIds(item).map((id) => doll.sets?.find((x) => x.id === id)?.name ?? '').join('」「');
   const [error, setError] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [placing, setPlacing] = useState<string | null>(null); // 位置と大きさを直している服
@@ -569,14 +572,14 @@ export function Library({ doll, onChanged }: Common) {
         <div className="category" data-testid="library-sets">
           <div className="row">
             <b>セット</b>
-            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。最後の 1 点が無くなるとセットも消えます。▲ ▼ で、ゲームのメニューでのセットの順番を変えられます。</span>
+            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。1 点の服を、いくつものセットに入れられます。最後の 1 点が無くなるとセットも消えます。▲ ▼ で、ゲームのメニューでのセットの順番を変えられます。</span>
           </div>
           {(doll.sets ?? []).map((x, setIndex, sets) => {
             const categoryOf = (id: string) => doll.categories.find((c) => c.id === id);
             const layerOf = (i: (typeof doll.items)[number]) => i.layer ?? categoryOf(i.category)?.layer ?? 0;
             // 手前（重ね順が大きい）から
-            const members = doll.items.filter((i) => i.set === x.id).sort((a, b) => layerOf(b) - layerOf(a));
-            const others = doll.items.filter((i) => i.set !== x.id);
+            const members = doll.items.filter((i) => itemSetIds(i).includes(x.id)).sort((a, b) => layerOf(b) - layerOf(a));
+            const others = doll.items.filter((i) => !itemSetIds(i).includes(x.id));
             return (
               <div key={x.id} className="set-box" data-testid="library-set">
                 <div className="row">
@@ -599,7 +602,7 @@ export function Library({ doll, onChanged }: Common) {
                       return list.length === 0 ? null : (
                         <optgroup key={c.id} label={c.label}>
                           {list.map((i) => (
-                            <option key={i.id} value={i.id}>{i.name}{i.set ? `（いまは「${doll.sets?.find((s2) => s2.id === i.set)?.name ?? ''}」）` : ''}</option>
+                            <option key={i.id} value={i.id}>{i.name}{itemSetIds(i).length > 0 ? `（「${setNames(i)}」にも入っている）` : ''}</option>
                           ))}
                         </optgroup>
                       );
@@ -630,7 +633,7 @@ export function Library({ doll, onChanged }: Common) {
                           data-testid="set-member-layer"
                         />
                       </label>
-                      <button onClick={() => void guard(() => api.updateItem({ id: i.id, set: null }))} data-testid="set-member-remove">セットから外す</button>
+                      <button onClick={() => void guard(() => api.updateItem({ id: i.id, leaveSet: x.id }))} data-testid="set-member-remove">このセットから外す</button>
                     </figure>
                   ))}
                 </div>
@@ -707,34 +710,35 @@ export function Library({ doll, onChanged }: Common) {
                     <button title="後ろ髪をドールの下に描くようにする（ドールの輪郭線が髪で削られなくなる）" onClick={() => void guard(() => api.splitHair(item.id))} data-testid="split-hair">前髪と後ろ髪に分ける</button>
                   )}
                   {item.back && <span className="hint">前髪・後ろ髪</span>}
-                  {item.set ? (
-                    <>
-                      <span className="hint">セット: {doll.sets?.find((x) => x.id === item.set)?.name ?? ''}</span>
-                      <button onClick={() => void guard(() => api.updateItem({ id: item.id, set: null }))} data-testid="leave-set">セットから外す</button>
-                    </>
-                  ) : (
-                    <select
-                      value=""
-                      aria-label="セットに入れる"
-                      data-testid="item-join-set"
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (!value) return;
-                        if (value === NEW_SET) {
-                          const name = prompt('新しいセットのなまえ')?.trim();
-                          if (name) void guard(() => api.updateItem({ id: item.id, set: { name } }));
-                          return;
-                        }
-                        void guard(() => api.updateItem({ id: item.id, set: value }));
-                      }}
-                    >
-                      <option value="">セットに入れる…</option>
-                      {(doll.sets ?? []).map((x) => (
+                  {itemSetIds(item).map((id) => (
+                    <span key={id} className="row" data-testid="item-set">
+                      <span className="hint">セット: {doll.sets?.find((x) => x.id === id)?.name ?? ''}</span>
+                      <button onClick={() => void guard(() => api.updateItem({ id: item.id, leaveSet: id }))} aria-label="このセットから外す" title="このセットから外す" data-testid="leave-set">×</button>
+                    </span>
+                  ))}
+                  <select
+                    value=""
+                    aria-label="セットに入れる"
+                    data-testid="item-join-set"
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (!value) return;
+                      if (value === NEW_SET) {
+                        const name = prompt('新しいセットのなまえ')?.trim();
+                        if (name) void guard(() => api.updateItem({ id: item.id, set: { name } }));
+                        return;
+                      }
+                      void guard(() => api.updateItem({ id: item.id, set: value }));
+                    }}
+                  >
+                    <option value="">{itemSetIds(item).length > 0 ? 'ほかのセットにも入れる…' : 'セットに入れる…'}</option>
+                    {(doll.sets ?? [])
+                      .filter((x) => !itemSetIds(item).includes(x.id))
+                      .map((x) => (
                         <option key={x.id} value={x.id}>{x.name}</option>
                       ))}
-                      <option value={NEW_SET}>＋ 新しいセット</option>
-                    </select>
-                  )}
+                    <option value={NEW_SET}>＋ 新しいセット</option>
+                  </select>
                   <button onClick={() => confirm(`「${item.name}」を消しますか？`) && void guard(() => api.deleteItem(item.id))}>消す</button>
                 </figure>
               ))}

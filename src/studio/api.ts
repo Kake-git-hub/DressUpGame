@@ -97,8 +97,9 @@ export const api = {
   content: () => get<Manifest>('/content'),
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
   addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string; set?: SetRef }) => send<ManifestItem>('POST', '/items', input),
-  // set: null でセットから外す。セットの ID でそのセットに入れる。{ name } で新しいセットを作って入れる。layer: null でカテゴリの重ね順に戻す
-  updateItem: (change: { id: string; name?: string; category?: string; layer?: number | null; set?: null | string | { name: string } }) => send<ManifestItem>('PATCH', '/items', change),
+  // set: null で全部のセットから外す。セットの ID でそのセットにも入れる（ほかのセットはそのまま）。{ name } で新しいセットを作って入れる。
+  // leaveSet: そのセットだけから外す。layer: null でカテゴリの重ね順に戻す
+  updateItem: (change: { id: string; name?: string; category?: string; layer?: number | null; set?: null | string | { name: string }; leaveSet?: string }) => send<ManifestItem>('PATCH', '/items', change),
   // カテゴリの中の服の並び（ids はそのカテゴリの服の全部を、新しい順に）
   reorderItems: (dollId: string, category: string, ids: string[]) => send<{ ok: true }>('POST', '/items/order', { dollId, category, ids }),
   // 服の位置と大きさ: 服の中心を軸に scale 倍してから (dx, dy) 動かす（キャンバスの px）

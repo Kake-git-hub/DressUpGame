@@ -290,12 +290,12 @@ describe('resolveContentUrl', () => {
       set: 'アニメ/セット/うみ',
     });
     const { clothing } = await loadContent(BASE, okFetch(m));
-    const inSet = clothing.filter((c) => c.setId === 'アニメ/セット/うみ');
+    const inSet = clothing.filter((c) => c.sets?.some((x) => x.id === 'アニメ/セット/うみ'));
     expect(inSet.map((c) => c.id)).toEqual([m.dolls[0].items[0].id, 'アニメ/ヘア/ロング']);
-    expect(inSet.every((c) => c.setName === 'うみ')).toBe(true);
-    expect(clothing.find((c) => c.type === BACK_HAIR_TYPE)).not.toHaveProperty('setId');
+    expect(inSet.every((c) => c.sets?.[0].name === 'うみ')).toBe(true);
+    expect(clothing.find((c) => c.type === BACK_HAIR_TYPE)).not.toHaveProperty('sets');
     // 印の無い服には付かない
-    expect(clothing.filter((c) => !c.setId).length).toBe(clothing.length - 2);
+    expect(clothing.filter((c) => !c.sets).length).toBe(clothing.length - 2);
   });
 
   it('セットの服には、セットの並び（sets の中の番号）が付く', async () => {
@@ -303,6 +303,17 @@ describe('resolveContentUrl', () => {
     m.dolls[0].sets = [{ id: 'アニメ/セット/やま', name: 'やま' }, { id: 'アニメ/セット/うみ', name: 'うみ' }];
     m.dolls[0].items[0].set = 'アニメ/セット/うみ';
     const { clothing } = await loadContent(BASE, okFetch(m));
-    expect(clothing.find((c) => c.id === m.dolls[0].items[0].id)).toMatchObject({ setId: 'アニメ/セット/うみ', setOrder: 1 });
+    expect(clothing.find((c) => c.id === m.dolls[0].items[0].id)!.sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ', order: 1 }]);
+  });
+
+  it('いくつものセットに入っている服には、そのセットが全部付く。一覧に無いセットの印は捨てる', async () => {
+    const m: Manifest = structuredClone(manifest);
+    m.dolls[0].sets = [{ id: 'アニメ/セット/やま', name: 'やま' }, { id: 'アニメ/セット/うみ', name: 'うみ' }];
+    m.dolls[0].items[0].set = ['アニメ/セット/うみ', 'アニメ/セット/やま', 'アニメ/セット/ない'];
+    const { clothing } = await loadContent(BASE, okFetch(m));
+    expect(clothing.find((c) => c.id === m.dolls[0].items[0].id)!.sets).toEqual([
+      { id: 'アニメ/セット/うみ', name: 'うみ', order: 1 },
+      { id: 'アニメ/セット/やま', name: 'やま', order: 0 },
+    ]);
   });
 });

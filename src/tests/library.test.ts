@@ -129,10 +129,10 @@ describe('自分の服を、公開の素材に重ねる', () => {
     const merged = await mergeMyItems(content, [hair, myItem('my:1', { set: { id: 'my:set-1', name: 'うみのセット' } })]);
     const front = merged.clothing.find((c) => c.id === 'my:h')!;
     const back = merged.clothing.find((c) => c.type === BACK_HAIR_TYPE)!;
-    expect(front).toMatchObject({ setId: 'my:set-1', setName: 'うみのセット', backItemId: back.id, mine: true });
+    expect(front).toMatchObject({ sets: [{ id: 'my:set-1', name: 'うみのセット' }], backItemId: back.id, mine: true });
     expect(back.frontItemId).toBe('my:h');
     expect(back.imageUrl).toMatch(/^data:/);
-    expect(merged.clothing.find((c) => c.id === 'my:1')).toMatchObject({ setId: 'my:set-1', setName: 'うみのセット' });
+    expect(merged.clothing.find((c) => c.id === 'my:1')).toMatchObject({ sets: [{ id: 'my:set-1', name: 'うみのセット' }] });
   });
 
   it('壊れた控え（中身が欠けている）が 1 件あっても、ほかの服は出る', async () => {

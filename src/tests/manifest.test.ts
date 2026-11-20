@@ -125,6 +125,16 @@ describe('parseManifest', () => {
       expect(parsed.dolls[0].items[0]).not.toHaveProperty('set');
       expect(parsed.dolls[0].sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ' }]);
     });
+    it('いくつものセットに入っている服（set が ID の並び）を読む。無い ID は捨て、残りが 1 つなら文字列にする', () => {
+      const m = withSet() as unknown as { dolls: { sets: { id: string; name: string }[]; items: { set: unknown }[] }[] };
+      m.dolls[0].sets.push({ id: 'アニメ/セット/やま', name: 'やま' });
+      m.dolls[0].items[0].set = ['アニメ/セット/うみ', 'アニメ/セット/やま', 5, '無いセット'];
+      expect(parseManifest(m).dolls[0].items[0].set).toEqual(['アニメ/セット/うみ', 'アニメ/セット/やま']);
+      m.dolls[0].items[0].set = ['アニメ/セット/やま', '無いセット'];
+      expect(parseManifest(m).dolls[0].items[0].set).toBe('アニメ/セット/やま');
+      m.dolls[0].items[0].set = ['無いセット'];
+      expect(parseManifest(m).dolls[0].items[0]).not.toHaveProperty('set');
+    });
     it('空の sets は出さない', () => {
       const m = valid();
       m.dolls[0].sets = [];

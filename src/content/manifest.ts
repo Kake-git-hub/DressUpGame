@@ -41,8 +41,19 @@ export interface ManifestItem {
   backThumb?: string;
   // ドールのすぐ上、ほかの服の下に描く分。くつの中に見える足の肌など。色スライダーはかけない
   under?: ManifestImage;
-  // セット（同じテーマで一度に作った服の集まり）の ID。ManifestDoll.sets にあるもの
-  set?: string;
+  // セット（同じテーマの服の集まり）の ID。ManifestDoll.sets にあるもの。
+  // 1 つのセットなら文字列、いくつものセットに入っていれば ID の並び（読み書きは itemSetIds / setItemSets で）
+  set?: string | string[];
+}
+
+// 服が入っているセットの ID（無ければ空）
+export const itemSetIds = (item: { set?: string | string[] }): string[] => (item.set === undefined ? [] : typeof item.set === 'string' ? [item.set] : item.set);
+
+// 服が入るセットを決める（同じ ID は 1 つに。0 個なら項目ごと消し、1 個なら文字列で書く。前の版のアプリでも読めるように）
+export function setItemSets(item: { set?: string | string[] }, ids: string[]): void {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) delete item.set;
+  else item.set = unique.length === 1 ? unique[0] : unique;
 }
 
 // セット: 同じテーマで一度に作った、ふつうの服の集まり。印だけで、絵は持たない（パーツは 1 点ずつ着られ、消せる）
@@ -176,8 +187,9 @@ function doll(v: unknown, path: string): ManifestDoll {
     if (r.back !== undefined) item.back = image(r.back, `${p}.back`);
     if (r.backThumb !== undefined) item.backThumb = str(r.backThumb, `${p}.backThumb`);
     if (r.under !== undefined) item.under = image(r.under, `${p}.under`);
-    // セットの印。一覧に無いセットを指していたら（形が違っていても）、印を捨てる（服はそのまま使える）
-    if (typeof r.set === 'string' && setIds.has(r.set)) item.set = r.set;
+    // セットの印（文字列か、文字列の並び）。一覧に無いセットを指していたら（形が違っていても）、その印を捨てる（服はそのまま使える）
+    const marks = typeof r.set === 'string' ? [r.set] : Array.isArray(r.set) ? r.set.filter((x): x is string => typeof x === 'string') : [];
+    setItemSets(item, marks.filter((x) => setIds.has(x)));
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);

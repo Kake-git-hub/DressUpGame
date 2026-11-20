@@ -415,11 +415,12 @@ export class StudioApi {
         return json(await this.store.addItem(doll.id, { category: item.category, name: item.name, ...layers, replaceId: item.id }));
       }
       case 'PATCH /api/items': {
-        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string } }>(req);
+        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string }; leaveSet?: string }>(req);
+        if (b.leaveSet !== undefined && typeof b.leaveSet !== 'string') throw new HttpError(400, 'leaveSet はセットの ID です');
         if (b.layer !== undefined && b.layer !== null && (typeof b.layer !== 'number' || !Number.isFinite(b.layer))) throw new HttpError(400, 'layer は数値です');
         const set = b.set === null || typeof b.set === 'string' ? b.set : b.set !== undefined && typeof b.set === 'object' && typeof b.set.name === 'string' ? { name: b.set.name } : undefined;
         if (b.set !== undefined && set === undefined) throw new HttpError(400, 'set の形が正しくありません');
-        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap, ...(set !== undefined ? { set } : {}) }));
+        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap, ...(set !== undefined ? { set } : {}), ...(b.leaveSet !== undefined ? { leaveSet: b.leaveSet } : {}) }));
       }
       case 'POST /api/items/order': {
         // カテゴリの中の服の並び（メニューでの順番）
