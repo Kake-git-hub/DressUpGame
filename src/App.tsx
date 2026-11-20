@@ -417,9 +417,13 @@ function App() {
     </div>
   );
 
+  // 版数（右上に小さく。読み込み中・失敗の画面にも出して、どの版で止まっているかが分かるようにする）
+  const versionBadge = <div className="version-badge">v{APP_VERSION}</div>;
+
   if (loadState !== 'ready') {
     return (
       <div className="app">
+        {versionBadge}
         <div className="status-screen" data-testid="status-screen">
           {loadState === 'loading' ? (
             <p>よみこみちゅう…</p>
@@ -437,6 +441,8 @@ function App() {
 
   return (
     <div className="app">
+      {versionBadge}
+
       {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
       {currentDoll && !isAdjustingItem && (
         <button
@@ -523,19 +529,9 @@ function App() {
               onDragEnd={handleDragEnd}
               onBackgroundDragEnd={handleDragEnd}
             />
-
-            {/* バージョン表示（メニュー下） */}
-            <div className="version-badge">v{APP_VERSION}</div>
           </section>
         )}
       </main>
-
-      {/* フッター - 調整中は非表示 */}
-      {!isAdjustingItem && (
-        <footer className="app-footer">
-          <p>ドラッグしてドールにきせてね！</p>
-        </footer>
-      )}
 
       {/* アイテム/ドール調整オーバーレイ（画面全体） */}
       {isAdjustingItem && (

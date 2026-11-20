@@ -396,6 +396,8 @@ test.describe('素材の取得に失敗したとき', () => {
     await page.route('**/e2e-content/manifest.json', (route) => (failing ? route.abort() : route.continue()));
     await page.goto(APP_URL);
     await expect(page.getByTestId('status-screen')).toContainText('インターネットにつないでね');
+    // どの版で止まっているかが分かるように、この画面にも版数を出す
+    await expect(page.locator('.version-badge')).toBeVisible();
     failing = false;
     await page.getByRole('button', { name: 'もういちど' }).click();
     await waitForMenu(page);
@@ -884,4 +886,26 @@ test('色スライダー: 黒い服にも色が付く（調整中の表示と、
   await page.getByTestId('hue-reset').click();
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, TOP_Y, BLACK);
+});
+
+test('下の案内の文は無く、版数は右上に小さく出る（調整中も）', async ({ page }) => {
+  await openApp(page);
+  await expect(page.locator('.app-footer')).toHaveCount(0);
+  await expect(page.getByText('ドラッグしてドールにきせてね')).toHaveCount(0);
+  const badge = page.locator('.version-badge');
+  await expect(badge).toHaveText(/^v\d+\.\d+\.\d+$/);
+  const box = (await badge.boundingBox())!;
+  expect(box.y).toBeLessThan(20);
+  expect(VIEW_W - (box.x + box.width)).toBeLessThan(12);
+  expect(box.height).toBeLessThanOrEqual(14);
+  // メニューの下の ▼ は画面の中
+  const down = (await page.getByTestId('menu-scroll-down').boundingBox())!;
+  expect(down.y + down.height).toBeLessThanOrEqual(VIEW_H);
+  // 調整中も出ていて、右上のボタンと重ならない・押せない
+  await page.locator('.tool-button').click();
+  await expect(badge).toBeVisible();
+  const b = (await badge.boundingBox())!;
+  const top = (await page.locator('.item-adjust-top-buttons').boundingBox())!;
+  expect(b.y + b.height).toBeLessThanOrEqual(top.y);
+  expect(await badge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
 });
