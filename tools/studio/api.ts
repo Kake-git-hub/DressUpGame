@@ -9,12 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
 import { promisify } from 'node:util';
 import type { Box } from '../../src/pipeline/alpha.ts';
-import { defaultRegion, estimateBodyParts } from '../../src/pipeline/bodyParts.ts';
-import { hairFromMask, hairThumbs } from '../../src/pipeline/hairLayers.ts';
-import { hairFrontBottom, splitHair, splitsHair } from '../../src/pipeline/hairSplit.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
@@ -27,9 +23,10 @@ import { BudgetError } from './budget.ts';
 import type { Budget } from './budget.ts';
 import { MAX_ATTEMPTS, generateBackground, generateCandidate, planBackgrounds, planItems, planSet } from './generate.ts';
 import type { BackgroundCandidate, Candidate, PlannedItem, TemplateData } from './generate.ts';
-import { dollTemplateFromImage, loadDollTemplate, padTemplate, processGenerated, workPad } from './processGenerated.ts';
+import { DollAssets } from './dollAssets.ts';
+import { dollTemplateFromImage, processGenerated } from './processGenerated.ts';
 import type { DollTemplate } from './processGenerated.ts';
-import { alphaToPng, pngToRgba, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { alphaToPng, renderSilhouette, rgbaToPng } from './silhouette.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 
 const run = promisify(execFile);
@@ -103,29 +100,21 @@ function parseColor(value: string | null, what: string): Rgb {
 }
 
 // 肌の絵の上に服を重ねた絵（サムネイル用）
-function withUnder(rgba: Uint8ClampedArray, under: Uint8ClampedArray): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(under);
-  for (let i = 0; i < out.length; i += 4) {
-    const a = rgba[i + 3] / 255;
-    if (a === 0) continue;
-    const b = out[i + 3] / 255;
-    const alpha = a + b * (1 - a);
-    for (let c = 0; c < 3; c++) out[i + c] = Math.round((rgba[i + c] * a + out[i + c] * b * (1 - a)) / alpha);
-    out[i + 3] = Math.round(alpha * 255);
-  }
-  return out;
-}
 
 export class StudioApi {
   readonly store: ContentStore;
   private readonly options: StudioOptions;
-  private readonly templates = new Map<string, DollTemplate>();
+  private readonly assets: DollAssets;
   private readonly jobs = new Map<string, Job>();
   private syncing: Promise<SyncResult> | null = null; // 走っている取り込み
 
   constructor(options: StudioOptions) {
     this.options = options;
     this.store = new ContentStore(options.contentDir);
+    this.assets = new DollAssets({
+      readFile: (file) => fs.readFile(path.join(this.store.dir, file)).catch(() => null),
+      readTemplates: () => this.store.readStudioData<Record<string, TemplateData>>('templates', {}),
+    });
   }
 
   async handle(req: ApiRequest): Promise<ApiResponse> {
@@ -196,108 +185,21 @@ export class StudioApi {
   // 髪のカテゴリなら、前髪（ドールの上）と後ろ髪（ドールの下）に分ける。ほかはそのまま。
   // front（前髪の範囲。本物のドールに描かせた髪の候補が持つ）があれば、それで分ける。無ければ、絵の形から分ける（splitHair）。
   // 分けたら、サムネイルは「後ろ髪 → うすい体の形 → 前髪」、うしろがみのサムネイルは「後ろ髪 → うすい体の形」から作る（体の裏の塗りつぶしを見せない）
-  private async hairLayers(
-    dollId: string,
-    category: string,
-    image: { rgba: Uint8ClampedArray; width: number; height: number },
-    force = false,
-    shape: Uint8Array | null = null, // AI が描いた体と髪の形（画像と同じ大きさの不透明度）
-    front: Uint8Array | null = null,
-  ): Promise<{ rgba: Uint8ClampedArray; width: number; height: number; back?: Uint8ClampedArray; thumbFrom?: Uint8ClampedArray; backThumbFrom?: Uint8ClampedArray }> {
-    const { doll } = await this.doll(dollId);
-    const label = doll.categories.find((c) => c.id === category)?.label ?? category;
-    // うしろがみを別の品目として作るドールでは、髪は分けない（髪のカテゴリは前髪だけ）
-    if (!force && !splitsHair(label, doll.categories.map((c) => c.label))) return image;
-    // 服は、ドールのキャンバスか、余白を足した作業用のキャンバス。大きさに合うほうの型を使う
-    let template = await this.dollTemplate(doll);
-    if (template.canvasW !== image.width) template = await this.workTemplate(doll);
-    if (template.canvasW !== image.width || template.canvasH !== image.height) return image; // 大きさの違いは、保存のときに断られる
-    const alpha = new Uint8Array(image.width * image.height);
-    for (let p = 0; p < alpha.length; p++) alpha[p] = template.rgba[p * 4 + 3];
-    let split: { front: Uint8ClampedArray; back: Uint8ClampedArray } | null;
-    if (front) {
-      split = hairFromMask(image.rgba, front, alpha, image.width, image.height);
-    } else {
-      // 前に残すのは、頭のまわりの前髪だけ
-      const head = (await this.templateData(doll)).parts.head;
-      const padY = Math.round((image.height - doll.image.canvasH) / 2);
-      split = splitHair(image.rgba, alpha, image.width, image.height, undefined, { frontBottom: hairFrontBottom(head) + padY, bodyShape: shape ?? undefined });
-    }
-    if (!split) return image;
-    const thumbs = hairThumbs(split.front, split.back, alpha, image.width, image.height);
-    return { rgba: split.front, width: image.width, height: image.height, back: split.back, thumbFrom: thumbs.hair, backThumbFrom: thumbs.back };
+  // ドールの型と、保存用の絵づくり（素材フォルダから読む）
+  private dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {
+    return this.assets.dollTemplate(doll);
   }
-  private async dollTemplate(doll: ManifestDoll): Promise<DollTemplate> {
-    const key = `${doll.id}\n${doll.image.file}`;
-    let template = this.templates.get(key);
-    if (!template) {
-      template = await loadDollTemplate(this.store.dir, doll.image);
-      this.templates.set(key, template);
-    }
-    return template;
+  private workTemplate(doll: ManifestDoll): Promise<DollTemplate> {
+    return this.assets.workTemplate(doll);
   }
-
-  // 余白を足した、作業用の型（生成と切り抜きはこの上で行う）
-  private async workTemplate(doll: ManifestDoll): Promise<DollTemplate> {
-    const key = `${doll.id}\n${doll.image.file}\nwork`;
-    let template = this.templates.get(key);
-    if (!template) {
-      const base = await this.dollTemplate(doll);
-      template = padTemplate(base, workPad(base.canvasW));
-      this.templates.set(key, template);
-    }
-    return template;
+  private hiTemplate(doll: ManifestDoll): Promise<{ template: DollTemplate; scale: number }> {
+    return this.assets.hiTemplate(doll);
   }
-  // 拡大図のもとにする、高解像度の作業用の型。素材フォルダの studio/masters/ に、ドールの画像と同じ名前の
-  // 整数倍の画像があればそれを使う。無ければ、ふつうの作業用の型（scale 1）
-  private async hiTemplate(doll: ManifestDoll): Promise<{ template: DollTemplate; scale: number }> {
-    const key = `${doll.id}\n${doll.image.file}\nhi`;
-    const cached = this.templates.get(key);
-    const work = await this.workTemplate(doll);
-    if (cached) return { template: cached, scale: cached.canvasW / work.canvasW };
-    const file = path.join(this.store.dir, 'studio', 'masters', `${path.basename(doll.image.file, path.extname(doll.image.file))}.webp`);
-    let data: Buffer;
-    try {
-      data = await fs.readFile(file);
-    } catch {
-      return { template: work, scale: 1 };
-    }
-    const meta = await sharp(data).metadata();
-    const scale = Math.round((meta.width ?? 0) / doll.image.box.w);
-    if (!(scale >= 2 && scale <= 4)) return { template: work, scale: 1 };
-    const { canvasW, canvasH, box } = doll.image;
-    const base = await dollTemplateFromImage(data, { file: doll.image.file, canvasW: canvasW * scale, canvasH: canvasH * scale, box: { x: box.x * scale, y: box.y * scale, w: box.w * scale, h: box.h * scale } });
-    const template = padTemplate(base, workPad(canvasW) * scale);
-    this.templates.set(key, template);
-    return { template, scale };
+  private workData(doll: ManifestDoll): Promise<TemplateData> {
+    return this.assets.workData(doll);
   }
-  // 型紙（ドールのキャンバス上の位置）を、作業用のキャンバス上の位置に直す
-  private async workData(doll: ManifestDoll): Promise<TemplateData> {
-    const data = await this.templateData(doll);
-    const pad = workPad(doll.image.canvasW);
-    const shift = (b: Box): Box => ({ ...b, x: b.x + pad, y: b.y + pad });
-    return {
-      parts: Object.fromEntries(Object.entries(data.parts).map(([k, b]) => [k, shift(b)])) as TemplateData['parts'],
-      regions: Object.fromEntries(Object.entries(data.regions).map(([k, b]) => [k, b ? shift(b) : null])),
-    };
-  }
-
-  // 型紙: 保存されたものがあればそれ、無ければ輪郭から推定する。あとから増えたカテゴリの範囲は補う
-  private async templateData(doll: ManifestDoll): Promise<TemplateData> {
-    const all = await this.store.readStudioData<Record<string, TemplateData>>('templates', {});
-    const template = await this.dollTemplate(doll);
-    let data: TemplateData | undefined = all[doll.id];
-    if (!data || !data.parts || !data.regions) {
-      const parts = estimateBodyParts(template.mask, template.canvasW, template.canvasH);
-      if (!parts) throw new HttpError(500, 'ドールの画像が全部透明です');
-      data = { parts, regions: {} };
-    }
-    // 以前の型紙にあった絵柄の項目は使わない（絵柄は「テーマから作る」で選ぶ）
-    data = { parts: data.parts, regions: data.regions };
-    for (const c of doll.categories) {
-      if (!(c.id in data.regions)) data.regions[c.id] = defaultRegion(c.label, data.parts, template.canvasW, template.canvasH);
-    }
-    return data;
+  private templateData(doll: ManifestDoll): Promise<TemplateData> {
+    return this.assets.templateData(doll);
   }
 
   private git(...args: string[]): Promise<string> {
@@ -363,7 +265,7 @@ export class StudioApi {
       return { state: 'blocked', updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、取り込めませんでした（${reason}）。手元の内容は変えていません` };
     }
     // ドールの画像が変わったかもしれないので、読み込んだ型を捨てる
-    this.templates.clear();
+    this.assets.clear();
     return {
       state: 'updated',
       updated: true,
@@ -494,53 +396,10 @@ export class StudioApi {
         const b = this.body<{ dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string; set?: { id: string; name: string } }>(req);
         if (typeof b.png !== 'string') throw new HttpError(400, 'png を指定してください');
         const set = b.set === undefined ? undefined : this.setInput(b.set);
-        let image;
-        let hide: Uint8Array | null = null;
-        let shape: Uint8Array | null = null;
-        let front: Uint8Array | null = null;
-        let under: Uint8ClampedArray | null = null;
-        try {
-          image = await pngToRgba(Buffer.from(b.png, 'base64'));
-          // 髪の前髪の範囲（不透明度）と、くつの中の肌の絵。どちらも服と同じ大きさ
-          if (typeof b.front === 'string' && b.front) {
-            const f = await pngToRgba(Buffer.from(b.front, 'base64'));
-            if (f.width !== image.width || f.height !== image.height) throw new HttpError(400, '前髪の範囲の画像の大きさが服と違います');
-            front = new Uint8Array(f.width * f.height);
-            for (let p = 0; p < front.length; p++) front[p] = f.rgba[p * 4 + 3];
-          }
-          if (typeof b.under === 'string' && b.under) {
-            const u = await pngToRgba(Buffer.from(b.under, 'base64'));
-            if (u.width !== image.width || u.height !== image.height) throw new HttpError(400, '肌の画像の大きさが服と違います');
-            under = u.rgba;
-          }
-          if (typeof b.shape === 'string' && b.shape) {
-            const s = await pngToRgba(Buffer.from(b.shape, 'base64'));
-            if (s.width === image.width && s.height === image.height) {
-              shape = new Uint8Array(s.width * s.height);
-              for (let p = 0; p < shape.length; p++) shape[p] = s.rgba[p * 4 + 3];
-            }
-          }
-          if (typeof b.hide === 'string' && b.hide) {
-            const mask = await pngToRgba(Buffer.from(b.hide, 'base64'));
-            if (mask.width !== image.width || mask.height !== image.height) throw new HttpError(400, '隠す所の画像の大きさが服と違います');
-            // 隠す所は、ドールのキャンバス上の位置で持つ。服が余白つきのキャンバスなら、まん中（ドールのキャンバス）を切り出す
-            const { doll } = await this.doll(b.dollId);
-            const padX = (mask.width - doll.image.canvasW) / 2;
-            const padY = (mask.height - doll.image.canvasH) / 2;
-            if (padX < 0 || padY < 0 || !Number.isInteger(padX) || !Number.isInteger(padY)) throw new HttpError(400, '隠す所の画像の大きさがドールのキャンバスと合いません');
-            hide = new Uint8Array(doll.image.canvasW * doll.image.canvasH);
-            for (let y = 0; y < doll.image.canvasH; y++) {
-              for (let x = 0; x < doll.image.canvasW; x++) hide[y * doll.image.canvasW + x] = mask.rgba[((y + padY) * mask.width + x + padX) * 4 + 3];
-            }
-          }
-        } catch (error) {
-          if (error instanceof HttpError) throw error;
-          throw new HttpError(400, '画像を読めませんでした');
-        }
-        const layers = await this.hairLayers(b.dollId, b.category, image, false, shape, front);
-        // くつのサムネイルは、靴の中の肌も入れた絵から作る（靴の開きが透けて見えないように）
-        const thumbFrom = under && !layers.thumbFrom ? withUnder(image.rgba, under) : layers.thumbFrom;
-        return json(await this.store.addItem(b.dollId, { category: b.category, name: b.name, ...layers, thumbFrom, under, replaceId: b.replaceId, hide, set }));
+        const { doll } = await this.doll(b.dollId);
+        const layer = (value: unknown) => (typeof value === 'string' && value ? Buffer.from(value, 'base64') : null);
+        const input = await this.assets.itemInput(doll, { category: b.category, name: b.name, png: Buffer.from(b.png, 'base64'), hide: layer(b.hide), shape: layer(b.shape), front: layer(b.front), under: layer(b.under), replaceId: b.replaceId, set });
+        return json(await this.store.addItem(b.dollId, input));
       }
       case 'POST /api/items/split-hair': {
         // 保存済みの髪（1 枚）を、前髪と後ろ髪に分け直す
@@ -551,7 +410,7 @@ export class StudioApi {
         if (!doll || !item) throw new HttpError(404, `アイテム「${b.id}」がありません`);
         if (item.back) throw new HttpError(400, 'この髪は、もう前髪と後ろ髪に分かれています');
         const placed = await dollTemplateFromImage(await fs.readFile(path.join(this.store.dir, item.image.file)), item.image);
-        const layers = await this.hairLayers(doll.id, item.category, { rgba: placed.rgba, width: placed.canvasW, height: placed.canvasH }, true);
+        const layers = await this.assets.hairLayers(doll, item.category, { rgba: placed.rgba, width: placed.canvasW, height: placed.canvasH }, true);
         if (!layers.back) throw new HttpError(422, '体の前にかかる髪が見つからないので、分けませんでした');
         return json(await this.store.addItem(doll.id, { category: item.category, name: item.name, ...layers, replaceId: item.id }));
       }

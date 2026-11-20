@@ -13,14 +13,30 @@ import type { ManifestBackground, ManifestImage } from '../../src/content/manife
 export const MAX_SIZE = 1024; // 長辺がこれを超える画像だけ縮小する（表示の基準）
 export const THUMB_SIZE = 192;
 
-export class FileWriter {
+// 画像の書き出し先。内容のハッシュを名前にして置き、一覧ファイルからの相対パス（files/…）を返す
+export interface ImageWriter {
+  write(data: Buffer, ext: string): Promise<string>;
+}
+const hashedName = (data: Buffer, ext: string) => `${createHash('sha1').update(data).digest('hex').slice(0, 16)}.${ext}`;
+
+// メモリの中に書き出す（サーバーの関数が、置き場に上げる前に使う）
+export class MemoryWriter implements ImageWriter {
+  readonly files = new Map<string, Buffer>();
+  async write(data: Buffer, ext: string): Promise<string> {
+    const file = `files/${hashedName(data, ext)}`;
+    this.files.set(file, data);
+    return file;
+  }
+}
+
+export class FileWriter implements ImageWriter {
   private readonly filesDir: string;
   constructor(outDir: string) {
     this.filesDir = path.join(outDir, 'files');
   }
   // 内容のハッシュを名前にして書く。戻り値は manifest からの相対パス
   async write(data: Buffer, ext: string): Promise<string> {
-    const name = `${createHash('sha1').update(data).digest('hex').slice(0, 16)}.${ext}`;
+    const name = hashedName(data, ext);
     await fs.mkdir(this.filesDir, { recursive: true });
     await fs.writeFile(path.join(this.filesDir, name), data);
     return `files/${name}`;
@@ -45,7 +61,7 @@ function crop(rgba: Pixels, width: number, height: number): { image: sharp.Sharp
 }
 
 // RGBA（キャンバス全体）を透明でない部分で切り抜いて、WebP（劣化なし）だけを書く（サムネイルなし）。全部透明なら null
-export async function encodeLayer(rgba: Pixels, width: number, height: number, writer: FileWriter): Promise<ManifestImage | null> {
+export async function encodeLayer(rgba: Pixels, width: number, height: number, writer: ImageWriter): Promise<ManifestImage | null> {
   const cropped = crop(rgba, width, height);
   if (!cropped) return null;
   const data = await cropped.image.webp({ lossless: true, effort: 6 }).toBuffer();
@@ -54,7 +70,7 @@ export async function encodeLayer(rgba: Pixels, width: number, height: number, w
 
 // RGBA（キャンバス全体）を透明でない部分で切り抜いて、WebP（劣化なし）とサムネイルを書く。全部透明なら null。
 // thumbFrom を渡すと、サムネイルはそちらの絵から作る（前髪と後ろ髪に分けた髪の、全体の絵など）
-export async function encodeCutout(rgba: Pixels, width: number, height: number, writer: FileWriter, thumbFrom?: Pixels): Promise<EncodedImage | null> {
+export async function encodeCutout(rgba: Pixels, width: number, height: number, writer: ImageWriter, thumbFrom?: Pixels): Promise<EncodedImage | null> {
   const main0 = crop(rgba, width, height);
   if (!main0) return null;
   const { image: cropped, box } = main0;
@@ -71,7 +87,7 @@ export async function encodeCutout(rgba: Pixels, width: number, height: number, 
 }
 
 // サムネイルだけを書く（透明でない部分で切り抜き、192px 以内）。全部透明なら null
-export async function encodeThumb(rgba: Pixels, width: number, height: number, writer: FileWriter): Promise<string | null> {
+export async function encodeThumb(rgba: Pixels, width: number, height: number, writer: ImageWriter): Promise<string | null> {
   const cropped = crop(rgba, width, height);
   if (!cropped) return null;
   const thumb = await cropped.image
@@ -82,7 +98,7 @@ export async function encodeThumb(rgba: Pixels, width: number, height: number, w
 }
 
 // 隠す所（白、不透明度が隠す強さ）: 必要な範囲だけを切り出して書く。何も無ければ null
-export async function encodeMask(alpha: Uint8Array | Uint8ClampedArray, width: number, height: number, writer: FileWriter): Promise<ManifestImage | null> {
+export async function encodeMask(alpha: Uint8Array | Uint8ClampedArray, width: number, height: number, writer: ImageWriter): Promise<ManifestImage | null> {
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let p = 0; p < width * height; p++) {
     rgba[p * 4] = 255;
@@ -100,7 +116,7 @@ export async function encodeMask(alpha: Uint8Array | Uint8ClampedArray, width: n
 }
 
 // 背景: 縮小して JPEG とサムネイルを書く
-export async function encodeBackground(input: string | Buffer, id: string, name: string, writer: FileWriter): Promise<ManifestBackground> {
+export async function encodeBackground(input: string | Buffer, id: string, name: string, writer: ImageWriter): Promise<ManifestBackground> {
   const base = sharp(input).flatten({ background: '#ffffff' });
   const main = await base
     .clone()
