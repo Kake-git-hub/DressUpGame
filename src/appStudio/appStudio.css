@@ -171,7 +171,6 @@
 .studio-stage {
   position: relative;
   flex: none;
-  max-width: 45%;
   background: #f6f0f8;
   border-radius: 10px;
   overflow: hidden;

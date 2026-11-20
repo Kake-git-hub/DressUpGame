@@ -227,7 +227,7 @@ textarea {
   animation: fadeIn 0.5s ease-out;
 }
 
-/* バージョンバッジ（右上に小さく。調整画面より手前に出すが、押せない） */
+/* バージョンバッジ（右上に小さく。調整画面より手前に出す） */
 .version-badge {
   position: fixed;
   top: calc(var(--top-inset, 0px) + 2px);
@@ -238,7 +238,11 @@ textarea {
   opacity: 0.6;
   color: #666;
   z-index: 400;
-  pointer-events: none;
+  /* 5 回続けて押すと、あいことばを聞く（ホーム画面のアプリで「つくる」を出すため）。押せる範囲は、左へだけ広げる
+     （下には広げない: 調整画面の右上のボタンに重ならないように） */
+  padding-left: 24px;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* 設定ボタン - 右下に配置 */
@@ -1361,4 +1365,25 @@ textarea {
   background: rgba(60, 40, 60, 0.45);
   color: #fff;
   font-size: 1.2rem;
+}
+
+.studio-load-failed {
+  max-width: 320px;
+  margin: 16px;
+  padding: 16px;
+  background: #fff;
+  color: #333;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  text-align: center;
+}
+.studio-load-failed button {
+  margin-top: 12px;
+  min-height: 40px;
+  padding: 6px 18px;
+  font-size: 0.95rem;
+  border: 1px solid #c9b8cf;
+  border-radius: 10px;
+  background: #fff;
 }

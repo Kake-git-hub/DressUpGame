@@ -53,14 +53,22 @@ describe('端末の中の「自分の服」（IndexedDB）', () => {
     expect((await library.all()).map((i) => i.id)).toEqual(['my:2', 'my:3']);
   });
 
-  it('IndexedDB が使えない端末では、空として動く（落ちない）', async () => {
+  it('IndexedDB が使えない端末では、読むと空（落ちない）。書くと、保存できなかったことが分かる（黙って失わない）', async () => {
     const library = openLibrary(null);
-    await library.put(myItem('my:1'));
     expect(await library.all()).toEqual([]);
-    await library.remove('my:1');
-    await library.replaceAll([]);
+    await expect(library.put(myItem('my:1'))).rejects.toThrow(/保存できません/);
+    await expect(library.remove('my:1')).rejects.toThrow(/保存できません/);
+    await expect(library.replaceAll([])).rejects.toThrow(/保存できません/);
     const broken = { open: () => { throw new Error('使えません'); } } as unknown as IDBFactory;
     expect(await openLibrary(broken).all()).toEqual([]);
+    await expect(openLibrary(broken).put(myItem('my:1'))).rejects.toThrow(/保存できません/);
+  });
+
+  it('開くのに返事が無いときは、待ちつづけない', async () => {
+    const hanging = { open: () => ({}) } as unknown as IDBFactory;
+    const library = openLibrary(hanging, 50);
+    expect(await library.all()).toEqual([]);
+    await expect(library.put(myItem('my:1'))).rejects.toThrow(/保存できません/);
   });
 });
 
@@ -115,6 +123,18 @@ describe('自分の服を、公開の素材に重ねる', () => {
     expect(back.frontItemId).toBe('my:h');
     expect(back.imageUrl).toMatch(/^data:/);
     expect(merged.clothing.find((c) => c.id === 'my:1')).toMatchObject({ setId: 'my:set-1', setName: 'うみのセット' });
+  });
+
+  it('壊れた控え（中身が欠けている）が 1 件あっても、ほかの服は出る', async () => {
+    const broken = [{ id: 'my:x', dollId: 'アニメ', createdAt: 1 } as unknown as MyItem, { id: 'my:y', dollId: 'アニメ', item: { category: 'トップス' }, files: null, createdAt: 1 } as unknown as MyItem];
+    const merged = await mergeMyItems(content, [...broken, myItem('my:1')]);
+    expect(merged.clothing.map((c) => c.id)).toEqual(['アニメ/トップス/シャツ', 'my:1']);
+  });
+
+  it('種類の分からない絵（type が空）は、PNG として読めるようにする', async () => {
+    const untyped = myItem('my:1', { files: { image: new Blob(['i']), thumb: new Blob(['t']) } });
+    const merged = await mergeMyItems(content, [untyped]);
+    expect(merged.clothing[1].imageUrl).toMatch(/^data:image\/png;base64,/);
   });
 
   it('自分の服が無ければ、同じ content を返す', async () => {

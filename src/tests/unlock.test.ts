@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adultConfirmed, gateQuestion, readStudioMode, rememberAdult } from '../appStudio/unlock';
+import { gateQuestion, readStudioMode, unlockByWord } from '../appStudio/unlock';
 
 const memory = () => {
   const map = new Map<string, string>();
@@ -24,11 +24,17 @@ describe('「つくる」を出す端末かどうか', () => {
     const broken = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); }, removeItem: () => {} };
     expect(readStudioMode('?studio=1', broken)).toBeNull();
   });
-  it('保護者の確認は、覚えるまでは済んでいない', () => {
+  it('あいことばでも出せる（ホーム画面のアプリ用）: studio・fake・off。ほかの言葉は、何もしない', () => {
     const storage = memory();
-    expect(adultConfirmed(storage)).toBe(false);
-    rememberAdult(storage);
-    expect(adultConfirmed(storage)).toBe(true);
+    expect(unlockByWord('まちがい', storage)).toBe(false);
+    expect(unlockByWord(null, storage)).toBe(false);
+    expect(readStudioMode('', storage)).toBeNull();
+    expect(unlockByWord(' Fake ', storage)).toBe(true);
+    expect(readStudioMode('', storage)).toBe('fake');
+    expect(unlockByWord('studio', storage)).toBe(true);
+    expect(readStudioMode('', storage)).toBe('real');
+    expect(unlockByWord('off', storage)).toBe(true);
+    expect(readStudioMode('', storage)).toBeNull();
   });
   it('入口の問いは、11〜19 かける 2〜9 を漢数字で出す', () => {
     expect(gateQuestion(() => 0)).toEqual({ text: '十一 かける 二 は？', answer: 22 });

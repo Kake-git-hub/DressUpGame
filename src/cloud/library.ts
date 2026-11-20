@@ -27,13 +27,17 @@ const done = (tx: IDBTransaction) =>
     tx.onabort = () => reject(tx.error);
   });
 
-// IndexedDB が使えない端末（プライベートブラウズなど）では、空として動く（落ちない）
-export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ?? null): Library {
+const UNAVAILABLE = 'この端末では、服を保存できません（端末の保存領域が使えません）';
+
+// IndexedDB が使えない端末（プライベートブラウズなど）では、読むと空（落ちない）。書くと、保存できなかったことを知らせる。
+// openTimeoutMs: 開くのに返事が無いとき、これだけ待ったら「使えない」として進む（ゲームの起動を止めない）
+export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ?? null, openTimeoutMs = 1500): Library {
   let opened: Promise<IDBDatabase | null> | null = null;
   const open = (): Promise<IDBDatabase | null> => {
     opened ??= new Promise<IDBDatabase | null>((resolve) => {
       try {
         if (!factory) return resolve(null);
+        setTimeout(() => resolve(null), openTimeoutMs);
         const request = factory.open(DATABASE, 1);
         request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: 'id' });
         request.onsuccess = () => resolve(request.result);
@@ -45,15 +49,17 @@ export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ??
     });
     return opened;
   };
+  // 書き込みは、失敗したら Error（黙って失わない。画面が知らせる）
   const write = async (work: (store: IDBObjectStore) => void): Promise<void> => {
     const db = await open();
-    if (!db) return;
+    if (!db) throw new Error(UNAVAILABLE);
     try {
       const tx = db.transaction(STORE, 'readwrite');
       work(tx.objectStore(STORE));
       await done(tx);
     } catch (error) {
       console.error('自分の服を保存できませんでした:', error);
+      throw new Error('この端末に、服を保存できませんでした（空きが足りないかもしれません）');
     }
   };
   return {
@@ -80,7 +86,9 @@ export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ??
   };
 }
 
-function toDataUrl(blob: Blob): Promise<string> {
+function toDataUrl(source: Blob): Promise<string> {
+  // 種類の分からない絵は、PNG として読めるようにする（描画の部品は、data: の種類で絵かどうかを見分ける）
+  const blob = source.type ? source : source.slice(0, source.size, 'image/png');
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
@@ -98,13 +106,14 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[]): Pro
   if (items.length === 0) return content;
   const clothing = [...content.clothing];
   for (const mine of items) {
-    const category = content.categories?.[mine.dollId]?.find((c) => c.id === mine.item.category);
-    if (!category || !content.dolls.some((d) => d.id === mine.dollId)) continue;
-    // 使う絵を、全部 data: の URL にする
-    const images: (ManifestImage | undefined)[] = [mine.item.image, mine.item.hide, mine.item.back, mine.item.under];
-    const names = [...images.flatMap((i) => (i ? [i.file] : [])), mine.item.thumb, ...(mine.item.backThumb ? [mine.item.backThumb] : [])];
-    if (names.some((name) => !(mine.files[name] instanceof Blob))) continue;
+    // 控えが 1 件壊れていても（中身が欠けているなど）、ほかの服は出す
     try {
+      const category = content.categories?.[mine.dollId]?.find((c) => c.id === mine.item.category);
+      if (!category || !content.dolls.some((d) => d.id === mine.dollId)) continue;
+      // 使う絵を、全部 data: の URL にする
+      const images: (ManifestImage | undefined)[] = [mine.item.image, mine.item.hide, mine.item.back, mine.item.under];
+      const names = [...images.flatMap((i) => (i ? [i.file] : [])), mine.item.thumb, ...(mine.item.backThumb ? [mine.item.backThumb] : [])];
+      if (names.some((name) => !(mine.files[name] instanceof Blob))) continue;
       const urls = new Map<string, string>();
       for (const name of new Set(names)) urls.set(name, await toDataUrl(mine.files[name]));
       const converted = itemToClothing(mine.dollId, category, mine.item, (file) => urls.get(file) ?? '', mine.set);

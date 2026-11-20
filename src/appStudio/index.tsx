@@ -8,7 +8,6 @@ import type { Library } from '../cloud/library';
 import type { DollData } from '../types';
 import { AdultGate } from './AdultGate';
 import { AppStudio } from './AppStudio';
-import { adultConfirmed, rememberAdult } from './unlock';
 import type { StudioMode } from './unlock';
 import './appStudio.css';
 
@@ -22,17 +21,15 @@ export interface StudioRootProps {
 }
 
 export default function StudioRoot({ mode, doll, categories, library, onClose, onLibraryChanged }: StudioRootProps) {
-  const [confirmed, setConfirmed] = useState(adultConfirmed);
+  // 保護者の確認は、開くたびに毎回たずねる（覚えない）
+  const [confirmed, setConfirmed] = useState(false);
   // 裏側は、開いている間に 1 つだけ作る
   const backend = useMemo(() => createBackend(mode), [mode]);
   if (!confirmed) {
     return (
       <AdultGate
         onCancel={onClose}
-        onPass={() => {
-          rememberAdult();
-          setConfirmed(true);
-        }}
+        onPass={() => setConfirmed(true)}
       />
     );
   }

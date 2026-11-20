@@ -5,7 +5,8 @@
  * 横でも縦でも遊べる（配置は src/components/layout.ts）。
  * ドール・服・背景の画像は、別リポジトリ（DressUpGame-content）から配信されたものを読む。
  */
-import { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { Component, Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlash } from './components';
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
@@ -15,7 +16,7 @@ import { adjustBaseId, partnerOf } from './engine/pairs';
 import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
-import { readStudioMode } from './appStudio/unlock';
+import { readStudioMode, unlockByWord } from './appStudio/unlock';
 import type { LoadedContent } from './content/loadContent';
 import type { ManifestCategory } from './content/manifest';
 import { loadContent, resolveContentUrl } from './content/loadContent';
@@ -73,6 +74,29 @@ const StudioRoot = lazy(() => import('./appStudio'));
 const library = openLibrary();
 const NO_CATEGORIES: ManifestCategory[] = [];
 
+// スタジオの画面を読み込めなかった（通信が切れた、など）とき、ゲームごと消えないようにする
+class StudioBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="studio-loading" data-testid="studio-load-failed">
+        <div className="studio-load-failed">
+          <p>画面を読み込めませんでした。インターネットにつながっているか確かめて、もう一度ためしてください。</p>
+          <button onClick={this.props.onClose}>とじる</button>
+        </div>
+      </div>
+    );
+  }
+}
+
+// 版数を続けて押した回数（ホーム画面のアプリで「つくる」を出すための入口）
+const UNLOCK_TAPS = 5;
+const UNLOCK_WINDOW_MS = 1500;
+
 // 素材の置き場所
 const CONTENT_URL = resolveContentUrl(window.location.search, window.location.href);
 // 画面が出てから先読みを始めるまでの待ち時間（最初の表示を邪魔しない）
@@ -115,9 +139,20 @@ function App() {
   );
   const canvasSize = layout.canvas;
 
+  // 服を作る画面を開いているか
+  const [studioOpen, setStudioOpen] = useState(false);
+  const studioOpenRef = useRef(false);
+  useEffect(() => {
+    studioOpenRef.current = studioOpen;
+    // 閉じたら、その間に変わっていた画面の大きさに合わせ直す
+    if (!studioOpen) window.dispatchEvent(new Event('resize'));
+  }, [studioOpen]);
+
   // 画面サイズの変化（持ち替えを含む）に合わせる。CSS変数も同時に更新してレイアウト全体を制御
   useEffect(() => {
     const update = () => {
+      // スタジオで文字を打っている間は、キーボードで画面が縮んでも、うしろのゲームの配置を変えない
+      if (studioOpenRef.current) return;
       const next = readViewport();
       // CSS変数に実際のビューポートサイズを設定
       document.documentElement.style.setProperty('--app-height', `${next.height}px`);
@@ -180,15 +215,16 @@ function App() {
     if (!base) return;
     setAllClothing((await mergeMyItems(base, await library.all())).clothing);
   }, []);
-  const [studioOpen, setStudioOpen] = useState(false);
 
   // 配信された素材の一覧を読み込む
   useEffect(() => {
     let cancelled = false;
+    // 端末の中の自分の服は、素材の取得と並べて読み始める（読めない・返事が無いときは、空として進む）
+    const mine = library.all().catch(() => []);
     loadContent(CONTENT_URL)
       .then(async (publicContent) => {
-        // 端末の中の自分の服を、公開の素材に重ねる（読めなければ、公開の素材だけで進む）
-        const content = await mergeMyItems(publicContent, await library.all()).catch(() => publicContent);
+        // 自分の服を、公開の素材に重ねる（重ねられなければ、公開の素材だけで進む）
+        const content = await mine.then((items) => mergeMyItems(publicContent, items)).catch(() => publicContent);
         if (cancelled) return;
         publicContentRef.current = publicContent;
         setCategoriesByDoll(publicContent.categories ?? {});
@@ -485,7 +521,21 @@ function App() {
   }, []);
 
   // 版数（右上に小さく。読み込み中・失敗の画面にも出して、どの版で止まっているかが分かるようにする）
-  const versionBadge = <div className="version-badge">v{APP_VERSION}</div>;
+  // 版数を 5 回続けて押すと、あいことばを聞く（studio / fake / off）。合っていれば、読み込み直して「つくる」を出す・消す。
+  // ホーム画面のアプリは Safari と保存が別なので、URL（?studio=…）では出せないため
+  const badgeTaps = useRef<number[]>([]);
+  const handleBadgeTap = () => {
+    const now = Date.now();
+    badgeTaps.current = [...badgeTaps.current.filter((t) => now - t < UNLOCK_WINDOW_MS), now];
+    if (badgeTaps.current.length < UNLOCK_TAPS) return;
+    badgeTaps.current = [];
+    if (unlockByWord(window.prompt('あいことばを入れてください'))) window.location.reload();
+  };
+  const versionBadge = (
+    <div className="version-badge" onClick={handleBadgeTap}>
+      v{APP_VERSION}
+    </div>
+  );
 
   if (loadState !== 'ready') {
     return (
@@ -657,16 +707,18 @@ function App() {
 
       {/* 服を作る画面（開いたときに読み込む） */}
       {studioOpen && STUDIO_MODE && currentDoll && (
-        <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
-          <StudioRoot
-            mode={STUDIO_MODE}
-            doll={currentDoll}
-            categories={categoriesByDoll[currentDoll.id] ?? NO_CATEGORIES}
-            library={library}
-            onClose={() => setStudioOpen(false)}
-            onLibraryChanged={refreshMyItems}
-          />
-        </Suspense>
+        <StudioBoundary onClose={() => setStudioOpen(false)}>
+          <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
+            <StudioRoot
+              mode={STUDIO_MODE}
+              doll={currentDoll}
+              categories={categoriesByDoll[currentDoll.id] ?? NO_CATEGORIES}
+              library={library}
+              onClose={() => setStudioOpen(false)}
+              onLibraryChanged={refreshMyItems}
+            />
+          </Suspense>
+        </StudioBoundary>
       )}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}

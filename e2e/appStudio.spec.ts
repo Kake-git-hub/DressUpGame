@@ -80,7 +80,7 @@ test('「つくる」のボタンは、教えた URL を開いた端末にだけ
   await expect(page.getByTestId('studio-button')).toHaveCount(0);
 });
 
-test('入口は保護者用: 問いに正しく答えて、18 歳以上に印を付けないと開かない。開いたあとは、閉じるまで聞かない', async ({ page }) => {
+test('入口は保護者用: 問いに正しく答えて、18 歳以上に印を付けないと開かない。開くたびに、毎回たずねる', async ({ page }) => {
   await open(page);
   await page.getByTestId('studio-button').click();
   const gate = page.getByTestId('adult-gate');
@@ -104,12 +104,13 @@ test('入口は保護者用: 問いに正しく答えて、18 歳以上に印を
   // やめる
   await page.getByTestId('adult-cancel').click();
   await expect(gate).toHaveCount(0);
-  // 正しく答えると開く。閉じて開き直しても、もう聞かない
+  // 正しく答えると開く。閉じて開き直すと、もう一度たずねる（大人が開いたあと、子どもがそのまま開けないように）
   await passGate(page);
   await page.getByTestId('studio-close').click();
   await expect(page.getByTestId('app-studio')).toHaveCount(0);
   await page.getByTestId('studio-button').click();
-  await expect(page.getByTestId('app-studio')).toBeVisible();
+  await expect(page.getByTestId('adult-gate')).toBeVisible();
+  await expect(page.getByTestId('app-studio')).toHaveCount(0);
 });
 
 test('1 点作る: チケットが 1 枚減り、できた服を「使う」と、自分のメニューに出て着せられる。読み込み直しても残る', async ({ page }) => {
@@ -232,8 +233,7 @@ test('作っている間に閉じて、開き直しても、続きが見られ�
   await expect(candidates(page)).toHaveAttribute('data-status', 'working');
   await page.reload();
   await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId('studio-button').click(); // 同じタブなので、入口はもう聞かない
-  await expect(page.getByTestId('app-studio')).toBeVisible();
+  await passGate(page);
   await expect(candidates(page)).toHaveCount(1);
   await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 15_000 });
   await expect(page.getByTestId('studio-tickets')).toContainText('4');
@@ -264,4 +264,91 @@ test('スタジオの画面は、ゲームの最初の読み込みに入って�
   // 別のファイルに入っている
   const assets = fs.readdirSync(path.join(dist, 'assets')).filter((f) => f.endsWith('.js'));
   expect(assets.some((f) => fs.readFileSync(path.join(dist, 'assets', f), 'utf8').includes('studio-make'))).toBe(true);
+});
+
+test('自分の服は、オフラインで開き直しても、メニューに出て着たまま', async ({ page, context }) => {
+  await open(page);
+  await passGate(page);
+  await make(page, 'トップス');
+  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
+  await candidates(page).getByTestId('studio-candidate-name').fill('うみのふく');
+  await candidates(page).getByTestId('studio-keep').click();
+  await page.getByTestId('studio-close').click();
+  await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
+  const box = (await page.locator('.palette-section img[alt="うみのふく"]').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, VIEW_H / 2, { steps: 4 });
+  await page.mouse.up();
+  await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
+  // 先読みが終わってから、オフラインにして開き直す
+  await page.waitForFunction(() => document.documentElement.dataset.prefetch === 'test', null, { timeout: 60_000 });
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
+  await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
+  await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
+  await expect(page.locator('.palette-section img[alt="うみのふく"]')).toBeVisible();
+  await context.setOffline(false);
+});
+
+test('端末の保存領域（IndexedDB）が応答しなくても、ゲームは始まる', async ({ page }) => {
+  await page.addInitScript(() => {
+    // open が、いつまでも返事をしない
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => ({}), deleteDatabase: () => ({}) }, configurable: true });
+  });
+  await page.goto(APP);
+  await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 12_000 });
+});
+
+test('つながっていないとき、スタジオはそう知らせる。本物の裏側がまだ無いときは「準備中」と出る', async ({ page }) => {
+  await open(page, FAKE, { offline: true } as never);
+  await page.getByTestId('studio-button').click();
+  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
+  await page.getByTestId('adult-18').check();
+  await page.getByTestId('adult-open').click();
+  await expect(page.getByTestId('studio-problem')).toContainText('インターネット');
+  await expect(page.getByTestId('studio-make')).toHaveCount(0);
+  await page.getByTestId('studio-close').click();
+  // 本物（?studio=1）は、まだつながっていない
+  await page.goto(`${APP}&studio=1`);
+  await expect(page.getByTestId('studio-button')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('studio-button').click();
+  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
+  await page.getByTestId('adult-18').check();
+  await page.getByTestId('adult-open').click();
+  await expect(page.getByTestId('studio-unavailable')).toBeVisible();
+});
+
+test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あいことばを入れると、「つくる」のボタンが出る', async ({ page }) => {
+  await open(page, APP);
+  await expect(page.getByTestId('studio-button')).toHaveCount(0);
+  const answers = ['まちがい', 'fake'];
+  page.on('dialog', (d) => void d.accept(answers.shift() ?? ''));
+  const badge = page.locator('.version-badge');
+  // 4 回では何も起きない
+  for (let i = 0; i < 4; i++) await badge.click();
+  await page.waitForTimeout(1600);
+  // 5 回続けて押す: あいことばが違えば、何も変わらない
+  for (let i = 0; i < 5; i++) await badge.click();
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId('studio-button')).toHaveCount(0);
+  // 正しいあいことば
+  for (let i = 0; i < 5; i++) await badge.click();
+  await expect(page.getByTestId('studio-button')).toBeVisible({ timeout: 60_000 });
+});
+
+test.describe('スタジオの画面を読み込めないとき', () => {
+  test.use({ serviceWorkers: 'block' });
+  test('ゲームは消えずに、読み込めなかったことを知らせる', async ({ page }) => {
+    await open(page);
+    // スタジオの画面のファイル（あとから読み込む分）だけ、取れないようにする
+    await page.route('**/assets/index-*.js', (route) => route.abort());
+    await page.getByTestId('studio-button').click();
+    await expect(page.getByTestId('studio-load-failed')).toBeVisible();
+    await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible();
+    await page.getByTestId('studio-load-failed').getByRole('button').click();
+    await expect(page.getByTestId('studio-load-failed')).toHaveCount(0);
+    await expect(page.getByTestId('studio-button')).toBeVisible();
+  });
 });

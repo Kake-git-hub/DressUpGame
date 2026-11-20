@@ -58,6 +58,8 @@ function toDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+// 進み具合は、ただのデータ（古い端末には structuredClone が無い）
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const colorOf = (index: number) => COLORS[index % COLORS.length];
 // 品目ごとに、ドールのキャンバスの上の位置を少しずつ変える（重なって見えなくならないように）
 const boxOf = (index: number) => ({ x: (CANVAS - SIZE.w) / 2, y: 300 + ((index * 150) % 450), w: SIZE.w, h: SIZE.h });
@@ -96,7 +98,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   const jobOf = (id: string) => state.jobs.find((j) => j.id === id);
   const notifyJob = (id: string) => {
     const job = jobOf(id);
-    if (job) jobListeners.get(id)?.forEach((l) => l(structuredClone(job)));
+    if (job) jobListeners.get(id)?.forEach((l) => l(clone(job)));
   };
   const setTickets = (tickets: number) => {
     state = { ...state, user: { ...state.user, tickets } };
@@ -187,12 +189,12 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       set.add(listener);
       jobListeners.set(jobId, set);
       const job = jobOf(jobId);
-      if (job) listener(structuredClone(job));
+      if (job) listener(clone(job));
       return () => set.delete(listener);
     },
     async pendingJobs() {
       online();
-      return structuredClone(state.jobs.filter(undecided));
+      return clone(state.jobs.filter(undecided));
     },
     async keep(jobId, index, name) {
       online();

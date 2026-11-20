@@ -909,13 +909,12 @@ test('下の案内の文は無く、版数は右上に小さく出る（調整�
   // メニューの下の ▼ は画面の中
   const down = (await page.getByTestId('menu-scroll-down').boundingBox())!;
   expect(down.y + down.height).toBeLessThanOrEqual(VIEW_H);
-  // 調整中も出ていて、右上のボタンと重ならない・押せない
+  // 調整中も出ていて、右上のボタンと重ならない
   await page.locator('.tool-button').click();
   await expect(badge).toBeVisible();
   const b = (await badge.boundingBox())!;
   const top = (await page.locator('.item-adjust-top-buttons').boundingBox())!;
   expect(b.y + b.height).toBeLessThanOrEqual(top.y);
-  expect(await badge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
 });
 
 // ホーム画面から開いたとき（standalone）をまねて、開き直す。
@@ -1233,6 +1232,8 @@ test.describe('縦画面', () => {
     await page.setViewportSize({ width, height });
     await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
     await expect(page.getByTestId('portrait-categories')).toBeVisible();
+    // 出てくるときの動き（0.5 秒、少し下から上がる）が終わるまで待つ。途中で位置を測ると、キャンバスが 10px ほど下にある
+    await expect.poll(async () => (await page.getByTestId('avatar-canvas').boundingBox())?.y).toBe(0);
   }
   const selectCategory = (page: Page, label: string) => page.getByTestId('portrait-categories').getByRole('button', { name: label }).click();
   const itemBox = async (page: Page, name: string) => (await page.getByTestId('portrait-items').locator(`img[alt="${name}"]`).boundingBox())!;

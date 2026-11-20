@@ -23,7 +23,8 @@ interface Props {
 }
 
 const SET = '__set';
-const STAGE = 200; // できた服を、ドールに着せて見せる枠の大きさ（px）
+// できた服を、ドールに着せて見せる枠の大きさ（px）。せまい画面では小さくする
+const stageSize = () => Math.max(110, Math.min(200, Math.floor(window.innerWidth * 0.36)));
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
 
@@ -45,6 +46,7 @@ function BlobImage({ blob, alt }: { blob: Blob | undefined; alt: string }) {
 
 // ドールに、できた服を着せた絵
 function Stage({ doll, preview }: { doll: DollData; preview?: StudioPreview }) {
+  const STAGE = stageSize();
   const k = STAGE / doll.canvasW;
   // 服のキャンバスは、ドールのキャンバスのまわりに余白を足した大きさのことがある（中心は同じ）
   const padX = preview ? (preview.canvasW - doll.canvasW) / 2 : 0;
@@ -107,12 +109,18 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
           if (stopped) return;
           stops.push(backend.watchJob(job.id, upsertJob));
         }
+      } catch (e) {
+        if (!stopped) setProblem(messageOf(e));
+        return;
+      }
+      // 端末の控えを、サーバーの一覧に合わせる。できなくても、作ることはできる（知らせだけ出す）
+      try {
         const items = await backend.listMyItems();
         if (stopped) return;
         await library.replaceAll(items);
         await refreshLibrary();
       } catch (e) {
-        if (!stopped) setProblem(messageOf(e));
+        if (!stopped) setError(messageOf(e));
       }
     })();
     return () => {

@@ -4,11 +4,11 @@
  * 販売を始めるまでは、作者が教えた URL（?studio=1）を 1 回開いた端末にだけ「つくる」のボタンを出す（次からは覚えている）。
  * ?studio=fake は、端末の中だけで動く偽物の裏側（開発と確認用）。?studio=0 で消す。
  * この小さな部分だけは、ゲームの最初の読み込みに入る（スタジオの画面そのものは、開いたときに読み込む）。
+ * 保護者の確認は、覚えない: 「つくる」を開くたびに、毎回たずねる（大人が開いたあと、子どもがそのまま開けないように）。
  */
 export type StudioMode = 'real' | 'fake';
 
 const KEY = 'dressup_studio';
-const ADULT_KEY = 'dressup_studio_adult';
 
 export function readStudioMode(search: string, storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = localStorage): StudioMode | null {
   try {
@@ -23,19 +23,18 @@ export function readStudioMode(search: string, storage: Pick<Storage, 'getItem' 
   }
 }
 
-// 保護者の確認が済んでいるか（アプリを閉じるまで覚える）
-export function adultConfirmed(storage: Pick<Storage, 'getItem'> = sessionStorage): boolean {
+// ホーム画面のアプリは、Safari とは保存が別なので、URL では出せない。
+// 版数を 5 回続けて押すと、あいことばを聞く: studio = 本物、fake = 確認用、off = 消す。変わったら true
+export function unlockByWord(word: string | null, storage: Pick<Storage, 'setItem' | 'removeItem'> = localStorage): boolean {
   try {
-    return storage.getItem(ADULT_KEY) === '1';
+    const value = (word ?? '').trim().toLowerCase();
+    if (value === 'studio') storage.setItem(KEY, 'real');
+    else if (value === 'fake') storage.setItem(KEY, 'fake');
+    else if (value === 'off') storage.removeItem(KEY);
+    else return false;
+    return true;
   } catch {
     return false;
-  }
-}
-export function rememberAdult(storage: Pick<Storage, 'setItem'> = sessionStorage): void {
-  try {
-    storage.setItem(ADULT_KEY, '1');
-  } catch {
-    // 覚えられなくても動く（次に開くとき、もう一度たずねる）
   }
 }
 
