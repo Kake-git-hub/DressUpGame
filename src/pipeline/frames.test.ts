@@ -23,8 +23,11 @@ const contains = (outer: { x: number; y: number; w: number; h: number }, inner: 
 
 describe('frameKind', () => {
   it('カテゴリ名から枠の種類を決める', () => {
-    expect(frameKind('ヘアスタイル')).toBe('upper');
+    // 髪は本物のドールの上半身（hair）、ぼうしは上半身のシルエット（upper）。枠の範囲は同じ
+    expect(frameKind('ヘアスタイル')).toBe('hair');
+    expect(frameKind('まえがみ')).toBe('hair');
     expect(frameKind('ぼうし')).toBe('upper');
+    expect(frameKind('うしろがみ')).toBeNull();
     expect(frameKind('くつ')).toBe('feet');
     expect(frameKind('てぶくろ')).toBe('hands');
     expect(frameKind('くつした')).toBeNull();
@@ -35,6 +38,10 @@ describe('frameKind', () => {
 });
 
 describe('frameTiles', () => {
+  it('hair の枠は、upper と同じ範囲', () => {
+    expect(frameTiles('hair', parts, 1228, 1228)).toEqual(frameTiles('upper', parts, 1228, 1228));
+  });
+
   for (const kind of ['upper', 'feet', 'hands'] as const) {
     it(`${kind}: キャンバスの中に収まり、縦横比が合う`, () => {
       const tiles = frameTiles(kind, parts, W, W);
