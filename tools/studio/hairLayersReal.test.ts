@@ -94,20 +94,30 @@ describe('extractHair（本物の生成画像）', async () => {
   });
 
   it('ツインテールのしっぽと、肩より下の後ろ髪の広がりは、前にしない', () => {
-    // 左のしっぽ（x < 300、y 250〜700）は、ほとんどが後ろだけ
+    // 左のしっぽの、肩より下（x < 300、y 480〜700）は、ほとんどが後ろだけ
     let tail = 0;
     let tailFront = 0;
-    for (let y = 250; y < 700; y++) {
+    for (let y = 480; y < 700; y++) {
       for (let x = 0; x < 300; x++) {
         if (pink.hair.rgba[(y * SIZE + x) * 4 + 3] < 128) continue;
         tail++;
         if (pink.hair.front[y * SIZE + x]) tailFront++;
       }
     }
-    expect(tail).toBeGreaterThan(20000);
+    expect(tail).toBeGreaterThan(10000);
     expect(tailFront / tail).toBeLessThan(0.05);
     expect(brown.hair.rgba[(800 * SIZE + 215) * 4 + 3]).toBe(255); // 体の左に広がる後ろ髪
     expect(brown.hair.front[800 * SIZE + 215]).toBe(0);
+  });
+
+  it('前の範囲は、肩より上で左右同じ高さに分かれる（片側のしっぽだけが前に入ることはない）', () => {
+    const rows = (x0: number, x1: number) => {
+      let lowest = -1;
+      for (let y = 0; y < SIZE; y++) for (let x = x0; x < x1; x++) if (pink.hair.front[y * SIZE + x] && pink.hair.rgba[(y * SIZE + x) * 4 + 3] >= 128) lowest = Math.max(lowest, y);
+      return lowest;
+    };
+    // しっぽは x < 300 と x > 724
+    expect(Math.abs(rows(0, 300) - rows(724, SIZE))).toBeLessThanOrEqual(8);
   });
 
   it('ツインテール: 前の範囲は、ほとんどが頭のまわり（体の後ろの髪は前にしない）', () => {
@@ -117,7 +127,7 @@ describe('extractHair（本物の生成画像）', async () => {
       for (let x = 0; x < SIZE; x++) {
         if (!pink.hair.front[y * SIZE + x]) continue;
         total++;
-        if (y < SIZE * 0.42) head++;
+        if (y < NECK_Y + 10) head++;
       }
     }
     expect(total).toBeGreaterThan(10000);

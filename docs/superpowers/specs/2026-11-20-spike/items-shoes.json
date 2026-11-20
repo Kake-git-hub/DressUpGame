@@ -1,0 +1,7 @@
+[
+  { "category": "くつ", "name": "あかいリボンのパンプス", "description": "Glossy red Mary Jane pumps with a strap across the instep and a small red bow on the toe of each shoe.", "colors": ["#c01820", "#801010"] },
+  { "category": "くつ", "name": "そらいろスニーカー", "description": "Light sky blue canvas low-top sneakers with white laces and thick white rubber soles.", "colors": ["#78c0f0", "#ffffff"] },
+  { "category": "くつ", "name": "ひまわりサンダル", "description": "Yellow strappy sandals with an ankle strap, two straps crossing over the toes and a small sunflower decoration on each sandal.", "colors": ["#f8d020", "#c08010", "#6a3a10"] },
+  { "category": "くつ", "name": "きいろいながぐつ", "description": "Bright yellow rubber rain boots reaching the middle of the calf, with thick white soles.", "colors": ["#f8d820", "#ffffff"] },
+  { "category": "くつ", "name": "リボンのバレエシューズ", "description": "Pale pink satin ballet flats with pink ribbons that cross over the ankles and tie in small bows.", "colors": ["#f0a8c0", "#e080a0"] }
+]

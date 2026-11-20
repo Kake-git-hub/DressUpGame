@@ -218,16 +218,21 @@ describe('extractHair: 前髪の切れ目は、絵の線に沿う', () => {
     expect(without.front[20 * S + 128]).toBe(0);
   });
 
-  it('首より下へ長くのびる房（ツインテールなど）は、首の高さが分かっていても、前にしない', () => {
+  it('首より下へ長くのびる房（ツインテールなど）は、首より上だけが前になる（左右どちらも同じ高さで分かれる）', () => {
     const image = reference();
     rect(image, 80, 10, 175, 45, BROWN);
     rect(image, 60, 10, 61, 200, LINE);
-    rect(image, 30, 10, 59, 200, BROWN); // 頭の横から腰までたれる房（ドールの外）
+    rect(image, 30, 10, 59, 200, BROWN); // 頭の左から腰までたれる房（ドールの外）
     rect(image, 62, 10, 79, 45, BROWN);
+    rect(image, 196, 10, 197, 200, LINE);
+    rect(image, 198, 10, 227, 200, BROWN); // 右の房
+    rect(image, 176, 10, 195, 45, BROWN);
     const hair = extractHair(image, reference(), dollAlpha(), S, S, GREEN, 110);
     expect(hair.front[20 * S + 128]).toBe(255);
-    expect(hair.front[150 * S + 45]).toBe(0);
-    expect(hair.front[30 * S + 45]).toBe(0);
+    for (const x of [45, 212]) {
+      expect(hair.front[30 * S + x]).toBe(255); // 首より上
+      expect(hair.front[150 * S + x]).toBe(0); // 首より下（体の横）は後ろだけ
+    }
   });
 });
 

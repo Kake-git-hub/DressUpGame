@@ -255,10 +255,11 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
  *  1. ドールの上の、太さのある髪（細い線は、後ろ髪のふちが体の輪郭線にかぶっただけの所）と、そのすぐ外
  *  2. 髪を、絵の線（輪郭線）で房に分ける。ドールの上の髪を多く含む房は、ドールの外の部分もふくめて、房ごと前にする
  *     （切れ目が絵の線に沿うので、前髪だけを着せても自然に見える）。
- *     首の高さが分かっていれば、ほとんどが首より上にある房（頭のまわりの髪）も、房ごと前にする
+ *     首の高さが分かっていれば、首より上の髪（頭のまわり）はすべて前にし、ほとんどが首より上にある房も房ごと前にする。
+ *     肩より下へのびる房（しっぽ・長い後ろ髪）は、首の高さで左右そろって分かれる。その下の、体の外の髪は後ろだけ
+ *     （体より幅の広い服の後ろに、髪が回るように）
  *  3. まだ離れているかたまり（顔の横から首の横を通って胸にたれる房は、首の横でドールの外に出る）は、
- *     髪の中をたどる道でつなぐ。道が通る小さな房は、房ごと前にする。後ろ髪とつながった大きな房は、
- *     首より上を通るなら首より上だけ（切れ目は肩の高さの横線になる）、そうでなければ道のまわりだけ
+ *     髪の中をたどる道でつなぐ。道が通る小さな房は、房ごと前にする。後ろ髪とつながった大きな房は、道のまわりだけ
  * 足すのは髪の画素だけ。後ろ髪にも同じ画素があるので、重ねた見た目は変わらない
  */
 function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: number, height: number, px: (v: number) => number, area: (v: number) => number, neckY?: number): Uint8Array {
@@ -307,16 +308,15 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
     });
   }
   const smallLobe = area(JOIN_LOBE_AREA);
-  const takeLobe = new Uint8Array(lobeSize.length); // 1 = 房ごと、2 = 首より上だけ
+  const takeLobe = new Uint8Array(lobeSize.length); // 1 = 房ごと
   for (let id = 1; id < lobeSize.length; id++) {
     if (lobeOn[id] >= lobeSize[id] * LOBE_ON_SHARE || lobeAbove[id] >= lobeSize[id] * LOBE_ABOVE_SHARE) takeLobe[id] = 1;
   }
   const addLobes = () => {
     const added = new Uint8Array(total);
-    for (let p = 0; p < total; p++) {
-      const take = takeLobe[lobe[p]];
-      if (take === 1 || (take === 2 && p < neckStart)) added[p] = 1;
-    }
+    // 首より上の髪（頭のまわり）は、すべて前。肩より下へのびる房は、首の高さで左右そろって分かれる
+    for (let p = 0; p < neckStart; p++) if (any[p]) added[p] = 1;
+    for (let p = 0; p < total; p++) if (takeLobe[lobe[p]] === 1) added[p] = 1;
     // 房のまわりの線も一緒に（房の外へ数 px。となりの房に少し入っても、同じ髪の画素）
     const grown = dilate(added, width, height, px(LOBE_RIM));
     for (let p = 0; p < total; p++) if (grown[p] && any[p]) mask[p] = 1;
@@ -378,14 +378,9 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
     for (let id = 1; id < sizes.length; id++) {
       if (id === main || reached[id] < 0) continue;
       for (let p = reached[id]; label[p] !== main; p = parent[p]) {
-        const id2 = lobe[p];
-        if (id2 > 0 && takeLobe[id2] === 0) {
-          // 小さな房は房ごと。後ろ髪とつながった大きな房は、首より上を通るなら、首より上だけ（切れ目は肩の高さの横線になる）
-          if (lobeSize[id2] <= smallLobe) takeLobe[id2] = 1;
-          else if (p < neckStart) takeLobe[id2] = 2;
-        }
-        // 首より上で大きな房を通る所は、上の決まりで足りる。それ以外の所は、道のまわりを足す
-        if (!(id2 > 0 && takeLobe[id2] === 2)) path[p] = 1;
+        // 小さな房は房ごと。大きな房（後ろ髪の広がり）は、道のまわりだけ
+        if (lobe[p] > 0 && lobeSize[lobe[p]] <= smallLobe) takeLobe[lobe[p]] = 1;
+        path[p] = 1;
       }
     }
     addLobes();

@@ -6,7 +6,7 @@
  *
  * 品目の JSON: [{ "category": "くつ", "name": "…", "description": "英語の説明", "colors": ["#rrggbb"] }, …]
  * 出力フォルダに、品目ごとに 切り抜き（-cut.png）・隠す所（-hide.png）・AI の形（-shape.png）・前髪の範囲（-front.png）・
- * くつの中の肌（-under.png）・ドールに着せた絵（-worn.jpg）と、結果の一覧（result.json）を書く。
+ * くつの中の肌（-under.png）・AI の絵（-source.png）・ドールに着せた絵（-worn.jpg）と、結果の一覧（result.json）を書く。
  * 髪は、サムネイル（-thumb.png）と、うしろがみのサムネイル（-backthumb.png）も書く。
  * --with を付けると、その品目（靴下など）も重ねた絵（-worn-with.jpg）を書く。
  * save は、選んだ番号の候補を素材フォルダに登録する（公開はしない）。最後に replace を付けると、同じカテゴリ・同じ名前の品目を置き換える。
@@ -93,6 +93,7 @@ async function generate(contentDir: string, dollId: string, itemsFile: string, o
     const write = (suffix: string, data: Buffer) => fs.writeFile(path.join(outDir, `${i}-${suffix}`), data);
     const cut = await get('png');
     await write('cut.png', cut);
+    await write('source.png', await get('source')); // AI の絵（位置合わせ済み）。あとで処理を直したときに、作り直さずに確かめられるように
     if (c.hasShape) await write('shape.png', await get('shape'));
     const meta = await sharp(cut).metadata();
     const W = meta.width!;

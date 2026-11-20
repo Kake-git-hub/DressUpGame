@@ -1,0 +1,7 @@
+[
+  { "category": "ヘアスタイル", "name": "ピンクのツインテール", "description": "Long pale pink wavy twin tails tied high on both sides of the head with small white ribbons, straight blunt bangs, the wavy ends reaching the waist.", "colors": ["#f4b8c8", "#e890aa", "#ffffff"] },
+  { "category": "ヘアスタイル", "name": "くろかみボブ", "description": "Glossy black chin-length bob with straight blunt bangs and a small red hair clip above the right ear.", "colors": ["#1c1c24", "#3a3a48", "#d02030"] },
+  { "category": "ヘアスタイル", "name": "ちゃいろのロング", "description": "Very long straight chestnut brown hair reaching the hips, parted in the middle, with long side locks framing the face and falling in front of the shoulders.", "colors": ["#7a4426", "#a0603a"] },
+  { "category": "ヘアスタイル", "name": "きんいろみつあみ", "description": "Golden blonde hair with soft swept bangs, in two thick braids that hang in front of the shoulders down to the waist, each tied with a small blue ribbon.", "colors": ["#f0c050", "#d09a30", "#3060d0"] },
+  { "category": "ヘアスタイル", "name": "むらさきポニーテール", "description": "Lavender purple hair in a high side ponytail on the right side of the head tied with a white scrunchie, side-swept bangs, the ponytail reaching the waist.", "colors": ["#b48ce6", "#8a64c8", "#ffffff"] }
+]
