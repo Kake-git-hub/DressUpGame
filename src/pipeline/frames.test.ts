@@ -59,6 +59,17 @@ describe('frameTiles', () => {
     expect(t.from.y).toBe(0);
     expect(t.from.y + t.from.h).toBeGreaterThanOrEqual(parts.hips.y + parts.hips.h);
   });
+  it('hair のロングヘア（ひざまで）は、上の端から、ひざの下までを写す（頭は真ん中）', () => {
+    const [short] = frameTiles('hair', parts, W, W);
+    const [long] = frameTiles('hair', parts, W, W, { longHair: true });
+    expect(long.from.y).toBe(0);
+    const knee = parts.legs.y + parts.legs.h * 0.5;
+    expect(long.from.y + long.from.h).toBeGreaterThan(knee + 20);
+    expect(long.from.h).toBeGreaterThan(short.from.h);
+    expect(contains(long.from, parts.head)).toBe(true);
+    expect(Math.abs(long.from.x + long.from.w / 2 - (parts.head.x + parts.head.w / 2))).toBeLessThan(2);
+    expect(Math.abs(long.from.w / long.from.h - 1)).toBeLessThan(0.01);
+  });
   it('feet は足先を、下に余白を付けて含む', () => {
     const [t] = frameTiles('feet', parts, W, W);
     expect(contains(t.from, parts.feet)).toBe(true);
@@ -73,9 +84,15 @@ describe('frameTiles', () => {
     // 2 枚のあいだに背景のすき間を空ける（つながった 1 つの絵に見えないように）
     expect(l.to).toEqual({ x: 0, y: 0, w: 480, h: 1024 });
     expect(r.to).toEqual({ x: 544, y: 0, w: 480, h: 1024 });
-    // 胴を写さない: 枠の内側の端は、腕の内側の端まで
-    expect(l.from.x + l.from.w).toBeLessThanOrEqual(parts.armLeft.x + parts.armLeft.w);
-    expect(r.from.x).toBeGreaterThanOrEqual(parts.armRight.x);
+    // 上腕は胴の方へ斜めに上がるので、枠の内側の端は胴の中まで入れる（腕の箱の端で切ると、ひじまでの手袋が縦に切れる）。
+    // ただし胴の真ん中までは入れない（左右の枠が同じ胴を写さない）
+    const torsoMid = parts.torso.x + parts.torso.w / 2;
+    expect(l.from.x + l.from.w).toBeGreaterThanOrEqual(parts.torso.x + parts.torso.w * 0.2);
+    expect(l.from.x + l.from.w).toBeLessThan(torsoMid);
+    expect(r.from.x).toBeLessThanOrEqual(parts.torso.x + parts.torso.w * 0.8);
+    expect(r.from.x).toBeGreaterThan(torsoMid);
+    // 上は肩の近くまで（ひじより上まで届く手袋が、枠の上の端で切れない）
+    for (const t of [l, r]) expect(t.from.y).toBeLessThanOrEqual(parts.torso.y + parts.torso.h * 0.4);
   });
   it('部位がキャンバスの端にあっても、枠ははみ出さない', () => {
     const edge = shift(raw, 0); // 余白なしのキャンバス（1024）

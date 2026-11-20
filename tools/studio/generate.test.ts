@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { categoryKind, categoryRules, hairPrompt } from './generate.ts';
+import { categoryKind, categoryRules, hairPrompt, isLongHair } from './generate.ts';
 
 describe('categoryKind / categoryRules', () => {
   it('顔のカテゴリは髪を描かせない', () => {
@@ -29,5 +29,23 @@ describe('hairPrompt', () => {
     const prompt = hairPrompt({ category: 'ヘア', name: 'ボブ', description: 'A black bob.', colors: [] }, 'ヘアスタイル', '', [0, 255, 0], null);
     expect(prompt).toMatch(/casts no shadow/);
     expect(prompt).toMatch(/face stays completely blank/);
+  });
+});
+
+describe('ロングヘア', () => {
+  it('説明に "knee-length" などがあれば、ひざまでのロングヘア', () => {
+    expect(isLongHair('Knee-length wavy pink hair with a ribbon.')).toBe(true);
+    expect(isLongHair('Very long straight hair that reaches the knees.')).toBe(true);
+    expect(isLongHair('Long hair down to the knees.')).toBe(true);
+    expect(isLongHair('A black bob.')).toBe(false);
+    expect(isLongHair('Waist-length twin tails.')).toBe(false);
+  });
+  it('ロングヘアの指示文は、ひざの下までの図だと伝え、ひざで終わるように頼む。ふつうの髪は腰まで', () => {
+    const long = hairPrompt({ category: 'ヘア', name: 'ながいかみ', description: 'Knee-length silver hair.', colors: [] }, 'ヘアスタイル', '', [0, 255, 0], null);
+    expect(long).toMatch(/down to just below the knees/);
+    expect(long).toMatch(/end at the knees/);
+    const short = hairPrompt({ category: 'ヘア', name: 'ボブ', description: 'A black bob.', colors: [] }, 'ヘアスタイル', '', [0, 255, 0], null);
+    expect(short).toMatch(/head to hips/);
+    expect(short).not.toMatch(/knees/);
   });
 });

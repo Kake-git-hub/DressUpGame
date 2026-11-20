@@ -35,8 +35,10 @@ const GROW = 3;
 // 肌の色合わせ: 変わっていない画素がこれより少なければ、合わせない
 const MIN_MATCH_PIXELS = 200;
 const EDGE_MARGIN = 0.03;
-// 範囲の外の品目は、この太さ（枠の幅 ÷ CORE_PER の 2 倍 + 1 px 四方）の芯を持つかたまりだけ残す
-const CORE_PER = 200;
+// 範囲の外の品目は、この太さ（枠の幅 ÷ CORE_PER の 2 倍 + 1 px 四方）より細い所を捨てる
+const CORE_PER = 120;
+// 範囲の品目につながらないかたまりは、枠の画素数をこれで割った数より小さければ捨てる
+const MIN_PIECE_DIVISOR = 300;
 // 品目の「まるごと残す範囲」を、隠す範囲よりこの px（キャンバス上）だけ広く取る
 const OVERLAP = 3;
 // 背景色との距離: これ未満なら「きれいな背景」。これ以上 CLOSE_DISTANCE 未満の色が品目に多いと、品目が背景と一緒に消えた疑いがある
@@ -81,8 +83,9 @@ function grow(alpha: Uint8Array, width: number, height: number, r: number): Uint
   return out;
 }
 
-// mask のひと続きのかたまりのうち、まわり r px がすべて mask の画素（芯）を持つものだけを残す
-function withCore(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
+// mask の「開き」: まわり (2r+1) px 四方がすべて mask の画素（芯）から r px 以内の画素だけを残す。
+// 太いかたまりの形はそのままで、かたまりから伸びる細い線（r*2+1 px より細いもの）と、小さなかけらが消える
+function opened(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
   const total = width * height;
   const run = new Uint8Array(total);
   const core = new Uint8Array(total);
@@ -97,26 +100,42 @@ function withCore(mask: Uint8Array, width: number, height: number, r: number): U
     let length = 0;
     for (let y = 0; y < height; y++) {
       length = run[y * width + x] ? length + 1 : 0;
-      if (length >= r * 2 + 1) core[(y - r) * width + x] = 1;
+      if (length >= r * 2 + 1) core[(y - r) * width + x] = 255;
     }
   }
+  const near = grow(core, width, height, r);
   const keep = new Uint8Array(total);
+  for (let p = 0; p < total; p++) if (mask[p] && near[p]) keep[p] = 1;
+  return keep;
+}
+
+// mask のひと続きのかたまりのうち、anchor の画素をふくむもの、または minArea 画素以上のものだけを残す
+function attachedOrLarge(mask: Uint8Array, anchor: (p: number) => boolean, width: number, height: number, minArea: number): Uint8Array {
+  const total = width * height;
+  const keep = new Uint8Array(total);
+  const seen = new Uint8Array(total);
   const stack = new Int32Array(total);
+  const piece: number[] = [];
   for (let start = 0; start < total; start++) {
-    if (!core[start] || keep[start]) continue;
+    if (!mask[start] || seen[start]) continue;
+    piece.length = 0;
+    let anchored = false;
     let top = 0;
     stack[top++] = start;
-    keep[start] = 1;
+    seen[start] = 1;
     while (top > 0) {
       const p = stack[--top];
+      piece.push(p);
+      if (!anchored && anchor(p)) anchored = true;
       const x = p % width;
       for (const n of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width]) {
-        if (n >= 0 && n < total && mask[n] && !keep[n]) {
-          keep[n] = 1;
+        if (n >= 0 && n < total && mask[n] && !seen[n]) {
+          seen[n] = 1;
           stack[top++] = n;
         }
       }
     }
+    if (anchored || piece.length >= minArea) for (const p of piece) keep[p] = 1;
   }
   return keep;
 }
@@ -221,11 +240,23 @@ export async function processSwap(generated: Buffer, reference: Buffer, doll: Do
     let top = 0;
     for (let y = edge; y < edge + band; y++) for (let x = 0; x < w; x++) if (diff[y * w + x] >= 128) top++;
     if (top > w * band * TOP_BAND_SHARE) cutOff = true;
-    // 範囲の外の、細い線だけのかけらは捨てる（位置が少し合わなかったときの、輪郭線のずれの消し残り）
+    // 範囲の外の、細い線は捨てる（AI が腕や胴の輪郭線を少しずらして描き直した消し残り）。
+    // 品目につながっていても消す（つながったかたまりごと残すと、手袋の口から上に輪郭線が残る）。
+    // 芯は、範囲の中の品目もふくめて見る（範囲の境目で、品目のふちが削れないように）
+    const solid = new Uint8Array(w * h);
     const outside = new Uint8Array(w * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (cut[(y * w + x) * 4 + 3] > 0 && !inBoxes(tileZones, x, y)) outside[y * w + x] = 1;
-    const keep = withCore(outside, w, h, Math.max(2, Math.round(w / CORE_PER)));
-    for (let p = 0; p < w * h; p++) if (outside[p] && !keep[p]) cut[p * 4 + 3] = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (cut[p * 4 + 3] === 0) continue;
+        solid[p] = 1;
+        if (!inBoxes(tileZones, x, y)) outside[p] = 1;
+      }
+    }
+    const keep = opened(solid, w, h, Math.max(2, Math.round(w / CORE_PER)));
+    // 範囲の品目（手袋の手・靴の足）につながらない、小さなかけらも捨てる（ちぎれた輪郭線の切れはし）
+    const attached = attachedOrLarge(keep, (p) => inBoxes(tileZones, p % w, Math.floor(p / w)), w, h, Math.round((w * h) / MIN_PIECE_DIVISOR));
+    for (let p = 0; p < w * h; p++) if (outside[p] && !attached[p]) cut[p * 4 + 3] = 0;
     await pasteTile(rgba, canvasW, canvasH, cut, tile);
     await pasteTile(source, canvasW, canvasH, match.rgba, tile);
   }

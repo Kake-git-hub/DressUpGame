@@ -1218,6 +1218,17 @@ test('セット: ドールへドラッグすると、全部のパーツが一度
   await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
   await openCategory(page, 'セット');
   await expect(page.getByTestId('set-tile')).toHaveAttribute('data-worn', 'false');
+  // セットを着せると、それまでの服（青いトップス・靴下）は全部脱げて、セットだけになる
+  await backToCategories(page);
+  await dragItemToDoll(page, 'ソックス', 'sock');
+  await expect.poll(saved).toContain('sock');
+  await openCategory(page, 'セット');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
+  await page.mouse.up();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expect.poll(saved).toEqual(['green', 'red']);
 });
 
 test.describe('縦画面', () => {

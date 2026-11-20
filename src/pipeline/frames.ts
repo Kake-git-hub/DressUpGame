@@ -15,6 +15,8 @@ export interface Tile {
 
 export const FRAME_SIZE = 1024;
 const PANEL_GAP = 64; // 手の図: 左右の 2 枚のあいだの、背景だけの帯（px）
+const LONG_HAIR_LEGS = 0.62; // ロングヘアの枠の下の端: 脚の上からこの割合（ひざは約 0.5）
+const INNER_TORSO = 0.22; // 手の図: 枠の内側の端を、胴の幅のこの割合だけ胴の中へ入れる（上腕を肩の近くまで写す）
 // hair: 本物のドールの上半身（髪）。upper: 上半身のシルエット（ぼうし）。枠の範囲は同じ
 export type FrameKind = 'hair' | 'upper' | 'feet' | 'hands';
 
@@ -38,12 +40,13 @@ function fit(cx: number, top: number, w: number, h: number, canvasW: number, can
   return { x, y, w: bw, h: bh };
 }
 
-export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, canvasH: number): Tile[] {
+// longHair: ひざまでのロングヘア。髪の枠を、ひざの下まで広げる
+export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, canvasH: number, options: { longHair?: boolean } = {}): Tile[] {
   const tall = parts.feet.y + parts.feet.h - parts.head.y;
   const full: Box = { x: 0, y: 0, w: FRAME_SIZE, h: FRAME_SIZE };
   if (kind === 'upper' || kind === 'hair') {
-    // キャンバスの上端から腰の下まで
-    const size = parts.hips.y + parts.hips.h;
+    // キャンバスの上端から腰の下まで（ロングヘアは、ひざの下まで）
+    const size = kind === 'hair' && options.longHair ? parts.legs.y + parts.legs.h * LONG_HAIR_LEGS : parts.hips.y + parts.hips.h;
     return [{ from: fit(parts.head.x + parts.head.w / 2, 0, size, size, canvasW, canvasH), to: full }];
   }
   if (kind === 'feet') {
@@ -53,9 +56,11 @@ export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, c
     const size = Math.max(bottom - top, parts.feet.w * 1.3);
     return [{ from: fit(parts.feet.x + parts.feet.w / 2, bottom - size, size, size, canvasW, canvasH), to: full }];
   }
-  // 手: 左右それぞれ、腕の下のほうから指先まで。縦長の図を、すき間を空けて左右に並べる。
-  // 胴が写りこまないように、枠の内側の端を腕の内側の端にそろえる
+  // 手: 左右それぞれ、肩の近くから指先まで。縦長の図を、すき間を空けて左右に並べる（左右がつながって 1 つの形に見えないように）。
+  // 上腕は胴の方へ斜めに上がるので、枠の内側の端は胴の中（INNER_TORSO の割合）まで入れる。
+  // 腕の箱の端で切ると、上腕が縦にまっすぐ切れた図になり、ひじまでの手袋も縦に切れて描かれる
   const panelW = (FRAME_SIZE - PANEL_GAP) / 2;
+  const { torso } = parts;
   return (
     [
       [parts.armLeft, parts.handLeft, 0, true],
@@ -64,10 +69,12 @@ export function frameTiles(kind: FrameKind, parts: BodyParts, canvasW: number, c
   ).map(([arm, hand, toX, left]) => {
     const x0 = Math.min(arm.x, hand.x);
     const x1 = Math.max(arm.x + arm.w, hand.x + hand.w);
+    const inner = left ? Math.max(x1, torso.x + torso.w * INNER_TORSO) : Math.min(x0, torso.x + torso.w * (1 - INNER_TORSO));
+    const outer = left ? x0 - (x1 - x0) * 0.25 : x1 + (x1 - x0) * 0.25; // 指先の外にも少し余白
     const bottom = Math.max(arm.y + arm.h, hand.y + hand.h) + tall * 0.03;
-    const w = Math.max((x1 - x0) * 1.25, hand.w * 1.5);
+    const w = Math.max(Math.abs(inner - outer), hand.w * 1.5);
     const h = (w * FRAME_SIZE) / panelW;
-    const box = fit(left ? x1 - w / 2 : x0 + w / 2, bottom - h, w, h, canvasW, canvasH);
+    const box = fit(left ? inner - w / 2 : inner + w / 2, bottom - h, w, h, canvasW, canvasH);
     return { from: box, to: { x: toX, y: 0, w: panelW, h: FRAME_SIZE } };
   });
 }

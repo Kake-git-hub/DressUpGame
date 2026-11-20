@@ -435,20 +435,22 @@ function App() {
       setFlash((prev) => ({ ids: [item.id], count: (prev?.count ?? 0) + 1 }));
       playDressUpSound();
     },
-    [equipItem, allClothing]
+    [equipItem, resetAll, allClothing]
   );
 
-  // セットをドロップした時の処理: パーツを全部、重なりの小さい順に 1 点ずつ着せる（1 点ずつ着せたのと同じ結果）。
+  // セットをドロップした時の処理: それまでの服を脱がせ、パーツを全部、重なりの小さい順に 1 点ずつ着せる。
   // 光るのは着せた全部、音は 1 回
   const handleSetDrop = useCallback(
     (parts: ClothingItemData[]) => {
       if (parts.length === 0) return;
+      // セットは、それまで着ていた服を全部脱がせてから着せる（前の服と重ねない）
+      resetAll();
       for (const item of parts) equipItem(item, item.backItemId ? allClothing.find((c) => c.id === item.backItemId) : undefined);
       dragPreviewRef.current?.hide();
       setFlash((prev) => ({ ids: parts.map((item) => item.id), count: (prev?.count ?? 0) + 1 }));
       playDressUpSound();
     },
-    [equipItem, allClothing]
+    [equipItem, resetAll, allClothing]
   );
 
   // アイテムドラッグ中のコールバック（全アイテム対象）
