@@ -1,109 +1,108 @@
-# 引き継ぎ（2026-11-19 時点）
+# 引き継ぎ（2026-11-20 時点、v0.21.0）
 
-次のセッションは、まずこの文書を読み、続けて「設計書」と「ロードマップ」を読んでから始める。
+次のセッションは、まずこの文書を読む。必要になったら、下の文書を読む。
 
-- 設計書: `docs/superpowers/specs/2026-11-15-lightweight-rework-design.md`
-- ロードマップ: `docs/superpowers/plans/2026-11-16-roadmap.md`
-- 各段階の計画と結果: `docs/superpowers/plans/`
-
-## 0. 最新（2026-11-20、v0.20.0）: 髪とくつを「違いで取り出す」方式に
-
-設計と結果: `docs/superpowers/specs/2026-11-20-hair-and-shoes-by-difference-design.md`（10 章が結果）。計画: `docs/superpowers/plans/2026-11-20-hair-and-shoes-by-difference.md`。
-
-- **公開済み（2026-11-20）**: ゲーム v0.20.0（`main` = 作業ブランチ `claude/festive-brahmagupta-vpdsx2` と同じ）と、素材リポジトリ（コミット `9e8cf72`: 「アニメ　その２」の髪 5 点・くつ 5 点の作り直し、ドールと顔 3 点の輪郭線、うしろがみのサムネイル 8 点）。公開サイトで確かめた。
-- 髪は本物の上半身に描かせ、肩の線より上と体の上の髪が前髪。体の裏の塗りつぶしは体の内側だけ。うしろがみのサムネイル（`backThumb`）。
-- くつは 靴・肌（`under`）・ドールのまわりだけの隠す所。ゲームは隠す所を靴下にも効かせる。
-- 残り（作者に見てもらうこと）: iPad での見え方。「アニメ」「リアル」で新しい髪を作ったときの出来は未確認。
-- 直していない小さな点: 靴下や後ろの服を調整しているあいだ、サンダルの開きに肌が描かれない／調整画面を開いた直後、靴下が一瞬消える／`/api/jobs/image` に変な kind を渡すと 500（開発用サーバーだけ）／うしろがみのカテゴリを持つドールでは、前髪の範囲が使われない（いま該当するドールは無い）。
-- 画像生成は、このセッションで 21 枚（上限 25 枚）。
-
-## 0-2. 2026-11-19（v0.18.0）: 新ドールと部位の差し替え式生成
-
-設計と結果: `docs/superpowers/specs/2026-11-19-new-doll-and-part-swap-design.md`（9 章が結果）。計画: `docs/superpowers/plans/2026-11-19-new-doll-and-part-swap.md`。
-
-- 髪・帽子は上半身の拡大図、くつ・てぶくろは本物の脚・腕の拡大図に描かせる。くつ・てぶくろは足首・手首から先を絵ごと差し替える（`tools/studio/processSwap.ts`、枠は `src/pipeline/frames.ts`）。
-- 新ドールは、作者が選んだ「候補 2」の手を、作者の提案で手のひらが見える「パー」の形に直したもの（`docs/superpowers/specs/2026-11-19-spike/doll_chosen_2_open_hands.webp`、2048px・緑の背景）。
-- 上限額の変更後、このドールで 25 点（靴 5・髪 5・手袋 3・顔 3・帽子 1・服 8）を生成し、すべて 1 回目で使える出来だった（設計書 10 章）。
-- **公開済み**: 素材リポジトリに、ドール「アニメ　その２」と 25 点（設計書 11 章）。公開サイトで確認済み。
-- 残り（作者に見てもらうこと）: iPad での表示、色スライダーと調整モードでの差し替え式アイテムの見え方、スタジオ画面で差し替え式の候補カードを開く操作。「ちゃいろのロング」の白いヘアバンドのような部分が気になれば作り直す。
-- ドールの形を変えたら、その部分にかかる服は作り直すこと（設計書 11 章の教訓）。
-- クラウド環境で画像生成を呼ぶとき: `NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy`（中継がキーを差し込む）。Claude API のキーは無いので、企画と見た目の検品は人が代わる（`tryItems.ts`）。
-- 以下の 1〜2 章は 2026-11-16 時点の記録（スタジオはその後 `main` に入り、公開中の版は v0.17.1 → v0.18.0）。
+- 最初の設計書: `docs/superpowers/specs/2026-11-15-lightweight-rework-design.md`
+- ロードマップ: `docs/superpowers/plans/2026-11-16-roadmap.md`（順番と「残り」。マージの決まりは、この文書の 5 章のほうが新しい）
+- 版ごとの設計と結果: `docs/superpowers/specs/`、計画: `docs/superpowers/plans/`
+- 使い方と更新履歴: `README.md`
 
 ## 1. いまの状態
 
 | 項目 | 状態 |
 |---|---|
-| 公開中の版 | v0.10.1（`main` = コミット `352d416`）。https://kake-git-hub.github.io/DressUpGame/ |
-| 作業ブランチ | `claude/friendly-fermi-pgp3jg`（v0.11.0。スタジオを追加。**`main` には未マージ**） |
-| 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`）。ドール 2 体・服 91 点・背景 20 枚、15 MB。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 241 件、E2E 29 件。すべて通過。ESLint エラー 0 |
+| ゲームの版 | v0.21.0。作業ブランチ `claude/happy-fermi-dkdhas` に push 済み。**`main` へのマージ（＝公開）は、作者の返事を待っている**（公開中は v0.20.0）。https://kake-git-hub.github.io/DressUpGame/ |
+| 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、公開中はコミット `9e8cf72`）。ドール 3 体（アニメ 102 点・リアル 11 点・アニメ　その２ 25 点）、背景 0 枚。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
+| 素材の未公開分 | **クラウドの作業フォルダにだけある（セッションが終わると消える）**: ドール「おとこのこ」（服 0 点）と、「アニメ　その２」の髪 5 点の影を取った絵。公開は作者の返事を待っている。消えたときの作り直し方は 2 章 |
+| テスト | ユニット 518 件、E2E 43 件。すべて通過。型・ESLint エラー 0 |
+| 画像生成 | Gemini の呼び出しは本物で動いている（2026-11-19 から）。Claude API のキーは無い（企画と見た目の検品は、人が代わる。`tools/studio/tryItems.ts`） |
 
-完了した段階:
+## 2. 直近の変更（v0.21.0、2026-11-20）
 
-- **段階 0**（v0.9.7）: ドラッグ中の無駄な再描画の解消、服装の保存を ID と調整値だけに、未使用コードの削除、PWA の自動更新。
-- **段階 1**（v0.10.0）: 素材を別リポジトリから配信。取り込み・IndexedDB・JSZip・設定画面・縦画面を削除。オフライン対応。作者が iPad で確認済み。
-- **v0.10.1**: 色スライダーのプレビューを、画素を直接変換する方式に変更（`src/components/HueCanvas.tsx`）。
-- **スタジオ**（v0.11.0、作業ブランチ）: 切り抜き・位置合わせ・型紙・自動生成・背景・一覧の管理・公開。計画と結果は `docs/superpowers/plans/2026-11-16-studio.md`。**AI を実際に呼ぶ部分は未確認。**
+設計と結果: `docs/superpowers/specs/2026-11-20-hair-one-item-and-black-recolor.md`。
 
-作者の確認待ち:
+- **髪は 1 点に戻した**: メニューのカテゴリは 1 つ。着ているあいだは前髪とうしろがみの 2 枚で、重なりの順番は 1 枚ずつ、位置・大きさ・向き・色は一緒に変わる（`src/engine/pairs.ts`）。
+- **黒にも色が付く**: 黒っぽい絵は、色スライダーで黒い所に色を付ける（`src/pipeline/recolor.ts`）。ほかの絵は今までどおり色相を回す。
+- **髪が肌に落とす影を、髪に入れない**（`src/pipeline/skinShadow.ts`）。公開済みの髪の手直しは `npm run content:fix -- hair-shadows <素材フォルダ> 'アニメ　その２'`。
+- **スタジオは、公開されている素材を自動で取り込む**（`POST /api/sync`）。「アニメ　その２」が作者の PC のスタジオに出なかったのは、PC の素材フォルダが古いため、と判断した（PC の状態は見えていない）。
+- **男の子のドール「おとこのこ」**: 見本と候補は `docs/superpowers/specs/2026-11-20-boy-doll/`（選んだのは 3 枚目 `doll_chosen_3.webp`）。作り直すときは `npx tsx tools/studio/makeDoll.ts import <その絵を PNG にしたもの> <素材フォルダ> おとこのこ 'アニメ　その２'`（画像生成は要らない）。
+- **服が 1 点も無いドールは、ゲームに出さない**（スタジオには出る）。「おとこのこ」は、最初の 1 点を公開するとゲームに出る。
+- 画像生成は、このセッションで 6 枚（ドールの候補 3、男の子の髪の試作 3。試作は保存していない）。
 
-- v0.10.1 で、色スライダーが調整中にその場で変わるか（iPad Safari）。開発環境の Chromium では元の実装でも再現せず、原因（服の ID に日本語と `/` が入り、Safari が SVG フィルターの参照を解釈できない）は推測。直っていなければ、ここから調べ直す。
-- スタジオを PC で動かした結果（`2026-11-16-studio.md` の 5 章の 1〜5）。
+作者に見てもらうこと（こちらでは確かめられない）:
 
-## 2. 次にやること
+- iPad での見え方: 髪を動かす・回す・色を変える、黒髪の色変え。
+- PC でスタジオを開き、ドールの一覧に「アニメ　その２」と「おとこのこ」が出るか。出なければ、画面の上に出る知らせの文を教えてもらう（未公開の変更が残っていると取り込めない）。
+- 黒髪に付く色の好み（こいめのはっきりした色。金髪やうすいピンクにはできない。明るさのスライダーは作っていない）。
+- 「おとこのこ」の服を作るか（スタジオで作者が作る／こちらで最初の数点を作る）。
 
-作者から「決めることはすべておすすめで進めてよい」と指示があり（2026-11-16）、スタジオは `2026-11-16-studio.md` の 1 章のとおり決めて実装した。
+前からの持ち越し:
 
-1. **作者に PC で動かしてもらう**（`npm run studio`）。手持ちの画像で切り抜きの出来を見てもらい、公開まで通す。
-2. **API キーを置いて、最初の試行（10〜20 点）で合格率を測る**。Gemini の呼び出し（`tools/studio/ai.ts`）は、公式の説明（Interactions API）に合わせて書き直したが、本物のキーでは未確認。Claude API を触るときは `claude-api` スキルを読む。
-3. 合格率を見て、指示文（`tools/studio/generate.ts` の `itemPrompt`）・作り直し回数（`MAX_ATTEMPTS`）・部分拡大の要否を決める。
-4. 問題が無ければ、作者の「マージして」で `main` へ。
-5. そのあと: サーバーへの設置と有料化の設計（別の設計書。置き場所は `2026-11-16-studio.md` の 1 章に候補）。ロードマップの残り（描画の Canvas 2D 置き換え → 操作の改善 → 説明書の統合）。
+- 「アニメ」「リアル」のドールで新しい髪を作ったときの出来は未確認（v0.20.0 から）。
+- 「ちゃいろのロング」の白いヘアバンドのような部分が気になれば作り直す（v0.18.0 から）。
+- 小さな不具合（直していない）: 靴下や後ろの服を調整しているあいだ、サンダルの開きに肌が描かれない／調整画面を開いた直後、靴下が一瞬消える／`/api/jobs/image` に変な kind を渡すと 500（開発用サーバーだけ）。
+- 前髪は黒っぽくないが、うしろがみだけが黒っぽい髪があると、ほかの服を調整しているあいだだけ、前髪の色が確定後と違って見える（該当する髪は、いまは無い）。
+- スタジオで、PC に未公開の変更があり、公開先のほうも新しいとき、取り込みも公開もできない（知らせは出る。直し方は決めていない）。
+- スタジオの画面には、うしろがみを別の品目として作る道（v0.19.0）の名残がある（カテゴリ名「うしろがみ」の扱い）。使っていない。
 
-まだ決まっていないこと（作者に確認が要るもの）:
+## 3. これまでの版（新しい順。くわしくは README の更新履歴）
 
-- サーバーをどこに置くか。
-- 有料化の範囲（利用者ごとに素材を分けるか、ログインと課金の方法）。
-- サンプル画像 3 枚（`tools/studio/fixtures/`）を公開リポジトリに置いたままでよいか（いまは置いたまま。テストが使う）。
+| 版 | 内容 | 設計・結果 |
+|---|---|---|
+| v0.21.0 | 髪は 1 点・黒にも色・肌の影を取る・スタジオの自動取り込み・男の子のドール | `specs/2026-11-20-hair-one-item-and-black-recolor.md` |
+| v0.20.0 | 髪とくつを「元の絵との違い」で取り出す。くつは 靴・肌（`under`）・隠す所 | `specs/2026-11-20-hair-and-shoes-by-difference-design.md` |
+| v0.18.0〜v0.19.0 | 新ドール「アニメ　その２」と 25 点、部位の差し替え式（くつ・てぶくろ）、うしろがみを別の 1 点に（v0.21.0 でメニューは 1 点に戻した） | `specs/2026-11-19-new-doll-and-part-swap-design.md` |
+| v0.11.0〜v0.17.1 | 素材スタジオ（切り抜き・位置合わせ・自動生成・公開）、調整画面のシール風の枠、重なりの前後 | `plans/2026-11-16-studio.md` |
+| v0.10.0〜v0.10.1 | 素材を別リポジトリから配信、オフライン対応、色スライダーの即時表示 | `plans/2026-11-16-stage1-hosted-content.md` |
+| v0.9.7 | ドラッグの軽量化、服装の保存を ID と調整値だけに | `plans/2026-11-16-stage0-quick-fixes.md` |
 
-## 3. コードの地図
+## 4. 次にやること
+
+1. 作者の返事を受けて、`main` へのマージと素材の公開（1 章）。
+2. 「おとこのこ」の服（作者の返事しだい）。
+3. ロードマップの残り: サーバーへの設置と有料化の設計 → 描画の Canvas 2D 置き換え（計画あり: `plans/2026-11-16-stage-render-canvas2d.md`。JS の大半を占める PixiJS を外す）→ 操作の改善（タップで着脱、一覧のスクロール、調整対象の選択）→ 説明書の統合。
+
+まだ決まっていないこと（作者に確認が要る）:
+
+- サーバーをどこに置くか。有料化の範囲（利用者ごとに素材を分けるか、ログインと課金の方法）。
+- サンプル画像（`tools/studio/fixtures/`）を公開リポジトリに置いたままでよいか（いまは置いたまま。テストが使う）。
+
+## 5. 作業の決まり（このプロジェクトで続けてきたやり方）
+
+- **作者への報告は日本語**。専門用語を避け、数値と「確かめられていないこと」を必ず書く。
+- **テストを先に書く**。失敗を見てから実装する。本物の生成画像で起きた不具合は、その絵を見本（`tools/studio/fixtures/`）にしてテストに残す。
+- 大きな変更は、計画を書いて作者の了承を得てから実装する。作者が具体的に指示した変更は、そのまま実装し、設計と結果を `specs/` に残す。最後に、別の目（サブエージェント）の全体レビューを 1 回かける（v0.21.0 は、利用の上限でレビューが途中で止まり、自分での見直しだけ）。
+- **`main` へのマージ**: 作者の指示（2026-11-19）は「作業が終わったら、毎回そのまま `main` にマージして push する」。ただし、クラウドのセッションには「決められた作業ブランチ以外へは、その場の明示の許可なしに push しない」という決まりがあるので、セッションごとに作者に一度確かめる。テスト（ユニット・E2E）・型・lint が通ってからマージする。`main` に入ると GitHub Actions が自動で公開する。
+- **push 済みのコミットは書き換えない**（force push は拒否される）。
+- 版数は `src/App.tsx` の `APP_VERSION` と `README.md` の両方を上げる。
+- iPad 実機でしか確かめられないことは、確認項目として作者に渡す。
+- 画像生成は作者の費用。枚数を毎回報告する。頼まれていない品目は作らない。
+
+## 6. コードの地図
 
 | 場所 | 役割 |
 |---|---|
 | `src/App.tsx` | 画面全体と状態。素材の読み込み、服装の復元と保存、先読み |
-| `src/content/` | 一覧ファイルの型と検証（`manifest.ts`）、読み込み（`loadContent.ts`）、起動時の状態（`startState.ts`）、先読み（`prefetch.ts`）、旧データの削除（`legacyCleanup.ts`） |
-| `src/pipeline/` | 画像処理の純粋関数: 外接矩形（`alpha.ts`）、縁からの背景除去（`removeBackground.ts`）、右下の小片除去（`removeCornerSpeck.ts`）、色相（`hue.ts`）、背景色とシルエット色（`keyColors.ts`）、切り抜き（`cutout.ts`）、位置合わせ（`align.ts`）、体の部位（`bodyParts.ts`） |
-| `src/engine/PixiEngine.ts`、`src/components/AvatarCanvas.tsx` | 描画（PixiJS）。切り抜き画像は、元キャンバスの中心を原点にして描く |
-| `src/components/ItemAdjustPanel.tsx`、`HueCanvas.tsx` | 調整モード。プレビューは CSS で重ねている（描画と二重実装。「描画」の段階で一本化する予定） |
-| `src/services/outfitStorage.ts`、`stateStorage.ts` | 端末に保存する小さな状態 |
-| `studio.html`、`src/studio/` | スタジオの画面（別ページ）。`Studio.tsx`（枠と公開）、`Panels.tsx`（各タブ）、`ItemCard.tsx`（候補 1 点の編集と保存）、`api.ts`（API の呼び出し） |
-| `tools/studio/` | スタジオの API（`api.ts`）、開発サーバーへの組み込み（`vitePlugin.ts`）、1 枚の処理（`processGenerated.ts`）、自動生成（`generate.ts`）、AI の呼び出し（`ai.ts`）、枚数の上限（`budget.ts`）、テスト用のサンプル（`fixtures/`） |
-| `tools/content/encode.ts`、`manifestEdit.ts` | 画像の書き出しと、素材フォルダの編集（`ContentStore`） |
-| `tools/content/buildContent.ts` | プリセットのフォルダ → 配信用の一覧と画像。`npm run content:migrate -- <入力> <出力>` |
-| `e2e/` | E2E。`e2e/globalSetup.ts` がテスト用の素材を `dist/e2e-content` に作り、アプリを `?content=e2e-content/` で開く。`studio.spec.ts` は、空の素材フォルダ（`node_modules/.tmp/studio-e2e`）でスタジオの開発サーバーを起動して確かめる |
+| `src/content/` | 一覧ファイルの型と検証（`manifest.ts`）、読み込み（`loadContent.ts`。髪を前髪とうしろがみの 2 枚に分ける・服の無いドールを出さない）、起動時の状態（`startState.ts`）、先読み（`prefetch.ts`） |
+| `src/hooks/useDressUp.ts` | 着ている服の状態（着せる・脱がせる・調整値） |
+| `src/engine/` | 描画（`PixiEngine.ts`）、重なりの順番（`layers.ts`）、服が隠す所（`hides.ts`）、一緒に動かす 2 枚（`pairs.ts`） |
+| `src/components/` | `AvatarCanvas.tsx`（キャンバス）、`DressUpMenu.tsx`（メニュー）、`ItemAdjustPanel.tsx`（調整画面。プレビューは CSS で重ねる）、`PlacedItem.tsx`・`placement.ts`（キャンバスと同じ位置に重ねる計算）、`HueCanvas.tsx`（色変えのプレビュー） |
+| `src/pipeline/` | 画像処理の純粋関数。切り抜き（`cutout.ts`）、位置合わせ（`align.ts`・`partAlign.ts`）、体の部位（`bodyParts.ts`）、違いで取り出す（`diffMatte.ts`）、髪（`hairLayers.ts`・`hairSplit.ts`・`skinShadow.ts`）、くつ（`shoeLayers.ts`）、色変え（`hue.ts`・`recolor.ts`） |
+| `src/services/` | 端末に保存する小さな状態（服装・ドールの位置など） |
+| `studio.html`、`src/studio/` | スタジオの画面（別ページ）。`Studio.tsx`（枠・取り込み・公開）、`Panels.tsx`（各タブ）、`ItemCard.tsx`（候補 1 点の編集と保存）、`api.ts`（API の呼び出し） |
+| `tools/studio/` | スタジオの API（`api.ts`）、開発サーバーへの組み込み（`vitePlugin.ts`）、自動生成（`generate.ts`）、品目ごとの処理（`processGenerated.ts`・`processHair.ts`・`processShoe.ts`・`processSwap.ts`・`processFace.ts`）、AI の呼び出し（`ai.ts`）、枚数の上限（`budget.ts`）、ドールづくり（`makeDoll.ts`・`dollPrompt.ts`）、キー無しで生成を回す（`tryItems.ts`） |
+| `tools/content/` | 画像の書き出し（`encode.ts`）、素材フォルダの編集（`manifestEdit.ts`）、1 回きりの手直し（`fixContent.ts`）、プリセットからの変換（`buildContent.ts`） |
+| `e2e/` | E2E。`globalSetup.ts` がテスト用の素材を `dist/e2e-content` に作り、アプリを `?content=e2e-content/` で開く。`studio.spec.ts` は、空の素材フォルダでスタジオの開発サーバーを起動して確かめる |
 
-残っている段階（ロードマップ参照）: スタジオの実地確認とサーバーへの設置 → 描画の Canvas 2D 置き換え（計画あり: `2026-11-16-stage-render-canvas2d.md`。JS の大半を占める PixiJS を外す）→ 操作の改善（タップで着脱、一覧のスクロール、調整対象の選択）→ 説明書の統合。
-
-## 4. 作業の決まり（このプロジェクトで続けてきたやり方）
-
-- **作者への報告は日本語**。専門用語を避け、数値と「確かめられていないこと」を必ず書く。
-- **段階ごとに計画を書き、作者の了承を得てから実装する**。実装はセッション内で順に行い、最後に別の目（サブエージェント）の全体レビューを 1 回かける。
-- **テストを先に書く**。失敗を見てから実装する。
-- **作業が終わったら、毎回そのまま `main` にマージして push する**（作者の指示、2026-11-19。それまでは「マージして」と言われたときだけだった）。テスト（ユニット・E2E）・型・lint が通ってからマージする。`main` に入ると GitHub Actions が自動で公開する。
-- **push 済みのコミットは書き換えない**（force push は拒否される）。
-- 版数は `src/App.tsx` の `APP_VERSION` と `README.md` の両方を上げる。
-- iPad 実機でしか確かめられないことは、確認項目として作者に渡す。
-
-## 5. 開発環境の注意
+## 7. 開発環境の注意
 
 - 依存の導入: `npm ci`
 - ユニットテスト: `npx vitest run`　型: `npx tsc -b`　lint: `npx eslint .`
-- E2E: `npm run build` のあと `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test`（クラウド環境では、導入済みの Chromium を使うためにこの環境変数が必要。`npm run test:e2e` はビルドも行う）。
-- 実物の素材でアプリを見る: 素材リポジトリを `dist/real-content` にコピーし、`npx vite preview --port 4173` で `/DressUpGame/?content=real-content/` を開く（`?content=` は同じオリジンの相対パスだけ受け付ける）。
-- クラウド環境は、このリポジトリ用の環境「DressUpGame」を使う（公開サイト `kake-git-hub.github.io` と Gemini の説明 `ai.google.dev`・`aistudio.google.com` を開ける。開始時に `npm ci` と、隣への素材リポジトリの取得を自動で行う）。既定の環境では公開サイトを開けない。
+- E2E: `npm run build` のあと `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --trace off`（クラウド環境では、導入済みの Chromium を使うためにこの環境変数が必要）。
+- クラウド環境は、このリポジトリ用の環境「DressUpGame」を使う（公開サイトと Gemini を開ける。開始時に `npm ci` と、隣への素材リポジトリの取得を自動で行う）。**隣の素材リポジトリは古いことがある**ので、最初に `git -C ../DressUpGame-content pull --ff-only` する（2026-11-20 のセッションでは 3 コミット古かった）。
+- 素材リポジトリへ push するには、セッションに `Kake-git-hub/DressUpGame-content` を追加する必要がある（読むだけなら不要）。
+- 画像生成を呼ぶとき: `NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy`（中継がキーを差し込む）。例: `STYLE_ID=anime NODE_USE_ENV_PROXY=1 GEMINI_API_KEY=dummy npx tsx tools/studio/tryItems.ts ../DressUpGame-content <ドールの ID> <品目の JSON> <出力フォルダ>`。処理だけを直して確かめるときは、出力フォルダの `raw-N.png` を `STUDIO_FAKE_IMAGE` に渡す（生成しない）。
+- 実物の素材でゲームを見る: 素材フォルダの `manifest.json` と `files/` を `dist/real-content` にコピーし、`npx vite preview --port 4173` で `/DressUpGame/?content=real-content/` を開く（`?content=` は同じオリジンの相対パスだけ受け付ける）。
+- スタジオを実物の素材で見る: 素材フォルダの `manifest.json`・`files/`・`studio/` を別のフォルダにコピーし、`CONTENT_DIR=<そのフォルダ> npx vite --config vite.studio.config.ts --port 5199 --open false` で `/DressUpGame/studio.html` を開く。
 - 公開サイトの確認: Playwright で `https://kake-git-hub.github.io/DressUpGame/` を開き、`.version-badge` の版数と画面を見る。
-- 素材リポジトリを触るには、セッションに `Kake-git-hub/DressUpGame-content` を追加して取得する必要がある（読むだけなら、公開リポジトリなので `git clone` できる）。
-- スタジオを実物の素材で見る: 素材リポジトリの `manifest.json` と `files/` を別のフォルダにコピーし、`CONTENT_DIR=<そのフォルダ> npx vite --config vite.studio.config.ts --port 5199 --open false` で `/DressUpGame/studio.html` を開く。
-- API キーが無いので、自動生成はテスト用の偽物でしか動かしていない。キーを環境に保存してもらえば（安全な入力フォームを出せる）、クラウド環境で最初の試行ができる。
 - コミットメッセージの訂正: コミット `0cfd7d9` の本文にある `e3f9d0f^` は誤り。削除した旧プリセットが最後に残っているのは `a3c7b62`。
