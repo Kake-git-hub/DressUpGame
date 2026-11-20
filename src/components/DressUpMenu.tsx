@@ -25,7 +25,13 @@ interface DressUpMenuProps {
   // 縦画面では、画面の下に「カテゴリの行」と「服の行（itemRows 段）」を横に流して並べる
   layout?: 'landscape' | 'portrait';
   itemRows?: number;
+  // セット（同じテーマで一度に作った服の集まり）をドールへ運んだとき。パーツを全部着せる
+  onSetDrop?: (items: ClothingItemData[]) => void;
 }
+
+// メニューの「セット」。カテゴリの名前とは別物（同じ名前のカテゴリがあっても混ざらない）
+const SET_CATEGORY = '__set';
+const SET_LABEL = 'セット';
 
 export function DressUpMenu({
   items,
@@ -44,6 +50,7 @@ export function DressUpMenu({
   onBackgroundDragEnd,
   layout = 'landscape',
   itemRows = 1,
+  onSetDrop,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
@@ -91,6 +98,21 @@ export function DressUpMenu({
 
   // カテゴリ一覧
   const categories = useMemo(() => Array.from(groupedItems.keys()), [groupedItems]);
+
+  // セット: 同じ印（setId）の服をまとめる。パーツは、重なりの小さい順（着せる順）
+  const sets = useMemo(() => {
+    const map = new Map<string, MenuSet>();
+    for (const item of items) {
+      if (!item.setId || item.frontItemId) continue;
+      const set = map.get(item.setId) ?? { id: item.setId, name: item.setName ?? '', items: [] };
+      set.items.push(item);
+      map.set(item.setId, set);
+    }
+    const layer = (i: ClothingItemData) => i.layerOrder ?? i.baseZIndex ?? 0;
+    return Array.from(map.values()).map((set) => ({ ...set, items: [...set.items].sort((a, b) => layer(a) - layer(b)) }));
+  }, [items]);
+  const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
+  const dropSet = onSetDrop ?? (() => {});
   
   // 選択中カテゴリのアイテム（横画面用）
   const selectedCategoryItemsLandscape = useMemo(() => {
@@ -103,6 +125,8 @@ export function DressUpMenu({
     return (
       <PortraitMenu
         groupedItems={groupedItems}
+        sets={sets}
+        onSetDrop={dropSet}
         equippedIds={equippedIds}
         equippedTypes={equippedTypes}
         itemRows={itemRows}
@@ -173,8 +197,28 @@ export function DressUpMenu({
     );
   }
 
+  // セットの一覧（横画面）
+  if (selectedCategoryLandscape === SET_CATEGORY && sets.length > 0) {
+    return (
+      <div style={styles.outerContainer}>
+        <div style={styles.container}>
+          <button style={styles.backButton} onClick={() => setSelectedCategoryLandscape(null)}>
+            ← もどる
+          </button>
+          <ScrollList>
+            <div style={styles.scrollContent}>
+              {sets.map((set) => (
+                <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={dropSet} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} />
+              ))}
+            </div>
+          </ScrollList>
+        </div>
+      </div>
+    );
+  }
+
   // カテゴリ内アイテム表示（横画面）
-  if (selectedCategoryLandscape) {
+  if (selectedCategoryLandscape && selectedCategoryLandscape !== SET_CATEGORY) {
     return (
       <div style={styles.outerContainer}>
         <div style={styles.container}>
@@ -253,6 +297,24 @@ export function DressUpMenu({
               </button>
             )}
 
+            {/* セット（あるドールだけ。服のカテゴリより前） */}
+            {sets.length > 0 && (
+              <button
+                style={{ ...styles.categoryButton, ...(sets.some(isSetWorn) ? styles.categoryButtonEquipped : {}) }}
+                onClick={() => setSelectedCategoryLandscape(SET_CATEGORY)}
+              >
+                <div style={styles.categoryThumbnail}>
+                  <div style={styles.setMosaic}>
+                    {sets[0].items.slice(0, 4).map((item) => (
+                      <img key={item.id} src={item.thumbnailUrl || item.imageUrl} alt="" style={styles.setMosaicImage} draggable={false} loading="lazy" />
+                    ))}
+                  </div>
+                  {sets.some(isSetWorn) && <div style={styles.categoryEquippedBadge}>✓</div>}
+                </div>
+                <span style={styles.categoryButtonLabel}>{SET_LABEL}</span>
+              </button>
+            )}
+
             {categories.map(category => {
               const categoryItems = groupedItems.get(category) ?? [];
               const firstItem = categoryItems[0];
@@ -307,6 +369,8 @@ const PORTRAIT_TILE = 72; // 服 1 点の大きさ（行の高さ 84px に収ま
 
 interface PortraitMenuProps {
   groupedItems: Map<string, ClothingItemData[]>;
+  sets: MenuSet[];
+  onSetDrop: (items: ClothingItemData[]) => void;
   equippedIds: Set<string>;
   equippedTypes: Set<string>;
   itemRows: number;
@@ -326,6 +390,8 @@ interface PortraitMenuProps {
 
 function PortraitMenu({
   groupedItems,
+  sets,
+  onSetDrop,
   equippedIds,
   equippedTypes,
   itemRows,
@@ -348,10 +414,13 @@ function PortraitMenu({
   const selected =
     chosen === PORTRAIT_BACKGROUND && backgrounds.length > 0
       ? PORTRAIT_BACKGROUND
-      : chosen !== null && groupedItems.has(chosen)
-        ? chosen
-        : (categories[0] ?? (backgrounds.length > 0 ? PORTRAIT_BACKGROUND : null));
-  const items = selected && selected !== PORTRAIT_BACKGROUND ? (groupedItems.get(selected) ?? []) : [];
+      : chosen === SET_CATEGORY && sets.length > 0
+        ? SET_CATEGORY
+        : chosen !== null && chosen !== SET_CATEGORY && groupedItems.has(chosen)
+          ? chosen
+          : (categories[0] ?? (backgrounds.length > 0 ? PORTRAIT_BACKGROUND : null));
+  const items = selected && selected !== PORTRAIT_BACKGROUND && selected !== SET_CATEGORY ? (groupedItems.get(selected) ?? []) : [];
+  const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
   // 服は、上から下へ段を埋めてから右へ進む（横に流す）
   const grid: CSSProperties = { gridTemplateRows: `repeat(${Math.max(1, itemRows)}, ${PORTRAIT_TILE}px)` };
 
@@ -378,6 +447,19 @@ function PortraitMenu({
           >
             <span className="portrait-category-thumb" aria-hidden="true">🖼️</span>
             <span className="portrait-category-label">はいけい</span>
+          </button>
+        )}
+        {sets.length > 0 && (
+          <button
+            type="button"
+            className={`portrait-category${sets.some(isSetWorn) ? ' worn' : ''}`}
+            aria-pressed={selected === SET_CATEGORY}
+            onClick={() => setChosen(SET_CATEGORY)}
+          >
+            <span className="portrait-category-thumb">
+              {sets[0].items[0] && <img src={sets[0].items[0].thumbnailUrl || sets[0].items[0].imageUrl} alt="" draggable={false} loading="lazy" />}
+            </span>
+            <span className="portrait-category-label">{SET_LABEL}</span>
           </button>
         )}
         {categories.map((category) => {
@@ -421,6 +503,10 @@ function PortraitMenu({
               />
             ))}
           </>
+        ) : selected === SET_CATEGORY ? (
+          sets.map((set) => (
+            <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={onSetDrop} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} size={PORTRAIT_TILE} scrollRow />
+          ))
         ) : (
           items.map((item) => (
             <DraggableItem
@@ -474,94 +560,100 @@ function advanceRowGesture(g: RowGesture, dx: number, dy: number): boolean {
   return true;
 }
 
-const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, scrollRow = false }: DraggableItemProps) {
+const pointInside = (selector: string, x: number, y: number): boolean => {
+  const element = document.querySelector(selector);
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+};
+
+// メニューのタイル（服・背景・セット）をつかんで、ドールへ運ぶ操作。
+// 離した場所がメニューの上なら何もしない。キャンバス（dropTargetId）の上なら onDrop。
+// tapApplies: ほとんど動かさずに離したとき（タップ）も onDrop するか（背景だけ）
+function useTileDrag(options: {
+  scrollRow: boolean;
+  dropTargetId: string;
+  menuSelector: string;
+  tapApplies: boolean;
+  onDrop: () => void;
+  onMove?: (position: Position) => void;
+  onEnd?: () => void;
+}) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
   const movedDistance = useRef(0);
-  const elementRef = useRef<HTMLDivElement>(null);
-
-  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
-    const menu = document.querySelector('.palette-section');
-    if (!menu) return false;
-    const rect = (menu as HTMLElement).getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  }, []);
-
-  const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
-    const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
-    if (!targetElement) return false;
-    const rect = targetElement.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && 
-           clientY >= rect.top && clientY <= rect.bottom;
-  }, [dropTargetId]);
-
   const gesture = useRef<RowGesture>({ mode: 'drag', scroller: null, startScroll: 0 });
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    startPos.current = { x: e.clientX, y: e.clientY };
-    setDragPos({ x: 0, y: 0 });
-    movedDistance.current = 0;
-    gesture.current = startRowGesture(e, scrollRow);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [scrollRow]);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    if (advanceRowGesture(gesture.current, dx, dy)) return;
-    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
-    setDragPos({ x: dx, y: dy });
-    if (onDragMove) {
-      onDragMove(item, { x: e.clientX, y: e.clientY });
-    }
-  }, [isDragging, item, onDragMove]);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
+  const stop = () => {
     setIsDragging(false);
     setDragPos({ x: 0, y: 0 });
-    onDragEnd?.();
+    options.onEnd?.();
+  };
+  const handlers = {
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+      startPos.current = { x: e.clientX, y: e.clientY };
+      setDragPos({ x: 0, y: 0 });
+      movedDistance.current = 0;
+      gesture.current = startRowGesture(e, options.scrollRow);
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startPos.current.x;
+      const dy = e.clientY - startPos.current.y;
+      if (advanceRowGesture(gesture.current, dx, dy)) return;
+      movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
+      setDragPos({ x: dx, y: dy });
+      options.onMove?.({ x: e.clientX, y: e.clientY });
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      if (!isDragging) return;
+      stop();
+      // 行を流しただけなら、何もしない
+      if (gesture.current.mode === 'scroll') return;
+      // タップ（ほぼ移動なし）
+      if (movedDistance.current < 10) {
+        if (options.tapApplies) options.onDrop();
+        return;
+      }
+      // メニュー領域上で指を離した場合は何もしない（キャンバスが背面にあっても誤判定を防ぐ）
+      if (pointInside(options.menuSelector, e.clientX, e.clientY)) return;
+      if (pointInside(`[data-testid="${options.dropTargetId}"]`, e.clientX, e.clientY)) options.onDrop();
+    },
+    onPointerCancel: stop,
+  };
+  // タイルの見た目（つかんでいる間は指に付いていく）
+  const dragStyle = (size?: number): CSSProperties => ({
+    ...(isDragging ? styles.itemDragging : {}),
+    transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
+    cursor: isDragging ? 'grabbing' : 'grab',
+    touchAction: 'none',
+    ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
+  });
+  return { handlers, dragStyle };
+}
 
-    // 行を流しただけ・タップ（ほぼ移動なし）は装着しない
-    if (gesture.current.mode !== 'drag' || movedDistance.current < 10) {
-      return;
-    }
+const BROKEN_ITEM = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="40">?</text></svg>';
+const BROKEN_BACKGROUND = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
 
-    // メニュー領域上で指を離した場合は装着しない（キャンバスが背面にあっても誤判定を防ぐ）
-    if (isInsideMenu(e.clientX, e.clientY)) {
-      return;
-    }
-
-    if (checkIsOverTarget(e.clientX, e.clientY)) {
-      onDrop(item);
-    }
-  }, [isDragging, checkIsOverTarget, onDrop, item, onDragEnd, isInsideMenu]);
+const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, scrollRow = false }: DraggableItemProps) {
+  const drag = useTileDrag({
+    scrollRow,
+    dropTargetId,
+    menuSelector: '.palette-section',
+    tapApplies: false, // タップ（ほぼ移動なし）は装着しない
+    onDrop: () => onDrop(item),
+    onMove: onDragMove ? (position) => onDragMove(item, position) : undefined,
+    onEnd: onDragEnd,
+  });
 
   return (
     <div
-      ref={elementRef}
-      style={{
-        ...styles.itemButton,
-        ...(isEquipped ? styles.itemButtonEquipped : {}),
-        ...(isDragging ? styles.itemDragging : {}),
-        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
-        cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
-        ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
-      }}
+      style={{ ...styles.itemButton, ...(isEquipped ? styles.itemButtonEquipped : {}), ...drag.dragStyle(size) }}
       data-draggable=""
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={() => {
-        setIsDragging(false);
-        setDragPos({ x: 0, y: 0 });
-        onDragEnd?.();
-      }}
+      {...drag.handlers}
     >
       <div style={styles.itemImageContainer}>
         <img
@@ -571,12 +663,72 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
           draggable={false}
           loading="lazy"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="40">?</text></svg>';
+            (e.target as HTMLImageElement).src = BROKEN_ITEM;
           }}
         />
         {isEquipped && (
           <div style={styles.equippedBadge}>✓</div>
         )}
+      </div>
+    </div>
+  );
+});
+
+// セット（同じテーマで一度に作った服の集まり）のタイル。ドールへ運ぶと、パーツが全部着る。
+// 絵は、パーツのサムネイルを 4 つまで並べたもの（専用の絵は持たないので、パーツを消しても古くならない）
+export interface MenuSet {
+  id: string;
+  name: string;
+  items: ClothingItemData[];
+}
+const DraggableSet = memo(function DraggableSet({
+  set,
+  isWorn,
+  onDrop,
+  dropTargetId,
+  onDragMove,
+  onDragEnd,
+  size,
+  scrollRow = false,
+}: {
+  set: MenuSet;
+  isWorn: boolean; // パーツを全部着ている
+  onDrop: (items: ClothingItemData[]) => void;
+  dropTargetId: string;
+  onDragMove?: (item: ClothingItemData, position: Position) => void;
+  onDragEnd?: () => void;
+  size?: number;
+  scrollRow?: boolean;
+}) {
+  const drag = useTileDrag({
+    scrollRow,
+    dropTargetId,
+    menuSelector: '.palette-section',
+    tapApplies: false,
+    onDrop: () => onDrop(set.items),
+    // 指に付いてくる絵は、先頭のパーツ
+    onMove: onDragMove && set.items[0] ? (position) => onDragMove(set.items[0], position) : undefined,
+    onEnd: onDragEnd,
+  });
+  const shown = set.items.slice(0, 4);
+
+  return (
+    <div
+      style={{ ...styles.itemButton, ...(isWorn ? styles.itemButtonEquipped : {}), ...drag.dragStyle(size) }}
+      data-draggable=""
+      data-testid="set-tile"
+      data-worn={isWorn ? 'true' : 'false'}
+      title={set.name}
+      {...drag.handlers}
+    >
+      <div style={styles.itemImageContainer}>
+        <div style={shown.length > 1 ? styles.setMosaic : styles.setSingle}>
+          {shown.map((item) => (
+            <img key={item.id} src={item.thumbnailUrl || item.imageUrl} alt="" style={styles.setMosaicImage} draggable={false} loading="lazy" />
+          ))}
+        </div>
+        <span style={styles.setLabel}>{set.name}</span>
+        {isWorn && <div style={styles.equippedBadge}>✓</div>}
       </div>
     </div>
   );
@@ -602,95 +754,21 @@ const DraggableBackground = memo(function DraggableBackground({
   size?: number;
   scrollRow?: boolean;
 }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
-  const startPos = useRef({ x: 0, y: 0 });
-  const movedDistance = useRef(0);
-
-  const isInsideMenu = useCallback((clientX: number, clientY: number): boolean => {
-    const menu = document.querySelector('[data-menu="dressup-menu"]');
-    if (!menu) return false;
-    const rect = (menu as HTMLElement).getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  }, []);
-
-  const checkIsOverTarget = useCallback((clientX: number, clientY: number): boolean => {
-    const targetElement = document.querySelector(`[data-testid="${dropTargetId}"]`);
-    if (!targetElement) return false;
-    const rect = targetElement.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && 
-           clientY >= rect.top && clientY <= rect.bottom;
-  }, [dropTargetId]);
-
-  const gesture = useRef<RowGesture>({ mode: 'drag', scroller: null, startScroll: 0 });
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    startPos.current = { x: e.clientX, y: e.clientY };
-    setDragPos({ x: 0, y: 0 });
-    movedDistance.current = 0;
-    gesture.current = startRowGesture(e, scrollRow);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [scrollRow]);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - startPos.current.x;
-    const dy = e.clientY - startPos.current.y;
-    if (advanceRowGesture(gesture.current, dx, dy)) return;
-    movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
-    setDragPos({ x: dx, y: dy });
-    if (onDragMove) {
-      onDragMove(bg, { x: e.clientX, y: e.clientY });
-    }
-  }, [isDragging, bg, onDragMove]);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (!isDragging) return;
-    setIsDragging(false);
-    setDragPos({ x: 0, y: 0 });
-    onDragEnd?.();
-
-    // 行を流しただけなら、何もしない
-    if (gesture.current.mode === 'scroll') return;
-
-    // タップ（ほぼ移動なし）も適用
-    if (movedDistance.current < 10) {
-      onDrop(bg.id);
-      return;
-    }
-
-    // メニュー領域上で指を離した場合は適用しない
-    if (isInsideMenu(e.clientX, e.clientY)) {
-      return;
-    }
-
-    if (checkIsOverTarget(e.clientX, e.clientY)) {
-      onDrop(bg.id);
-    }
-  }, [isDragging, checkIsOverTarget, onDrop, bg.id, onDragEnd, isInsideMenu]);
+  const drag = useTileDrag({
+    scrollRow,
+    dropTargetId,
+    menuSelector: '[data-menu="dressup-menu"]',
+    tapApplies: true, // 背景は、タップ（ほぼ移動なし）でも適用
+    onDrop: () => onDrop(bg.id),
+    onMove: onDragMove ? (position) => onDragMove(bg, position) : undefined,
+    onEnd: onDragEnd,
+  });
 
   return (
     <div
-      style={{
-        ...styles.itemButton,
-        ...(isSelected ? styles.itemButtonSelected : {}),
-        ...(isDragging ? styles.itemDragging : {}),
-        transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
-        cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
-        ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
-      }}
+      style={{ ...styles.itemButton, ...(isSelected ? styles.itemButtonSelected : {}), ...drag.dragStyle(size) }}
       data-draggable=""
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={() => {
-        setIsDragging(false);
-        setDragPos({ x: 0, y: 0 });
-        onDragEnd?.();
-      }}
+      {...drag.handlers}
     >
       <div style={styles.itemImageContainer}>
         <img
@@ -700,7 +778,7 @@ const DraggableBackground = memo(function DraggableBackground({
           draggable={false}
           loading="lazy"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
+            (e.target as HTMLImageElement).src = BROKEN_BACKGROUND;
           }}
         />
         {isSelected && (
@@ -927,6 +1005,45 @@ const styles: Record<string, CSSProperties> = {
     fontSize: '9px',
     color: '#666',
     marginTop: '2px',
+  },
+  // セットのタイル: パーツのサムネイルを 2×2 に並べる。名前は下に重ねる
+  setMosaic: {
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gridTemplateRows: '1fr 1fr',
+    gap: '2px',
+    pointerEvents: 'none',
+  },
+  setSingle: {
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    pointerEvents: 'none',
+  },
+  setMosaicImage: {
+    width: '100%',
+    height: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    objectFit: 'contain',
+  },
+  setLabel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: '1px 2px',
+    fontSize: '10px',
+    lineHeight: '12px',
+    textAlign: 'center',
+    color: '#555',
+    background: 'rgba(255, 255, 255, 0.85)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    pointerEvents: 'none',
   },
   equippedBadge: {
     position: 'absolute',

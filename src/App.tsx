@@ -355,13 +355,13 @@ function App() {
   const avatarSectionRef = useRef<HTMLElement>(null);
 
   // 着せた服を一瞬光らせる（同じ服を続けて着せても、もう一度光るように回数も持つ）
-  const [flash, setFlash] = useState<{ id: string; count: number } | null>(null);
+  const [flash, setFlash] = useState<{ ids: string[]; count: number } | null>(null);
   useEffect(() => {
     if (!flash) return;
     const timer = setTimeout(() => setFlash(null), 900);
     return () => clearTimeout(timer);
   }, [flash]);
-  const flashItem = flash ? canvasItems.find((item) => item.id === flash.id) ?? null : null;
+  const flashItems = flash ? canvasItems.filter((item) => flash.ids.includes(item.id)) : [];
 
   // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
@@ -369,7 +369,20 @@ function App() {
       // 髪なら、対のうしろがみも一緒に着せる
       equipItem(item, item.backItemId ? allClothing.find((c) => c.id === item.backItemId) : undefined);
       dragPreviewRef.current?.hide();
-      setFlash((prev) => ({ id: item.id, count: (prev?.count ?? 0) + 1 }));
+      setFlash((prev) => ({ ids: [item.id], count: (prev?.count ?? 0) + 1 }));
+      playDressUpSound();
+    },
+    [equipItem, allClothing]
+  );
+
+  // セットをドロップした時の処理: パーツを全部、重なりの小さい順に 1 点ずつ着せる（1 点ずつ着せたのと同じ結果）。
+  // 光るのは着せた全部、音は 1 回
+  const handleSetDrop = useCallback(
+    (parts: ClothingItemData[]) => {
+      if (parts.length === 0) return;
+      for (const item of parts) equipItem(item, item.backItemId ? allClothing.find((c) => c.id === item.backItemId) : undefined);
+      dragPreviewRef.current?.hide();
+      setFlash((prev) => ({ ids: parts.map((item) => item.id), count: (prev?.count ?? 0) + 1 }));
       playDressUpSound();
     },
     [equipItem, allClothing]
@@ -552,6 +565,7 @@ function App() {
               onBackgroundDragEnd={handleDragEnd}
               layout={layout.orientation}
               itemRows={layout.itemRows}
+              onSetDrop={handleSetDrop}
             />
             {portrait && (
               <div className="portrait-tools" data-testid="portrait-tools">
@@ -588,18 +602,19 @@ function App() {
         />
       )}
 
-      {/* 着せた服を一瞬光らせる */}
-      {flashItem && !isAdjustingItem && (
-        <EquipFlash
-          key={flash!.count}
-          item={flashItem}
-          dollTransform={dollTransform}
-          canvasWidth={canvasSize.width}
-          canvasHeight={canvasSize.height}
-          menuOffset={layout.menuOffset}
-          rightOffset={layout.rightOffset}
-        />
-      )}
+      {/* 着せた服を一瞬光らせる（セットは、着せた全部） */}
+      {!isAdjustingItem &&
+        flashItems.map((item) => (
+          <EquipFlash
+            key={`${flash!.count}:${item.id}`}
+            item={item}
+            dollTransform={dollTransform}
+            canvasWidth={canvasSize.width}
+            canvasHeight={canvasSize.height}
+            menuOffset={layout.menuOffset}
+            rightOffset={layout.rightOffset}
+          />
+        ))}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />

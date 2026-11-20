@@ -494,6 +494,9 @@ test('メニューの並び: カテゴリは並び順どおり、サムネイル
   const labels = await page.locator('.palette-section button').allInnerTexts();
   const names = labels.map((l) => l.split('\n').pop()?.trim());
   expect(names.indexOf('トップス')).toBeLessThan(names.indexOf('ボトムス'));
+  // セットのあるドールでは、「セット」が服のカテゴリより前に出る
+  expect(names.indexOf('セット')).toBeGreaterThanOrEqual(0);
+  expect(names.indexOf('セット')).toBeLessThan(Math.min(...['トップス', 'ボトムス', 'くつ', 'ソックス'].map((n) => names.indexOf(n))));
   await openCategory(page, 'トップス');
   const thumb = page.locator('.palette-section img[alt="red"]');
   const size = await thumb.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]);
@@ -1180,6 +1183,44 @@ test('更新の前に保存した服装（調整値が画面の px）は、同�
   expect(saved.x).toBeCloseTo(ADJUST_DX / BASE_SCALE, 3);
 });
 
+test('セット: ドールへドラッグすると、全部のパーツが一度に着く。パーツは、ふつうの服として 1 点ずつ着替えられる', async ({ page }) => {
+  await openApp(page);
+  await openCategory(page, 'セット');
+  const tile = page.getByTestId('set-tile');
+  await expect(tile).toHaveCount(1);
+  await expect(tile).toHaveAttribute('title', 'あかみどり');
+  await expect(tile.locator('img')).toHaveCount(2); // パーツのサムネイルを並べた絵
+  await expect(tile).toHaveAttribute('data-worn', 'false');
+  const box = (await tile.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
+  await page.mouse.up();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  await expect(tile).toHaveAttribute('data-worn', 'true');
+  const saved = () => page.evaluate(() => (JSON.parse(localStorage.getItem('dressup_outfit') ?? '[]') as { id: string }[]).map((e) => e.id.split('/').pop()));
+  await expect.poll(saved).toEqual(['green', 'red']); // 重なりの小さい順（ボトムス → トップス）に着せる
+  // タップ（動かさない）では着ない
+  await page.locator('.reset-button-fixed').click();
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await tile.click();
+  await page.waitForTimeout(300);
+  expect(await saved()).toEqual([]);
+  // もう一度着せてから、トップスだけ着替える: ボトムスは残り、セットの ✓ は消える
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
+  await page.mouse.up();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await backToCategories(page);
+  await dragItemToDoll(page, 'トップス', 'blue');
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
+  await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
+  await openCategory(page, 'セット');
+  await expect(page.getByTestId('set-tile')).toHaveAttribute('data-worn', 'false');
+});
+
 test.describe('縦画面', () => {
   const PW = 820;
   const PH = 1180;
@@ -1378,6 +1419,21 @@ test.describe('縦画面', () => {
     await page.mouse.up();
     await page.locator('.item-adjust-done-btn-small').click();
     await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  });
+
+  test('セット: 縦でも、セットを上へドラッグすると全部のパーツが着く', async ({ page }) => {
+    await openPortrait(page);
+    await selectCategory(page, 'セット');
+    const tile = page.getByTestId('portrait-items').getByTestId('set-tile');
+    await expect(tile).toHaveCount(1);
+    const box = (await tile.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X, pY(500), { steps: 6 });
+    await page.mouse.up();
+    await expectPixel(page, P_DOLL_X, pY(380), RED);
+    await expectPixel(page, P_DOLL_X, pY(660), GREEN);
+    await expect(tile).toHaveAttribute('data-worn', 'true');
   });
 
   test.describe('指での操作', () => {

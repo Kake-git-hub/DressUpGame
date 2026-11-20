@@ -18,6 +18,7 @@ export default async function globalSetup(): Promise<void> {
     await addHide(out);
     await addBack(out);
     await addShoeLayers(out);
+    await addSet(out);
   } finally {
     await fs.rm(presetDir, { recursive: true, force: true });
   }
@@ -67,5 +68,20 @@ async function addBack(dir: string): Promise<void> {
   const blue = manifest.dolls[0].items.find((i) => i.name === 'blue');
   if (!blue) throw new Error('e2e: blue が見つかりません');
   blue.back = { file: 'files/e2e-back.webp', canvasW: 1024, canvasH: 1024, box };
+  await fs.writeFile(file, JSON.stringify(manifest, null, 1));
+}
+
+// セット「あかみどり」: トップス（red）とボトムス（green）
+async function addSet(dir: string): Promise<void> {
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(file, 'utf8')) as { dolls: { id: string; sets?: { id: string; name: string }[]; items: { name: string; set?: string }[] }[] };
+  const doll = manifest.dolls[0];
+  const set = { id: `${doll.id}/セット/あかみどり`, name: 'あかみどり' };
+  doll.sets = [set];
+  for (const name of ['red', 'green']) {
+    const item = doll.items.find((i) => i.name === name);
+    if (!item) throw new Error(`e2e: ${name} が見つかりません`);
+    item.set = set.id;
+  }
   await fs.writeFile(file, JSON.stringify(manifest, null, 1));
 }
