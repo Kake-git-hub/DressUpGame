@@ -371,11 +371,11 @@ test.describe('スタジオ', () => {
       await page.getByTestId('tab-library').click();
       const setRow = page.getByTestId('library-set');
       await expect(setRow).toHaveCount(1);
-      await expect(setRow.locator('input')).toHaveValue('うみのセット');
+      await expect(setRow.getByLabel('セットのなまえ')).toHaveValue('うみのセット');
       await expect(setRow).toContainText('2 点');
       // 名前を変える（Enter で決まる）
-      await setRow.locator('input').fill('なつのうみ');
-      await setRow.locator('input').press('Enter');
+      await setRow.getByLabel('セットのなまえ').fill('なつのうみ');
+      await setRow.getByLabel('セットのなまえ').press('Enter');
       await expect.poll(() => manifest().sets?.[0]?.name).toBe('なつのうみ');
       // 1 点を外す → セットは残る（1 点）
       await page.locator('[data-testid="library-item"]', { has: page.locator('input[value="うみのシャツ"]') }).getByTestId('leave-set').click();
@@ -410,6 +410,136 @@ test.describe('スタジオ', () => {
       await expect(page.getByTestId('item-card')).toHaveCount(0);
       await expect.poll(() => dollNow().items.filter((i) => i.set === SET.id).map((i) => i.name).sort()).toEqual(['うみのかざり', 'うみのシャツ']);
       expect(dollNow().items.filter((i) => i.name === 'うみのシャツ')).toHaveLength(2);
+    });
+  });
+  test.describe('一覧での並べ替え・位置の直し、ドールの設定、作りかけの候補', () => {
+    const manifestNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')) as { dolls: { id: string; name: string; hidden?: boolean; items: Item[] }[] };
+    const tops = () => manifestNow().dolls[0].items.filter((i) => i.category === 'トップス');
+
+    test('一覧: ◀ ▶ でメニューでの順番が変わり、「位置・大きさ」で動かして保存すると、位置が変わる', async ({ page }) => {
+      expect(tops().length).toBeGreaterThanOrEqual(2);
+      const before = tops().map((i) => i.id);
+      await page.getByTestId('tab-library').click();
+      const list = page.getByTestId('category-トップス').getByTestId('library-item');
+      await list.first().getByTestId('item-later').click();
+      await expect.poll(() => tops().map((i) => i.id)).toEqual([before[1], before[0], ...before.slice(2)]);
+      // 画面が読み直した並びで続ける（同じ絵の服があるので、絵では見分けられない）
+      await page.reload();
+      await page.getByTestId('tab-library').click();
+      // 位置・大きさ: 矢印キーで右へ 3px、Shift+↓ で下へ 10px
+      const target = tops()[0];
+      await list.first().getByTestId('item-place').click();
+      await expect(page.getByTestId('placer')).toBeVisible();
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Shift+ArrowDown');
+      await expect(page.getByTestId('placer-values')).toContainText('(3, 10)');
+      await page.getByTestId('placer-save').click();
+      await expect(page.getByTestId('placer')).toHaveCount(0);
+      const after = tops()[0];
+      expect(after.id).toBe(target.id);
+      expect(after.image.box).toMatchObject({ x: target.image.box.x + 3, y: target.image.box.y + 10, w: target.image.box.w, h: target.image.box.h });
+      // ドラッグでも動かせる（画面の 1px より大きく動く）
+      await list.first().getByTestId('item-place').click();
+      const view = (await page.getByTestId('placer-view').boundingBox())!;
+      await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(view.x + view.width / 2 + 40, view.y + view.height / 2, { steps: 4 });
+      await page.mouse.up();
+      await expect(page.getByTestId('placer-values')).not.toContainText('(0, 0)');
+      await page.getByRole('button', { name: 'やめる' }).click();
+      await expect(page.getByTestId('placer')).toHaveCount(0);
+      expect(tops()[0].image.box).toEqual(after.image.box);
+    });
+
+    test('一覧のセット: パーツが並び、重ね順を決められ、外したり、ほかの服を足したりできる', async ({ page }) => {
+      const setItems = () => manifestNow().dolls[0].items.filter((i) => (i as Item & { set?: string }).set === 'アニメ/セット/うみのセット') as (Item & { layer?: number })[];
+      expect(setItems().map((i) => i.name).sort()).toEqual(['うみのかざり', 'うみのシャツ']);
+      await page.getByTestId('tab-library').click();
+      const box = page.getByTestId('library-set');
+      await expect(box.getByTestId('set-member')).toHaveCount(2);
+      // シャツを一番手前に（重ね順 30）
+      const shirt = box.getByTestId('set-member').filter({ hasText: 'うみのシャツ' });
+      await shirt.getByTestId('set-member-layer').fill('30');
+      await shirt.getByTestId('set-member-layer').press('Enter');
+      await expect.poll(() => setItems().find((i) => i.name === 'うみのシャツ')?.layer).toBe(30);
+      await expect(box.getByTestId('set-member').first()).toContainText('うみのシャツ');
+      // 外す → 1 点。ほかの服を足す → 2 点
+      await box.getByTestId('set-member').filter({ hasText: 'うみのかざり' }).getByTestId('set-member-remove').click();
+      await expect.poll(() => setItems().map((i) => i.name)).toEqual(['うみのシャツ']);
+      const arabian = manifestNow().dolls[0].items.find((i) => i.name === 'アラビアン')!;
+      await box.getByTestId('set-add-item').selectOption(arabian.id);
+      await expect.poll(() => setItems().map((i) => i.name).sort()).toEqual(['うみのシャツ', 'アラビアン']);
+      await expect(box.getByTestId('set-member')).toHaveCount(2);
+      // 服の側からも入れられる
+      const kazari = page.getByTestId('library-item').filter({ has: page.locator('input[value="うみのかざり"]') });
+      await kazari.getByTestId('item-join-set').selectOption({ label: 'うみのセット' });
+      await expect.poll(() => setItems().length).toBe(3);
+    });
+
+    test('ドールの範囲のタブで、ドールの名前を変え、ゲームに出さないようにできる', async ({ page }) => {
+      await page.getByTestId('tab-doll').click();
+      await page.getByTestId('doll-rename').fill('おんなのこ');
+      await page.getByTestId('doll-rename').press('Enter');
+      await expect.poll(() => manifestNow().dolls[0].name).toBe('おんなのこ');
+      expect(manifestNow().dolls[0].id).toBe('アニメ');
+      await page.getByTestId('doll-hidden').check();
+      await expect.poll(() => manifestNow().dolls[0].hidden).toBe(true);
+      await expect(page.getByTestId('doll-select')).toContainText('ゲームに出さない');
+      await page.getByTestId('doll-hidden').uncheck();
+      await expect.poll(() => manifestNow().dolls[0].hidden).toBeUndefined();
+    });
+
+    test('保存していない候補は、ほかのタブを開いても残り、ドールを変える前にたずねる。ページを閉じる前にもたずねる', async ({ page }) => {
+      // 2 体目のドール
+      await page.getByTestId('tab-doll').click();
+      await page.getByText('ドールを追加').click();
+      await page.getByTestId('doll-name').fill('ふたりめ');
+      await page.getByTestId('doll-file').setInputFiles(fixture('doll-anime.webp'));
+      await page.getByTestId('doll-add').click();
+      await expect(page.getByTestId('doll-select')).toHaveValue('ふたりめ');
+      await page.getByTestId('doll-select').selectOption('アニメ');
+      await upload(page, 'sample-green-set.webp');
+      await page.getByTestId('tab-library').click();
+      await page.getByTestId('tab-add').click();
+      await expect(page.getByTestId('item-card')).toHaveCount(1);
+      // やめると、ドールは変わらず、候補も残る
+      const asked: string[] = [];
+      page.once('dialog', (d) => {
+        asked.push(d.message());
+        void d.dismiss();
+      });
+      await page.getByTestId('doll-select').selectOption('ふたりめ');
+      await expect.poll(() => asked.length).toBe(1);
+      expect(asked[0]).toContain('1 点');
+      await expect(page.getByTestId('doll-select')).toHaveValue('アニメ');
+      await expect(page.getByTestId('item-card')).toHaveCount(1);
+      // ページを閉じる前にもたずねる
+      const unload: string[] = [];
+      page.once('dialog', (d) => {
+        unload.push(d.type());
+        void d.dismiss();
+      });
+      await page.close({ runBeforeUnload: true });
+      await expect.poll(() => unload).toEqual(['beforeunload']);
+    });
+    test('背景: えらんだ背景だけを、ほかのドール・全部のドールにコピーできる', async ({ page }) => {
+      await page.getByTestId('doll-select').selectOption('アニメ');
+      await page.getByTestId('tab-backgrounds').click();
+      await page.getByTestId('bg-files').setInputFiles([fixture('sample-green-set.webp'), fixture('sample-black-skirt.webp')]);
+      await expect(page.getByTestId('bg-item')).toHaveCount(2, { timeout: 30_000 });
+      const anime = () => manifestNow() as unknown as { backgrounds: { id: string; file: string }[]; dolls: { id: string; backgrounds: { id: string; file: string }[] }[] };
+      const first = anime().dolls[0].backgrounds[0];
+      await page.getByTestId('bg-pick').first().check();
+      await page.getByTestId('bg-copy-to').selectOption('ふたりめ');
+      await page.getByTestId('bg-copy-run').click();
+      await expect(page.getByTestId('bg-copied')).toContainText('1 枚');
+      await expect.poll(() => anime().dolls.find((d) => d.id === 'ふたりめ')?.backgrounds.map((b) => b.file)).toEqual([first.file]);
+      await page.getByTestId('bg-pick').first().check();
+      await page.getByTestId('bg-copy-to').selectOption({ label: '全部のドール（共通の背景）' });
+      await page.getByTestId('bg-copy-run').click();
+      await expect.poll(() => anime().backgrounds.map((b) => b.file)).toEqual([first.file]);
     });
   });
 });

@@ -66,6 +66,7 @@ export interface ManifestDoll {
   items: ManifestItem[];
   backgrounds: ManifestBackground[]; // このドール専用の背景
   sets?: ManifestSet[]; // このドールのセット（無ければ項目ごと無い）
+  hidden?: true; // ゲームに出さない（スタジオには出る。無ければ出す）
 }
 
 export interface Manifest {
@@ -190,6 +191,7 @@ function doll(v: unknown, path: string): ManifestDoll {
     items,
     backgrounds,
     ...(sets.length > 0 ? { sets } : {}),
+    ...(o.hidden === true ? { hidden: true as const } : {}),
   };
 }
 

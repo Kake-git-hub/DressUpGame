@@ -68,3 +68,14 @@ details.form > summary { cursor: pointer; font-weight: bold; width: 100%; }
 .dialog { background: #fff; border-radius: 12px; padding: 18px 22px; width: min(640px, 90vw); }
 .dialog label { display: flex; flex-direction: column; align-items: stretch; margin: 8px 0; }
 .log { background: #f1f0f6; padding: 8px; border-radius: 6px; white-space: pre-wrap; max-height: 240px; overflow: auto; font-size: 12px; }
+.thumbs figure.dragging { opacity: 0.4; }
+.thumbs img[draggable='true'] { cursor: grab; }
+.order-buttons { justify-content: space-between; margin: 0; }
+.order-buttons button { padding: 1px 8px; font-size: 12px; }
+.dialog.placer { width: min(720px, 94vw); max-height: 96vh; overflow: auto; }
+.dialog.placer .row label { flex-direction: row; align-items: center; margin: 0; }
+.placer-view { display: block; width: min(560px, 80vh, 88vw); aspect-ratio: 1; margin: 6px auto; background: repeating-conic-gradient(#dcdae6 0% 25%, #f1f0f6 0% 50%) 0 0 / 24px 24px; border-radius: 6px; cursor: grab; touch-action: none; user-select: none; }
+.placer-view:active { cursor: grabbing; }
+.set-box { background: #faf8ff; border: 1px solid #e0daf5; border-radius: 8px; padding: 8px; margin: 8px 0; }
+.set-box .thumbs label { display: flex; gap: 4px; font-size: 12px; }
+.set-box .thumbs label input { width: 56px; }

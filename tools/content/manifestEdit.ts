@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { parseManifest } from '../../src/content/manifest.ts';
-import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestItem, ManifestSet } from '../../src/content/manifest.ts';
+import type { Manifest, ManifestBackground, ManifestCategory, ManifestDoll, ManifestImage, ManifestItem, ManifestSet } from '../../src/content/manifest.ts';
 import type { Pixels } from '../../src/pipeline/alpha.ts';
 import { FileWriter, MAX_SIZE, encodeBackground, encodeCutout, encodeLayer, encodeMask, encodeThumb, uniqueId } from './encode.ts';
 
@@ -214,8 +214,8 @@ export class ContentStore {
   }
 
   // 改名・カテゴリ移動・重ね順などの変更。ID は変えない。layer / overlap に null を渡すと、カテゴリの値に戻す。
-  // set に null を渡すと、セットから外す
-  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null }): Promise<ManifestItem> {
+  // set: null でセットから外す。セットの ID で、そのセットに入れる。{ name } で、新しいセットを作って入れる
+  updateItem(itemId: string, change: { name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string } }): Promise<ManifestItem> {
     return this.change((manifest) => {
       const { doll, item } = ContentStore.findItem(manifest, itemId);
       if (change.name !== undefined) item.name = checkPlainName(change.name, '名前');
@@ -228,6 +228,95 @@ export class ContentStore {
       if (change.overlap === null) delete item.overlap;
       else if (change.overlap !== undefined) item.overlap = change.overlap;
       if (change.set === null) delete item.set;
+      else if (typeof change.set === 'string') {
+        const id = change.set;
+        if (!doll.sets?.some((x) => x.id === id)) throw new ContentError(`セット「${id}」がありません`, 404);
+        item.set = id;
+      } else if (change.set !== undefined) {
+        const set = { id: this.newSetId(doll, change.set.name), name: checkPlainName(change.set.name, 'セットの名前') };
+        doll.sets = [...(doll.sets ?? []), set];
+        item.set = set.id;
+      }
+      return item;
+    });
+  }
+
+  // ドールの改名と、ゲームに出すかどうか（ID は変えない。hidden: false で項目ごと消す）
+  updateDoll(dollId: string, change: { name?: string; hidden?: boolean }): Promise<ManifestDoll> {
+    return this.change((manifest) => {
+      const doll = ContentStore.doll(manifest, dollId);
+      if (change.name !== undefined) doll.name = checkPlainName(change.name, 'ドールの名前');
+      if (change.hidden === true) doll.hidden = true;
+      else if (change.hidden === false) delete doll.hidden;
+      return doll;
+    });
+  }
+
+  // カテゴリの中の服の並び（メニューでの順番）を変える。ids はそのカテゴリの服の全部を、新しい順に。
+  // ほかのカテゴリの服の位置は変えない（そのカテゴリの服がいた場所に、新しい順で入れ直す）
+  reorderItems(dollId: string, categoryId: string, ids: string[]): Promise<void> {
+    return this.change((manifest) => {
+      const doll = ContentStore.doll(manifest, dollId);
+      const current = doll.items.filter((i) => i.category === categoryId);
+      if (!Array.isArray(ids) || ids.length !== current.length || new Set(ids).size !== ids.length || !ids.every((id) => current.some((i) => i.id === id))) {
+        throw new ContentError('並び替える服が、カテゴリの服と合いません。画面を読み直してください', 409);
+      }
+      const ordered = ids.map((id) => current.find((i) => i.id === id)!);
+      let next = 0;
+      doll.items = doll.items.map((i) => (i.category === categoryId ? ordered[next++] : i));
+    });
+  }
+
+  // 服の位置と大きさを変える（ゲームで最初に着せたときの位置）。服の中心を軸に scale 倍してから、(dx, dy) だけ動かす（キャンバスの px）。
+  // 後ろ髪・肌・隠す所も一緒に動かす。キャンバスの外に出た分は切れる。サムネイルは変えない
+  async transformItem(itemId: string, t: { scale: number; dx: number; dy: number }): Promise<ManifestItem> {
+    const ok = (v: unknown, min: number, max: number) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+    if (!ok(t.scale, 0.2, 5) || !ok(t.dx, -4096, 4096) || !ok(t.dy, -4096, 4096)) throw new ContentError('位置と大きさの値が正しくありません');
+    return this.change(async (manifest) => {
+      const { item } = ContentStore.findItem(manifest, itemId);
+      // 軸: 服の中心（キャンバスの中心からの位置。キャンバスの大きさが違う絵でも同じ点になる）
+      const pivot = {
+        x: item.image.box.x + item.image.box.w / 2 - item.image.canvasW / 2,
+        y: item.image.box.y + item.image.box.h / 2 - item.image.canvasH / 2,
+      };
+      const move = async (image: ManifestImage, mask: boolean): Promise<ManifestImage | null> => {
+        const { canvasW: width, canvasH: height, box } = image;
+        const left = Math.round(t.scale * (box.x - width / 2 - pivot.x) + pivot.x + t.dx + width / 2);
+        const top = Math.round(t.scale * (box.y - height / 2 - pivot.y) + pivot.y + t.dy + height / 2);
+        const w = Math.max(1, Math.round(box.w * t.scale));
+        const h = Math.max(1, Math.round(box.h * t.scale));
+        const { data } = await sharp(path.join(this.dir, image.file)).ensureAlpha().resize(w, h, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
+        const out = new Uint8ClampedArray(width * height * 4);
+        const x0 = Math.max(0, left);
+        const x1 = Math.min(width, left + w);
+        for (let y = Math.max(0, top); y < Math.min(height, top + h); y++) {
+          if (x1 <= x0) break;
+          const from = ((y - top) * w + (x0 - left)) * 4;
+          out.set(data.subarray(from, from + (x1 - x0) * 4), (y * width + x0) * 4);
+        }
+        if (!mask) return encodeLayer(out, width, height, this.writer);
+        const alpha = new Uint8Array(width * height);
+        for (let p = 0; p < alpha.length; p++) alpha[p] = out[p * 4 + 3];
+        return encodeMask(alpha, width, height, this.writer);
+      };
+      const image = await move(item.image, false);
+      if (!image) throw new ContentError('服がキャンバスの外に出てしまいます');
+      const back = item.back ? await move(item.back, false) : null;
+      const under = item.under ? await move(item.under, false) : null;
+      const hide = item.hide ? await move(item.hide, true) : null;
+      item.image = image;
+      if (item.back) {
+        if (back) item.back = back;
+        else delete item.back;
+      }
+      if (item.under) {
+        if (under) item.under = under;
+        else delete item.under;
+      }
+      if (item.hide) {
+        if (hide) item.hide = hide;
+        else delete item.hide;
+      }
       return item;
     });
   }
@@ -333,6 +422,22 @@ export class ContentStore {
       }
       list.push(background);
       return background;
+    });
+  }
+
+  // 背景を、ほかのドールにも置く（target が null なら、全部のドールで使う背景）。絵は同じファイルを指す。
+  // 置き先にもう同じ絵があれば、それを返す（増やさない）
+  copyBackground(id: string, target: string | null): Promise<ManifestBackground> {
+    return this.change((manifest) => {
+      const source = [...manifest.backgrounds, ...manifest.dolls.flatMap((d) => d.backgrounds)].find((b) => b.id === id);
+      if (!source) throw new ContentError(`背景「${id}」がありません`, 404);
+      const list = target === null ? manifest.backgrounds : ContentStore.doll(manifest, target).backgrounds;
+      const have = list.find((b) => b.file === source.file);
+      if (have) return { ...have };
+      const all = new Set([...manifest.backgrounds, ...manifest.dolls.flatMap((d) => d.backgrounds)].map((b) => b.id));
+      const copy: ManifestBackground = { ...source, id: uniqueId(target === null ? `bg/${source.name}` : `${target}/bg/${source.name}`, all) };
+      list.push(copy);
+      return { ...copy };
     });
   }
 

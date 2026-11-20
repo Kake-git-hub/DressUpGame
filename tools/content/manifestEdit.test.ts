@@ -105,6 +105,53 @@ describe('ContentStore', () => {
     expect(changed).toMatchObject({ id: first.id, name: 'あたらしいなまえ', category: 'ドレス', layer: 7 });
     expect((await store.updateItem(first.id, { layer: null })).layer).toBeUndefined();
   });
+  it('ドールの改名と非表示: ID は変わらない。hidden は false で項目ごと消える。使えない名前・無いドールは Error', async () => {
+    const changed = await store.updateDoll(dollId, { name: 'おんなのこ', hidden: true });
+    expect(changed).toMatchObject({ id: dollId, name: 'おんなのこ', hidden: true });
+    expect((await store.read()).dolls[0]).toMatchObject({ id: dollId, name: 'おんなのこ', hidden: true });
+    await store.updateDoll(dollId, { hidden: false });
+    expect('hidden' in (await store.read()).dolls[0]).toBe(false);
+    await expect(store.updateDoll(dollId, { name: ' ' })).rejects.toThrow();
+    await expect(store.updateDoll('ない', { hidden: true })).rejects.toThrow(/ありません/);
+  });
+  it('カテゴリの中の服の並び替え: ほかのカテゴリの服の位置は変わらない。足りない・余分な ID は Error', async () => {
+    const a = await store.addItem(dollId, item('a'));
+    const d = await store.addItem(dollId, { ...item('d'), category: 'ドレス' });
+    const b = await store.addItem(dollId, item('b'));
+    const c = await store.addItem(dollId, item('c'));
+    await store.reorderItems(dollId, 'トップス', [c.id, a.id, b.id]);
+    expect((await store.read()).dolls[0].items.map((i) => i.name)).toEqual(['c', 'd', 'a', 'b']);
+    await expect(store.reorderItems(dollId, 'トップス', [c.id, a.id])).rejects.toThrow();
+    await expect(store.reorderItems(dollId, 'トップス', [c.id, a.id, b.id, d.id])).rejects.toThrow();
+    await expect(store.reorderItems(dollId, 'トップス', [c.id, a.id, a.id])).rejects.toThrow();
+  });
+  it('服の位置と大きさの変更: 服の中心を軸に大きさを変えてから動かす。後ろ髪・肌・隠す所も一緒に動く。サムネイルはそのまま', async () => {
+    const hide = new Uint8Array(1024 * 1024);
+    for (let y = 300; y < 400; y++) for (let x = 400; x < 600; x++) hide[y * 1024 + x] = 255;
+    const added = await store.addItem(dollId, item('ふく', { back: canvas([300, 200, 400, 600]), under: canvas([450, 380, 100, 20]), hide }));
+    const moved = await store.transformItem(added.id, { scale: 1, dx: 10, dy: -20 });
+    expect(moved.image.box).toEqual({ x: 410, y: 280, w: 200, h: 100 });
+    expect(moved.back!.box).toEqual({ x: 310, y: 180, w: 400, h: 600 });
+    expect(moved.under!.box).toEqual({ x: 460, y: 360, w: 100, h: 20 });
+    expect(moved.hide!.box).toEqual({ x: 410, y: 280, w: 200, h: 100 });
+    expect(moved.thumb).toBe(added.thumb);
+    // 服の中心（510, 330）を軸に 2 倍
+    const scaled = await store.transformItem(added.id, { scale: 2, dx: 0, dy: 0 });
+    expect(scaled.image.box).toEqual({ x: 310, y: 230, w: 400, h: 200 });
+    expect(scaled.back!.box).toEqual({ x: 110, y: 30, w: 800, h: 994 }); // 下はキャンバスの外に出た分が切れる
+    const meta = await sharp(path.join(dir, scaled.image.file)).metadata();
+    expect([meta.width, meta.height]).toEqual([400, 200]);
+    expect((await store.read()).dolls[0].items[0].image.box).toEqual(scaled.image.box);
+  });
+  it('服の位置の変更: キャンバスの外に出た分は切れる。全部出たり、倍率がおかしかったりすれば Error で、何も変わらない', async () => {
+    const added = await store.addItem(dollId, item('ふく'));
+    const cut = await store.transformItem(added.id, { scale: 1, dx: 500, dy: 0 });
+    expect(cut.image.box).toEqual({ x: 900, y: 300, w: 124, h: 100 });
+    await expect(store.transformItem(added.id, { scale: 1, dx: 2000, dy: 0 })).rejects.toThrow();
+    await expect(store.transformItem(added.id, { scale: 0, dx: 0, dy: 0 })).rejects.toThrow();
+    await expect(store.transformItem(added.id, { scale: Number.NaN, dx: 0, dy: 0 })).rejects.toThrow();
+    expect((await store.read()).dolls[0].items[0].image.box).toEqual(cut.image.box);
+  });
   it('服の削除', async () => {
     const first = await store.addItem(dollId, item('ふく'));
     await store.deleteItem(first.id);
@@ -152,6 +199,22 @@ describe('ContentStore', () => {
     manifest = await store.read();
     expect(manifest.dolls[0].backgrounds).toEqual([]);
     expect(manifest.backgrounds).toEqual([]);
+  });
+  it('背景のコピー: 同じ絵のまま、ほかのドール（null なら全部のドールで使う）に足す。もうあれば足さない。無い背景・ドールは Error', async () => {
+    const bg = await store.addBackground(dollId, { name: 'うみ', data: await png(64, 64, [0, 0, 64, 64], '#3080ff') });
+    const other = await store.addDoll({ name: 'べつ', data: await png(300, 600, [100, 50, 100, 500]) });
+    const copied = await store.copyBackground(bg.id, other.id);
+    expect(copied).toMatchObject({ id: 'べつ/bg/うみ', name: 'うみ', file: bg.file, thumb: bg.thumb });
+    const shared = await store.copyBackground(bg.id, null);
+    expect(shared).toMatchObject({ id: 'bg/うみ', file: bg.file });
+    // もう同じ絵があれば、そのまま返す（増えない）
+    expect(await store.copyBackground(bg.id, other.id)).toEqual(copied);
+    const m = await store.read();
+    expect(m.dolls.find((d) => d.id === other.id)!.backgrounds).toHaveLength(1);
+    expect(m.backgrounds).toHaveLength(1);
+    expect(m.dolls.find((d) => d.id === dollId)!.backgrounds).toEqual([bg]);
+    await expect(store.copyBackground('ない', other.id)).rejects.toThrow(/ありません/);
+    await expect(store.copyBackground(bg.id, 'いない')).rejects.toThrow(/ありません/);
   });
   it('壊れた画像は背景にできない', async () => {
     await expect(store.addBackground(null, { name: 'x', data: Buffer.from('no') })).rejects.toThrow(/読めません/);
@@ -244,6 +307,19 @@ describe('ContentStore', () => {
       // 名前だけの変更では、印は変わらない
       const c = await store.addItem(doll.id, item('くつ', { set: umi }));
       expect((await store.updateItem(c.id, { name: 'あかいくつ' })).set).toBe(umi.id);
+    });
+
+    it('あとから服をセットに入れる（いまあるセット・新しいセット）。無いセットは Error', async () => {
+      const doll = await dollOf();
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      const b = await store.addItem(doll.id, item('ぼうし'));
+      expect((await store.updateItem(b.id, { set: umi.id })).set).toBe(umi.id);
+      const made = await store.updateItem(a.id, { set: { name: 'やま' } });
+      const yama = (await dollOf()).sets!.find((x) => x.name === 'やま')!;
+      expect(made.set).toBe(yama.id);
+      expect(yama.id).toBe(`${doll.id}/セット/やま`);
+      await expect(store.updateItem(b.id, { set: 'ない' })).rejects.toThrow(/ありません/);
+      expect((await store.read()).dolls[0].items.find((i) => i.id === b.id)!.set).toBe(umi.id);
     });
 
     it('ほかのドールの同じ名前のセットには触らない。カテゴリを移しても印は残る', async () => {

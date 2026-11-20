@@ -8,6 +8,7 @@ import { ApiError, api } from './api';
 import type { Status, SyncResult } from './api';
 import { APP_VERSION } from '../version';
 import { AddItems, Backgrounds, DollPanel, Generate, Library } from './Panels';
+import { confirmDiscard, unsavedCount } from './unsaved';
 
 const TABS = [
   ['generate', 'テーマから作る'],
@@ -65,6 +66,16 @@ export function Studio() {
     },
     [apply],
   );
+  // 保存していない服の候補があるときは、ページを閉じる・読み直す前に、ブラウザにたずねさせる
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (unsavedCount() === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
   useEffect(() => {
     let cancelled = false;
     void syncAndLoad().then((result) => !cancelled && applySynced(result));
@@ -93,9 +104,9 @@ export function Studio() {
         <span className="hint" data-testid="studio-version">v{APP_VERSION}</span>
         <label>
           ドール
-          <select value={dollId} onChange={(e) => setDollId(e.target.value)} data-testid="doll-select">
+          <select value={dollId} onChange={(e) => confirmDiscard('ドールを変える') && setDollId(e.target.value)} data-testid="doll-select">
             {manifest.dolls.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}（服 {d.items.length} 点）</option>
+              <option key={d.id} value={d.id}>{d.name}（服 {d.items.length} 点{d.hidden ? '・ゲームに出さない' : ''}）</option>
             ))}
           </select>
         </label>
@@ -130,8 +141,17 @@ export function Studio() {
       )}
       <main>
         {activeTab === 'doll' && <DollPanel doll={doll} onChanged={reload} onAdded={(id) => { setDollId(id); setTab('doll'); void reload(); }} />}
-        {doll && activeTab === 'add' && <AddItems key={doll.id} doll={doll} onChanged={reload} />}
-        {doll && activeTab === 'generate' && <Generate key={doll.id} doll={doll} status={status} onChanged={reload} />}
+        {/* 作った候補は、ほかのタブを開いても消えないように、隠すだけにする */}
+        {doll && (
+          <div hidden={activeTab !== 'add'}>
+            <AddItems key={doll.id} doll={doll} onChanged={reload} />
+          </div>
+        )}
+        {doll && (
+          <div hidden={activeTab !== 'generate'}>
+            <Generate key={doll.id} doll={doll} status={status} onChanged={reload} />
+          </div>
+        )}
         {doll && activeTab === 'backgrounds' && <Backgrounds key={doll.id} doll={doll} manifest={manifest} onChanged={reload} />}
         {doll && activeTab === 'library' && <Library key={doll.id} doll={doll} onChanged={reload} />}
       </main>

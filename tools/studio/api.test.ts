@@ -294,6 +294,21 @@ describe('服の追加', () => {
     await ok('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`);
     expect((await call('DELETE', `/api/items?id=${encodeURIComponent(item.id)}`)).status).toBe(404);
   }, 30_000);
+  it('一覧から: ドールの改名・非表示、カテゴリの中の服の並び替え、服の位置と大きさの変更', async () => {
+    const generated = await fakeImage.generate({ prompt: '', images: [(await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer] });
+    const { png } = await ok<{ png: string }>('POST', `/api/process?doll=${dollId}`, generated);
+    type Saved = { id: string; image: { box: { x: number; y: number; w: number; h: number } } };
+    const a = await ok<Saved>('POST', '/api/items', { dollId, category: 'トップス', name: 'a', png });
+    const b = await ok<Saved>('POST', '/api/items', { dollId, category: 'トップス', name: 'b', png });
+    expect(await ok('PATCH', '/api/dolls', { id: dollId, name: 'おんなのこ', hidden: true })).toMatchObject({ id: dollId, name: 'おんなのこ', hidden: true });
+    await ok('POST', '/api/items/order', { dollId, category: 'トップス', ids: [b.id, a.id] });
+    expect((await ok<{ dolls: { items: { id: string }[] }[] }>('GET', '/api/content')).dolls[0].items.map((i) => i.id)).toEqual([b.id, a.id]);
+    expect((await call('POST', '/api/items/order', { dollId, category: 'トップス', ids: [b.id] })).status).toBe(409);
+    const moved = await ok<Saved>('POST', '/api/items/transform', { id: a.id, scale: 1, dx: 5, dy: -7 });
+    expect(moved.image.box).toMatchObject({ x: a.image.box.x + 5, y: a.image.box.y - 7, w: a.image.box.w });
+    expect((await call('POST', '/api/items/transform', { id: a.id, scale: 'x', dx: 0, dy: 0 })).status).toBe(400);
+    expect((await call('PATCH', '/api/dolls', { id: 'いない', hidden: true })).status).toBe(404);
+  }, 30_000);
   it('シルエットから作った服は、余白つきのキャンバスで処理され、ドールのキャンバスより上に描いた分も残る', async () => {
     const silhouette = (await call('GET', `/api/silhouette?doll=${dollId}`)).body as Buffer;
     const meta = await sharp(silhouette).metadata();

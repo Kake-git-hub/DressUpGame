@@ -136,10 +136,15 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
   const clothing: ClothingItemData[] = [];
   const backgrounds: BackgroundData[] = [];
   const categoriesByDoll: Record<string, ManifestCategory[]> = {};
-  // 服が 1 点も無いドール（スタジオで作りかけ）は、遊ぶ側には出さない。どのドールにも服が無いときは、そのまま出す
-  const anyItems = manifest.dolls.some((d) => d.items.length > 0);
-  for (const doll of manifest.dolls) {
-    if (anyItems && doll.items.length === 0) continue;
+  // 服が 1 点も無いドール（スタジオで作りかけ）と、非表示にしたドールは、遊ぶ側には出さない。
+  // 出せるドールが 1 体も無くなるときは、服のあるドールを（それも無ければ全部を）そのまま出す
+  const playable = (d: { items: unknown[]; hidden?: true }) => d.items.length > 0 && !d.hidden;
+  const shown = manifest.dolls.some(playable)
+    ? manifest.dolls.filter(playable)
+    : manifest.dolls.some((d) => d.items.length > 0)
+      ? manifest.dolls.filter((d) => d.items.length > 0)
+      : manifest.dolls;
+  for (const doll of shown) {
     dolls.push({
       id: doll.id,
       name: doll.name,

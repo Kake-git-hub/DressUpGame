@@ -170,6 +170,28 @@ describe('loadContent', () => {
     expect(content.backgrounds.some((b) => b.dollId === 'おとこのこ')).toBe(false);
   });
 
+  it('非表示にしたドールは、遊ぶ側に出さない（服も背景も出さない）', async () => {
+    const m: Manifest = structuredClone(manifest);
+    const other = structuredClone(m.dolls[0]);
+    other.id = 'リアル';
+    other.name = 'リアル';
+    other.items = other.items.map((i) => ({ ...i, id: `リアル/${i.id}` }));
+    other.backgrounds = [{ id: 'リアル/bg/1', name: '1', file: 'files/bg2.jpg', thumb: 'files/bg2t.jpg' }];
+    other.hidden = true;
+    m.dolls.push(other);
+    const content = await loadContent(BASE, okFetch(m));
+    expect(content.dolls.map((d) => d.id)).toEqual(['アニメ']);
+    expect(content.clothing.some((c) => c.dollId === 'リアル')).toBe(false);
+    expect(content.backgrounds.some((b) => b.dollId === 'リアル')).toBe(false);
+  });
+
+  it('全部のドールを非表示にしたときは、服のあるドールを出す（何も出せなくならない）', async () => {
+    const m: Manifest = structuredClone(manifest);
+    m.dolls[0].hidden = true;
+    const content = await loadContent(BASE, okFetch(m));
+    expect(content.dolls.map((d) => d.id)).toEqual(['アニメ']);
+  });
+
   it('どのドールにも服が無いときは、ドールをそのまま出す（始めたばかりの素材でも開ける）', async () => {
     const bare: Manifest = structuredClone(manifest);
     bare.dolls[0].items = [];

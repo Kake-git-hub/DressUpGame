@@ -69,6 +69,11 @@ describe('parseManifest', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].backThumb = '')))).toThrow();
     expect(parseManifest(valid()).dolls[0].items[0].backThumb).toBeUndefined();
   });
+  it('ドールの非表示（hidden: true）を保つ。true 以外は無視する', () => {
+    expect(parseManifest(mutate((c) => (c.dolls[0].hidden = true))).dolls[0].hidden).toBe(true);
+    expect('hidden' in parseManifest(mutate((c) => (c.dolls[0].hidden = false))).dolls[0]).toBe(false);
+    expect('hidden' in parseManifest(valid()).dolls[0]).toBe(false);
+  });
   it('layer の上書きが数値でなければ Error', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].layer = '5')))).toThrow();
   });

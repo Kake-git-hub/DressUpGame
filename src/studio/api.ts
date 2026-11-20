@@ -97,8 +97,13 @@ export const api = {
   content: () => get<Manifest>('/content'),
   process: async (dollId: string, file: Blob) => (await (await request('POST', `/process?${q({ doll: dollId })}`, file)).json()) as ProcessResult,
   addItem: (input: { dollId: string; category: string; name: string; png: string; replaceId?: string; hide?: string; shape?: string; front?: string; under?: string; set?: SetRef }) => send<ManifestItem>('POST', '/items', input),
-  // set: null で、セットから外す
-  updateItem: (change: { id: string; name?: string; category?: string; set?: null }) => send<ManifestItem>('PATCH', '/items', change),
+  // set: null でセットから外す。セットの ID でそのセットに入れる。{ name } で新しいセットを作って入れる。layer: null でカテゴリの重ね順に戻す
+  updateItem: (change: { id: string; name?: string; category?: string; layer?: number | null; set?: null | string | { name: string } }) => send<ManifestItem>('PATCH', '/items', change),
+  // カテゴリの中の服の並び（ids はそのカテゴリの服の全部を、新しい順に）
+  reorderItems: (dollId: string, category: string, ids: string[]) => send<{ ok: true }>('POST', '/items/order', { dollId, category, ids }),
+  // 服の位置と大きさ: 服の中心を軸に scale 倍してから (dx, dy) 動かす（キャンバスの px）
+  transformItem: (id: string, t: { scale: number; dx: number; dy: number }) => send<ManifestItem>('POST', '/items/transform', { id, ...t }),
+  updateDoll: (id: string, change: { name?: string; hidden?: boolean }) => send<ManifestDoll>('PATCH', '/dolls', { id, ...change }),
   splitHair: (id: string) => send<ManifestItem>('POST', '/items/split-hair', { id }),
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
@@ -106,6 +111,8 @@ export const api = {
   deleteCategory: (dollId: string, id: string) => request('DELETE', `/categories?${q({ doll: dollId, id })}`),
   addBackground: async (dollId: string | null, name: string, file: Blob) =>
     (await (await request('POST', `/backgrounds?${q({ doll: dollId, name })}`, file)).json()) as ManifestBackground,
+  // 背景を、ほかのドールにも置く（doll が null なら、全部のドールで使う背景）
+  copyBackground: (id: string, doll: string | null) => send<ManifestBackground>('POST', '/backgrounds/copy', { id, doll }),
   deleteBackground: (id: string) => request('DELETE', `/backgrounds?${q({ id })}`),
   addDoll: async (name: string, file: Blob) => (await (await request('POST', `/dolls?${q({ name })}`, file)).json()) as { doll: ManifestDoll; template: TemplateData },
   template: (dollId: string) => get<TemplateData>(`/template?${q({ doll: dollId })}`),

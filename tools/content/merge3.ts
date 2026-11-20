@@ -44,17 +44,37 @@ function mergeMember(base: Json, local: Json, remote: Json): Json {
   return merge3(base, local, remote);
 }
 
+// 両方にあるものの並びが同じか
+const sameOrder = (a: Keyed[], b: Keyed[]): boolean => {
+  const ids = new Set(a.map((x) => x.id));
+  const common = b.filter((x) => ids.has(x.id)).map((x) => x.id);
+  const mine = a.filter((x) => common.includes(x.id)).map((x) => x.id);
+  return same(common, mine);
+};
+
 function mergeKeyed(base: Keyed[], local: Keyed[], remote: Keyed[]): Json[] {
   const find = (list: Keyed[], id: string) => list.find((x) => x.id === id);
-  const merged: Json[] = [];
+  const merged: Keyed[] = [];
   for (const r of remote) {
     const value = mergeMember(find(base, r.id), find(local, r.id), r);
-    if (value !== undefined) merged.push(value);
+    if (value !== undefined) merged.push(value as Keyed);
   }
   for (const l of local) {
     if (find(remote, l.id)) continue;
     const value = mergeMember(find(base, l.id), l, undefined);
-    if (value !== undefined) merged.push(value);
+    if (value !== undefined) merged.push(value as Keyed);
+  }
+  // 手元だけが並べ替えていたら（公開は前と同じ並び）、手元の並びにする。手元に無いもの（公開で増えた分）は、
+  // 公開の並びで直前にあったものの後ろに置く
+  if (sameOrder(base, remote) && !sameOrder(base, local)) {
+    const order = local.map((x) => x.id);
+    const result: Keyed[] = merged.filter((x) => order.includes(x.id)).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    for (const x of merged) {
+      if (order.includes(x.id)) continue;
+      const before = merged.slice(0, merged.indexOf(x)).reverse().find((y) => result.includes(y));
+      result.splice(before ? result.indexOf(before) + 1 : 0, 0, x);
+    }
+    return result;
   }
   return merged;
 }

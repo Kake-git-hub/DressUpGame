@@ -556,8 +556,29 @@ export class StudioApi {
         return json(await this.store.addItem(doll.id, { category: item.category, name: item.name, ...layers, replaceId: item.id }));
       }
       case 'PATCH /api/items': {
-        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null }>(req);
-        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap, ...(b.set === null ? { set: null } : {}) }));
+        const b = this.body<{ id: string; name?: string; category?: string; layer?: number | null; overlap?: boolean | null; set?: null | string | { name: string } }>(req);
+        if (b.layer !== undefined && b.layer !== null && (typeof b.layer !== 'number' || !Number.isFinite(b.layer))) throw new HttpError(400, 'layer は数値です');
+        const set = b.set === null || typeof b.set === 'string' ? b.set : b.set !== undefined && typeof b.set === 'object' && typeof b.set.name === 'string' ? { name: b.set.name } : undefined;
+        if (b.set !== undefined && set === undefined) throw new HttpError(400, 'set の形が正しくありません');
+        return json(await this.store.updateItem(b.id, { name: b.name, category: b.category, layer: b.layer, overlap: b.overlap, ...(set !== undefined ? { set } : {}) }));
+      }
+      case 'POST /api/items/order': {
+        // カテゴリの中の服の並び（メニューでの順番）
+        const b = this.body<{ dollId: string; category: string; ids: string[] }>(req);
+        if (!Array.isArray(b.ids) || !b.ids.every((id) => typeof id === 'string')) throw new HttpError(400, 'ids を指定してください');
+        await this.store.reorderItems(b.dollId, b.category, b.ids);
+        return json({ ok: true });
+      }
+      case 'POST /api/items/transform': {
+        // 服の位置と大きさ（ゲームで最初に着せたときの位置）
+        const b = this.body<{ id: string; scale: number; dx: number; dy: number }>(req);
+        return json(await this.store.transformItem(b.id, { scale: b.scale, dx: b.dx, dy: b.dy }));
+      }
+      case 'PATCH /api/dolls': {
+        // ドールの改名と、ゲームに出すかどうか
+        const b = this.body<{ id: string; name?: string; hidden?: boolean }>(req);
+        if (b.hidden !== undefined && typeof b.hidden !== 'boolean') throw new HttpError(400, 'hidden は true か false です');
+        return json(await this.store.updateDoll(b.id, { name: b.name, hidden: b.hidden }));
       }
       case 'PATCH /api/sets': {
         // セットの名前を変える
@@ -592,6 +613,12 @@ export class StudioApi {
 
       case 'POST /api/backgrounds':
         return json(await this.store.addBackground(req.query.get('doll') || null, { name: this.param(req, 'name'), data: req.body }));
+      case 'POST /api/backgrounds/copy': {
+        // 背景を、ほかのドールにも置く（doll が null なら、全部のドールで使う背景）
+        const b = this.body<{ id: string; doll: string | null }>(req);
+        if (b.doll !== null && typeof b.doll !== 'string') throw new HttpError(400, 'doll を指定してください');
+        return json(await this.store.copyBackground(b.id, b.doll));
+      }
       case 'DELETE /api/backgrounds':
         await this.store.deleteBackground(this.param(req, 'id'));
         return json({ ok: true });

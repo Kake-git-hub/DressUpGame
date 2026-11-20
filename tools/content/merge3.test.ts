@@ -29,6 +29,20 @@ describe('merge3（手元の変更を、公開されている新しい一覧に�
     expect((merged.dolls[1] as { items: { id: string }[] }).items.map((i) => i.id)).toEqual(['r1']);
   });
 
+  it('手元で並べ替えた服は、公開が並びを変えていなければ手元の並び（公開で増えたものは、公開での前のものの後ろ）', () => {
+    const local = manifest(doll('アニメ', [item('c'), item('a'), item('b')]), base.dolls[1]);
+    const remote = manifest(doll('アニメ', [item('a'), item('b'), item('d'), item('c', { name: 'しー' })]), base.dolls[1]);
+    const merged = merge3(base, local, remote) as ReturnType<typeof manifest>;
+    expect((merged.dolls[0] as { items: Obj[] }).items).toEqual([item('c', { name: 'しー' }), item('a'), item('b'), item('d')]);
+  });
+
+  it('公開のほうも並べ替えていたら、公開の並び', () => {
+    const local = manifest(doll('アニメ', [item('c'), item('a'), item('b')]), base.dolls[1]);
+    const remote = manifest(doll('アニメ', [item('b'), item('a'), item('c')]), base.dolls[1]);
+    const merged = merge3(base, local, remote) as ReturnType<typeof manifest>;
+    expect((merged.dolls[0] as { items: Obj[] }).items.map((i) => i.id)).toEqual(['b', 'a', 'c']);
+  });
+
   it('手元で足した服・名前を変えた服は残り、公開で変わった別の項目も入る', () => {
     const local = manifest(doll('アニメ', [item('a', { name: 'あたらしい名前' }), item('b'), item('c'), item('mine', { image: 'files/m.webp' })]), base.dolls[1]);
     const remote = manifest(doll('アニメ', [item('a', { image: 'files/a2.webp' }), item('b'), item('c')], { image: 'files/doll2.webp' }), base.dolls[1]);

@@ -7,8 +7,11 @@ import type { Box, Manifest, ManifestDoll } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
 import type { Job, PlannedItem, SetRef, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
+import { ItemPlacer } from './ItemPlacer';
+import { dropIndex, moveInList } from './order';
 import { forgetParts } from './partsCache';
 import { STYLE_PRESETS, findStyle } from './stylePresets';
+import { useUnsaved } from './unsaved';
 import type { CardSource, ItemCardHandle } from './ItemCard';
 
 const message = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : String(e));
@@ -56,6 +59,7 @@ export function AddItems({ doll, onChanged }: Common) {
     }
   };
   const remove = (key: string) => setCards((list) => list.filter((c) => c.key !== key));
+  useUnsaved(`add-${doll.id}`, cards.length + busy);
 
   return (
     <section>
@@ -330,6 +334,8 @@ function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: strin
   const [savingAll, setSavingAll] = useState(false);
   const [readyCards, setReadyCards] = useState<string[]>([]); // 絵の読み込みが終わったカード（「候補の番号-何回目の生成か」）
   const cards = useRef(new Map<number, ItemCardHandle>());
+  // 保存も「捨てる」もしていない候補（作っている途中のものも）。ドールを変える・ページを閉じる前に確かめる
+  useUnsaved(`job-${id}`, job ? job.candidates.filter((c, i) => !hidden.includes(i) && c.status !== 'failed').length : 1);
   if (!job) return <p>準備中…</p>;
   const hide = (i: number) => setHidden((list) => [...list, i]);
   // カードとして出ている候補
@@ -399,9 +405,10 @@ function JobCards({ id, doll, onChanged, onRedo, missing }: Common & { id: strin
 
 function BackgroundJob({ id, owner, onChanged }: { id: string; owner: string | null; onChanged: () => void | Promise<void> }) {
   const job = useJob(id);
-  const [adopted, setAdopted] = useState<number[]>([]);
+  const [adopted, setAdopted] = useState<number[]>([]); // 採用した・使わないことにした候補
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useUnsaved(`bg-${id}`, job ? job.candidates.filter((c, i) => !adopted.includes(i) && c.status !== 'failed').length : 1);
   if (!job) return <p>準備中…</p>;
   const adopt = async (i: number, name: string) => {
     setBusy(true);
@@ -428,9 +435,14 @@ function BackgroundJob({ id, owner, onChanged }: { id: string; owner: string | n
               <figcaption>{c.item.name} {c.notes.join(' / ')}</figcaption>
               <Instruction text={c.item.description} />
               {c.hasImage && (
-                <button disabled={busy} onClick={() => void adopt(i, c.item.name)}>
-                  採用
-                </button>
+                <div className="row">
+                  <button disabled={busy} onClick={() => void adopt(i, c.item.name)}>
+                    採用
+                  </button>
+                  <button disabled={busy} onClick={() => setAdopted((a) => [...a, i])} data-testid="bg-discard">
+                    使わない
+                  </button>
+                </div>
               )}
             </figure>
           ),
@@ -441,6 +453,8 @@ function BackgroundJob({ id, owner, onChanged }: { id: string; owner: string | n
 }
 
 /* ---------- 背景 ---------- */
+
+const SHARED = '__shared'; // コピー先: 全部のドール
 
 export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: Manifest }) {
   const [shared, setShared] = useState(false);
@@ -459,6 +473,18 @@ export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: 
     setBusy(false);
   };
   const list = [...doll.backgrounds.map((b) => ({ ...b, own: true })), ...manifest.backgrounds.map((b) => ({ ...b, own: false }))];
+  // コピーする背景と、コピー先（ドールの ID。SHARED は全部のドール）
+  const [picked, setPicked] = useState<string[]>([]);
+  const others = manifest.dolls.filter((d) => d.id !== doll.id);
+  const [copyTo, setCopyTo] = useState<string>(() => others[0]?.id ?? SHARED);
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = () =>
+    guard(async () => {
+      const target = copyTo === SHARED ? null : copyTo;
+      for (const id of picked) await api.copyBackground(id, target);
+      setCopied(`${picked.length} 枚を「${target === null ? '全部のドール' : (manifest.dolls.find((d) => d.id === target)?.name ?? target)}」にコピーしました`);
+      setPicked([]);
+    });
 
   return (
     <section>
@@ -484,10 +510,29 @@ export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: 
       </label>
       {error && <p className="error">{error}</p>}
       <h3>いまの背景（{list.length} 枚）</h3>
+      <div className="form" data-testid="bg-copy">
+        <span>えらんだ背景（{picked.length} 枚）を</span>
+        <select value={copyTo} onChange={(e) => setCopyTo(e.target.value)} aria-label="コピー先" data-testid="bg-copy-to">
+          {others.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}{d.hidden ? '（ゲームに出さない）' : ''}</option>
+          ))}
+          <option value={SHARED}>全部のドール（共通の背景）</option>
+        </select>
+        <button className="primary" disabled={busy || picked.length === 0} onClick={() => { setCopied(null); void copy(); }} data-testid="bg-copy-run">
+          にコピー
+        </button>
+        <button disabled={picked.length === list.length} onClick={() => setPicked(list.map((b) => b.id))}>全部えらぶ</button>
+        <button disabled={picked.length === 0} onClick={() => setPicked([])}>えらぶのをやめる</button>
+        {copied && <span className="hint" data-testid="bg-copied">{copied}</span>}
+        <span className="hint">絵は同じものを使うので、増えません。コピー先にもう同じ背景があれば、そのままです。</span>
+      </div>
       <div className="thumbs" data-testid="bg-list">
         {list.map((b) => (
-          <figure key={b.id}>
-            <img src={contentUrl(b.thumb)} alt={b.name} loading="lazy" />
+          <figure key={b.id} data-testid="bg-item">
+            <label>
+              <input type="checkbox" checked={picked.includes(b.id)} onChange={(e) => setPicked((p) => (e.target.checked ? [...p, b.id] : p.filter((x) => x !== b.id)))} data-testid="bg-pick" />
+              <img src={contentUrl(b.thumb)} alt={b.name} loading="lazy" />
+            </label>
             <figcaption>{b.name}{b.own ? '' : '（共通）'}</figcaption>
             <button disabled={busy} onClick={() => confirm(`背景「${b.name}」を消しますか？`) && void guard(() => api.deleteBackground(b.id))}>消す</button>
           </figure>
@@ -499,9 +544,14 @@ export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: 
 
 /* ---------- 一覧（服とカテゴリの管理） ---------- */
 
+const NEW_SET = '__new-set';
+
 export function Library({ doll, onChanged }: Common) {
   const [error, setError] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
+  const [placing, setPlacing] = useState<string | null>(null); // 位置と大きさを直している服
+  const [dragged, setDragged] = useState<{ id: string; category: string } | null>(null); // 並べ替えでつかんでいる服
+  const placingItem = doll.items.find((i) => i.id === placing) ?? null;
   const guard = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
@@ -519,21 +569,82 @@ export function Library({ doll, onChanged }: Common) {
         <div className="category" data-testid="library-sets">
           <div className="row">
             <b>セット</b>
-            <span className="hint">同じテーマで一度に作った服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。服は 1 点ずつ消せて、最後の 1 点が無くなるとセットも消えます。</span>
+            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。最後の 1 点が無くなるとセットも消えます。</span>
           </div>
-          {(doll.sets ?? []).map((x) => (
-            <div key={x.id} className="row" data-testid="library-set">
-              <input defaultValue={x.name} aria-label="セットのなまえ" onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
-              <span>{doll.items.filter((i) => i.set === x.id).length} 点</span>
-            </div>
-          ))}
+          {(doll.sets ?? []).map((x) => {
+            const categoryOf = (id: string) => doll.categories.find((c) => c.id === id);
+            const layerOf = (i: (typeof doll.items)[number]) => i.layer ?? categoryOf(i.category)?.layer ?? 0;
+            // 手前（重ね順が大きい）から
+            const members = doll.items.filter((i) => i.set === x.id).sort((a, b) => layerOf(b) - layerOf(a));
+            const others = doll.items.filter((i) => i.set !== x.id);
+            return (
+              <div key={x.id} className="set-box" data-testid="library-set">
+                <div className="row">
+                  <input defaultValue={x.name} aria-label="セットのなまえ" onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
+                  <span>{members.length} 点</span>
+                  <select
+                    value=""
+                    aria-label="セットに服を足す"
+                    onChange={(e) => e.target.value && void guard(() => api.updateItem({ id: e.target.value, set: x.id }))}
+                    data-testid="set-add-item"
+                  >
+                    <option value="">＋ 服を足す…</option>
+                    {doll.categories.map((c) => {
+                      const list = others.filter((i) => i.category === c.id);
+                      return list.length === 0 ? null : (
+                        <optgroup key={c.id} label={c.label}>
+                          {list.map((i) => (
+                            <option key={i.id} value={i.id}>{i.name}{i.set ? `（いまは「${doll.sets?.find((s2) => s2.id === i.set)?.name ?? ''}」）` : ''}</option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="thumbs">
+                  {members.map((i) => (
+                    <figure key={i.id} data-testid="set-member">
+                      <img src={contentUrl(i.thumb)} alt={i.name} loading="lazy" />
+                      <span>{i.name}</span>
+                      <span className="hint">{categoryOf(i.category)?.label ?? i.category}</span>
+                      <label>
+                        重ね順
+                        <input
+                          key={`${i.id}-${i.layer ?? ''}`}
+                          type="number"
+                          defaultValue={i.layer ?? ''}
+                          placeholder={String(categoryOf(i.category)?.layer ?? '')}
+                          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                          onBlur={(e) => {
+                            const raw = e.target.value.trim();
+                            const next = raw === '' ? null : Number(raw);
+                            if (next !== null && !Number.isFinite(next)) return;
+                            if (next === (i.layer ?? null)) return;
+                            void guard(() => api.updateItem({ id: i.id, layer: next }));
+                          }}
+                          data-testid="set-member-layer"
+                        />
+                      </label>
+                      <button onClick={() => void guard(() => api.updateItem({ id: i.id, set: null }))} data-testid="set-member-remove">セットから外す</button>
+                    </figure>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-      <p className="hint">「重ね順」は大きいほど手前。「並び順」はメニューでの順番（小さいほど先）。</p>
+      <p className="hint">「重ね順」は大きいほど手前。「並び順」はメニューでの順番（小さいほど先）。カテゴリの中の服の順番は、絵をドラッグするか ◀ ▶ で変えられます。「位置・大きさ」で、ゲームで最初に着せたときの位置と大きさを直せます。</p>
+      {placingItem && <ItemPlacer doll={doll} item={placingItem} onClose={() => setPlacing(null)} onSaved={onChanged} />}
       {categories.map((c) => {
         const items = doll.items.filter((i) => i.category === c.id);
         // 変えた項目だけを送る（続けて別の項目を変えても、前の変更が戻らない）
         const set = (change: Partial<Omit<typeof c, 'id'>>) => void guard(() => api.updateCategory(doll.id, c.id, change));
+        // メニューでの並びを変える（from 番目の服を to 番目へ）
+        const reorder = (from: number, to: number) => {
+          if (from === to || from < 0) return;
+          void guard(() => api.reorderItems(doll.id, c.id, moveInList(items, from, to).map((i) => i.id)));
+        };
         return (
           <div key={c.id} className="category" data-testid={`category-${c.id}`}>
             <div className="row">
@@ -546,9 +657,41 @@ export function Library({ doll, onChanged }: Common) {
               {items.length === 0 && <button onClick={() => void guard(() => api.deleteCategory(doll.id, c.id))}>カテゴリを消す</button>}
             </div>
             <div className="thumbs">
-              {items.map((item) => (
-                <figure key={item.id} data-testid="library-item">
-                  <img src={contentUrl(item.thumb)} alt={item.name} loading="lazy" />
+              {items.map((item, index) => (
+                <figure
+                  key={item.id}
+                  data-testid="library-item"
+                  className={dragged?.id === item.id ? 'dragging' : undefined}
+                  onDragOver={(e) => dragged?.category === c.id && e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (!dragged || dragged.category !== c.id) return;
+                    const from = items.findIndex((i) => i.id === dragged.id);
+                    // 絵の右半分に落としたら後ろ、左半分なら前
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setDragged(null);
+                    reorder(from, dropIndex(from, index, e.clientX > rect.left + rect.width / 2));
+                  }}
+                >
+                  <img
+                    src={contentUrl(item.thumb)}
+                    alt={item.name}
+                    loading="lazy"
+                    draggable
+                    title="ドラッグして並べ替え（メニューでの順番）"
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', item.id);
+                      setDragged({ id: item.id, category: c.id });
+                    }}
+                    onDragEnd={() => setDragged(null)}
+                  />
+                  <div className="row order-buttons">
+                    <button onClick={() => reorder(index, index - 1)} disabled={index === 0} aria-label="前へ" title="メニューで前へ" data-testid="item-earlier">◀</button>
+                    <span className="hint">{index + 1}</span>
+                    <button onClick={() => reorder(index, index + 1)} disabled={index === items.length - 1} aria-label="後ろへ" title="メニューで後ろへ" data-testid="item-later">▶</button>
+                  </div>
+                  <button onClick={() => setPlacing(item.id)} data-testid="item-place">位置・大きさ</button>
                   <input defaultValue={item.name} aria-label="なまえ" onBlur={(e) => e.target.value.trim() && e.target.value !== item.name && void guard(() => api.updateItem({ id: item.id, name: e.target.value.trim() }))} />
                   <select value={item.category} aria-label="カテゴリ" onChange={(e) => void guard(() => api.updateItem({ id: item.id, category: e.target.value }))}>
                     {doll.categories.map((x) => (
@@ -559,11 +702,33 @@ export function Library({ doll, onChanged }: Common) {
                     <button title="後ろ髪をドールの下に描くようにする（ドールの輪郭線が髪で削られなくなる）" onClick={() => void guard(() => api.splitHair(item.id))} data-testid="split-hair">前髪と後ろ髪に分ける</button>
                   )}
                   {item.back && <span className="hint">前髪・後ろ髪</span>}
-                  {item.set && (
+                  {item.set ? (
                     <>
                       <span className="hint">セット: {doll.sets?.find((x) => x.id === item.set)?.name ?? ''}</span>
                       <button onClick={() => void guard(() => api.updateItem({ id: item.id, set: null }))} data-testid="leave-set">セットから外す</button>
                     </>
+                  ) : (
+                    <select
+                      value=""
+                      aria-label="セットに入れる"
+                      data-testid="item-join-set"
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (!value) return;
+                        if (value === NEW_SET) {
+                          const name = prompt('新しいセットのなまえ')?.trim();
+                          if (name) void guard(() => api.updateItem({ id: item.id, set: { name } }));
+                          return;
+                        }
+                        void guard(() => api.updateItem({ id: item.id, set: value }));
+                      }}
+                    >
+                      <option value="">セットに入れる…</option>
+                      {(doll.sets ?? []).map((x) => (
+                        <option key={x.id} value={x.id}>{x.name}</option>
+                      ))}
+                      <option value={NEW_SET}>＋ 新しいセット</option>
+                    </select>
                   )}
                   <button onClick={() => confirm(`「${item.name}」を消しますか？`) && void guard(() => api.deleteItem(item.id))}>消す</button>
                 </figure>
@@ -618,6 +783,9 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
   const [focus, setFocus] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const dollId = doll?.id;
+  // 「ゲームに出さない」は、押したらすぐ変える（保存が終わって読み直すまで待たない）
+  const [hiddenDraft, setHiddenDraft] = useState<{ dollId: string; value: boolean } | null>(null);
+  const hiddenNow = hiddenDraft && hiddenDraft.dollId === dollId ? hiddenDraft.value : !!doll?.hidden;
   // 別のドールの型紙は見せない
   const template = loaded && loaded.dollId === dollId ? loaded.data : null;
   const setTemplate = (data: TemplateData) => dollId && setLoaded({ dollId, data });
@@ -669,6 +837,42 @@ export function DollPanel({ doll, onChanged, onAdded }: { doll: ManifestDoll | n
         <button className="primary" onClick={() => void add()} disabled={!name.trim() || !file} data-testid="doll-add">追加して範囲を作る</button>
       </details>
       {error && <p className="error" data-testid="doll-error">{error}</p>}
+      {doll && (
+        <div className="form row" data-testid="doll-settings">
+          <label>
+            ドールのなまえ
+            <input
+              key={`${doll.id}-${doll.name}`}
+              defaultValue={doll.name}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              onBlur={(e) => {
+                const value = e.target.value.trim();
+                if (value && value !== doll.name) void api.updateDoll(doll.id, { name: value }).then(() => onChanged(), (err) => setError(message(err)));
+              }}
+              data-testid="doll-rename"
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={hiddenNow}
+              onChange={(e) => {
+                const value = e.target.checked;
+                setHiddenDraft({ dollId: doll.id, value });
+                void api.updateDoll(doll.id, { hidden: value }).then(
+                  () => onChanged(),
+                  (err) => {
+                    setHiddenDraft(null);
+                    setError(message(err));
+                  },
+                );
+              }}
+              data-testid="doll-hidden"
+            />
+            ゲームに出さない（スタジオには出ます。服も消えません）
+          </label>
+        </div>
+      )}
       {doll && template && (
         <div className="template" data-testid="template">
           <div className="template-view">
