@@ -7,11 +7,9 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { deleteItem, discard, keep, listItems, listJobs, signIn, startJob } from './studioCore.ts';
+import { deleteItem, discard, keep, listItems, listJobs, signIn, STALE_MS, startJob } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
-// 止まっている仕事（作成中のまま進んでいない）かどうかを、アプリに知らせるための目安
-const STALE_MS = 150_000;
 
 export type CandidateView = WireCandidate;
 export type JobView = WireJob;
@@ -32,7 +30,8 @@ const jobView = (job: JobDoc, now: number): JobView => ({
     notes: c.notes,
     ...(c.preview ? { preview: { canvasW: c.preview.canvasW, canvasH: c.preview.canvasH, box: c.preview.box } } : {}),
   })),
-  stalled: !job.done && now - job.heartbeat > STALE_MS,
+  // 終わっていないのに、だれも作っていない（まだ頼まれていない・時間切れでやめた）か、作成中のまま合図がとぎれている
+  stalled: !job.done && (!job.candidates.some((c) => c.status === 'working') || now - job.heartbeat > STALE_MS),
 });
 const itemView = (item: ItemDoc): ItemView => ({ id: item.id, dollId: item.dollId, item: item.item, ...(item.set ? { set: item.set } : {}), createdAt: item.createdAt });
 

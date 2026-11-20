@@ -16,7 +16,10 @@ import type { CloudStore, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/sto
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
 const docId = (id: string) => encodeURIComponent(id).replace(/\./g, '%2E').replace(/^__/, '%5F%5F');
-const LIST_MAX = 500;
+// 仕事の一覧は、新しいものだけ（古い仕事は消さないので、開くたびに全部は読まない）
+const JOBS_MAX = 100;
+// チケットの数が壊れている（管理画面で文字にしてしまった、など）ときは、0 枚として扱う
+const have = (user: UserDoc) => (typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0);
 
 export class FirestoreStore implements CloudStore {
   private readonly db: Firestore;
@@ -67,10 +70,24 @@ export class FirestoreStore implements CloudStore {
       const snap = await tx.get(ref);
       if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
       const user = snap.data() as UserDoc;
-      if (user.tickets + delta < 0) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${-delta} 枚）`);
-      tx.update(ref, { tickets: user.tickets + delta });
+      const tickets = have(user);
+      if (tickets + delta < 0) throw new CloudError('no-tickets', `チケットが足りません（のこり ${tickets} 枚、必要 ${-delta} 枚）`);
+      tx.update(ref, { tickets: tickets + delta });
       tx.create(ref.collection('ledger').doc(), { count: delta, reason, at: now });
-      return user.tickets + delta;
+      return tickets + delta;
+    });
+  }
+  async refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      // 台帳の行の名前を key から決める。もうあれば、戻し済み
+      const row = ref.collection('ledger').doc(docId(`refund:${key}`));
+      if ((await tx.get(row)).exists) return false;
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      tx.update(ref, { tickets: have(snap.data() as UserDoc) + 1 });
+      tx.create(row, { count: 1, reason, at: now });
+      return true;
     });
   }
   charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
@@ -112,7 +129,7 @@ export class FirestoreStore implements CloudStore {
     });
   }
   async listJobs(uid: string): Promise<JobDoc[]> {
-    const snap = await this.user(uid).collection('jobs').orderBy('createdAt', 'desc').limit(LIST_MAX).get();
+    const snap = await this.user(uid).collection('jobs').orderBy('createdAt', 'desc').limit(JOBS_MAX).get();
     return snap.docs.map((doc) => doc.data() as JobDoc);
   }
   async putItem(uid: string, item: ItemDoc): Promise<void> {
@@ -123,7 +140,7 @@ export class FirestoreStore implements CloudStore {
     return snap.exists ? (snap.data() as ItemDoc) : null;
   }
   async listItems(uid: string): Promise<ItemDoc[]> {
-    const snap = await this.user(uid).collection('items').orderBy('createdAt', 'asc').limit(LIST_MAX).get();
+    const snap = await this.user(uid).collection('items').orderBy('createdAt', 'asc').get(); // 全部（途中で切ると、アプリが「消えた」とみなして端末の控えを消してしまう）
     return snap.docs.map((doc) => doc.data() as ItemDoc);
   }
   async deleteItem(uid: string, itemId: string): Promise<void> {

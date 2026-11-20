@@ -59,8 +59,6 @@ const top = (dollId: string) => ({ op: 'startJob', dollId, theme: 'うみ', styl
 beforeAll(async () => {
   fakes = await startFakes();
   admin = initializeAdmin({ projectId: PROJECT }, `callable-admin-${Date.now()}`);
-  // 管理者の利用者コード（関数は、この設定を 1 分おぼえる。関数を初めて呼ぶ前に書いておく）
-  await getAdminFirestore(admin).doc('system/config').set({ adminCodes: `nobody, ${ADMIN_CODE.toLowerCase()}`, imagesPerDay: 50 });
 });
 afterAll(async () => {
   await Promise.all(clients.map((app) => deleteClient(app)));
@@ -157,6 +155,37 @@ describe('サーバーの関数（エミュレーター）', () => {
     expect(job.candidates[0].status).toBe('failed');
     expect(job.candidates[0].notes.join('')).not.toBe('');
     expect(user.tickets).toBe(1);
+  });
+
+  it('「進める」を同時に 3 回呼んでも、絵は 1 回しか作らない。失敗しても、チケットは 1 回しか戻らない', async () => {
+    const me = await client();
+    await me.call({ op: 'signIn' });
+    await grant(me.uid, 2);
+    const first = await me.call<{ jobId: string }>(top(fakes.dollId));
+    const before = fakes.gemini.image;
+    await Promise.all([me.run(first.jobId), me.run(first.jobId), me.run(first.jobId)]);
+    expect(fakes.gemini.image - before).toBe(1);
+    expect((await me.call<{ job: JobView }>({ op: 'job', jobId: first.jobId })).job.candidates[0].status).toBe('done');
+    // 失敗するほう
+    const second = await me.call<{ jobId: string; user: UserView }>(top(fakes.dollId));
+    expect(second.user.tickets).toBe(0);
+    fakes.gemini.failImages = true;
+    try {
+      await Promise.all([me.run(second.jobId), me.run(second.jobId), me.run(second.jobId)]);
+    } finally {
+      fakes.gemini.failImages = false;
+    }
+    const { job, user } = await me.call<{ job: JobView; user: UserView }>({ op: 'job', jobId: second.jobId });
+    expect(job.candidates[0].status).toBe('failed');
+    expect(user.tickets).toBe(1);
+    // 同じ候補を、同時に「使う」「捨てる」しても、通るのは 1 回
+    const results = await Promise.all([
+      me.call({ op: 'keep', jobId: first.jobId, index: 0, name: 'a' }).then(() => 'ok', (e) => failure(e).reason),
+      me.call({ op: 'keep', jobId: first.jobId, index: 0, name: 'b' }).then(() => 'ok', (e) => failure(e).reason),
+      me.call({ op: 'discard', jobId: first.jobId, index: 0 }).then(() => 'ok', (e) => failure(e).reason),
+    ]);
+    expect(results.filter((r) => r === 'ok')).toHaveLength(1);
+    expect(results.filter((r) => r === 'refused')).toHaveLength(2);
   });
 
   it('管理者（system/config の利用者コード）は、チケットが無くても作れる', async () => {

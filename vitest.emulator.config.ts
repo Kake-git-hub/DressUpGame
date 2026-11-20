@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['functions/test/**/*.emu.ts'],
+    globalSetup: ['functions/test/globalSetup.ts'],
     fileParallelism: false,
     testTimeout: 120_000,
     hookTimeout: 120_000,

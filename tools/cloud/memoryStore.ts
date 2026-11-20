@@ -5,6 +5,8 @@ import { CloudError } from './store.ts';
 import type { CloudFiles, CloudStore, ItemDoc, JobDoc, UserDoc } from './store.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+// チケットの数が壊れている（数でない）ときは、0 枚として扱う
+const have = (user: UserDoc) => (typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0);
 
 export class MemoryStore implements CloudStore {
   readonly users = new Map<string, UserDoc>();
@@ -12,6 +14,7 @@ export class MemoryStore implements CloudStore {
   readonly items = new Map<string, ItemDoc>(); // `${uid}/${itemId}`
   readonly ledger: { uid: string; count: number; reason: string; at: number }[] = [];
   readonly usage = new Map<string, number>();
+  readonly refunds = new Set<string>();
 
   async getUser(uid: string): Promise<UserDoc | null> {
     const user = this.users.get(uid);
@@ -33,17 +36,23 @@ export class MemoryStore implements CloudStore {
   async charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
     const user = this.users.get(uid);
     if (!user) throw new CloudError('refused', '利用者が見つかりません');
-    if (user.tickets < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${cost} 枚）`);
-    user.tickets -= cost;
+    if (have(user) < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${have(user)} 枚、必要 ${cost} 枚）`);
+    user.tickets = have(user) - cost;
     this.ledger.push({ uid, count: -cost, reason, at: now });
     return user.tickets;
   }
   async addTickets(uid: string, count: number, reason: string, now: number): Promise<number> {
     const user = this.users.get(uid);
     if (!user) throw new CloudError('refused', '利用者が見つかりません');
-    user.tickets += count;
+    user.tickets = have(user) + count;
     this.ledger.push({ uid, count, reason, at: now });
     return user.tickets;
+  }
+  async refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean> {
+    if (this.refunds.has(`${uid}/${key}`)) return false;
+    this.refunds.add(`${uid}/${key}`);
+    await this.addTickets(uid, 1, reason, now);
+    return true;
   }
   async note(uid: string, count: number, reason: string, now: number): Promise<void> {
     this.ledger.push({ uid, count, reason, at: now });
@@ -60,12 +69,19 @@ export class MemoryStore implements CloudStore {
     const job = this.jobs.get(`${uid}/${jobId}`);
     return job ? clone(job) : null;
   }
+  // 本物（Firestore の取り引き）と同じく、読んでから書くまでの間に割り込まれうる。割り込まれたら、やり直す（change は、もう一度呼ばれる）
   async updateJob(uid: string, jobId: string, change: (job: JobDoc) => JobDoc | null): Promise<JobDoc> {
-    const current = this.jobs.get(`${uid}/${jobId}`);
-    if (!current) throw new CloudError('refused', 'この仕事は見つかりません');
-    const next = change(clone(current));
-    if (next) this.jobs.set(`${uid}/${jobId}`, clone(next));
-    return clone(next ?? current);
+    const key = `${uid}/${jobId}`;
+    for (;;) {
+      const current = this.jobs.get(key);
+      if (!current) throw new CloudError('refused', 'この仕事は見つかりません');
+      const before = JSON.stringify(current);
+      const next = change(clone(current));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (JSON.stringify(this.jobs.get(key)) !== before) continue;
+      if (next) this.jobs.set(key, clone(next));
+      return clone(next ?? current);
+    }
   }
   async listJobs(uid: string): Promise<JobDoc[]> {
     return [...this.jobs.entries()]

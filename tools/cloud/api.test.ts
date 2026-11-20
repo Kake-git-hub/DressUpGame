@@ -135,13 +135,18 @@ describe('アプリからの呼び出し', () => {
     }
   });
 
-  it('止まっている仕事は、stalled で知らせる', async () => {
+  it('だれも作っていない仕事（まだ頼まれていない・時間切れでやめた）と、作成中のまま合図がとぎれた仕事は、stalled で知らせる', async () => {
     await call('u1', { op: 'signIn' });
     await store.addTickets('u1', 1, 'test', clock);
     const started = await call<{ jobId: string }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
-    expect((await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId })).job.stalled).toBe(false);
+    const stalled = async () => (await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId })).job.stalled;
+    expect(await stalled()).toBe(true); // まだ、だれも作っていない
+    await store.updateJob('u1', started.jobId, (job) => ({ ...job, heartbeat: clock, candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const })) }));
+    expect(await stalled()).toBe(false); // 作っている最中
     clock += 200_000;
-    expect((await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId })).job.stalled).toBe(true);
+    expect(await stalled()).toBe(true); // 合図がとぎれた
+    await store.updateJob('u1', started.jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'failed' as const })) }));
+    expect(await stalled()).toBe(false); // 終わった
   });
 });
 

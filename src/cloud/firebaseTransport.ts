@@ -16,7 +16,8 @@ import { firebaseConfig, FUNCTIONS_REGION } from './firebaseConfig';
 import type { StudioTransport } from './remoteBackend';
 
 const CODES: BackendErrorCode[] = ['offline', 'no-tickets', 'limit', 'refused', 'unknown'];
-const OFFLINE = 'サーバーにつながりませんでした';
+// 端末はつながっているのに、返事が無い。関数がまだ載っていない・起動に失敗した、でもこうなる（ブラウザからは、通信の失敗と見分けられない）
+const NO_ANSWER = 'サーバーから返事がありません。少し待って、開き直してください（続くときは、サーバーの準備ができていないかもしれません。作者に知らせてください）';
 const NOT_READY = 'サーバーの準備ができていません（作者の設定が終わっていないか、更新の途中です）';
 
 /**
@@ -31,13 +32,14 @@ export function toBackendError(error: unknown, online: boolean = globalThis.navi
   if (reason && CODES.includes(reason) && typeof e.message === 'string' && e.message) return new BackendError(reason, e.message);
   if (!online) return new BackendError('offline', 'インターネットにつながっていません');
   switch (code) {
-    // 届かなかった・返事が来なかった（SDK は、通信の失敗を internal として返す）
+    // 届かなかった・返事が来なかった（SDK は、通信の失敗も、関数が無いときの失敗も、internal として返す）
     case 'functions/internal':
     case 'functions/unavailable':
     case 'functions/deadline-exceeded':
     case 'functions/cancelled':
+      return new BackendError('unknown', NO_ANSWER);
     case 'auth/network-request-failed':
-      return new BackendError('offline', OFFLINE);
+      return new BackendError('offline', 'インターネットにつながっていません');
     case 'functions/resource-exhausted':
       return new BackendError('limit', 'いま、こみあっています。少し待ってから、もう一度ためしてください');
     case 'functions/not-found':

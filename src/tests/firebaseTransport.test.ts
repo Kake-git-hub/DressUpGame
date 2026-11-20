@@ -13,11 +13,20 @@ describe('Firebase の失敗を、画面に出せる形に直す', () => {
     expect(of({ code: 'functions/failed-precondition', message: '今日は上限です', details: { code: 'limit' } }).code).toBe('limit');
     expect(of({ code: 'functions/internal', message: 'サーバーで問題が起きました', details: { code: 'unknown' } })).toEqual({ code: 'unknown', message: 'サーバーで問題が起きました' });
   });
-  it('届かなかった・返事が来なかったときは、「つながらない」', () => {
-    for (const code of ['functions/internal', 'functions/unavailable', 'functions/deadline-exceeded', 'auth/network-request-failed']) expect(of({ code, message: 'internal' }).code).toBe('offline');
-    // 端末がオフラインなら、どの失敗でも「つながっていません」
+  it('端末がオフラインなら、どの失敗でも「つながっていません」', () => {
     expect(of({ code: 'functions/not-found' }, false)).toEqual({ code: 'offline', message: 'インターネットにつながっていません' });
+    expect(of({ code: 'functions/internal', message: 'internal' }, false).code).toBe('offline');
     expect(of(new TypeError('Failed to fetch'), false).code).toBe('offline');
+    expect(of({ code: 'auth/network-request-failed' }).code).toBe('offline');
+  });
+  it('端末はつながっているのに、サーバーから返事が無いとき（関数がまだ載っていない・起動に失敗した、でもこうなる）は、通信のせいにしない', () => {
+    for (const code of ['functions/internal', 'functions/unavailable', 'functions/deadline-exceeded']) {
+      const e = of({ code, message: 'internal' });
+      expect(e.code).toBe('unknown');
+      expect(e.message).toContain('サーバーから返事がありません');
+      expect(e.message).toContain('準備ができていない');
+      expect(e.message).not.toContain('internal');
+    }
   });
   it('サーバーの用意がまだのとき（関数が無い・匿名のログインが無効）は、準備ができていないと伝える', () => {
     for (const code of ['functions/not-found', 'auth/operation-not-allowed', 'auth/admin-restricted-operation', 'auth/configuration-not-found']) {

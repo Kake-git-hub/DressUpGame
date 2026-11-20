@@ -32,10 +32,11 @@ export interface CoreDeps {
   ai: AiClients;
   content: PublicContent;
   adminCodes: string[]; // 管理者の利用者コード
-  limits: { perDay: number; maxAttempts: number }; // サーバー全体の 1 日の画像の上限、1 品目あたりの生成回数
+  limits: { perDay: number; perUserDay?: number; maxAttempts: number }; // 1 日の画像の上限（サーバー全体・利用者ごと）、1 品目あたりの生成回数
   now: () => number;
   newId: () => string;
   heartbeatMs?: number; // 作っている間、この間隔で「動いている」の合図を書く（既定 30 秒）
+  runBudgetMs?: number; // 1 回の呼び出しで、新しい品目に取りかかるのは、始めてからこの時間まで（既定 8 分。関数の時間切れの前に、自分でやめる）
 }
 
 export interface UserView {
@@ -50,7 +51,7 @@ export const SET_MIN = 2;
 export const SET_MAX = 6;
 const NAME_MAX = 20;
 // 作成中のまま、これだけ進んでいない仕事は「止まっている」とみなして、呼び直しで続きを進める
-const STALE_MS = 150_000;
+export const STALE_MS = 150_000;
 const LAYERS: LayerKind[] = ['png', 'hide', 'shape', 'front', 'under'];
 
 // 利用者コード: まぎらわしい文字（I・O・0・1）を除いた 8 文字
@@ -66,7 +67,9 @@ const undecided = (c: CandidateDoc) => c.status === 'waiting' || c.status === 'w
 
 export async function signIn(deps: CoreDeps, uid: string): Promise<UserView> {
   const user = await deps.store.createUser(uid, makeCode, deps.now());
-  return { userCode: user.userCode, tickets: user.tickets, admin: deps.adminCodes.includes(user.userCode) };
+  // チケットの数が壊れている（数でない）ときは、0 枚として扱う
+  const tickets = typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0;
+  return { userCode: user.userCode, tickets, admin: deps.adminCodes.includes(user.userCode) };
 }
 
 async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
@@ -127,6 +130,7 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
     tickets: cost,
     createdAt: now,
     heartbeat: now,
+    ...(user.admin ? { free: true } : {}),
     candidates: items.map((item, index): CandidateDoc => ({ index, name: item.name, categoryId: item.category, description: item.description, colors: item.colors, status: 'waiting', notes: [] })),
   };
   try {
@@ -146,46 +150,81 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
 export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
   const first = await deps.store.getJob(uid, jobId);
   if (!first) throw new CloudError('refused', 'この仕事は見つかりません');
-  const user = await signIn(deps, uid);
+  const runner = deps.newId(); // この呼び出しの印
+  const started = Date.now();
+  const budget = deps.runBudgetMs ?? 480_000;
 
-  // 次の 1 点を「作成中」にして受け持つ（割り込まれない）。受け持てなければ null
-  const claim = async (result?: { index: number; change: Partial<CandidateDoc>; refund: boolean }): Promise<CandidateDoc | null> => {
+  // 次の 1 点を「作成中」にして受け持つ（割り込まれない）。受け持てなければ null。
+  // updateJob の change は呼び直されることがあるので、外の変数は、毎回はじめに元へ戻す
+  const take = async (): Promise<CandidateDoc | null> => {
     let claimed: CandidateDoc | null = null;
     await deps.store.updateJob(uid, jobId, (job) => {
+      claimed = null;
+      if (job.done) return null;
       const now = deps.now();
-      if (result) {
-        job.candidates = job.candidates.map((c) => (c.index === result.index ? { ...c, ...result.change } : c));
-        if (result.refund) job.tickets = Math.max(0, job.tickets - 1);
-      } else {
-        if (job.done) return null;
-        const working = job.candidates.some((c) => c.status === 'working');
-        // ほかの呼び出しが進めている最中なら、手を出さない
-        if (working && now - job.heartbeat <= STALE_MS) return null;
-        // 止まっていた分は、順番待ちに戻す
-        job.candidates = job.candidates.map((c) => (c.status === 'working' ? { ...c, status: 'waiting' as const } : c));
-      }
+      // ほかの呼び出しが進めている最中なら、手を出さない
+      if (job.candidates.some((c) => c.status === 'working') && now - job.heartbeat <= STALE_MS) return null;
+      // 止まっていた分は、順番待ちに戻す
+      job.candidates = job.candidates.map((c) => (c.status === 'working' ? { ...c, status: 'waiting' as const } : c));
       const next = job.candidates.find((c) => c.status === 'waiting');
       if (next) {
         next.status = 'working';
         claimed = { ...next };
+        job.runner = runner;
       } else {
         job.done = true;
+        delete job.runner;
       }
       job.heartbeat = now;
       return job;
     });
     return claimed;
   };
+  // いまも、この呼び出しが、その品目を受け持っているか（止まったとみなされて、ほかの呼び出しに追い越されていないか）
+  const mine = (job: JobDoc, index: number) => job.runner === runner && job.candidates.some((c) => c.index === index && c.status === 'working');
+  // 受け持った 1 点の結果を書いて、続けるなら次の 1 点を受け持つ。追い越されていたら、何も書かない（applied = false）
+  const finish = async (index: number, change: Partial<CandidateDoc>, refund: boolean, more: boolean): Promise<{ applied: boolean; next: CandidateDoc | null }> => {
+    let applied = false;
+    let next: CandidateDoc | null = null;
+    await deps.store.updateJob(uid, jobId, (job) => {
+      applied = false;
+      next = null;
+      if (!mine(job, index)) return null;
+      job.candidates = job.candidates.map((c) => (c.index === index ? { ...c, ...change } : c));
+      if (refund) job.tickets = Math.max(0, job.tickets - 1);
+      applied = true;
+      const waiting = job.candidates.find((c) => c.status === 'waiting');
+      if (!waiting) {
+        job.done = true;
+        delete job.runner;
+      } else if (more) {
+        waiting.status = 'working';
+        next = { ...waiting };
+      } else {
+        // 時間切れ: 残りは、アプリからの呼び直しに任せる
+        delete job.runner;
+      }
+      job.heartbeat = deps.now();
+      return job;
+    });
+    return { applied, next };
+  };
 
-  let current = await claim();
+  let current = await take();
   if (!current) return;
   // 作っている間は、「動いている」の合図を書き続ける（1 点に長くかかっても、止まったとみなされて二重に作られないように）
   const beat = setInterval(() => {
-    void deps.store.updateJob(uid, jobId, (job) => (job.done ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
+    void deps.store.updateJob(uid, jobId, (job) => (job.done || job.runner !== runner ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
   }, deps.heartbeatMs ?? 30_000);
   try {
     const doll = await dollOf(deps, first.dollId).catch(() => null);
     const { text, image } = deps.ai;
+    // 画像を 1 枚作る前: 利用者ごとの上限（1 人が、みんなの分を使い切らないように。管理者にはかけない）と、サーバー全体の上限
+    const spend = async () => {
+      const day = dayOf(deps.now());
+      if (!first.free && deps.limits.perUserDay !== undefined) await deps.store.spendImage(`${day}:${uid}`, deps.limits.perUserDay);
+      await deps.store.spendImage(day, deps.limits.perDay);
+    };
     while (current) {
       const c: CandidateDoc = current;
       let change: Partial<CandidateDoc>;
@@ -198,7 +237,7 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
           {
             text,
             image,
-            budget: { spend: () => deps.store.spendImage(dayOf(deps.now()), deps.limits.perDay) },
+            budget: { spend },
             doll,
             template: await deps.content.assets.workTemplate(doll),
             data: await deps.content.assets.workData(doll),
@@ -226,15 +265,21 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
         change = { status: 'done', notes: candidate.notes, preview, layers };
         ok = true;
       } catch (error) {
-        await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
         change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`] };
       }
-      // できなかった分は、チケットを戻す（管理者は、もともと引いていない）
       if (!ok) {
-        if (user.admin) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
-        else await deps.store.addTickets(uid, 1, `refund:${jobId}:${c.index}`, deps.now());
+        // 追い越されていたら、戻さない・消さない（引き継いだ呼び出しが、同じ品目を作っている・作り終えている）
+        const now = await deps.store.getJob(uid, jobId);
+        if (!now || !mine(now, c.index)) return;
+        // できなかった分は、チケットを戻す。同じ品目では 1 回だけ（このあと止まって作り直しになり、また失敗しても、二重に戻らない）。
+        // 管理者が始めた仕事は、もともと引いていない
+        if (first.free) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
+        else await deps.store.refundOnce(uid, `${jobId}:${c.index}`, `refund:${jobId}:${c.index}`, deps.now());
       }
-      current = await claim({ index: c.index, change, refund: !ok });
+      const result = await finish(c.index, change, !ok, Date.now() - started < budget);
+      if (!result.applied) return;
+      if (!ok) await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
+      current = result.next;
     }
   } finally {
     clearInterval(beat);
@@ -250,6 +295,7 @@ export async function listJobs(deps: CoreDeps, uid: string): Promise<JobDoc[]> {
 async function decide(deps: CoreDeps, uid: string, jobId: string, index: number, from: CandidateDoc['status'], to: CandidateDoc['status']): Promise<{ job: JobDoc; candidate: CandidateDoc }> {
   let found: CandidateDoc | null = null;
   const job = await deps.store.updateJob(uid, jobId, (current) => {
+    found = null; // 呼び直されることがあるので、毎回はじめに戻す
     const candidate = current.candidates.find((c) => c.index === index);
     if (!candidate || candidate.status !== from) return null;
     found = { ...candidate };

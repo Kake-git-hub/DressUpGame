@@ -85,6 +85,27 @@ describe('Firestore の置き場', () => {
     expect(code(await store.addTickets('nobody', 1, 'x', 1).catch((e) => e))).toBe('refused');
   });
 
+  it('払い戻しは、同じ品目では 1 回だけ（同時に 6 回呼んでも、1 枚しか戻らない）。別の品目は、別に戻る', async () => {
+    const u = uid();
+    await store.createUser(u, () => `R${u}`.toUpperCase(), 1);
+    const results = await Promise.all(Array.from({ length: 6 }, () => store.refundOnce(u, 'job1:0', 'refund:job1:0', 2)));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect((await store.getUser(u))!.tickets).toBe(1);
+    expect(await store.refundOnce(u, 'job1:0', 'refund:job1:0', 3)).toBe(false);
+    expect(await store.refundOnce(u, 'job1:1', 'refund:job1:1', 3)).toBe(true);
+    expect((await store.getUser(u))!.tickets).toBe(2);
+    expect(code(await store.refundOnce('nobody', 'x', 'x', 1).catch((e) => e))).toBe('refused');
+  });
+
+  it('チケットの数が壊れている（管理画面で、文字にしてしまった）利用者は、0 枚として扱う。足すと、数に直る', async () => {
+    const u = uid();
+    await store.createUser(u, () => `B${u}`.toUpperCase(), 1);
+    await getFirestore(app).doc(`users/${u}`).update({ tickets: '10' });
+    expect(code(await store.charge(u, 1, 'job', 2).catch((e) => e))).toBe('no-tickets');
+    expect(await store.addTickets(u, 2, 'grant', 3)).toBe(2);
+    expect((await store.getUser(u))!.tickets).toBe(2);
+  });
+
   it('1 日の上限: 同時に 9 枚たのんでも、上限の 4 枚まで', async () => {
     const day = `2099-01-${run}`;
     const results = await Promise.all(Array.from({ length: 9 }, () => store.spendImage(day, 4).then(() => 'ok', code)));

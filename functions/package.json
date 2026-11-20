@@ -7,8 +7,8 @@
     "node": "22"
   },
   "dependencies": {
-    "firebase-admin": "^14.5.1",
-    "firebase-functions": "^7.4.0",
-    "sharp": "^0.34.5"
+    "firebase-admin": "14.5.1",
+    "firebase-functions": "7.4.0",
+    "sharp": "0.34.5"
   }
 }

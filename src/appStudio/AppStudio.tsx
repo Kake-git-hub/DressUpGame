@@ -316,6 +316,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
                             <>
                               <input value={names[key] ?? c.name} onChange={(e) => setNames((n) => ({ ...n, [key]: e.target.value }))} maxLength={20} aria-label="名前" data-testid="studio-candidate-name" />
                               {c.notes.length > 0 && <p className="studio-hint">{c.notes.join(' ')}</p>}
+                              {!c.preview && <p className="studio-hint">絵を読み込めませんでした。開き直すと、もう一度ためします（だめなら「捨てる」で消せます）。</p>}
                               <div className="studio-row">
                                 <button type="button" className="primary" disabled={working !== null} onClick={() => void keep(job, c)} data-testid="studio-keep">
                                   使う

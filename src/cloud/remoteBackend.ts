@@ -43,6 +43,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   let user: StudioUser | null = null;
   const userListeners = new Set<(user: StudioUser) => void>();
   const previews = new Map<string, string>(); // `${jobId}:${index}` → data: の URL
+  const missing = new Set<string>(); // 置き場から無くなっていた絵（取り直さない）
   const known = new Map<string, StudioJob>(); // 最後に分かった進み具合
   const kicked = new Map<string, number>(); // 「進める」を最後に頼んだ時刻
   const watches = new Map<string, Watch>();
@@ -59,23 +60,33 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   };
   const me = async (): Promise<StudioUser> => user ?? (await backend.signIn());
 
-  // サーバーの進み具合を、画面の形に直す（できた候補の絵を、まだ持っていなければ取る）
-  const toJob = async (wire: WireJob): Promise<StudioJob> => {
+  // サーバーの進み具合を、画面の形に直す（できた候補の絵を、まだ持っていなければ取る）。
+  // 絵を取れなくても、失敗にはしない（その候補は絵なしで出す。1 枚の絵のせいで、スタジオが開けなくならないように）。
+  // complete: 取り直す意味のある絵が、もう残っていない
+  const toJob = async (wire: WireJob): Promise<{ job: StudioJob; complete: boolean }> => {
+    let complete = true;
     const candidates = await Promise.all(
       wire.candidates.map(async (c): Promise<StudioCandidate> => {
         const base: StudioCandidate = { index: c.index, name: c.name, categoryId: c.categoryId, status: c.status, notes: c.notes };
-        if (c.status !== 'done' || !c.preview) return base;
         const key = `${wire.id}:${c.index}`;
+        if (c.status !== 'done' || !c.preview || missing.has(key)) return base;
         let url = previews.get(key);
         if (!url) {
-          const image = await transport.call<{ data: string; contentType: string }>({ op: 'preview', jobId: wire.id, index: c.index });
-          url = `data:${image.contentType};base64,${image.data}`;
-          previews.set(key, url);
+          try {
+            const image = await transport.call<{ data: string; contentType: string }>({ op: 'preview', jobId: wire.id, index: c.index });
+            url = `data:${image.contentType};base64,${image.data}`;
+            previews.set(key, url);
+          } catch (error) {
+            // 置き場から無くなっていた: 取り直さない。通信の失敗: 次に聞くときに、取り直す
+            if ((error as { code?: unknown }).code === 'refused') missing.add(key);
+            else complete = false;
+            return base;
+          }
         }
         return { ...base, preview: { url, canvasW: c.preview.canvasW, canvasH: c.preview.canvasH, box: c.preview.box } };
       }),
     );
-    return { id: wire.id, dollId: wire.dollId, ...(wire.set ? { set: wire.set } : {}), done: wire.done, candidates, tickets: wire.tickets, createdAt: wire.createdAt };
+    return { complete, job: { id: wire.id, dollId: wire.dollId, ...(wire.set ? { set: wire.set } : {}), done: wire.done, candidates, tickets: wire.tickets, createdAt: wire.createdAt } };
   };
   const publish = (job: StudioJob) => {
     const before = known.get(job.id);
@@ -108,9 +119,11 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     watch.asking = true;
     try {
       const { job } = took(await transport.call<{ job: WireJob; user: WireUser }>({ op: 'job', jobId }));
-      publish(await toJob(job));
+      const converted = await toJob(job);
+      publish(converted.job);
       if (job.done) {
-        watch.over = true;
+        // 終わった。取れなかった絵が残っている間だけ、また聞く
+        if (converted.complete) watch.over = true;
       } else {
         // まだ頼んでいない（閉じる前に作りかけだった）か、止まっているなら、「進める」を頼む
         const last = kicked.get(jobId);
@@ -160,7 +173,6 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       watch.listeners.add(listener);
       const job = known.get(jobId);
       if (job) listener(structuredCopy(job));
-      if (job?.done) watch.over = true;
       // まだ分かっていない仕事は、すぐ聞く。分かっている仕事は、次の間隔から
       if (job) schedule(jobId);
       else void ask(jobId);
@@ -174,7 +186,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     },
     async pendingJobs() {
       const { jobs } = took(await transport.call<{ jobs: WireJob[]; user: WireUser }>({ op: 'jobs' }));
-      const converted = await Promise.all(jobs.map(toJob));
+      const converted = (await Promise.all(jobs.map(toJob))).map((c) => c.job);
       for (const job of converted) known.set(job.id, job);
       return converted.map(structuredCopy);
     },

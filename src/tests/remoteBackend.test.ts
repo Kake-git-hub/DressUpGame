@@ -18,7 +18,7 @@ function fakeServer() {
   const items: WireItem[] = [];
   const calls: string[] = [];
   const runs: string[] = [];
-  const state = { fail: null as BackendError | null, runDone: null as Promise<void> | null };
+  const state = { fail: null as BackendError | null, runDone: null as Promise<void> | null, previewFail: null as BackendError | null };
   const item = (id: string): WireItem => ({
     id,
     dollId: 'doll',
@@ -46,6 +46,7 @@ function fakeServer() {
           case 'jobs':
             return { jobs: [...jobs.values()].map((j) => structuredClone(j)), user: { ...user } };
           case 'preview':
+            if (state.previewFail) throw state.previewFail;
             return { data: PNG, contentType: 'image/png' };
           case 'keep':
             job!.candidates[Number(data.index)].status = 'kept';
@@ -224,6 +225,69 @@ describe('本物の裏側', () => {
     const asked2 = count(server.calls, 'job');
     await vi.advanceTimersByTimeAsync(5000);
     expect(count(server.calls, 'job')).toBe(asked2);
+  });
+
+  it('できた服の絵を取れなくても、スタジオは開ける（その候補は絵なしで出し、次に聞くときに取り直す）', async () => {
+    const server = fakeServer();
+    server.jobs.set('old', { id: 'old', dollId: 'doll', done: false, tickets: 2, createdAt: 1, stalled: false, candidates: [
+      { index: 0, name: 'a', categoryId: 'トップス', status: 'done', notes: [], preview: { canvasW: 8, canvasH: 8, box: { x: 0, y: 0, w: 1, h: 1 } } },
+      { index: 1, name: 'b', categoryId: 'くつ', status: 'working', notes: [] },
+    ] });
+    const backend = createRemoteBackend(server.transport, { pollMs: 1000 });
+    // 絵を取りに行ったら、通信が切れた
+    server.state.previewFail = new BackendError('offline', 'つながりません');
+    const pending = await backend.pendingJobs();
+    expect(pending[0].candidates[0]).toMatchObject({ status: 'done' });
+    expect(pending[0].candidates[0].preview).toBeUndefined();
+    const seen: StudioJob[] = [];
+    backend.watchJob('old', (job) => seen.push(job));
+    await vi.advanceTimersByTimeAsync(2000);
+    // 絵を取れなくても、見るのをやめない（仕事そのものは、ある）
+    const asked = count(server.calls, 'job');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(count(server.calls, 'job')).toBeGreaterThan(asked);
+    // 取れるようになったら、絵つきで知らせる
+    server.state.previewFail = null;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seen[seen.length - 1].candidates[0].preview!.url).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('絵が置き場から無くなっていた（サーバーが「見つかりません」と断る）ら、絵なしで出して、取り直しは繰り返さない。終わった仕事は、聞くのをやめる', async () => {
+    const server = fakeServer();
+    server.jobs.set('old', { id: 'old', dollId: 'doll', done: true, tickets: 1, createdAt: 1, stalled: false, candidates: [
+      { index: 0, name: 'a', categoryId: 'トップス', status: 'done', notes: [], preview: { canvasW: 8, canvasH: 8, box: { x: 0, y: 0, w: 1, h: 1 } } },
+    ] });
+    server.state.previewFail = new BackendError('refused', 'この絵は見つかりません');
+    const backend = createRemoteBackend(server.transport, { pollMs: 1000 });
+    const seen: StudioJob[] = [];
+    backend.watchJob('old', (job) => seen.push(job));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].candidates[0]).toMatchObject({ status: 'done' });
+    expect(seen[0].candidates[0].preview).toBeUndefined();
+    expect(count(server.calls, 'preview')).toBe(1);
+    expect(count(server.calls, 'job')).toBe(1);
+    // 捨てることはできる
+    await backend.discard('old', 0);
+    expect(seen[seen.length - 1].candidates[0].status).toBe('discarded');
+  });
+
+  it('「進める」を頼めなかった（こみあっている・通信が切れた）ら、間をあけて頼み直す', async () => {
+    const server = fakeServer();
+    let failRuns = 1;
+    const run = server.transport.run;
+    server.transport.run = async (jobId) => {
+      await run(jobId);
+      if (failRuns-- > 0) throw new BackendError('limit', 'こみあっています');
+    };
+    const backend = createRemoteBackend(server.transport, { pollMs: 1000, kickEveryMs: 5000 });
+    const { jobId } = await backend.startJob({ dollId: 'doll', theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
+    server.jobs.get(jobId)!.stalled = true; // だれも作っていない
+    backend.watchJob(jobId, () => undefined);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(server.runs).toEqual(['j1']);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(server.runs).toEqual(['j1', 'j1']);
   });
 
   it('サーバーの失敗は、そのまま伝える（チケットが足りない、など）', async () => {

@@ -52,6 +52,8 @@ export interface JobDoc {
   tickets: number; // 使った枚数（戻した分を引いたあと）
   createdAt: number;
   heartbeat: number; // 最後に進めた時刻（止まっている仕事を見分ける）
+  runner?: string; // いま進めている呼び出しの印（追い越された古い呼び出しが、あとから書き込まないように）
+  free?: boolean; // 管理者が始めた仕事（チケットを引いていないので、できなくても戻さない）
   candidates: CandidateDoc[];
 }
 // 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける
@@ -73,13 +75,17 @@ export interface CloudStore {
   charge(uid: string, cost: number, reason: string, now: number): Promise<number>;
   // チケットを足す（戻す・配る）。返り値は残り
   addTickets(uid: string, count: number, reason: string, now: number): Promise<number>;
+  // できなかった品目の分を 1 枚戻す。同じ key では、何度呼ばれても 1 回しか戻さない（戻したら true）
+  refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean>;
   // 台帳に書くだけ（管理者が使った分。残りは変えない）
   note(uid: string, count: number, reason: string, now: number): Promise<void>;
   // 画像を 1 枚作る前に呼ぶ。その日の上限に達していたら CloudError('limit')（数は増えない）
   spendImage(day: string, perDay: number): Promise<void>;
   createJob(uid: string, job: JobDoc): Promise<void>;
   getJob(uid: string, jobId: string): Promise<JobDoc | null>;
-  // 進み具合を、読んで書き換える（割り込まれない）。change が null を返したら、何も書かない。返り値は、書いたあとの内容
+  // 進み具合を、読んで書き換える（割り込まれない）。change が null を返したら、何も書かない。返り値は、書いたあとの内容。
+  // **change は、2 回以上呼ばれることがある**（ほかの書き込みと重なると、読み直して呼び直す）。
+  // change の中で外の変数に結果を入れるときは、毎回、最初に元へ戻すこと
   updateJob(uid: string, jobId: string, change: (job: JobDoc) => JobDoc | null): Promise<JobDoc>;
   listJobs(uid: string): Promise<JobDoc[]>; // 新しい順
   putItem(uid: string, item: ItemDoc): Promise<void>;

@@ -43,7 +43,9 @@ interface Fake {
   finish(): void;
 }
 /**
- * Firebase の偽の返事を用意する。functions: 'ok' = 関数が動く、'missing' = 関数がまだ載っていない（404）、'down' = 届かない
+ * Firebase の偽の返事を用意する。functions: 'ok' = 関数が動く、'missing' = 関数が無いと読める返事（404）、'down' = 届かない。
+ * 本物では、関数がまだ載っていないときの返事は、ブラウザからは読めない見込み（ほかのサイトから読んでよいという印が付かない）。
+ * そのときアプリからは 'down' と同じに見える（この道具では、読めない返事をまねできないので、'down' で確かめる）。
  */
 async function fakeFirebase(page: Page, functions: 'ok' | 'missing' | 'down' = 'ok'): Promise<Fake> {
   const png = (await sharp({ create: { width: 240, height: 200, channels: 4, background: { ...COLOR, alpha: 1 } } }).png().toBuffer()).toString('base64');
@@ -165,11 +167,13 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await expect(page.getByTestId('studio-make')).toHaveCount(0);
   });
 
-  test('サーバーに届かないときは、「つながりません」と出る。ゲームは、そのまま遊べる', async ({ page }) => {
+  test('サーバーから返事が無いとき（届かない。関数がまだ載っていないときも、こう見える）は、「返事がありません」と出る（通信のせいにしない）。ゲームは、そのまま遊べる', async ({ page }) => {
     await fakeFirebase(page, 'down');
     await openStudio(page);
-    await expect(page.getByTestId('studio-problem')).toContainText('つながりませんでした');
-    await expect(page.getByTestId('studio-problem')).toContainText('インターネット');
+    await expect(page.getByTestId('studio-problem')).toContainText('サーバーから返事がありません');
+    await expect(page.getByTestId('studio-problem')).toContainText('準備ができていないかもしれません');
+    await expect(page.getByTestId('studio-problem')).not.toContainText('インターネット');
+    await expect(page.getByTestId('studio-make')).toHaveCount(0);
     await page.getByTestId('studio-close').click();
     await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible();
   });

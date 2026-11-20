@@ -9,7 +9,9 @@
  *
  * 作者が変えられる設定は、Firestore の system/config（管理画面で作る。無ければ既定）:
  *   adminCodes   管理者の利用者コード（カンマ区切りの文字列）。管理者は、チケットが無くても作れる
- *   imagesPerDay サーバー全体で、1 日に作る画像の上限（数。既定 100）
+ *   imagesPerDay サーバー全体で、1 日に作る画像の上限（数。既定 100。0 にすると、だれも作れない = 急いで止めたいとき）
+ *   imagesPerUserPerDay 利用者 1 人が、1 日に作る画像の上限（数。既定 30。管理者にはかからない）
+ * 1 日の区切りは、世界標準時の 0 時（日本の朝 9 時）。
  */
 import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
@@ -24,6 +26,7 @@ import { CloudError } from '../../tools/cloud/store.ts';
 import type { CloudFiles, CloudStore } from '../../tools/cloud/store.ts';
 import { runJob } from '../../tools/cloud/studioCore.ts';
 import type { CoreDeps, PublicContent } from '../../tools/cloud/studioCore.ts';
+import { firebaseConfig } from '../../src/cloud/firebaseConfig.ts';
 import { createGemini, createGeminiText, GEMINI_IMAGE_MODEL, GEMINI_TEXT_MODEL } from '../../tools/studio/ai.ts';
 import { FirestoreStore } from './firestoreStore.ts';
 import { StorageFiles } from './storageFiles.ts';
@@ -32,6 +35,7 @@ const REGION = 'asia-northeast1';
 // 公開されている素材（src/content/loadContent.ts の DEFAULT_CONTENT_URL と同じ場所）
 const CONTENT_URL = 'https://kake-git-hub.github.io/DressUpGame-content/';
 const IMAGES_PER_DAY = 100;
+const IMAGES_PER_USER_PER_DAY = 30;
 const MAX_ATTEMPTS = 2; // 1 品目あたりの生成回数（作り直しを含む）
 const CONFIG_TTL_MS = 60_000;
 
@@ -44,11 +48,16 @@ const geminiUrl = emulated ? process.env.STUDIO_TEST_GEMINI_URL : undefined;
 const GEMINI_ORIGIN = 'https://generativelanguage.googleapis.com/';
 const aiFetch: typeof fetch = geminiUrl ? (input, init) => fetch(String(input).replace(GEMINI_ORIGIN, geminiUrl), init) : fetch;
 
+interface Config {
+  adminCodes: string[];
+  perDay: number;
+  perUserDay: number;
+}
 interface Services {
   store: CloudStore;
   files: CloudFiles;
   content: PublicContent;
-  config(): Promise<{ adminCodes: string[]; perDay: number }>;
+  config(): Promise<Config>;
 }
 let services: Services | null = null;
 function getServices(): Services {
@@ -56,18 +65,22 @@ function getServices(): Services {
   if (getApps().length === 0) initializeApp();
   const db = getFirestore();
   db.settings({ ignoreUndefinedProperties: true });
-  let cached: { at: number; value: { adminCodes: string[]; perDay: number } } | null = null;
+  let cached: { at: number; value: Config } | null = null;
+  const count = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback);
   services = {
     store: new FirestoreStore(db),
-    files: new StorageFiles(getStorage().bucket()),
+    // 置き場の名前は、はっきり指定する（手元のエミュレーターでは、既定のもの）
+    files: new StorageFiles(emulated ? getStorage().bucket() : getStorage().bucket(firebaseConfig.storageBucket)),
     content: createPublicContent(contentUrl),
     async config() {
       if (cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.value;
-      const data = ((await db.collection('system').doc('config').get()).data() ?? {}) as { adminCodes?: unknown; imagesPerDay?: unknown };
-      const adminCodes = typeof data.adminCodes === 'string' ? data.adminCodes.split(/[\s,、]+/).map((code) => code.trim().toUpperCase()).filter(Boolean) : [];
-      const perDay = typeof data.imagesPerDay === 'number' && Number.isFinite(data.imagesPerDay) && data.imagesPerDay >= 0 ? Math.floor(data.imagesPerDay) : IMAGES_PER_DAY;
-      cached = { at: Date.now(), value: { adminCodes, perDay } };
-      return cached.value;
+      const data = ((await db.collection('system').doc('config').get()).data() ?? {}) as { adminCodes?: unknown; imagesPerDay?: unknown; imagesPerUserPerDay?: unknown };
+      // 文字列（カンマ・空白区切り）でも、配列でも受け付ける
+      const listed = Array.isArray(data.adminCodes) ? data.adminCodes.filter((code): code is string => typeof code === 'string').join(',') : typeof data.adminCodes === 'string' ? data.adminCodes : '';
+      const adminCodes = listed.split(/[\s,、]+/).map((code) => code.trim().toUpperCase()).filter(Boolean);
+      const value: Config = { adminCodes, perDay: count(data.imagesPerDay, IMAGES_PER_DAY), perUserDay: count(data.imagesPerUserPerDay, IMAGES_PER_USER_PER_DAY) };
+      cached = { at: Date.now(), value };
+      return value;
     },
   };
   return services;
@@ -75,7 +88,7 @@ function getServices(): Services {
 
 async function coreDeps(): Promise<CoreDeps> {
   const { store, files, content, config } = getServices();
-  const { adminCodes, perDay } = await config();
+  const { adminCodes, perDay, perUserDay } = await config();
   const key = GEMINI_API_KEY.value();
   return {
     store,
@@ -83,7 +96,7 @@ async function coreDeps(): Promise<CoreDeps> {
     content,
     ai: key ? { text: createGeminiText(key, GEMINI_TEXT_MODEL, aiFetch), image: createGemini(key, GEMINI_IMAGE_MODEL, aiFetch, '1K') } : { text: null, image: null },
     adminCodes,
-    limits: { perDay, maxAttempts: MAX_ATTEMPTS },
+    limits: { perDay, perUserDay, maxAttempts: MAX_ATTEMPTS },
     now: () => Date.now(),
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
   };
