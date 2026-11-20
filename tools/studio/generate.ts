@@ -253,6 +253,7 @@ export function hairPrompt(item: PlannedItem, categoryLabel: string, style: stri
     'Strict rules:',
     '- Keep the doll exactly as it is: same position, size, pose, outline, skin colour and underwear. Do not move, resize, redraw or restyle it. Keep the same framing; do not zoom or crop.',
     '- The face stays completely blank: no eyes, eyebrows, nose, mouth or blush. Faces are a separate item.',
+    '- The hair casts no shadow on the doll: do not shade or darken the forehead, face, ears, neck, shoulders or body under or next to the hair. The skin keeps its original flat colour right up to the edge of the hair.',
     '- Draw only the hair (a small hair ornament is fine if the description asks for one). No hat, no clothes, no other objects.',
     `- The background stays the same flat ${colorName(background)} with no shadow, gradient, text or frame. Every gap between strands of hair shows the flat background or the doll.`,
     `- The hair must not contain ${colorName(background)} or colours close to it, and it must be clearly different from the doll's skin colour.`,

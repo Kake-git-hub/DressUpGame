@@ -12,7 +12,8 @@ export interface Status {
   contentDir: string;
   ai: { text: boolean; image: boolean };
   budget: { usedToday: number; perDay: number; perRun: number; maxAttempts: number };
-  git: { isRepo: boolean; branch: string | null; changedFiles: number; unusedFiles: number };
+  // behind: 公開されている素材のほうが何件新しいか（ほかの PC やクラウドから公開された分）
+  git: { isRepo: boolean; branch: string | null; changedFiles: number; unusedFiles: number; behind: number };
 }
 export interface Warning {
   code: string;
@@ -103,6 +104,8 @@ export const api = {
   // v = 何回目の生成か（作り直すと画像が変わるので、古い画像を使い回さない）
   jobImageUrl: (id: string, index: number, kind: 'png' | 'source' | 'shape' | 'hide' | 'front' | 'under' = 'png', v = 0) => `${API_BASE}/jobs/image?${q({ id, index, kind, v })}`,
   publish: (message: string) => send<{ log: string }>('POST', '/publish', { message }),
+  // 公開されている素材（ほかの PC やクラウドから公開された分）を取り込む
+  sync: () => send<{ updated: boolean; behind: number; message: string }>('POST', '/sync', {}),
 };
 
 export const contentUrl = (file: string) => `${CONTENT_BASE}${file}`;

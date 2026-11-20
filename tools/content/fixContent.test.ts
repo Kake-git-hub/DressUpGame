@@ -8,7 +8,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { THUMB_BODY } from '../../src/pipeline/hairLayers.ts';
-import { addBackThumbs, cleanDollOutline } from './fixContent.ts';
+import { addBackThumbs, cleanDollOutline, removeHairShadows } from './fixContent.ts';
 import { ContentStore } from './manifestEdit.ts';
 
 let dir: string;
@@ -136,5 +136,67 @@ describe('addBackThumbs', () => {
     for (let c = 0; c < 3; c++) expect(Math.abs(data[centre + c] - THUMB_BODY[c])).toBeLessThanOrEqual(4);
 
     expect(await addBackThumbs(dir)).toBe(0);
+  });
+});
+
+describe('removeHairShadows', () => {
+  const SHADOW = [221, 167, 150]; // 肌（254, 214, 190）に落ちた影の色
+  const HAIR = [24, 24, 28];
+  // 画像の中の、ある色（±12）の画素の数
+  async function countColor(file: string, color: number[]) {
+    const { data } = await sharp(path.join(dir, file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] >= 128 && color.every((c, k) => Math.abs(data[i + k] - c) <= 12)) n++;
+    return n;
+  }
+  const setup = async () => {
+    dollId = (await store.addDoll({ name: 'てすと', data: await outlined(300, 600, [100, 50, 100, 500]) })).id;
+    await store.createCategory(dollId, { id: 'ヘア', label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false });
+    const doll = (await store.read()).dolls[0];
+    const { x, y, w } = doll.image.box;
+    // 前髪: 頭の上の黒い帯（高さ 60）と、そのすぐ下の、肌に落ちた影の帯（高さ 8）
+    const paint = (rgba: Uint8ClampedArray, rect: number[], color: number[]) => {
+      for (let yy = rect[1]; yy < rect[1] + rect[3]; yy++) for (let xx = rect[0]; xx < rect[0] + rect[2]; xx++) rgba.set([...color, 255], (yy * 1024 + xx) * 4);
+    };
+    const front = canvasOf([x - 20, y - 10, w + 40, 70], 1024, HAIR);
+    paint(front, [x + 4, y + 60, w - 8, 8], SHADOW);
+    // 後ろ髪: 前髪と同じ絵に、体の横へ下がる房を足したもの
+    const back = new Uint8ClampedArray(front);
+    paint(back, [x - 40, y, 30, 300], HAIR);
+    paint(back, [x + w + 10, y, 30, 300], HAIR);
+    const hair = await store.addItem(dollId, { category: 'ヘア', name: 'かみ', rgba: front, width: 1024, height: 1024, back });
+    const top = await store.addItem(dollId, { category: 'トップス', name: 'ふく', rgba: canvasOf([400, 300, 200, 100]), width: 1024, height: 1024 });
+    return { hair, top };
+  };
+
+  it('前髪と後ろ髪から、肌に落ちた影を取る。髪の ID・名前はそのまま。ほかの品目は変えない', async () => {
+    const { hair, top } = await setup();
+    expect(await countColor(hair.image.file, SHADOW)).toBeGreaterThan(500);
+
+    const result = await removeHairShadows(dir, dollId);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: hair.id });
+    expect(result[0].removed).toBeGreaterThan(500);
+
+    const items = (await store.read()).dolls[0].items;
+    const fixed = items.find((i) => i.id === hair.id)!;
+    expect(fixed.name).toBe('かみ');
+    expect(fixed.image.file).not.toBe(hair.image.file);
+    expect(await countColor(fixed.image.file, SHADOW)).toBe(0);
+    expect(await countColor(fixed.back!.file, SHADOW)).toBe(0);
+    // 前髪は、影の帯のぶんだけ低くなる。黒い所は残る
+    expect(fixed.image.box.h).toBe(hair.image.box.h - 8);
+    expect(await countColor(fixed.image.file, HAIR)).toBe(await countColor(hair.image.file, HAIR));
+    expect(fixed.thumb).not.toBe(hair.thumb);
+    expect(fixed.backThumb).toBeDefined();
+    expect(items.find((i) => i.id === top.id)).toEqual(top);
+  });
+
+  it('2 回目は何も変えない', async () => {
+    await setup();
+    await removeHairShadows(dir, dollId);
+    const once = await fs.readFile(path.join(dir, 'manifest.json'), 'utf8');
+    expect(await removeHairShadows(dir, dollId)).toEqual([]);
+    expect(await fs.readFile(path.join(dir, 'manifest.json'), 'utf8')).toBe(once);
   });
 });

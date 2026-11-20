@@ -5,7 +5,8 @@
  * ドールは動かないので、大きさや位置を推定しなくてよい。返ってきた絵のうち、
  *  - ドールの外で、背景でない所
  *  - ドールの上で、渡した絵と色が違う所
- * が髪。ドールの上に描かれた髪（前髪、体の前にたれた三つ編み）は前髪としてドールの上に、
+ * が髪。ただし、髪が肌に落とした影（前髪の下の額など）は髪にしない（色スライダーで、影だけが変な色にならないように）。
+ * ドールの上に描かれた髪（前髪、体の前にたれた三つ編み）は前髪としてドールの上に、
  * 髪の全体は後ろ髪としてドールの下に描く。体の裏は、髪の地の色でなめらかに塗る（ドールの内側だけ）。
  */
 import { alphaBBox } from './alpha';
@@ -14,6 +15,7 @@ import { cutOutClothing } from './cutout';
 import { cleanKeyEdge, cleanKeySpill } from './edgeClean';
 import type { Rgb } from './keyColors';
 import { components, dilate, erode } from './morph';
+import { skinShadowMask } from './skinShadow';
 import { baseColorSource, fillSmooth } from './smoothFill';
 
 export interface HairExtract {
@@ -118,6 +120,13 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
     if (doll[p]) inHair[p] = distance[p] > HAIR_SAME && cut[p * 4 + 3] >= 128 ? 1 : 0;
     else outHair[p] = cut[p * 4 + 3] >= 128 && distance[p] > HAIR_SAME ? 1 : 0;
   }
+  // 髪が肌に落とした影は、髪にしない
+  const shadow = (() => {
+    const bare = new Uint8Array(total);
+    for (let p = 0; p < total; p++) bare[p] = doll[p] && !inHair[p] ? 1 : 0;
+    return skinShadowMask(image, reference, inHair, bare, width, height);
+  })();
+  for (let p = 0; p < total; p++) if (shadow[p]) inHair[p] = 0;
   components(inHair, width, height, (pixels, count) => {
     if (count < area(SPECK_AREA)) for (let n = 0; n < count; n++) inHair[pixels[n]] = 0;
   });
@@ -182,9 +191,10 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
     for (let p = 0; p < total; p++) bare[p] = doll[p] && !inHair[p] ? 1 : 0;
     components(bare, width, height, (pixels, count, touchesBorder) => {
       if (touchesBorder || count > area(HOLE_AREA)) return;
-      // 体の外の背景に接している穴は、髪に囲まれていない
+      // 体の外の背景に接している穴は、髪に囲まれていない。影を外した所も、髪に戻さない
       for (let n = 0; n < count; n++) {
         const p = pixels[n];
+        if (shadow[p]) return;
         const x = p % width;
         for (const q of [x > 0 ? p - 1 : p, x < width - 1 ? p + 1 : p, p >= width ? p - width : p, p < total - width ? p + width : p]) {
           if (!doll[q] && !outHair[q]) return;

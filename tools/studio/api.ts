@@ -69,6 +69,8 @@ const MIME: Record<string, string> = { '.json': 'application/json; charset=utf-8
 const MAX_ITEMS_PER_PLAN = 30;
 
 const MAX_JOBS_KEPT = 20;
+// 公開されている素材を確かめるときに待つ上限
+const SYNC_FETCH_TIMEOUT_MS = 30_000;
 
 interface Job {
   id: string;
@@ -282,26 +284,60 @@ export class StudioApi {
     return data;
   }
 
-  private async git(...args: string[]): Promise<string> {
+  private git(...args: string[]): Promise<string> {
+    return this.gitWithin(120_000, ...args);
+  }
+  private async gitWithin(timeout: number, ...args: string[]): Promise<string> {
     // 認証を求められても端末で止まらないようにし、時間も区切る
     const { stdout, stderr } = await run('git', ['-C', this.store.dir, ...args], {
       maxBuffer: 16 * 1024 * 1024,
-      timeout: 120_000,
+      timeout,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
     return (stdout + stderr).trim();
   }
-  private async gitStatus(): Promise<{ isRepo: boolean; branch: string | null; changedFiles: number }> {
+  // behind: 公開されている素材のほうが何件新しいか（最後に確かめた時点。公開先が無ければ 0）
+  private async gitStatus(): Promise<{ isRepo: boolean; branch: string | null; changedFiles: number; behind: number }> {
     try {
       // 素材フォルダそのものが作業フォルダの最上位であること（親のリポジトリを誤って commit しない）
       const top = await this.git('rev-parse', '--show-toplevel');
-      if (path.resolve(top) !== (await fs.realpath(this.store.dir))) return { isRepo: false, branch: null, changedFiles: 0 };
+      if (path.resolve(top) !== (await fs.realpath(this.store.dir))) return { isRepo: false, branch: null, changedFiles: 0, behind: 0 };
       const branch = await this.git('rev-parse', '--abbrev-ref', 'HEAD').catch(() => null);
       const status = await this.git('status', '--porcelain');
-      return { isRepo: true, branch, changedFiles: status ? status.split('\n').length : 0 };
+      const behind = Number(await this.git('rev-list', '--count', 'HEAD..@{upstream}').catch(() => '0')) || 0;
+      return { isRepo: true, branch, changedFiles: status ? status.split('\n').length : 0, behind };
     } catch {
-      return { isRepo: false, branch: null, changedFiles: 0 };
+      return { isRepo: false, branch: null, changedFiles: 0, behind: 0 };
     }
+  }
+
+  /**
+   * 公開されている素材（ほかの PC やクラウドから公開した分）を、素材フォルダに取り込む。
+   * 手元に未公開の変更があるとき・手元だけの記録があるときは、何も変えずに知らせる（手元の作業を壊さない）。
+   * つながらない・公開先が無いときも、エラーにしない
+   */
+  async sync(): Promise<{ updated: boolean; behind: number; message: string }> {
+    const before = await this.gitStatus();
+    if (!before.isRepo) return { updated: false, behind: 0, message: '素材フォルダが git の作業フォルダではないので、公開されている素材は確かめていません' };
+    try {
+      // つながらない回線で、スタジオの起動を長く待たせない
+      await this.gitWithin(SYNC_FETCH_TIMEOUT_MS, 'fetch', '--quiet');
+    } catch {
+      return { updated: false, behind: before.behind, message: '公開されている素材を確かめられませんでした（インターネットにつながっていないか、公開先がありません）' };
+    }
+    const { behind, changedFiles } = await this.gitStatus();
+    if (behind === 0) return { updated: false, behind: 0, message: '素材は最新です' };
+    if (changedFiles > 0) {
+      return { updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、未公開の変更が ${changedFiles} 件あるので取り込めません（このまま「公開」しても、公開先のほうが新しいので失敗します）` };
+    }
+    try {
+      await this.git('merge', '--ff-only', '--quiet', '@{upstream}');
+    } catch {
+      return { updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、手元にだけある記録（前回 push できなかった分）があるので、自動では取り込めません` };
+    }
+    // ドールの画像が変わったかもしれないので、読み込んだ型を捨てる
+    this.templates.clear();
+    return { updated: true, behind: 0, message: `公開されている新しい素材を ${behind} 件取り込みました` };
   }
 
   private async route(req: ApiRequest): Promise<ApiResponse> {
@@ -316,6 +352,8 @@ export class StudioApi {
         });
       case 'GET /api/content':
         return json(await this.store.read());
+      case 'POST /api/sync':
+        return json(await this.sync());
 
       case 'POST /api/process': {
         const { doll } = await this.doll(this.param(req, 'doll'));

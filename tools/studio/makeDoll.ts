@@ -1,7 +1,8 @@
 /**
  * ドールづくりの道具（コマンド）
  *
- *   候補を作る:  npx tsx tools/studio/makeDoll.ts generate <絵柄の見本の画像> <出力フォルダ> [枚数=4]
+ *   候補を作る:  npx tsx tools/studio/makeDoll.ts generate <絵柄の見本の画像> <出力フォルダ> [枚数=4] [girl|boy]
+ *               （boy は、見本のドールと同じ姿勢のまま男の子にする。見本には、作りやすい姿勢のドールを渡す）
  *   取り込む:    npx tsx tools/studio/makeDoll.ts import <候補の画像> <素材フォルダ> <名前> [カテゴリを写すドールの ID]
  *
  * 候補は、単色の背景に立つドール（dollPrompt の条件）。取り込みでは、背景を抜いて素材フォルダに登録し、
@@ -85,7 +86,8 @@ export async function importDoll(contentDir: string, name: string, image: Buffer
 async function main(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   if (command === 'generate' && rest.length >= 2) {
-    const [reference, outDir, count = '4'] = rest;
+    const [reference, outDir, count = '4', variant = 'girl'] = rest;
+    if (variant !== 'girl' && variant !== 'boy') throw new Error('ドールの種類は girl か boy で指定してください');
     const { image } = createAiFromEnv({ ...process.env, STUDIO_GEMINI_IMAGE_SIZE: '2K' });
     if (!image) throw new Error('GEMINI_API_KEY が設定されていません');
     await fs.mkdir(outDir, { recursive: true });
@@ -93,7 +95,7 @@ async function main(args: string[]): Promise<void> {
     await Promise.all(
       Array.from({ length: Math.max(1, Math.min(6, Number(count))) }, async (_, i) => {
         const file = path.join(outDir, `doll-${i + 1}.png`);
-        await fs.writeFile(file, await image.generate({ prompt: dollPrompt(DOLL_BACKGROUND), images: [ref] }));
+        await fs.writeFile(file, await image.generate({ prompt: dollPrompt(DOLL_BACKGROUND, variant), images: [ref] }));
         console.log(file);
       }),
     );
@@ -102,7 +104,7 @@ async function main(args: string[]): Promise<void> {
     const doll = await importDoll(contentDir, name, await fs.readFile(file), copyFrom);
     console.log(`登録しました: ${doll.id}（${doll.image.file}）`);
   } else {
-    console.log('使い方:\n  makeDoll.ts generate <絵柄の見本の画像> <出力フォルダ> [枚数]\n  makeDoll.ts import <候補の画像> <素材フォルダ> <名前> [カテゴリを写すドールの ID]');
+    console.log('使い方:\n  makeDoll.ts generate <絵柄の見本の画像> <出力フォルダ> [枚数] [girl|boy]\n  makeDoll.ts import <候補の画像> <素材フォルダ> <名前> [カテゴリを写すドールの ID]');
     process.exitCode = 1;
   }
 }

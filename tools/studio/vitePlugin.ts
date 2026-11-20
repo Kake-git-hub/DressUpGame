@@ -61,6 +61,8 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
           );
         }
       }
+      // ほかの PC やクラウドから公開された素材（新しいドールなど）を、始める前に取り込む
+      const synced = await api.sync().catch((error: Error) => ({ message: `公開されている素材を確かめられませんでした（${error.message}）` }));
       const base = server.config.base.replace(/\/$/, '');
       const contentPrefix = `${base}/local-content/`;
       server.middlewares.use(async (req, res, next) => {
@@ -86,7 +88,7 @@ export function studioPlugin(env: NodeJS.ProcessEnv = process.env): Plugin {
           next(error);
         }
       });
-      server.config.logger.info(`\n  スタジオ: 素材フォルダ ${contentDir}\n  画面: ${base}/studio.html\n`);
+      server.config.logger.info(`\n  スタジオ: 素材フォルダ ${contentDir}\n  ${synced.message}\n  画面: ${base}/studio.html\n`);
     },
   };
 }

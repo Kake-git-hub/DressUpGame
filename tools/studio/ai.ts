@@ -92,7 +92,7 @@ interface GeminiInteraction {
  * Gemini の画像生成（Interactions API、REST）。
  * 形は公式の説明（https://ai.google.dev/gemini-api/docs/image-generation、2026-11-16 確認）に合わせた:
  *   POST /v1beta/interactions、input に画像と文章を並べ、response_format で正方形の画像だけを求める。
- * 実際のキーではまだ呼んでいない。モデル名は環境変数 STUDIO_GEMINI_MODEL で変えられる。
+ * 本物のキーで動かしている（2026-11-19 から）。モデル名は環境変数 STUDIO_GEMINI_MODEL で変えられる。
  */
 export type ImageSize = '1K' | '2K' | '4K';
 export const IMAGE_SIZES: ImageSize[] = ['1K', '2K', '4K'];

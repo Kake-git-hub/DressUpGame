@@ -5,6 +5,8 @@
  *     ドールの画像・2 倍の元画像（studio/masters）・顔の品目の、輪郭線に混ざった背景の緑を取る（形は変えない）
  *   npm run content:fix -- back-thumbs <素材フォルダ>
  *     後ろ髪のある品目に、うしろがみのサムネイル（体の裏の塗りつぶしを、うすい体の形で隠した絵）を足す
+ *   npm run content:fix -- hair-shadows <素材フォルダ> [ドールの ID]
+ *     前髪と後ろ髪に分かれた髪から、髪が肌に落とした影（前髪の下の額など）を取る（色スライダーで、影だけが色変わりしないように）
  *
  * 画像の名前は中身のハッシュなので、直した画像は新しい名前になる。古い画像は消さない（公開のときに、使われていない画像として消える）
  */
@@ -14,9 +16,10 @@ import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import type { ManifestImage } from '../../src/content/manifest.ts';
 import { cleanKeyEdge } from '../../src/pipeline/edgeClean.ts';
-import { hairThumbs } from '../../src/pipeline/hairLayers.ts';
+import { fillUnderDoll, hairThumbs } from '../../src/pipeline/hairLayers.ts';
+import { skinShadowMask } from '../../src/pipeline/skinShadow.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
-import { encodeThumb } from './encode.ts';
+import { encodeCutout, encodeLayer, encodeThumb } from './encode.ts';
 import type { FileWriter } from './encode.ts';
 import { ContentError, ContentStore } from './manifestEdit.ts';
 
@@ -116,6 +119,61 @@ export async function addBackThumbs(contentDir: string): Promise<number> {
   });
 }
 
+const MIN_SHADOW_PIXELS = 20;
+
+// 前髪と後ろ髪に分かれた髪から、髪が肌に落とした影を取る。直した品目の ID と、取った画素数を返す
+export async function removeHairShadows(contentDir: string, dollId?: string): Promise<{ id: string; removed: number }[]> {
+  const store = new ContentStore(contentDir);
+  return store.edit(async (manifest, writer) => {
+    if (dollId && !manifest.dolls.some((d) => d.id === dollId)) throw new ContentError(`ドール「${dollId}」がありません`, 404);
+    const fixed: { id: string; removed: number }[] = [];
+    for (const doll of manifest.dolls) {
+      if (dollId && doll.id !== dollId) continue;
+      for (const item of doll.items) {
+        if (!item.back) continue;
+        const { canvasW: width, canvasH: height } = item.image;
+        if (item.back.canvasW !== width || item.back.canvasH !== height) continue;
+        const total = width * height;
+        const dollRgba = await placed(store.dir, doll.image, width, height);
+        const front = await placed(store.dir, item.image, width, height);
+        const alpha = new Uint8Array(total);
+        const hair = new Uint8Array(total);
+        const bare = new Uint8Array(total);
+        for (let p = 0; p < total; p++) {
+          alpha[p] = dollRgba[p * 4 + 3];
+          if (alpha[p] < 128) continue;
+          if (front[p * 4 + 3] >= 128) hair[p] = 1;
+          else bare[p] = 1;
+        }
+        const shadow = skinShadowMask(front, dollRgba, hair, bare, width, height);
+        let removed = 0;
+        for (let p = 0; p < total; p++) if (shadow[p]) removed++;
+        // ごく小さいもの（輪郭の色むら）は、絵を書き直すほどではない
+        if (removed < MIN_SHADOW_PIXELS) continue;
+        // 影の所は、前髪からは消す。後ろ髪では体の裏なので、髪の地の色で塗り直す
+        const back = await placed(store.dir, item.back, width, height);
+        for (let p = 0; p < total; p++) {
+          if (!shadow[p]) continue;
+          front[p * 4 + 3] = 0;
+          back[p * 4 + 3] = 0;
+        }
+        const filled = fillUnderDoll(back, alpha, width, height);
+        const thumbs = hairThumbs(front, filled, alpha, width, height);
+        const encoded = await encodeCutout(front, width, height, writer, thumbs.hair);
+        const backImage = await encodeLayer(filled, width, height, writer);
+        if (!encoded || !backImage) continue;
+        item.image = encoded.image;
+        item.thumb = encoded.thumb;
+        item.back = backImage;
+        const backThumb = await encodeThumb(thumbs.back, width, height, writer);
+        if (backThumb) item.backThumb = backThumb;
+        fixed.push({ id: item.id, removed });
+      }
+    }
+    return fixed;
+  });
+}
+
 async function main(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   if (command === 'outline' && rest.length >= 2) {
@@ -123,8 +181,12 @@ async function main(args: string[]): Promise<void> {
     console.log(`ドール: ${result.doll}／元画像: ${result.master ?? '（なし）'}／顔: ${result.faces} 点`);
   } else if (command === 'back-thumbs' && rest.length === 1) {
     console.log(`うしろがみのサムネイルを ${await addBackThumbs(rest[0])} 点に足しました`);
+  } else if (command === 'hair-shadows' && (rest.length === 1 || rest.length === 2)) {
+    const fixed = await removeHairShadows(rest[0], rest[1]);
+    for (const f of fixed) console.log(`${f.id}: 影を ${f.removed} 画素取りました`);
+    console.log(`${fixed.length} 点を直しました`);
   } else {
-    console.log('使い方:\n  fixContent.ts outline <素材フォルダ> <ドールの ID> [顔のカテゴリの ID]\n  fixContent.ts back-thumbs <素材フォルダ>');
+    console.log('使い方:\n  fixContent.ts outline <素材フォルダ> <ドールの ID> [顔のカテゴリの ID]\n  fixContent.ts back-thumbs <素材フォルダ>\n  fixContent.ts hair-shadows <素材フォルダ> [ドールの ID]');
     process.exitCode = 1;
   }
 }

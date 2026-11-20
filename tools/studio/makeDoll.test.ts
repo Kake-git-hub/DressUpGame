@@ -26,6 +26,19 @@ describe('dollPrompt', () => {
     expect(prompt).toMatch(/palm facing the viewer/);
     expect(prompt).toMatch(/fingers spread/);
   });
+
+  it('男の子: 見本と同じ姿勢のまま、体つきと下着だけを男の子にする指示になる', () => {
+    const prompt = dollPrompt([0, 255, 0], 'boy');
+    expect(prompt).toMatch(/BOY/);
+    expect(prompt).toMatch(/same pose/);
+    expect(prompt).toMatch(/sleeveless undershirt/);
+    expect(prompt).not.toMatch(/bandeau/);
+    // 姿勢の条件は、女の子と同じ
+    expect(prompt).toMatch(/palm facing the viewer/);
+    expect(prompt).toMatch(/turned outward/);
+    expect(prompt).toMatch(/no face/);
+    expect(prompt).toMatch(/#00FF00/);
+  });
 });
 
 describe('importDoll', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { categoryKind, categoryRules } from './generate.ts';
+import { categoryKind, categoryRules, hairPrompt } from './generate.ts';
 
 describe('categoryKind / categoryRules', () => {
   it('顔のカテゴリは髪を描かせない', () => {
@@ -21,5 +21,13 @@ describe('categoryKind / categoryRules', () => {
     for (const label of ['くつ', '靴', 'ブーツ', 'shoes']) expect(categoryKind(label)).toBe('shoes');
     for (const label of ['くつした', 'ソックス', '靴下']) expect(categoryKind(label)).toBeNull();
     expect(categoryRules('くつ')).toEqual([]);
+  });
+});
+
+describe('hairPrompt', () => {
+  it('髪が肌に影を落とさないように指示する（影は髪と一緒に色変わりしてしまうため）', () => {
+    const prompt = hairPrompt({ category: 'ヘア', name: 'ボブ', description: 'A black bob.', colors: [] }, 'ヘアスタイル', '', [0, 255, 0], null);
+    expect(prompt).toMatch(/casts no shadow/);
+    expect(prompt).toMatch(/face stays completely blank/);
   });
 });

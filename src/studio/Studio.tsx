@@ -21,6 +21,13 @@ type Tab = (typeof TABS)[number][0];
 const load = (): Promise<[Status, Manifest] | string> =>
   Promise.all([api.status(), api.content()]).catch((e: unknown) => (e instanceof ApiError ? e.message : String(e)));
 
+// 公開されている素材（ほかの PC やクラウドから公開された新しいドールなど）を取り込んでから、状態と一覧を読む。
+// 知らせる文は、取り込んだとき・取り込めなかったときだけ（最新なら null）
+async function syncAndLoad(): Promise<[string | null, [Status, Manifest] | string]> {
+  const synced = await api.sync().catch(() => null);
+  return [synced && (synced.updated || synced.behind > 0) ? synced.message : null, await load()];
+}
+
 export function Studio() {
   const [status, setStatus] = useState<Status | null>(null);
   const [manifest, setManifest] = useState<Manifest | null>(null);
@@ -28,6 +35,7 @@ export function Studio() {
   const [dollId, setDollId] = useState('');
   const [tab, setTab] = useState<Tab>('generate');
   const [publishing, setPublishing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
 
   const apply = useCallback((result: [Status, Manifest] | string) => {
     if (typeof result === 'string') {
@@ -40,13 +48,22 @@ export function Studio() {
     setDollId((current) => (result[1].dolls.some((d) => d.id === current) ? current : (result[1].dolls[0]?.id ?? '')));
   }, []);
   const reload = useCallback(() => load().then(apply), [apply]);
+  const [syncing, setSyncing] = useState(false);
+  const applySynced = useCallback(
+    ([note, result]: [string | null, [Status, Manifest] | string]) => {
+      setSyncNote(note);
+      setSyncing(false);
+      apply(result);
+    },
+    [apply],
+  );
   useEffect(() => {
     let cancelled = false;
-    void load().then((result) => !cancelled && apply(result));
+    void syncAndLoad().then((result) => !cancelled && applySynced(result));
     return () => {
       cancelled = true;
     };
-  }, [apply]);
+  }, [applySynced]);
 
   if (error && !manifest) {
     return (
@@ -92,6 +109,16 @@ export function Studio() {
         ))}
       </nav>
       {error && <p className="error">{error}</p>}
+      {syncNote && (
+        <p className={status.git.behind > 0 ? 'error' : 'hint'} data-testid="sync-note">
+          {syncNote}
+          {status.git.behind > 0 && (
+            <button disabled={syncing} onClick={() => { setSyncing(true); void syncAndLoad().then(applySynced); }}>
+              もう一度取り込む
+            </button>
+          )}
+        </p>
+      )}
       <main>
         {activeTab === 'doll' && <DollPanel doll={doll} onChanged={reload} onAdded={(id) => { setDollId(id); setTab('doll'); void reload(); }} />}
         {doll && activeTab === 'add' && <AddItems key={doll.id} doll={doll} onChanged={reload} />}

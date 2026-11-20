@@ -661,3 +661,60 @@ describe('公開', () => {
     expect((await errorOf(call('POST', '/api/publish', {}))).status).toBe(502);
   });
 });
+
+describe('公開されている素材の取り込み', () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { stdio: 'pipe' }).toString();
+  // 素材フォルダを git にして公開先を作り、別の場所（ほかの PC やクラウド）から、ドールを 1 体足して公開する
+  async function publishFromElsewhere(): Promise<void> {
+    const content = path.join(dir, 'content');
+    const remote = path.join(dir, 'remote.git');
+    execFileSync('git', ['init', '--bare', '-q', '-b', 'main', remote]);
+    git(content, 'init', '-q', '-b', 'main');
+    git(content, 'config', 'user.name', 't');
+    git(content, 'config', 'user.email', 't@example.com');
+    git(content, 'remote', 'add', 'origin', remote);
+    git(content, 'add', '-A');
+    git(content, 'commit', '-q', '-m', 'first');
+    git(content, 'push', '-q', '-u', 'origin', 'main');
+    const other = path.join(dir, 'other');
+    execFileSync('git', ['clone', '-q', remote, other]);
+    const elsewhere = new StudioApi({ contentDir: other, ai: { text: null, image: null }, budget });
+    await elsewhere.store.addDoll({ name: 'あたらしいドール', data: await dollPng() });
+    git(other, 'add', '-A');
+    git(other, 'commit', '-q', '-m', 'ドールを追加');
+    git(other, 'push', '-q');
+  }
+  type Sync = { updated: boolean; behind: number; message: string };
+  const dollNames = async () => (await ok<{ dolls: { name: string }[] }>('GET', '/api/content')).dolls.map((d) => d.name);
+
+  it('ほかの場所から公開されたドールが、取り込むと一覧に出る', async () => {
+    await publishFromElsewhere();
+    expect(await dollNames()).toEqual(['テスト']);
+    const r = await ok<Sync>('POST', '/api/sync', {});
+    expect(r).toMatchObject({ updated: true, behind: 0 });
+    expect(r.message).toMatch(/1 件/);
+    expect(await dollNames()).toEqual(['テスト', 'あたらしいドール']);
+    // もう一度は、何もしない
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+  });
+
+  it('未公開の変更があるときは、取り込まずに知らせる（手元の変更を壊さない）', async () => {
+    await publishFromElsewhere();
+    await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
+    const r = await ok<Sync>('POST', '/api/sync', {});
+    expect(r).toMatchObject({ updated: false, behind: 1 });
+    expect(r.message).toMatch(/未公開の変更/);
+    expect(await dollNames()).toEqual(['テスト']);
+    // 状態にも、公開されているほうが新しいことが出る
+    expect((await ok<{ git: { behind: number } }>('GET', '/api/status')).git.behind).toBe(1);
+  });
+
+  it('git の作業フォルダでない・公開先が無いときは、何もしない（エラーにしない）', async () => {
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+    const content = path.join(dir, 'content');
+    git(content, 'init', '-q', '-b', 'main');
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ updated: false, behind: 0 });
+    expect((await ok<{ git: { behind: number } }>('GET', '/api/status')).git.behind).toBe(0);
+  });
+});
+

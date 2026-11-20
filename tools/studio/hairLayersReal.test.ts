@@ -8,11 +8,13 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { extractHair, fillUnderDoll } from '../../src/pipeline/hairLayers.ts';
 import { pixelDistance } from '../../src/pipeline/keyColors.ts';
+import { isShadowOf } from '../../src/pipeline/skinShadow.ts';
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 
 const SIZE = 1024;
 const GREEN: Rgb = [0, 255, 0];
 const BLUE: Rgb = [0, 0, 255];
+const CYAN: Rgb = [0, 255, 255];
 const NECK_Y = 460; // 試作の拡大図での、首（肩の上）の高さ
 const file = (name: string) => path.join(import.meta.dirname, 'fixtures', 'diff', name);
 
@@ -30,7 +32,7 @@ async function load(slug: string, background: Rgb) {
   const reference = await raw(`${slug}-ref.webp`);
   const image = await raw(`${slug}-gen.webp`);
   const doll = dollOf(reference, background);
-  return { doll, hair: extractHair(image, reference, doll, SIZE, SIZE, background, NECK_Y) };
+  return { doll, reference, image, hair: extractHair(image, reference, doll, SIZE, SIZE, background, NECK_Y) };
 }
 
 describe('extractHair（本物の生成画像）', async () => {
@@ -135,15 +137,49 @@ describe('extractHair（本物の生成画像）', async () => {
   });
 
   it('うすいピンク（肌に近い色）の前髪が、欠けずに取り出せる', () => {
+    // 前髪の帯のうち、髪でない所は、房のすき間の肌の影だけ（影は髪に入れない）
     let band = 0;
+    let hairOrShadow = 0;
     let opaque = 0;
     for (let y = Math.round(SIZE * 0.24); y < SIZE * 0.29; y++) {
       for (let x = Math.round(SIZE * 0.44); x < SIZE * 0.56; x++) {
         band++;
-        if (pink.hair.rgba[(y * SIZE + x) * 4 + 3] >= 128) opaque++;
+        const i = (y * SIZE + x) * 4;
+        if (pink.hair.rgba[i + 3] >= 128) opaque++;
+        if (pink.hair.rgba[i + 3] >= 128 || isShadowOf(pink.image[i], pink.image[i + 1], pink.image[i + 2], pink.reference[i], pink.reference[i + 1], pink.reference[i + 2])) hairOrShadow++;
       }
     }
-    expect(opaque / band).toBeGreaterThan(0.95);
+    expect(hairOrShadow / band).toBeGreaterThan(0.95);
+    expect(opaque / band).toBeGreaterThan(0.88);
+  });
+
+  it('前髪が額に落とした肌の影は、髪に入れない（色スライダーで、影だけが色変わりしないように）', () => {
+    // 取り除く前は、髪に入った影の色の画素が ピンク 2168・三つ編み 2632。いまは 115・368（耳のまわりの小さなかけら）
+    for (const { doll, reference, hair } of [pink, braids]) {
+      let shadow = 0;
+      for (let p = 0; p < SIZE * SIZE; p++) {
+        const i = p * 4;
+        if (!doll[p] || hair.rgba[i + 3] < 128) continue;
+        if (isShadowOf(hair.rgba[i], hair.rgba[i + 1], hair.rgba[i + 2], reference[i], reference[i + 1], reference[i + 2])) shadow++;
+      }
+      expect(shadow).toBeLessThan(500);
+    }
+  });
+
+  it('白いシャツが肌より広いドール（男の子、2026-11-20）でも、額の影を髪に入れない', async () => {
+    // 肌の色を「いちばん多い色」で決めていたときは、シャツの白を肌と取り違えて、影の色の画素が 1500 以上残った
+    const boy = await load('h4-boy', CYAN);
+    let shadow = 0;
+    let onDoll = 0;
+    for (let p = 0; p < SIZE * SIZE; p++) {
+      const i = p * 4;
+      if (!boy.doll[p] || boy.hair.rgba[i + 3] < 128) continue;
+      onDoll++;
+      if (isShadowOf(boy.hair.rgba[i], boy.hair.rgba[i + 1], boy.hair.rgba[i + 2], boy.reference[i], boy.reference[i + 1], boy.reference[i + 2])) shadow++;
+    }
+    expect(onDoll).toBeGreaterThan(15000); // 髪は取り出せている
+    expect(shadow).toBeLessThan(200);
+    expect(boy.hair.unlike).toBeLessThan(0.02);
   });
 
   it('三つ編み: 手のまわりの小さな描き変えを、髪にしない（三つ編みの先より下に、髪は無い）', () => {

@@ -7,6 +7,8 @@
  * 品目の JSON: [{ "category": "くつ", "name": "…", "description": "英語の説明", "colors": ["#rrggbb"] }, …]
  * 出力フォルダに、品目ごとに 切り抜き（-cut.png）・隠す所（-hide.png）・AI の形（-shape.png）・前髪の範囲（-front.png）・
  * くつの中の肌（-under.png）・AI の絵（-source.png）・ドールに着せた絵（-worn.jpg）と、結果の一覧（result.json）を書く。
+ * AI に渡した絵は ref-1.png, ref-2.png …、AI が返したままの絵は raw-1.png, raw-2.png … として、作った順に残す
+ *（処理を直したとき、raw を STUDIO_FAKE_IMAGE に渡せば、作り直さずに確かめられる）。
  * 髪は、サムネイル（-thumb.png）と、うしろがみのサムネイル（-backthumb.png）も書く。
  * --with を付けると、その品目（靴下など）も重ねた絵（-worn-with.jpg）を書く。
  * save は、選んだ番号の候補を素材フォルダに登録する（公開はしない）。最後に replace を付けると、同じカテゴリ・同じ名前の品目を置き換える。
@@ -27,7 +29,22 @@ const noInspection: TextAi = { json: async <T>() => ({ ok: true, reason: '（人
 
 function makeApi(contentDir: string, outDir: string): StudioApi {
   const fake = process.env.STUDIO_FAKE_IMAGE;
-  const image: ImageAi | null = fake ? { generate: () => fs.readFile(fake) } : createAiFromEnv().image;
+  const real = fake ? null : createAiFromEnv().image;
+  let made = 0;
+  // AI に渡した絵（ref-N.png）と、AI が返したままの絵（raw-N.png。本物の生成だけ）を残す
+  const image: ImageAi | null =
+    fake || real
+      ? {
+          generate: async (input) => {
+            const n = ++made;
+            if (input.images[0]) await fs.writeFile(path.join(outDir, `ref-${n}.png`), input.images[0]);
+            if (fake) return fs.readFile(fake);
+            const data = await real!.generate(input);
+            await fs.writeFile(path.join(outDir, `raw-${n}.png`), data);
+            return data;
+          },
+        }
+      : null;
   return new StudioApi({
     contentDir,
     ai: { text: noInspection, image },
