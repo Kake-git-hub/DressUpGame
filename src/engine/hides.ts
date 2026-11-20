@@ -2,29 +2,44 @@
  * 服が隠すドールの部分（手袋・くつの下からはみ出す指先など）
  */
 import type { Box, EquippedItem } from '../types';
-import { isBehindDoll } from './layers';
+import { effectiveLayer, isBehindDoll } from './layers';
 
 export interface Hide {
   url: string;
   box: Box;
 }
 
+// 着せた位置のまま（動かしていない・大きさや傾きを変えていない・調整中でない）か
+const inPlace = (item: EquippedItem, adjustingItemId: string | null): boolean =>
+  item.id !== adjustingItemId && !(item.adjustOffsetX ?? 0) && !(item.adjustOffsetY ?? 0) && (item.adjustScale ?? 1) === 1 && !(item.adjustRotation ?? 0);
+
 // 着ている服のうち、ドールの一部を隠すもの。
 // 動かした・大きさや傾きを変えた服と、調整中の服は隠さない（隠した所が服からずれてしまうため）。
 // ドールの後ろに回した服も隠さない（ドールのほうが手前に見える）
 export function activeHides(items: EquippedItem[], adjustingItemId: string | null): Hide[] {
-  return items
-    .filter(
-      (item) =>
-        !!item.hide &&
-        item.id !== adjustingItemId &&
-        !isBehindDoll(item) &&
-        !(item.adjustOffsetX ?? 0) &&
-        !(item.adjustOffsetY ?? 0) &&
-        (item.adjustScale ?? 1) === 1 &&
-        !(item.adjustRotation ?? 0),
-    )
-    .map((item) => item.hide!);
+  return items.filter((item) => !!item.hide && !isBehindDoll(item) && inPlace(item, adjustingItemId)).map((item) => item.hide!);
+}
+
+/**
+ * 隠す所を、ドールと、ほかの服に分けて返す。
+ *  doll: ドールから消す所（activeHides と同じ）
+ *  items: 服の ID → その服から消す所。隠す所を持つ服より重なりが下で、ドールより前にある服（くつの下の靴下など）。
+ *         箱は、その服のキャンバス上の位置に直してある（服のキャンバスは、ドールのキャンバスのまわりに余白を足したもの）。
+ *         動かした・調整中の服からは消さない（消す形が服とずれるため）
+ */
+export function hidesFor(items: EquippedItem[], adjustingItemId: string | null, dollCanvas: { w: number; h: number }): { doll: Hide[]; items: Map<string, Hide[]> } {
+  const hiders = items.filter((item) => !!item.hide && !isBehindDoll(item) && inPlace(item, adjustingItemId));
+  const clipped = new Map<string, Hide[]>();
+  for (const target of items) {
+    if (isBehindDoll(target) || !inPlace(target, adjustingItemId)) continue;
+    const dx = (target.canvasW - dollCanvas.w) / 2;
+    const dy = (target.canvasH - dollCanvas.h) / 2;
+    const masks = hiders
+      .filter((hider) => hider.id !== target.id && effectiveLayer(target) < effectiveLayer(hider))
+      .map((hider) => ({ url: hider.hide!.url, box: { ...hider.hide!.box, x: hider.hide!.box.x + dx, y: hider.hide!.box.y + dy } }));
+    if (masks.length > 0) clipped.set(target.id, masks);
+  }
+  return { doll: hiders.map((item) => item.hide!), items: clipped };
 }
 
 /**

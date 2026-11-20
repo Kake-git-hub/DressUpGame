@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { PixiEngine } from '../engine/PixiEngine';
-import { activeHides } from '../engine/hides';
+import { activeHides, hidesFor } from '../engine/hides';
 import type { DollConfig, DollData, EquippedItem, DollTransform } from '../types';
 
 // 外部から呼び出せるメソッド
@@ -50,6 +50,12 @@ export interface HiddenSheets {
 // hidden は、服の ID を改行でつないだもの
 function hiddenIds(hidden: string): Set<string> {
   return new Set(hidden.split('\n').filter(Boolean));
+}
+
+// 服を描くときの指定: ほかの服が隠す所（くつの下の靴下など）と、調整中の服
+function clothingOptions(items: EquippedItem[], doll: DollData | null | undefined, adjustingItemId: string | null) {
+  const dollCanvas = { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 };
+  return { clip: hidesFor(items, adjustingItemId, dollCanvas).items, adjustingItemId };
 }
 
 export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(function AvatarCanvas({
@@ -103,7 +109,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
     const { equippedItems: items, doll: currentDoll, backgroundImageUrl: bg, adjustingItemId: adjusting, hiddenKey: hidden } = latest.current;
     await engine.setBackground(bg ?? null);
     await engine.drawDoll(toDollConfig(currentDoll, activeHides(items, adjusting)));
-    await engine.drawClothing(items, hiddenIds(hidden));
+    await engine.drawClothing(items, hiddenIds(hidden), clothingOptions(items, currentDoll, adjusting));
     engine.forceRedraw();
   };
 
@@ -200,7 +206,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
   useEffect(() => {
     if (isReady && engineRef.current?.isInitialized()) {
       // 調整中のアイテム（と、その手前の服）は描かない（調整画面が代わりに重ねて描く）
-      redrawWhenDone(engineRef.current.drawClothing(equippedItems, hiddenIds(hiddenKey)));
+      redrawWhenDone(engineRef.current.drawClothing(equippedItems, hiddenIds(hiddenKey), clothingOptions(equippedItems, latest.current.doll, latest.current.adjustingItemId)));
     }
   }, [equippedItems, hiddenKey, isReady]);
 
@@ -227,7 +233,7 @@ export const AvatarCanvas = forwardRef<AvatarCanvasHandle, AvatarCanvasProps>(fu
       redrawWhenDone(
         Promise.all([
           engine.drawDoll(toDollConfig(latest.current.doll, activeHides(latest.current.equippedItems, latest.current.adjustingItemId))),
-          engine.drawClothing(latest.current.equippedItems, hiddenIds(latest.current.hiddenKey)),
+          engine.drawClothing(latest.current.equippedItems, hiddenIds(latest.current.hiddenKey), clothingOptions(latest.current.equippedItems, latest.current.doll, latest.current.adjustingItemId)),
         ])
       );
     }

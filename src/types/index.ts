@@ -254,6 +254,8 @@ export interface ClothingItemData {
   box: Box;
   // 着ているあいだ隠すドールの部分（白い不透明な所）。位置はドールのキャンバス上
   hide?: { url: string; box: Box };
+  // ドールのすぐ上、ほかの服の下に描く分（くつの中に見える足の肌など）。服と同じように動き、色は変えない
+  under?: { url: string; canvasW: number; canvasH: number; box: Box };
   // 対になる「うしろがみ」の ID（前髪だけが持つ）。着せると、対のうしろがみも一緒に付く
   backItemId?: string;
 }

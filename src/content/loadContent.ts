@@ -98,6 +98,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
         canvasH: item.image.canvasH,
         box: item.image.box,
         ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
+        ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
         ...(item.back ? { backItemId: backItemId(item.id) } : {}),
       });
       if (item.back) {
@@ -106,7 +107,8 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
           name: item.name,
           type: BACK_HAIR_TYPE,
           imageUrl: url(item.back.file),
-          thumbnailUrl: url(item.back.file), // 専用のサムネイルは無いので、絵そのものを使う
+          // うしろがみのサムネイル（体の裏の塗りつぶしを、うすい体の形で隠した絵）。無ければ絵そのもの
+          thumbnailUrl: url(item.backThumb ?? item.back.file),
           position: { x: 0, y: 0 },
           baseZIndex: BACK_HAIR_LAYER,
           layerOrder: BACK_HAIR_LAYER,

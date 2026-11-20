@@ -17,6 +17,7 @@ export default async function globalSetup(): Promise<void> {
     await buildContent(presetDir, out);
     await addHide(out);
     await addBack(out);
+    await addShoeLayers(out);
   } finally {
     await fs.rm(presetDir, { recursive: true, force: true });
   }
@@ -32,6 +33,26 @@ async function addHide(dir: string): Promise<void> {
   const green = manifest.dolls[0].items.find((i) => i.name === 'green');
   if (!green) throw new Error('e2e: green が見つかりません');
   green.hide = { file: 'files/e2e-hide.webp', canvasW: 1024, canvasH: 1024, box };
+  await fs.writeFile(file, JSON.stringify(manifest, null, 1));
+}
+
+// くつ（shoe）に、靴の開きに見える肌（under、ピンク）と、靴の外の足を隠す所（hide）を付ける。
+// 隠す所は、足もと（x=330〜694、y=850〜911）のうち、靴と肌のある所（x=420〜604）を除いた左右
+async function addShoeLayers(dir: string): Promise<void> {
+  const underBox = { x: 470, y: 852, w: 85, h: 49 };
+  const under = await sharp({ create: { width: underBox.w, height: underBox.h, channels: 4, background: '#ff80c0' } }).webp({ lossless: true }).toBuffer();
+  const hideBox = { x: 330, y: 850, w: 365, h: 62 };
+  const { data, info } = await sharp({ create: { width: hideBox.w, height: hideBox.h, channels: 4, background: '#ffffff' } }).raw().toBuffer({ resolveWithObject: true });
+  for (let y = 0; y < info.height; y++) for (let x = 420 - hideBox.x; x < 605 - hideBox.x; x++) data[(y * info.width + x) * 4 + 3] = 0;
+  const hide = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).webp({ lossless: true }).toBuffer();
+  await fs.writeFile(path.join(dir, 'files', 'e2e-under.webp'), under);
+  await fs.writeFile(path.join(dir, 'files', 'e2e-shoe-hide.webp'), hide);
+  const file = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(file, 'utf8')) as { dolls: { items: { name: string; under?: unknown; hide?: unknown }[] }[] };
+  const shoe = manifest.dolls[0].items.find((i) => i.name === 'shoe');
+  if (!shoe) throw new Error('e2e: shoe が見つかりません');
+  shoe.under = { file: 'files/e2e-under.webp', canvasW: 1024, canvasH: 1024, box: underBox };
+  shoe.hide = { file: 'files/e2e-shoe-hide.webp', canvasW: 1024, canvasH: 1024, box: hideBox };
   await fs.writeFile(file, JSON.stringify(manifest, null, 1));
 }
 

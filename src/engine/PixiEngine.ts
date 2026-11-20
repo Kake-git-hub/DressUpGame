@@ -6,6 +6,7 @@
 import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter, Texture } from 'pixi.js';
 import { isBehindDoll } from './layers';
 import { eraseHides } from './hides';
+import type { Hide } from './hides';
 import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
 
 // ドール・服の表示高さ（画面の高さに対する割合）
@@ -42,6 +43,23 @@ export function itemPivot(placed: Placed, texture: { width: number; height: numb
   };
 }
 
+// 服に付いた「ドールのすぐ上に描く分」（くつの中の肌など）の原点。服と同じ軸（服の中心）で回り、大きくなるように、
+// 服の中心が、その絵のテクスチャ上のどこに当たるかを返す。scale は、テクスチャ 1px が元キャンバスの何 px か
+export function underPivot(item: Placed & { box: Box; canvasW: number; canvasH: number }, under: { canvasW: number; canvasH: number; box: Box }, texture: { width: number; height: number }): { x: number; y: number; scale: number } {
+  const k = texture.width / under.box.w;
+  const centerX = item.box.x + item.box.w / 2 - item.canvasW / 2; // 元キャンバスの中心から、服の中心まで
+  const centerY = item.box.y + item.box.h / 2 - item.canvasH / 2;
+  const left = under.box.x - under.canvasW / 2; // 元キャンバスの中心から、絵の左上まで
+  const top = under.box.y - under.canvasH / 2;
+  return { x: (centerX - left) * k, y: (centerY - top) * k, scale: 1 / k };
+}
+
+// 描き直しのたびに作る、隠す所を消した服のテクスチャ（次の描き直しで捨てる）
+type ClothingOptions = {
+  clip?: ReadonlyMap<string, Hide[]>; // 服の ID → その服から消す所（服のキャンバス上の位置）
+  adjustingItemId?: string | null; // 調整中の服。その「ドールのすぐ上の分」は、調整画面が服と一緒に描く
+};
+
 export class PixiEngine {
   private app: Application | null = null;
   private backgroundContainer: Container | null = null;
@@ -65,6 +83,7 @@ export class PixiEngine {
   private backgroundDrawId = 0;
   // 服が隠す所を消したドールのテクスチャ（作り直したら前のものは捨てる）
   private hiddenDollTexture: Texture | null = null;
+  private clippedTextures: Texture[] = []; // 隠す所を消した服（次の描き直しで捨てる）
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -487,9 +506,12 @@ export class PixiEngine {
   // 服を描画（imageUrlがあれば画像、なければプレースホルダー）。
   // 描く順番（下から）: ドールの後ろの服（うしろがみ・後ろに回した服）→ ドール → ほかの服（layers.ts の drawOrder と同じ）。
   // hidden の服は描かない（調整中は画面側のプレビューが代わりに出る）
+  // 服の「ドールのすぐ上に描く分」（くつの中の肌）は、ドールの前の服より下にまとめて描く（ドールの後ろの服なら、その服のすぐ下）。
+  // options.clip にある服は、その所を消して描く（くつの下の靴下が、くつの外にはみ出さないように）
   async drawClothing(
     items: (ClothingItemData | EquippedItem)[],
     hidden: ReadonlySet<string> | null = null,
+    options: ClothingOptions = {},
   ): Promise<void> {
     if (!this.clothingContainer || !this.app || !this.initialized || this.destroyed) {
       return;
@@ -507,17 +529,40 @@ export class PixiEngine {
     const behindSprites: Sprite[] = []; // ドールの後ろの服（うしろがみ・後ろに回した服）
 
     // 全アイテムのテクスチャを並列で先にロード（ラグ解消）
+    const clip = options.clip ?? new Map<string, Hide[]>();
+    const madeTextures: Texture[] = []; // この描き直しで作ったテクスチャ
     const loadPromises = items.map(async (item) => {
+      // ドールのすぐ上に描く分。読めなければ描かない（服そのものは描く）
+      const loadUnder = async (): Promise<Texture | null> => {
+        if (!item.under || hidden?.has(item.id) || item.id === options.adjustingItemId) return null;
+        try {
+          return (await Assets.load(item.under.url)) as Texture;
+        } catch (error) {
+          console.warn(`服の下に描く分の読み込みに失敗 (${item.name}):`, error);
+          return null;
+        }
+      };
       if (item.imageUrl) {
         try {
           // キャッシュ済みならすぐに返る
-          const texture = await Assets.load(item.imageUrl);
-          return { item, texture, error: null };
+          let texture = (await Assets.load(item.imageUrl)) as Texture;
+          const masks = clip.get(item.id);
+          if (masks?.length && item.box) {
+            try {
+              const images = await Promise.all(masks.map(async (h) => ({ image: ((await Assets.load(h.url)) as Texture).source.resource as CanvasImageSource, box: h.box })));
+              const source = texture.source.resource as CanvasImageSource & { width: number; height: number };
+              texture = Texture.from(eraseHides(source, item.box, images));
+              madeTextures.push(texture);
+            } catch (error) {
+              console.warn(`服が隠す所を読めませんでした。服をそのまま表示します (${item.name}):`, error);
+            }
+          }
+          return { item, texture, under: await loadUnder(), error: null };
         } catch (error) {
-          return { item, texture: null, error };
+          return { item, texture: null, under: null, error };
         }
       }
-      return { item, texture: null, error: null };
+      return { item, texture: null, under: null, error: null };
     });
 
     const drawId = ++this.clothingDrawId;
@@ -527,11 +572,13 @@ export class PixiEngine {
     // 読み込み中に次の描画が始まった場合も捨てる（遅れて届いた古い服装で上書きしない）
     if (this.destroyed || !this.clothingContainer || !this.backContainer || drawId !== this.clothingDrawId) {
       tempContainer.destroy({ children: true });
+      for (const texture of madeTextures) texture.destroy(true);
       return;
     }
 
+    const underSprites: Sprite[] = []; // ドールの前の服の「ドールのすぐ上の分」（服より下にまとめる）
     // ロード完了後、一時コンテナに描画
-    for (const { item, texture, error } of loadedItems) {
+    for (const { item, texture, under, error } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
@@ -600,8 +647,27 @@ export class PixiEngine {
 
         if (colorHue !== 0) clothingSprite.filters = hueFilters();
 
-        if (behind) behindSprites.push(clothingSprite);
-        else tempContainer.addChild(clothingSprite);
+        // ドールのすぐ上に描く分: 服と同じ位置・大きさ・向き。色は変えない
+        let underSprite: Sprite | null = null;
+        if (under && item.under) {
+          under.source.scaleMode = 'linear';
+          underSprite = new Sprite(under);
+          const p = underPivot({ ...item, box: item.box, canvasW: item.canvasW, canvasH: item.canvasH }, item.under, under);
+          underSprite.anchor.set(0);
+          underSprite.pivot.set(p.x, p.y);
+          underSprite.scale.set(baseScale * s * adjustScale * p.scale);
+          underSprite.x = clothingSprite.x;
+          underSprite.y = clothingSprite.y;
+          underSprite.rotation = clothingSprite.rotation;
+        }
+
+        if (behind) {
+          if (underSprite) behindSprites.push(underSprite);
+          behindSprites.push(clothingSprite);
+        } else {
+          if (underSprite) underSprites.push(underSprite);
+          tempContainer.addChild(clothingSprite);
+        }
       } else if (error) {
         // 画像読み込み失敗時はプレースホルダーを表示
         console.warn(`服画像の読み込みに失敗 (${item.name}):`, error);
@@ -620,7 +686,8 @@ export class PixiEngine {
       }
     }
     this.clothingContainer.removeChildren();
-    
+    for (const sprite of underSprites) this.clothingContainer.addChild(sprite);
+
     while (tempContainer.children.length > 0) {
       const child = tempContainer.children[0];
       tempContainer.removeChild(child);
@@ -632,6 +699,9 @@ export class PixiEngine {
     for (const child of this.backContainer.children) if (child instanceof Sprite) child.filters = null;
     this.backContainer.removeChildren().forEach((child) => child.destroy());
     for (const sprite of behindSprites) this.backContainer.addChild(sprite);
+    // 前の描き直しで作ったテクスチャを捨てる（いまの絵は、この描き直しで作ったものを使う）
+    for (const texture of this.clippedTextures) texture.destroy(true);
+    this.clippedTextures = madeTextures;
 
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
     this.cacheClothingContainer();
@@ -803,6 +873,14 @@ export class PixiEngine {
       // 無視
     }
     this.hiddenDollTexture = null;
+    for (const texture of this.clippedTextures) {
+      try {
+        texture.destroy(true);
+      } catch {
+        // 無視
+      }
+    }
+    this.clippedTextures = [];
 
     // コンテナをクリア
     if (this.dollContainer) {

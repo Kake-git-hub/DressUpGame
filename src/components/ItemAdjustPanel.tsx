@@ -12,7 +12,7 @@ import { canvasGeometry, itemOrigin, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
-import { activeHides } from '../engine/hides';
+import { activeHides, hidesFor } from '../engine/hides';
 import { isBehindDoll, moveLayer as nextLayerAdjust, sheetsAbove, sortByLayer } from '../engine/layers';
 
 interface ItemAdjustPanelProps {
@@ -536,7 +536,7 @@ export function ItemAdjustPanel({
 
         return (
           <>
-            <PlacedItem item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50} alwaysHue testId="adjust-preview">
+            <PlacedItem item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50} alwaysHue showUnder testId="adjust-preview">
               {/* シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転 */}
               <div
                 className="sticker-frame"
@@ -590,7 +590,10 @@ export function ItemAdjustPanel({
               </div>
             </PlacedItem>
             {/* 調整中の服より手前のもの（服・ドール）。キャンバスの代わりに、ここに重ねる */}
-            {sheetsAbove(current, item.id).map((sheet, i) =>
+            {(() => {
+              // 手前の服のうち、ほかの服が隠す所を持つもの（くつの下の靴下など）。キャンバスと同じように消して描く
+              const clip = hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items;
+              return sheetsAbove(current, item.id).map((sheet, i) =>
               sheet.kind === 'doll' ? (
                 doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={51 + i} />
               ) : (
@@ -598,13 +601,15 @@ export function ItemAdjustPanel({
                   key={sheet.item.id}
                   item={sheet.item}
                   look={lookOf(sheet.item)}
+                  clip={clip.get(sheet.item.id)}
                   geometry={geometry}
                   dollTransform={dollTransform}
                   zIndex={51 + i}
                   className="adjust-front-item"
                 />
               ),
-            )}
+              );
+            })()}
           </>
         );
       })()}

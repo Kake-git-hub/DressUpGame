@@ -578,6 +578,70 @@ test('隠す所を持つ服を着ると、そこだけドールが消える。�
   await expectPixel(page, DOLL_X, HEM_Y, SKIN);
 });
 
+{
+  // くつ: 開きに見える肌（ピンク）は、ドールのすぐ上・靴下の下。靴の外の足は、ドールからも靴下からも消える
+  const imgX = (x: number) => DOLL_X + (x - IMG / 2) * BASE_SCALE;
+  const HOLE = { x: imgX(512), y: imgY(875) }; // 靴の開き
+  const SIDE = { x: imgX(372), y: imgY(885) }; // 靴の左の、隠す所
+  const SHOE = { x: imgX(440), y: imgY(885) }; // 靴
+  const PINK: Rgba = [255, 128, 192, 255];
+  const SOCK: Rgba = [64, 224, 224, 255];
+  const BROWN: Rgba = [128, 64, 0, 255];
+
+  test('くつ: 開きに肌が見え、靴の外の足は消える。色スライダーは靴だけを変える', async ({ page }) => {
+    await openApp(page);
+    await expectPixel(page, SIDE.x, SIDE.y, SKIN);
+    await dragItemToDoll(page, 'くつ', 'shoe');
+    await expectPixel(page, SHOE.x, SHOE.y, BROWN);
+    await expectPixel(page, HOLE.x, HOLE.y, PINK);
+    await expect.poll(async () => (await canvasPixel(page, SIDE.x, SIDE.y))[3], { timeout: 20_000 }).toBe(0);
+
+    await page.locator('.tool-button').first().click();
+    await expect(page.getByTestId('adjust-preview')).toBeVisible();
+    await page.locator('.hue-slider-vertical').fill('120');
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expect.poll(async () => near(await canvasPixel(page, SHOE.x, SHOE.y), BROWN), { timeout: 10_000 }).toBe(false);
+    await expectPixel(page, HOLE.x, HOLE.y, PINK);
+
+    // 調整中も、肌の絵は靴と一緒に見え、靴を動かすと一緒に動く。確定後も同じ。隠す所は効かなくなり、ドールの足が見える
+    await page.locator('.tool-button').first().click();
+    await expect(page.getByTestId('adjust-preview')).toBeVisible();
+    await expect.poll(async () => near(await screenPixel(page, HOLE.x, HOLE.y), PINK), { timeout: 5000 }).toBe(true);
+    await page.mouse.move(SHOE.x, SHOE.y);
+    await page.mouse.down();
+    await page.mouse.move(SHOE.x + 40, SHOE.y, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => near(await screenPixel(page, HOLE.x + 40, HOLE.y), PINK), { timeout: 5000 }).toBe(true);
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expectPixel(page, HOLE.x + 40, HOLE.y, PINK);
+    await expectPixel(page, SIDE.x, SIDE.y, SKIN);
+  });
+
+  test('くつ＋靴下: 開きには靴下が見え、靴の外の靴下は消える。靴を動かすと、靴下は元どおり', async ({ page }) => {
+    await openApp(page);
+    await dragItemToDoll(page, 'ソックス', 'sock');
+    await expectPixel(page, SIDE.x, SIDE.y, SOCK);
+    await dragItemToDoll(page, 'くつ', 'shoe');
+    await expectPixel(page, SHOE.x, SHOE.y, BROWN);
+    await expectPixel(page, HOLE.x, HOLE.y, SOCK);
+    await expect.poll(async () => (await canvasPixel(page, SIDE.x, SIDE.y))[3], { timeout: 20_000 }).toBe(0);
+    // 再読み込みしても同じ
+    await page.reload();
+    await openApp(page);
+    await expectPixel(page, HOLE.x, HOLE.y, SOCK);
+    await expect.poll(async () => (await canvasPixel(page, SIDE.x, SIDE.y))[3], { timeout: 20_000 }).toBe(0);
+    // 靴を動かすと、隠す所は効かなくなり、靴下が元どおり見える（靴の開きにも、靴下が見えたまま）
+    await page.locator('.tool-button').first().click();
+    await page.mouse.move(SHOE.x, SHOE.y);
+    await page.mouse.down();
+    await page.mouse.move(SHOE.x + 40, SHOE.y, { steps: 4 });
+    await page.mouse.up();
+    await page.locator('.item-adjust-done-btn-small').click();
+    await expectPixel(page, SIDE.x, SIDE.y, SOCK);
+    await expectPixel(page, HOLE.x + 40, HOLE.y, SOCK);
+  });
+}
+
 test('調整の枠: 角のつまみで大きくでき、× で脱がせる', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');

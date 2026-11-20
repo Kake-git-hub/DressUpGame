@@ -92,6 +92,29 @@ describe('loadContent', () => {
     });
   });
 
+  // 一覧の最初の服に、項目を足した一覧
+  const withItem = (extra: Record<string, unknown>): Manifest => {
+    const m: Manifest = structuredClone(manifest);
+    Object.assign(m.dolls[0].items[0], extra);
+    return m;
+  };
+
+  it('ドールのすぐ上に描く分（under）を、服と同じキャンバスの位置で持つ', async () => {
+    const under = { file: 'files/u.webp', canvasW: 1024, canvasH: 1024, box: { x: 440, y: 900, w: 120, h: 60 } };
+    const { clothing } = await loadContent(BASE, okFetch(withItem({ under })));
+    expect(clothing[0].under).toEqual({ url: `${BASE}files/u.webp`, canvasW: 1024, canvasH: 1024, box: under.box });
+    const plain = await loadContent(BASE, okFetch(manifest));
+    expect(plain.clothing[0].under).toBeUndefined();
+  });
+
+  it('うしろがみのサムネイル（backThumb）があれば、うしろがみの一覧の絵はそれ。無ければ絵そのもの', async () => {
+    const back = { file: 'files/hb.webp', canvasW: 1024, canvasH: 1024, box: { x: 350, y: 30, w: 300, h: 600 } };
+    const withThumb = await loadContent(BASE, okFetch(withItem({ back, backThumb: 'files/hbt.webp' })));
+    expect(withThumb.clothing.find((c) => c.type === BACK_HAIR_TYPE)!.thumbnailUrl).toBe(`${BASE}files/hbt.webp`);
+    const without = await loadContent(BASE, okFetch(withItem({ back })));
+    expect(without.clothing.find((c) => c.type === BACK_HAIR_TYPE)!.thumbnailUrl).toBe(`${BASE}files/hb.webp`);
+  });
+
   it('後ろに描く分（back）のある髪は、前髪と「うしろがみ」の 2 点に分ける', async () => {
     const withHair: Manifest = structuredClone(manifest);
     withHair.dolls[0].categories.push({ id: 'ヘア', label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false });
