@@ -21,6 +21,8 @@
         var vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
         document.documentElement.style.setProperty('--app-height', vh + 'px');
         document.documentElement.style.setProperty('--app-width', vw + 'px');
+        // ホーム画面から開いたとき（古い iPadOS は display-mode で見分けられないことがある）
+        if (window.navigator.standalone === true) document.documentElement.classList.add('standalone');
       })();
     </script>
     <div id="root"></div>

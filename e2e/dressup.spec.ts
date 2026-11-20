@@ -909,3 +909,37 @@ test('下の案内の文は無く、版数は右上に小さく出る（調整�
   expect(b.y + b.height).toBeLessThanOrEqual(top.y);
   expect(await badge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
 });
+
+// ホーム画面から開いたとき（standalone）をまねて、開き直す。
+// Chromium は display-mode をまねられないので、iPadOS が持つ navigator.standalone のほうで確かめる
+async function reopenStandalone(page: Page): Promise<void> {
+  await page.addInitScript(() => Object.defineProperty(window.navigator, 'standalone', { value: true }));
+  await page.goto(APP_URL);
+  await waitForMenu(page);
+  await page.waitForTimeout(700);
+}
+
+test('ホーム画面から開いたときは、上のバーの分（24px 以上）をあける。ブラウザでは今までどおり', async ({ page }) => {
+  await openApp(page);
+  const tops = async () => ({
+    menu: (await page.locator('.palette-section select').boundingBox())!.y,
+    tool: (await page.locator('.tool-buttons').boundingBox())!.y,
+    badge: (await page.locator('.version-badge').boundingBox())!.y,
+  });
+  // 出てくるときの動き（0.5 秒）が終わってから測る
+  await page.waitForTimeout(700);
+  const browser = await tops();
+  // ブラウザでは、変える前（v0.21.2）と同じ位置
+  expect(browser.menu).toBe(8);
+  expect(browser.tool).toBe(72);
+  await reopenStandalone(page);
+  const standalone = await tops();
+  expect(standalone.menu).toBe(browser.menu + 24);
+  expect(standalone.tool).toBe(96);
+  expect(standalone.badge).toBeGreaterThanOrEqual(24);
+  // 調整画面の上のボタンも下がる
+  await page.locator('.tool-button').click();
+  expect((await page.locator('.item-adjust-top-buttons').boundingBox())!.y).toBe(40);
+  // キャンバスは動かない（この段階では、描く位置を変えない）
+  expect((await page.getByTestId('avatar-canvas').boundingBox())!.y).toBe(0);
+});
