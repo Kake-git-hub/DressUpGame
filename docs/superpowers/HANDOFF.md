@@ -13,7 +13,7 @@
 |---|---|
 | ゲームの版 | v0.27.0。**公開済み**（`main` = 作業ブランチ `claude/blissful-wozniak-9vofnl`。作者の了承「公開してよい」を得て取り込んだ、2026-11-20）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `fb063ca`。**公開済み**）。ドール 4 体（アニメ 102 点・リアル 11 点・アニメ　その２ 127 点・おとこのこ 11 点）、背景 0 枚。https://kake-git-hub.github.io/DressUpGame-content/manifest.json |
-| テスト | ユニット 617 件、E2E 76 件。すべて通過。型・ESLint エラー 0 |
+| テスト | ユニット 660 件、E2E 79 件、エミュレーター 15 件（`npm run firebase:test`）。すべて通過。型・ESLint エラー 0 |
 | 画像生成 | Gemini の呼び出しは本物で動いている（2026-11-19 から）。Claude API のキーは無いが、v0.25.0 から、企画と検品は Gemini の文章のモデル（`gemini-3.8-flash`）でも動く（スタジオの「テーマから作る」が、Gemini のキーだけで使える。本物で 1 組作って確かめた） |
 
 ## 1-2. 進行中の大きな計画: アプリ内スタジオ・縦画面・セット（2026-11-20 に作者と決めた）
