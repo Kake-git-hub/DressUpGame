@@ -1210,17 +1210,30 @@ test.describe('縦画面', () => {
     expect(cat.y + cat.height).toBeLessThanOrEqual(items.y + 0.5);
     expect(items.y + items.height).toBeLessThanOrEqual(tools.y + 0.5);
     expect(tools.y + tools.height).toBeLessThanOrEqual(PH + 0.5);
-    // 縦の服は、横になぞると一覧が流れる設定（上へ動かすとドラッグ）
     await selectCategory(page, 'トップス');
     await expect(categories.getByRole('button', { name: 'トップス' })).toHaveAttribute('aria-pressed', 'true');
     const red = await itemBox(page, 'red');
-    expect(await page.getByTestId('portrait-items').locator('img[alt="red"]').evaluate((el) => getComputedStyle(el.closest('[data-draggable]')!).touchAction)).toBe('pan-x');
-    // 上へドラッグして着せる
+    // ボタンの位置は、リセットが出ても変わらない
+    const cameraX = (await page.getByTestId('portrait-tools').locator('.screenshot-button').boundingBox())!.x;
+    // 上へドラッグして着せる。服の行を出たら（カテゴリの行の上でも）、絵が指に付いてくる
+    const preview = page.getByTestId('drag-preview');
     await page.mouse.move(red.x + red.width / 2, red.y + red.height / 2);
     await page.mouse.down();
+    await page.mouse.move(red.x + red.width / 2, red.y + red.height / 2 - 12, { steps: 2 });
+    await expect(preview).toBeHidden(); // 服の行の中では、服そのものが動く
+    await page.mouse.move(red.x + red.width / 2 + 30, cat.y + cat.height / 2, { steps: 4 });
+    await expect(preview).toBeVisible();
+    const pv = (await preview.boundingBox())!;
+    expect(Math.abs(pv.x + pv.width / 2 - (red.x + red.width / 2 + 30))).toBeLessThan(2);
+    expect(Math.abs(pv.y + pv.height / 2 - (cat.y + cat.height / 2))).toBeLessThan(2);
+    // メニューより手前に見えている
+    expect(await page.evaluate(([x, y]) => document.elementsFromPoint(x, y).findIndex((el) => el.getAttribute('data-testid') === 'drag-preview') === -1, [pv.x + pv.width / 2, pv.y + pv.height / 2])).toBe(true); // 押せない絵なので、当たり判定には出ない
+    expect(Number(await preview.evaluate((el) => getComputedStyle(el).zIndex))).toBeGreaterThan(10);
     await page.mouse.move(P_DOLL_X, pY(380), { steps: 6 });
     await page.mouse.up();
+    await expect(preview).toBeHidden();
     await expectPixel(page, P_DOLL_X, pY(380), RED);
+    expect((await page.getByTestId('portrait-tools').locator('.screenshot-button').boundingBox())!.x).toBe(cameraX);
     // メニューの上で離すと着ない（青に替わらない）
     const blue = await itemBox(page, 'blue');
     await page.mouse.move(blue.x + blue.width / 2, blue.y + blue.height / 2);
@@ -1328,12 +1341,20 @@ test.describe('縦画面', () => {
     await page.mouse.up();
     await page.locator('.item-adjust-done-btn-small').click();
     await expectPixel(page, P_DOLL_X + DX + 120, pY(660), GREEN);
-    // 横に持ち替える: ドールに対して同じ位置（ずれは、縮尺の比 だけ変わる）
-    await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+    // 横に持ち替える（高さ 700 の横画面: 縮尺が縦のときと違う）: ドールに対して同じ位置（ずれは、縮尺の比 だけ変わる）
+    const LW = 1024;
+    const LH = 700;
+    await page.setViewportSize({ width: LW, height: LH });
     await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
-    const k = BASE_SCALE / P_UNIT;
-    await expectPixel(page, DOLL_X + (DX + 120) * k, BOTTOM_Y, GREEN);
-    await expect.poll(async () => near(await canvasPixel(page, DOLL_X - 200 * k, BOTTOM_Y), GREEN), { timeout: 10_000 }).toBe(false);
+    const lUnit = (LH * 0.9) / 1024;
+    const k = lUnit / P_UNIT;
+    const lDollX = MENU_W + (LW - MENU_W - RIGHT_W) / 2;
+    const lY = LH / 2 + (660 - IMG / 2) * lUnit;
+    // 服（ドールの絵で幅 440）は、ずれが縮尺の比で縮んだ位置にある。
+    // 縮んでいれば 中心 +128・左右 ±135（-7〜263）、縮んでいなければ 中心 +150（15〜285）
+    const half = (440 * lUnit) / 2;
+    await expectPixel(page, lDollX + DX * k - half + 11, lY, GREEN);
+    await expect.poll(async () => near(await canvasPixel(page, lDollX + DX * k + half + 11, lY), GREEN), { timeout: 10_000 }).toBe(false);
   });
 
   test('調整画面を開いたまま持ち替えても、落ちずに調整を続けられる', async ({ page }) => {
@@ -1357,5 +1378,56 @@ test.describe('縦画面', () => {
     await page.mouse.up();
     await page.locator('.item-adjust-done-btn-small').click();
     await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  });
+
+  test.describe('指での操作', () => {
+    test.use({ hasTouch: true });
+    type Pt = { x: number; y: number };
+    async function finger(page: Page) {
+      const client = await page.context().newCDPSession(page);
+      return (type: 'touchStart' | 'touchMove' | 'touchEnd', points: Pt[]) =>
+        client.send('Input.dispatchTouchEvent', { type, touchPoints: points.map((p, i) => ({ x: p.x, y: p.y, id: i + 1 })) });
+    }
+    const tileCenter = async (page: Page, name: string): Promise<Pt> => {
+      const box = await itemBox(page, name);
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+
+    test('服の行が画面に収まっているとき: 横に動かし始めても、そのままドールまで運べば着る', async ({ page }) => {
+      await openPortrait(page);
+      await selectCategory(page, 'トップス');
+      const touch = await finger(page);
+      const from = await tileCenter(page, 'red');
+      await touch('touchStart', [from]);
+      for (const dx of [15, 30, 45, 60]) await touch('touchMove', [{ x: from.x + dx, y: from.y - 2 }]);
+      for (const f of [0.25, 0.5, 0.75, 1]) await touch('touchMove', [{ x: from.x + 60 + (P_DOLL_X - from.x - 60) * f, y: from.y + (pY(380) - from.y) * f }]);
+      await touch('touchEnd', []);
+      await expectPixel(page, P_DOLL_X, pY(380), RED);
+      await expect(page.getByTestId('drag-preview')).toBeHidden();
+    });
+
+    test('服の行が画面に収まらないとき: 横になぞると行が流れて着ない。上へ動かせば着る', async ({ page }) => {
+      await openPortrait(page, 240, 480); // 服の行が 1 段で、3 点が幅に収まらない大きさ
+      await selectCategory(page, 'トップス');
+      const list = page.getByTestId('portrait-items');
+      await expect.poll(() => list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeGreaterThan(4);
+      const max = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
+      const touch = await finger(page);
+      const from = await tileCenter(page, 'blue');
+      await touch('touchStart', [from]);
+      for (const dx of [-15, -30, -45, -60]) await touch('touchMove', [{ x: from.x + dx, y: from.y - 3 }]);
+      await touch('touchEnd', []);
+      await expect.poll(() => list.evaluate((el) => el.scrollLeft)).toBe(max);
+      await expect(page.getByTestId('drag-preview')).toBeHidden();
+      expect(await page.evaluate(() => localStorage.getItem('dressup_outfit'))).toBeNull();
+      // 上へ動かせば着る（正方形の一辺は 240）
+      const unit = (240 * 0.9) / 1024;
+      const target = { x: 120, y: 120 + (380 - IMG / 2) * unit };
+      const start = await tileCenter(page, 'blue');
+      await touch('touchStart', [start]);
+      for (const f of [0.1, 0.4, 0.7, 1]) await touch('touchMove', [{ x: start.x + (target.x - start.x) * f, y: start.y + (target.y - start.y) * f }]);
+      await touch('touchEnd', []);
+      await expectPixel(page, target.x, target.y, BLUE);
+    });
   });
 });

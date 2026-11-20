@@ -149,9 +149,12 @@ describe('outfitStorage', () => {
       expect(loadOutfit(0.72)).toEqual([]);
       expect(localStorage.getItem('dressup_outfit_units')).toBe('doll');
     });
-    it('縮尺が 0 のときは、割らずに返す（値を壊さない）', () => {
+    it('縮尺が 0 のときは、割らずに返す（値を壊さない）。目印は付けない（次に開いたときに変換できるように）', () => {
       localStorage.setItem(OUTFIT_KEY, JSON.stringify([{ id: 'a', equipOrder: 0, adjustOffsetX: 144 }]));
       expect(loadOutfit(0)[0].adjustOffsetX).toBe(144);
+      expect(localStorage.getItem('dressup_outfit_units')).toBeNull();
+      expect(loadOutfit(0.72)[0].adjustOffsetX).toBeCloseTo(200, 9);
+      expect(localStorage.getItem('dressup_outfit_units')).toBe('doll');
     });
   });
 });

@@ -1220,11 +1220,22 @@ textarea {
 .portrait-tools {
   flex: none;
   height: 56px;
-  display: flex;
+  /* 3 つの決まった場所（調整・写真・リセット）。リセットが出たり消えたりしても、ほかのボタンは動かない */
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   align-items: center;
-  justify-content: space-around;
+  justify-items: center;
   padding: 0 12px;
   border-top: 1px solid #ffe3ef;
+}
+.portrait-tools .tool-button {
+  grid-column: 1;
+}
+.portrait-tools .screenshot-button {
+  grid-column: 2;
+}
+.portrait-tools .reset-button-fixed {
+  grid-column: 3;
 }
 .portrait-tools .tool-button,
 .portrait-tools .screenshot-button,

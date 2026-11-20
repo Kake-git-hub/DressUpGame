@@ -417,7 +417,7 @@ function PortraitMenu({
                 onDragMove={onBackgroundDragMove}
                 onDragEnd={onBackgroundDragEnd}
                 size={PORTRAIT_TILE}
-                touchAction="pan-x"
+                scrollRow
               />
             ))}
           </>
@@ -432,7 +432,7 @@ function PortraitMenu({
               onDragMove={onDragMove}
               onDragEnd={onDragEnd}
               size={PORTRAIT_TILE}
-              touchAction="pan-x"
+              scrollRow
             />
           ))
         )}
@@ -449,11 +449,32 @@ interface DraggableItemProps {
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
   size?: number; // 縦画面の大きさ（無ければ、横のメニューの大きさ）
-  // 縦画面では 'pan-x': 横になぞると一覧が流れ、上へ動かすとドラッグになる
-  touchAction?: CSSProperties['touchAction'];
+  // 縦画面の、横に流す行の中にある: 指ではっきり横になぞったときは、着せずに行を流す
+  scrollRow?: boolean;
 }
 
-const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, touchAction = 'none' }: DraggableItemProps) {
+// 縦画面の行の中で、指の動き始めを「着せるドラッグ」か「行を流す」かに振り分ける。
+// 行が画面に収まっていれば、いつでもドラッグ。収まっていないときだけ、はっきり横（横の動きが縦の 1.5 倍より大きい）なら流す。
+// ブラウザ任せ（touch-action: pan-x）にすると、斜めに動かしただけで「流す」と判断されて、着せられないことがある
+const GESTURE_START_PX = 10;
+type RowGesture = { mode: 'pending' | 'drag' | 'scroll'; scroller: HTMLElement | null; startScroll: number };
+function startRowGesture(e: React.PointerEvent, scrollRow: boolean): RowGesture {
+  const scroller = scrollRow ? (e.currentTarget as HTMLElement).closest<HTMLElement>('.portrait-items') : null;
+  const canScroll = !!scroller && e.pointerType !== 'mouse' && scroller.scrollWidth > scroller.clientWidth + 1;
+  return { mode: canScroll ? 'pending' : 'drag', scroller, startScroll: scroller?.scrollLeft ?? 0 };
+}
+// 動いた量から、振り分けを進める。まだ決まらない・行を流した、なら true を返す（呼んだ側は、ドラッグとして扱わない）
+function advanceRowGesture(g: RowGesture, dx: number, dy: number): boolean {
+  if (g.mode === 'pending') {
+    if (Math.hypot(dx, dy) < GESTURE_START_PX) return true;
+    g.mode = Math.abs(dx) > Math.abs(dy) * 1.5 ? 'scroll' : 'drag';
+  }
+  if (g.mode !== 'scroll') return false;
+  if (g.scroller) g.scroller.scrollLeft = g.startScroll - dx;
+  return true;
+}
+
+const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, scrollRow = false }: DraggableItemProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
@@ -475,19 +496,23 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
            clientY >= rect.top && clientY <= rect.bottom;
   }, [dropTargetId]);
 
+  const gesture = useRef<RowGesture>({ mode: 'drag', scroller: null, startScroll: 0 });
+
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     setIsDragging(true);
     startPos.current = { x: e.clientX, y: e.clientY };
     setDragPos({ x: 0, y: 0 });
     movedDistance.current = 0;
+    gesture.current = startRowGesture(e, scrollRow);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
+  }, [scrollRow]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDragging) return;
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
+    if (advanceRowGesture(gesture.current, dx, dy)) return;
     movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
     setDragPos({ x: dx, y: dy });
     if (onDragMove) {
@@ -501,8 +526,8 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
     setDragPos({ x: 0, y: 0 });
     onDragEnd?.();
 
-    // タップ（ほぼ移動なし）は装着しない
-    if (movedDistance.current < 10) {
+    // 行を流しただけ・タップ（ほぼ移動なし）は装着しない
+    if (gesture.current.mode !== 'drag' || movedDistance.current < 10) {
       return;
     }
 
@@ -525,7 +550,7 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dr
         ...(isDragging ? styles.itemDragging : {}),
         transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
         cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction,
+        touchAction: 'none',
         ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
       }}
       data-draggable=""
@@ -566,7 +591,7 @@ const DraggableBackground = memo(function DraggableBackground({
   onDragMove,
   onDragEnd,
   size,
-  touchAction = 'none',
+  scrollRow = false,
 }: {
   bg: BackgroundData;
   isSelected: boolean;
@@ -575,7 +600,7 @@ const DraggableBackground = memo(function DraggableBackground({
   onDragMove?: (bg: BackgroundData, position: Position) => void;
   onDragEnd?: () => void;
   size?: number;
-  touchAction?: CSSProperties['touchAction'];
+  scrollRow?: boolean;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
@@ -597,19 +622,23 @@ const DraggableBackground = memo(function DraggableBackground({
            clientY >= rect.top && clientY <= rect.bottom;
   }, [dropTargetId]);
 
+  const gesture = useRef<RowGesture>({ mode: 'drag', scroller: null, startScroll: 0 });
+
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     setIsDragging(true);
     startPos.current = { x: e.clientX, y: e.clientY };
     setDragPos({ x: 0, y: 0 });
     movedDistance.current = 0;
+    gesture.current = startRowGesture(e, scrollRow);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
+  }, [scrollRow]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDragging) return;
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
+    if (advanceRowGesture(gesture.current, dx, dy)) return;
     movedDistance.current = Math.max(movedDistance.current, Math.hypot(dx, dy));
     setDragPos({ x: dx, y: dy });
     if (onDragMove) {
@@ -622,6 +651,9 @@ const DraggableBackground = memo(function DraggableBackground({
     setIsDragging(false);
     setDragPos({ x: 0, y: 0 });
     onDragEnd?.();
+
+    // 行を流しただけなら、何もしない
+    if (gesture.current.mode === 'scroll') return;
 
     // タップ（ほぼ移動なし）も適用
     if (movedDistance.current < 10) {
@@ -647,7 +679,7 @@ const DraggableBackground = memo(function DraggableBackground({
         ...(isDragging ? styles.itemDragging : {}),
         transform: isDragging ? `translate(${dragPos.x}px, ${dragPos.y}px)` : 'none',
         cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction,
+        touchAction: 'none',
         ...(size ? { width: `${size}px`, height: `${size}px`, flex: 'none' } : {}),
       }}
       data-draggable=""

@@ -209,8 +209,12 @@ test.describe('スタジオ', () => {
     // 生成の API を差し替える。images: kind → PNG
     async function fakeJob(page: Page, category: string, name: string, images: Record<string, Buffer>, flags: Record<string, boolean>) {
       await page.route('**/api/status', async (route) => {
-        const real = await (await route.fetch()).json();
-        await route.fulfill({ json: { ...real, ai: { text: true, image: true } } });
+        try {
+          const real = await (await route.fetch()).json();
+          await route.fulfill({ json: { ...real, ai: { text: true, image: true } } });
+        } catch {
+          // ページを閉じる・読み込み直すのと重なった問い合わせは捨てる（テストを落とさない）
+        }
       });
       const item = { category, name, description: 'test', colors: [] };
       await page.route('**/api/plan', (route) => route.fulfill({ json: { items: [item], maxImages: 2 } }));

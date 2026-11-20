@@ -25,8 +25,10 @@ const style: CSSProperties = {
   // キャンバス(.avatar-section: 1)より上、メニュー(.palette-section: 10)やボタンより下
   zIndex: 5,
 };
+// 縦画面: 服の行とドールのあいだに、メニューの行がある。そこを通るあいだも見えるように、メニューより手前に出す
+const ABOVE_MENU = 50;
 
-export const DragPreviewLayer = forwardRef<DragPreviewHandle>(function DragPreviewLayer(_props, ref) {
+export const DragPreviewLayer = forwardRef<DragPreviewHandle, { aboveMenu?: boolean }>(function DragPreviewLayer({ aboveMenu = false }, ref) {
   const imgRef = useRef<HTMLImageElement>(null);
 
   useImperativeHandle(
@@ -47,5 +49,5 @@ export const DragPreviewLayer = forwardRef<DragPreviewHandle>(function DragPrevi
     []
   );
 
-  return <img ref={imgRef} data-testid="drag-preview" alt="" draggable={false} style={style} />;
+  return <img ref={imgRef} data-testid="drag-preview" alt="" draggable={false} style={aboveMenu ? { ...style, zIndex: ABOVE_MENU } : style} />;
 });

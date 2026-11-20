@@ -2,7 +2,7 @@
  * 着せ替えゲーム メインアプリケーション
  * Kids 2D Dress-Up Game - Main Application
  *
- * iPad 横向き専用。
+ * 横でも縦でも遊べる（配置は src/components/layout.ts）。
  * ドール・服・背景の画像は、別リポジトリ（DressUpGame-content）から配信されたものを読む。
  */
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
@@ -376,26 +376,27 @@ function App() {
   );
 
   // アイテムドラッグ中のコールバック（全アイテム対象）
-  const handleDragMove = useCallback((item: ClothingItemData, position: Position) => {
+  const isPortrait = layout.orientation === 'portrait';
+  const handleDragMove = useCallback((item: { thumbnailUrl?: string; imageUrl: string }, position: Position) => {
     const preview = dragPreviewRef.current;
     if (!preview || !avatarSectionRef.current) return;
-    const rect = avatarSectionRef.current.getBoundingClientRect();
-    // ドラッグ位置がavatar-section内のときだけ表示
-    if (
-      position.x >= rect.left &&
-      position.x <= rect.right &&
-      position.y >= rect.top &&
-      position.y <= rect.bottom
-    ) {
-      preview.move(item.thumbnailUrl || item.imageUrl, position.x, position.y);
-    } else {
-      preview.hide();
-    }
-  }, []);
+    const inside = (rect: DOMRect) => position.x >= rect.left && position.x <= rect.right && position.y >= rect.top && position.y <= rect.bottom;
+    // 横: ドラッグ位置が avatar-section 内のときだけ表示（メニューの中では、服そのものが動いて見える）。
+    // 縦: 服の行を出たら表示（服そのものは行の外では見えないので、カテゴリの行の上を通るあいだも絵を出す）
+    const row = isPortrait ? document.querySelector('.portrait-items') : null;
+    const show = row ? !inside(row.getBoundingClientRect()) : inside(avatarSectionRef.current.getBoundingClientRect());
+    if (show) preview.move(item.thumbnailUrl || item.imageUrl, position.x, position.y);
+    else preview.hide();
+  }, [isPortrait]);
 
   const handleDragEnd = useCallback(() => {
     dragPreviewRef.current?.hide();
   }, []);
+
+  // 持ち替えたとき、ドラッグの途中だった絵が残らないようにする
+  useEffect(() => {
+    dragPreviewRef.current?.hide();
+  }, [isPortrait]);
 
   // リセット
   const handleReset = useCallback(() => {
@@ -546,6 +547,8 @@ function App() {
               onBackgroundChange={handleBackgroundChange}
               onDragMove={handleDragMove}
               onDragEnd={handleDragEnd}
+              // 縦では、背景も行の外で絵を出す（横は今までどおり、背景そのものが動いて見える）
+              onBackgroundDragMove={portrait ? handleDragMove : undefined}
               onBackgroundDragEnd={handleDragEnd}
               layout={layout.orientation}
               itemRows={layout.itemRows}
@@ -564,7 +567,8 @@ function App() {
       {/* アイテム/ドール調整オーバーレイ（画面全体） */}
       {isAdjustingItem && (
         <ItemAdjustPanel
-          // 画面の大きさが変わったら（持ち替えなど）、新しい縮尺で開き直す
+          // 縮尺が変わったら（画面の大きさが変わる持ち替えなど）、新しい縮尺で開き直す。
+          // 縦と横で正方形の一辺が同じ端末（iPad・スマホのふつうの持ち替え）では、縮尺は変わらないので、開いたまま
           key={`${adjustingItemId ?? 'doll'}@${unit}`}
           item={adjustingItem}
           onAdjust={handleItemAdjust}
@@ -598,7 +602,7 @@ function App() {
       )}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
-      <DragPreviewLayer ref={dragPreviewRef} />
+      <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />
     </div>
   );
 }

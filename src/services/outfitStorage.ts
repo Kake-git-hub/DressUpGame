@@ -105,7 +105,8 @@ export function loadOutfit(legacyUnit = 1): SavedOutfitEntry[] {
       entries = parseEntries(legacy);
       rewrite = true;
     }
-    if (!inDollUnits) {
+    // 縮尺が分からない（0 など）ときは、変換も目印もしない（次に開いたときに変換する）
+    if (!inDollUnits && Number.isFinite(legacyUnit) && legacyUnit > 0) {
       entries = entries.map((entry) => toDollOffsets(entry, legacyUnit));
       localStorage.setItem(UNITS_KEY, UNITS_DOLL);
       rewrite = rewrite || current !== null;
