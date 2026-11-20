@@ -14,6 +14,7 @@ export interface SavedOutfitEntry {
   adjustRotation?: number;
   layerAdjust?: number;
   colorHue?: number;
+  setLayer?: number; // セットとして着せたときの重ね順
 }
 
 export const OUTFIT_KEY = 'dressup_outfit';
@@ -32,6 +33,7 @@ const ADJUST_KEYS = [
   'adjustRotation',
   'layerAdjust',
   'colorHue',
+  'setLayer',
 ] as const;
 
 // 1件を保存形式に変換（不正なら null）

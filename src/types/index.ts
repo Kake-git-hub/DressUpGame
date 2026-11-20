@@ -262,7 +262,10 @@ export interface ClothingItemData {
   frontItemId?: string;
   // 入っているセット（同じテーマの服の集まり）。メニューの「セット」で、同じセットの服をまとめて着せる。
   // 1 点がいくつものセットに入っていてもよい。order: メニューでのセットの順番（小さいほど先。無いセットは、あとに服の順で並ぶ）
-  sets?: { id: string; name: string; order?: number }[];
+  // layer: そのセットを着たときだけの重なりの順番（無ければ、ふつうの重ね順）
+  sets?: { id: string; name: string; order?: number; layer?: number }[];
+  // セットとして着せたときの重なりの順番（layerOrder より優先。1 点で着せ直すと消える）
+  setLayer?: number;
   // 自分の服（アプリのスタジオで作った・届けてもらった服。その端末の利用者にだけ出る）
   mine?: boolean;
   // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする

@@ -379,6 +379,29 @@ describe('ContentStore', () => {
       await expect(store.reorderSets(doll.id, [yama.id, '無い'])).rejects.toThrow(/セット/);
     });
 
+    it('setSetLayer はセットごとの重ね順。ほかのセット・服の重ね順と連動しない。外すと、その分は消える', async () => {
+      const doll = await dollOf();
+      const yama = { id: `${doll.id}/セット/やま`, name: 'やま' };
+      const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
+      await store.updateItem(a.id, { set: (await store.addItem(doll.id, item('ぼうし', { set: yama }))).set as string });
+      expect(await store.setSetLayer(doll.id, umi.id, a.id, 30)).toEqual({ ...umi, layers: { [a.id]: 30 } });
+      await store.setSetLayer(doll.id, yama.id, a.id, 2);
+      let sets = (await dollOf()).sets!;
+      expect(sets.find((x) => x.id === umi.id)!.layers).toEqual({ [a.id]: 30 });
+      expect(sets.find((x) => x.id === yama.id)!.layers).toEqual({ [a.id]: 2 });
+      expect((await dollOf()).items.find((i) => i.id === a.id)).not.toHaveProperty('layer');
+      // null で戻す（空になれば項目ごと消える）
+      await store.setSetLayer(doll.id, yama.id, a.id, null);
+      expect((await dollOf()).sets!.find((x) => x.id === yama.id)).not.toHaveProperty('layers');
+      // セットから外すと、その分の重ね順も消える
+      await store.updateItem(a.id, { leaveSet: umi.id });
+      sets = (await dollOf()).sets!;
+      expect(sets.find((x) => x.id === umi.id)).toBeUndefined();
+      // 入っていない服・無いセットは Error
+      await expect(store.setSetLayer(doll.id, yama.id, 'ない服', 1)).rejects.toThrow(/入っていません/);
+      await expect(store.setSetLayer(doll.id, 'ない', a.id, 1)).rejects.toThrow(/ありません/);
+    });
+
     it('renameSet は名前だけを変える（ID と服の印はそのまま）。無いセット・使えない名前は Error', async () => {
       const doll = await dollOf();
       const a = await store.addItem(doll.id, item('シャツ', { set: umi }));

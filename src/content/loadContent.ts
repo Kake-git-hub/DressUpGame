@@ -48,7 +48,7 @@ export function itemToClothing(
   category: ManifestCategory,
   item: ManifestItem,
   url: (file: string) => string,
-  sets?: { id: string; name: string; order?: number }[],
+  sets?: { id: string; name: string; order?: number; layer?: number }[],
 ): ClothingItemData[] {
   const layer = item.layer ?? category.layer;
   const result: ClothingItemData[] = [
@@ -154,12 +154,17 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
       box: doll.image.box,
     });
     const categories = new Map(doll.categories.map((c) => [c.id, c]));
-    const setNames = new Map((doll.sets ?? []).map((x, order) => [x.id, { name: x.name, order }]));
+    const setNames = new Map((doll.sets ?? []).map((x, order) => [x.id, { name: x.name, order, layers: x.layers }]));
     categoriesByDoll[doll.id] = doll.categories;
     for (const item of doll.items) {
       const category = categories.get(item.category);
       if (!category) continue; // parseManifest が保証しているので通らない
-      const sets = itemSetIds(item).flatMap((id) => (setNames.has(id) ? [{ id, ...setNames.get(id)! }] : []));
+      const sets = itemSetIds(item).flatMap((id) => {
+        const set = setNames.get(id);
+        if (!set) return [];
+        const layer = set.layers?.[item.id];
+        return [{ id, name: set.name, order: set.order, ...(layer !== undefined ? { layer } : {}) }];
+      });
       clothing.push(...itemToClothing(doll.id, category, item, url, sets));
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));

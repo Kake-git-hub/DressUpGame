@@ -572,11 +572,14 @@ export function Library({ doll, onChanged }: Common) {
         <div className="category" data-testid="library-sets">
           <div className="row">
             <b>セット</b>
-            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。1 点の服を、いくつものセットに入れられます。最後の 1 点が無くなるとセットも消えます。▲ ▼ で、ゲームのメニューでのセットの順番を変えられます。</span>
+            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、そのセットを着たときだけの重なりの順番です（同じ服がほかのセットに入っていても、1 点で着ても、連動しません。空にすると、服の重ね順）。服は、あとから足したり外したりできます。1 点の服を、いくつものセットに入れられます。最後の 1 点が無くなるとセットも消えます。▲ ▼ で、ゲームのメニューでのセットの順番を変えられます。</span>
           </div>
           {(doll.sets ?? []).map((x, setIndex, sets) => {
             const categoryOf = (id: string) => doll.categories.find((c) => c.id === id);
-            const layerOf = (i: (typeof doll.items)[number]) => i.layer ?? categoryOf(i.category)?.layer ?? 0;
+            // 1 点で着たときの重ね順（服の値、無ければカテゴリの値）と、このセットを着たときの重ね順（このセットだけの値、無ければ 1 点のとき）
+            const ownLayer = (i: (typeof doll.items)[number]) => i.layer ?? categoryOf(i.category)?.layer ?? 0;
+            const setLayer = (i: (typeof doll.items)[number]) => x.layers?.[i.id];
+            const layerOf = (i: (typeof doll.items)[number]) => setLayer(i) ?? ownLayer(i);
             // 手前（重ね順が大きい）から
             const members = doll.items.filter((i) => itemSetIds(i).includes(x.id)).sort((a, b) => layerOf(b) - layerOf(a));
             const others = doll.items.filter((i) => !itemSetIds(i).includes(x.id));
@@ -618,17 +621,18 @@ export function Library({ doll, onChanged }: Common) {
                       <label>
                         重ね順
                         <input
-                          key={`${i.id}-${i.layer ?? ''}`}
+                          key={`${i.id}-${setLayer(i) ?? ''}`}
                           type="number"
-                          defaultValue={i.layer ?? ''}
-                          placeholder={String(categoryOf(i.category)?.layer ?? '')}
+                          defaultValue={setLayer(i) ?? ''}
+                          placeholder={String(ownLayer(i))}
+                          title="このセットを着たときだけの重ね順（ほかのセットや、1 点で着たときには効かない）。空にすると、服の重ね順"
                           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
                           onBlur={(e) => {
                             const raw = e.target.value.trim();
                             const next = raw === '' ? null : Number(raw);
                             if (next !== null && !Number.isFinite(next)) return;
-                            if (next === (i.layer ?? null)) return;
-                            void guard(() => api.updateItem({ id: i.id, layer: next }));
+                            if (next === (setLayer(i) ?? null)) return;
+                            void guard(() => api.setSetLayer(doll.id, x.id, i.id, next));
                           }}
                           data-testid="set-member-layer"
                         />

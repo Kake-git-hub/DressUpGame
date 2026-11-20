@@ -60,6 +60,9 @@ export function setItemSets(item: { set?: string | string[] }, ids: string[]): v
 export interface ManifestSet {
   id: string;
   name: string;
+  // セットを着たときの重なりの順番（服の ID → 値。大きいほど手前）。無い服は、服の重ね順（無ければカテゴリの重ね順）。
+  // セットごとの値なので、同じ服がほかのセットに入っていても、1 点だけで着ても、連動しない
+  layers?: { [itemId: string]: number };
 }
 
 export interface ManifestBackground {
@@ -165,7 +168,13 @@ function doll(v: unknown, path: string): ManifestDoll {
       ? []
       : arr(o.sets, `${path}.sets`).map((v, i): ManifestSet => {
           const r = rec(v, `${path}.sets[${i}]`);
-          return { id: str(r.id, `${path}.sets[${i}].id`), name: str(r.name, `${path}.sets[${i}].name`) };
+          const set: ManifestSet = { id: str(r.id, `${path}.sets[${i}].id`), name: str(r.name, `${path}.sets[${i}].name`) };
+          // 重なりの順番。数でない値は捨てる（一覧ごと読めなくはしない）
+          if (typeof r.layers === 'object' && r.layers !== null && !Array.isArray(r.layers)) {
+            const layers = Object.fromEntries(Object.entries(r.layers).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)));
+            if (Object.keys(layers).length > 0) set.layers = layers as { [itemId: string]: number };
+          }
+          return set;
         });
   unique(sets.map((x) => x.id), `${path}.sets`);
   const setIds = new Set(sets.map((x) => x.id));
@@ -193,6 +202,12 @@ function doll(v: unknown, path: string): ManifestDoll {
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);
+  // セットの重なりの順番は、そのセットに入っている服の分だけ残す
+  for (const set of sets) {
+    if (!set.layers) continue;
+    for (const id of Object.keys(set.layers)) if (!items.some((i) => i.id === id && itemSetIds(i).includes(set.id))) delete set.layers[id];
+    if (Object.keys(set.layers).length === 0) delete set.layers;
+  }
   const backgrounds = arr(o.backgrounds, `${path}.backgrounds`).map((b, i) => background(b, `${path}.backgrounds[${i}]`));
   unique(backgrounds.map((b) => b.id), `${path}.backgrounds`);
   return {
