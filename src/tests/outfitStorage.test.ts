@@ -128,4 +128,30 @@ describe('outfitStorage', () => {
     saveOutfit([{ ...item('a'), equipOrder: 0 }]);
     expect(isOutfitFromBeforeHairParts()).toBe(false);
   });
+
+  describe('調整値の単位の変換（更新の前の保存は、画面の px）', () => {
+    it('目印が無い保存は、位置のずれを横にしたときの縮尺で割って返し、新しい形で書き戻す', () => {
+      localStorage.setItem(OUTFIT_KEY, JSON.stringify([{ id: 'a', equipOrder: 0, adjustOffsetX: 144, adjustOffsetY: -72, adjustScale: 1.5 }]));
+      const loaded = loadOutfit(0.72);
+      expect(loaded[0].adjustOffsetX).toBeCloseTo(200, 9);
+      expect(loaded[0].adjustOffsetY).toBeCloseTo(-100, 9);
+      expect(loaded[0].adjustScale).toBe(1.5);
+      expect(localStorage.getItem('dressup_outfit_units')).toBe('doll');
+      // 2 回目は変換しない（縮尺が違っても同じ値）
+      expect(loadOutfit(0.5)[0].adjustOffsetX).toBeCloseTo(200, 9);
+    });
+    it('saveOutfit は目印を付ける。目印のある保存は変換しない', () => {
+      saveOutfit([{ id: 'a', equipOrder: 0, adjustOffsetX: 200 } as never]);
+      expect(localStorage.getItem('dressup_outfit_units')).toBe('doll');
+      expect(loadOutfit(0.72)[0].adjustOffsetX).toBe(200);
+    });
+    it('保存が無いときも、目印を付けて空を返す', () => {
+      expect(loadOutfit(0.72)).toEqual([]);
+      expect(localStorage.getItem('dressup_outfit_units')).toBe('doll');
+    });
+    it('縮尺が 0 のときは、割らずに返す（値を壊さない）', () => {
+      localStorage.setItem(OUTFIT_KEY, JSON.stringify([{ id: 'a', equipOrder: 0, adjustOffsetX: 144 }]));
+      expect(loadOutfit(0)[0].adjustOffsetX).toBe(144);
+    });
+  });
 });

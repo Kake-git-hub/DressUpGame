@@ -12,6 +12,7 @@ import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
 import { adjustBaseId, partnerOf } from './engine/pairs';
+import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
 import { resolveStartState } from './content/startState';
@@ -128,7 +129,12 @@ function App() {
 
   // 保存された装備（ID・調整値のみ）。素材の読み込み完了時に1回だけ復元する
   const savedOutfitRef = useRef<ReturnType<typeof loadOutfit> | null>(null);
-  if (savedOutfitRef.current === null) savedOutfitRef.current = loadOutfit();
+  if (savedOutfitRef.current === null) {
+    // 更新の前の保存は、位置の調整値が「横画面のキャンバスの px」。横にしたときの縮尺で、ドールの絵の px に直す
+    const vw = window.visualViewport?.width ?? window.innerWidth;
+    const vh = window.visualViewport?.height ?? window.innerHeight;
+    savedOutfitRef.current = loadOutfit(stageUnit(Math.min(vw, vh)));
+  }
 
   // 配信された素材の一覧を読み込む
   useEffect(() => {
@@ -205,6 +211,11 @@ function App() {
     return () => clearTimeout(timer);
   }, [equippedItems]);
 
+  // 服の位置の調整値は、状態では「ドールの絵の px」。描画と調整画面には「キャンバスの px」に直して渡す
+  // （画面の大きさや向きが変わっても、ドールに対して同じ位置になる）
+  const unit = stageUnit(canvasSize.height);
+  const canvasItems = useMemo(() => equippedItems.map((item) => toCanvasOffsets(item, unit)), [equippedItems, unit]);
+
   // アイテム調整モード（adjustingItemId === null の場合はドール調整モード）
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);
   const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
@@ -212,8 +223,8 @@ function App() {
   // 調整中のアイテム - nullの場合はドール調整
   const adjustingItem = useMemo(() => {
     if (adjustingItemId === null) return null;
-    return equippedItems.find(item => item.id === adjustingItemId) ?? null;
-  }, [adjustingItemId, equippedItems]);
+    return canvasItems.find(item => item.id === adjustingItemId) ?? null;
+  }, [adjustingItemId, canvasItems]);
 
   // 調整中の服より手前のもの（服・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない。
   // 髪は、前髪とうしろがみが一緒に動くので、下にあるほう（うしろがみ）から上を、調整画面が描く
@@ -246,9 +257,9 @@ function App() {
   // アイテム調整値を更新
   const handleItemAdjust = useCallback((adjustment: ItemAdjustment) => {
     if (adjustingItemId) {
-      updateItemAdjustment(adjustingItemId, adjustment);
+      updateItemAdjustment(adjustingItemId, toDollOffsets(adjustment, unit));
     }
-  }, [adjustingItemId, updateItemAdjustment]);
+  }, [adjustingItemId, updateItemAdjustment, unit]);
 
   // 調整モード終了
   const handleAdjustClose = useCallback(() => {
@@ -327,7 +338,7 @@ function App() {
     const timer = setTimeout(() => setFlash(null), 900);
     return () => clearTimeout(timer);
   }, [flash]);
-  const flashItem = flash ? equippedItems.find((item) => item.id === flash.id) ?? null : null;
+  const flashItem = flash ? canvasItems.find((item) => item.id === flash.id) ?? null : null;
 
   // 服をドロップした時の処理（全アイテム通常装着）
   const handleItemDrop = useCallback(
@@ -486,7 +497,7 @@ function App() {
               ref={avatarCanvasRef}
               width={canvasSize.width}
               height={canvasSize.height}
-              equippedItems={equippedItems}
+              equippedItems={canvasItems}
               doll={currentDoll}
               backgroundImageUrl={currentBackground?.imageUrl}
               dollTransform={dollTransform}
@@ -536,7 +547,8 @@ function App() {
       {/* アイテム/ドール調整オーバーレイ（画面全体） */}
       {isAdjustingItem && (
         <ItemAdjustPanel
-          key={adjustingItemId ?? 'doll'}
+          // 画面の大きさが変わったら（持ち替えなど）、新しい縮尺で開き直す
+          key={`${adjustingItemId ?? 'doll'}@${unit}`}
           item={adjustingItem}
           onAdjust={handleItemAdjust}
           onClose={handleAdjustClose}
@@ -547,7 +559,7 @@ function App() {
           menuOffset={MENU_WIDTH}
           rightOffset={RIGHT_BUTTON_WIDTH}
           doll={currentDoll}
-          equippedItems={equippedItems}
+          equippedItems={canvasItems}
           onRemove={handleAdjustRemove}
           onSelect={setAdjustingItemId}
           onLayerChange={(id, layerAdjust) => updateItemAdjustment(id, { layerAdjust })}

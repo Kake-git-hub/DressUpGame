@@ -3,6 +3,7 @@
  * 画像は保存せず、アイテムID・着た順・調整値だけを localStorage に置く
  */
 import type { ClothingItemData, EquippedItem } from '../types';
+import { toDollOffsets } from '../engine/units';
 
 export interface SavedOutfitEntry {
   id: string;
@@ -18,6 +19,9 @@ export interface SavedOutfitEntry {
 export const OUTFIT_KEY = 'dressup_outfit';
 // 髪を「前髪」と「うしろがみ」の 2 点に分けてから保存したことの目印
 const HAIR_PARTS_KEY = 'dressup_outfit_hair_parts';
+// 位置の調整値を「ドールの絵の px」で保存したことの目印（それより前は、横画面のキャンバスの px）
+const UNITS_KEY = 'dressup_outfit_units';
+const UNITS_DOLL = 'doll';
 // 旧形式（アイテム全体＝画像URL入り）を保存していたキー
 export const LEGACY_OUTFIT_KEY = 'dressup_equipped_items';
 
@@ -78,21 +82,35 @@ export function saveOutfit(items: EquippedItem[]): void {
   try {
     localStorage.setItem(OUTFIT_KEY, JSON.stringify(toSavedOutfit(items)));
     localStorage.setItem(HAIR_PARTS_KEY, '1');
+    localStorage.setItem(UNITS_KEY, UNITS_DOLL);
   } catch (error) {
     console.error('装備アイテム保存エラー:', error);
   }
 }
 
-export function loadOutfit(): SavedOutfitEntry[] {
+// legacyUnit: 目印の無い保存（位置の調整値が、横画面のキャンバスの px）を「ドールの絵の px」に直すための縮尺
+// （横にしたときの、ドールの絵の 1px の長さ）。直したら、新しい形で書き戻す
+export function loadOutfit(legacyUnit = 1): SavedOutfitEntry[] {
   try {
     const current = localStorage.getItem(OUTFIT_KEY);
     const legacy = localStorage.getItem(LEGACY_OUTFIT_KEY);
     if (legacy !== null) localStorage.removeItem(LEGACY_OUTFIT_KEY);
-    if (current !== null) return parseEntries(current);
-    if (legacy === null) return [];
-    // 旧形式を変換して新キーに書き直す
-    const entries = parseEntries(legacy);
-    localStorage.setItem(OUTFIT_KEY, JSON.stringify(entries));
+    const inDollUnits = localStorage.getItem(UNITS_KEY) === UNITS_DOLL;
+    let entries: SavedOutfitEntry[] = [];
+    let rewrite = false;
+    if (current !== null) {
+      entries = parseEntries(current);
+    } else if (legacy !== null) {
+      // 旧形式を変換して新キーに書き直す
+      entries = parseEntries(legacy);
+      rewrite = true;
+    }
+    if (!inDollUnits) {
+      entries = entries.map((entry) => toDollOffsets(entry, legacyUnit));
+      localStorage.setItem(UNITS_KEY, UNITS_DOLL);
+      rewrite = rewrite || current !== null;
+    }
+    if (rewrite) localStorage.setItem(OUTFIT_KEY, JSON.stringify(entries));
     return entries;
   } catch (error) {
     console.error('装備アイテム読み込みエラー:', error);

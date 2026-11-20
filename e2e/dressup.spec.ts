@@ -1128,3 +1128,49 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     await expect.poll(async () => (await namesOf(page)).at(-1)).toBe(order[1]);
   });
 });
+
+test('調整した服は、画面の大きさが変わっても、ドールに対して同じ位置にある', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await page.locator('.tool-button').first().click();
+  await page.mouse.move(DOLL_X, TOP_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + ADJUST_DX, TOP_Y, { steps: 6 });
+  await page.mouse.up();
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  // 高さを 3/4 にする: ドールも、服のずれも 3/4 になる
+  const H2 = 615;
+  await page.setViewportSize({ width: VIEW_W, height: H2 });
+  const k = H2 / VIEW_H;
+  const y2 = H2 / 2 + (380 - IMG / 2) * BASE_SCALE * k;
+  // 服（幅 440 × 縮尺）は、ずれも 3/4 になった位置にある: 左の端の近くは服、ずれが縮んでいなければ届く右の所には服が無い
+  await expectPixel(page, DOLL_X + (ADJUST_DX - 130) * k, y2, RED);
+  await expect.poll(async () => near(await canvasPixel(page, DOLL_X + 310, y2), RED), { timeout: 10_000 }).toBe(false);
+  // 元の大きさに戻すと、元の位置
+  await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+  await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  await expectPixel(page, DOLL_X + ADJUST_DX + 140, TOP_Y, RED);
+});
+
+test('更新の前に保存した服装（調整値が画面の px）は、同じ位置で復元され、新しい形で保存し直される', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  const id = await page.evaluate(() => (JSON.parse(localStorage.getItem('dressup_outfit')!) as { id: string }[])[0].id);
+  await page.evaluate(
+    ([itemId, dx]) => {
+      localStorage.setItem('dressup_outfit', JSON.stringify([{ id: itemId, equipOrder: 0, adjustOffsetX: dx }]));
+      localStorage.removeItem('dressup_outfit_units');
+    },
+    [id, ADJUST_DX] as const,
+  );
+  await page.reload();
+  await expectPixel(page, DOLL_X + ADJUST_DX, TOP_Y, RED);
+  await expectPixel(page, DOLL_X + ADJUST_DX + 140, TOP_Y, RED);
+  const saved = await page.evaluate(() => ({
+    units: localStorage.getItem('dressup_outfit_units'),
+    x: (JSON.parse(localStorage.getItem('dressup_outfit')!) as { adjustOffsetX: number }[])[0].adjustOffsetX,
+  }));
+  expect(saved.units).toBe('doll');
+  expect(saved.x).toBeCloseTo(ADJUST_DX / BASE_SCALE, 3);
+});
