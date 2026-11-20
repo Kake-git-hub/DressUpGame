@@ -288,11 +288,31 @@ export function ItemAdjustPanel({
   };
 
   // 一覧のドラッグで並べ替える: 行をつかんで上下に動かすと、離した位置に重なりが入る。
-  // 行は指に付いてきて、ほかの行（ドールの行も）は 1 行分ずれて場所をあける
+  // 行は指に付いてきて、ほかの行（ドールの行も）は 1 行分ずれて場所をあける。
+  // 一覧が画面に収まらないとき（服をたくさん着たとき）は、指では「すばやくなぞる = 一覧を流す」
+  // 「長く押してから動かす = 並べ替え」に分ける（行を touch-action: none にしているので、流すのも自前で行う）
   const DRAG_START_PX = 6; // これより動かさなければ「押した」（調整する服の切り替え）
-  const EDGE_SCROLL_PX = 24; // 一覧の端からこの幅に指があるとき、一覧を流す
+  const HOLD_MS = 250; // 一覧が収まらないとき、これだけ押し続けると行が浮く
+  const EDGE_SCROLL_PX = 24; // 一覧の端からこの幅に指があるあいだ、一覧を流し続ける
+  const EDGE_SCROLL_STEP = 6; // 1 フレームに流す量
   const pickerItemsRef = useRef<HTMLDivElement>(null);
-  const rowDragRef = useRef<{ id: string; pointerId: number; startY: number; startScroll: number; from: number; to: number; centers: number[]; pitch: number; moved: boolean } | null>(null);
+  const rowDragRef = useRef<{
+    id: string;
+    pointerId: number;
+    startY: number;
+    lastY: number;
+    startScroll: number;
+    maxScroll: number; // 流せる上限（つかんだ時点。動かしている行は transform で外へ出るので、あとからは測れない）
+    from: number; // 一覧の上からの番号（ドールの行も数える）
+    to: number;
+    slots: number[]; // 全部の行の中心（上から。つかんだ時点の画面の位置）
+    pitch: number;
+    mode: 'pending' | 'drag' | 'scroll';
+    holdToDrag: boolean;
+    holdTimer: number | null;
+    frame: number | null;
+    moved: boolean;
+  } | null>(null);
   const [rowDrag, setRowDrag] = useState<{ id: string; dy: number; from: number; to: number; pitch: number } | null>(null);
   const suppressClickRef = useRef(false);
   const applyLayerChanges = (changes: LayerChange[]) => {
@@ -305,6 +325,39 @@ export function ItemAdjustPanel({
       }
     }
   };
+  // 指の位置（と一覧の流れた量）から、行のずれと、入れる位置を決める
+  const updateRowDrag = () => {
+    const d = rowDragRef.current;
+    const container = pickerItemsRef.current;
+    if (!d || !container) return;
+    const dy = d.lastY - d.startY + (container.scrollTop - d.startScroll);
+    const own = d.slots[d.from] + dy;
+    // いちばん近い行の位置に入る（となりの行までの半分を越えたら、入れ替わる）
+    let to = 0;
+    for (let k = 1; k < d.slots.length; k++) if (Math.abs(d.slots[k] - own) < Math.abs(d.slots[to] - own)) to = k;
+    d.to = to;
+    setRowDrag({ id: d.id, dy, from: d.from, to, pitch: d.pitch });
+  };
+  // 指が一覧の端にあるあいだ、一覧を流し続ける（指を止めていても流れる）
+  const edgeScroll = () => {
+    const d = rowDragRef.current;
+    const container = pickerItemsRef.current;
+    if (!d || !container || d.mode !== 'drag') return;
+    const box = container.getBoundingClientRect();
+    const before = container.scrollTop;
+    if (d.lastY < box.top + EDGE_SCROLL_PX) container.scrollTop = Math.max(0, before - EDGE_SCROLL_STEP);
+    else if (d.lastY > box.bottom - EDGE_SCROLL_PX) container.scrollTop = Math.min(d.maxScroll, before + EDGE_SCROLL_STEP);
+    if (container.scrollTop !== before) updateRowDrag();
+    d.frame = requestAnimationFrame(edgeScroll);
+  };
+  const stopRowDragTimers = () => {
+    const d = rowDragRef.current;
+    if (!d) return;
+    if (d.holdTimer !== null) clearTimeout(d.holdTimer);
+    if (d.frame !== null) cancelAnimationFrame(d.frame);
+    d.holdTimer = null;
+    d.frame = null;
+  };
   const startRowDrag = (e: React.PointerEvent<HTMLElement>, id: string) => {
     const container = pickerItemsRef.current;
     if (!container || rowDragRef.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
@@ -313,54 +366,75 @@ export function ItemAdjustPanel({
     if (from < 0) return;
     const rects = rows.map((r) => r.getBoundingClientRect());
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    const pitch = rects.length > 1 ? Math.abs(rects[1].top - rects[0].top) : rects[0].height;
+    // 一覧が収まらないときの指: 押し続けてから並べ替える。マウスは（ホイールで流せるので）いつでもすぐ並べ替える
+    const holdToDrag = e.pointerType !== 'mouse' && container.scrollHeight > container.clientHeight + 1;
     rowDragRef.current = {
       id,
       pointerId: e.pointerId,
       startY: e.clientY,
+      lastY: e.clientY,
       startScroll: container.scrollTop,
+      maxScroll: Math.max(0, container.scrollHeight - container.clientHeight),
       from,
       to: from,
-      // ほかの行の中心（上から）
-      centers: rects.filter((_, i) => i !== from).map((r) => r.top + r.height / 2),
-      pitch: rects.length > 1 ? Math.abs(rects[1].top - rects[0].top) : rects[0].height,
+      slots: rects.map((r) => r.top + r.height / 2),
+      pitch,
+      mode: 'pending',
+      holdToDrag,
+      holdTimer: null,
+      frame: null,
       moved: false,
     };
-    // 動かす行の中心
-    rowDragRef.current.centers.push(rects[from].top + rects[from].height / 2);
+    if (holdToDrag) {
+      rowDragRef.current.holdTimer = window.setTimeout(() => {
+        const d = rowDragRef.current;
+        if (!d || d.mode !== 'pending') return;
+        d.holdTimer = null;
+        d.mode = 'drag';
+        d.moved = true; // 浮かせたあとは、離しても「押した」にしない
+        setRowDrag({ id: d.id, dy: 0, from: d.from, to: d.from, pitch: d.pitch }); // 行を浮かせて、動かせることを見せる
+      }, HOLD_MS);
+    }
   };
   const moveRowDrag = (e: React.PointerEvent<HTMLElement>) => {
     const d = rowDragRef.current;
     const container = pickerItemsRef.current;
     if (!d || !container || e.pointerId !== d.pointerId) return;
-    if (!d.moved && Math.abs(e.clientY - d.startY) < DRAG_START_PX) return;
+    d.lastY = e.clientY;
+    if (d.mode === 'pending') {
+      if (Math.abs(e.clientY - d.startY) < DRAG_START_PX) return;
+      if (d.holdTimer !== null) clearTimeout(d.holdTimer);
+      d.holdTimer = null;
+      d.mode = d.holdToDrag ? 'scroll' : 'drag';
+    }
     d.moved = true;
-    // 一覧が長いときは、端に来たら流す
-    const box = container.getBoundingClientRect();
-    if (e.clientY < box.top + EDGE_SCROLL_PX) container.scrollTop -= 8;
-    else if (e.clientY > box.bottom - EDGE_SCROLL_PX) container.scrollTop += 8;
-    const dy = e.clientY - d.startY + (container.scrollTop - d.startScroll);
-    const own = d.centers[d.centers.length - 1] + dy;
-    // 入れる位置 = 自分より上にある、ほかの行の数
-    const to = d.centers.slice(0, -1).filter((c) => c < own).length;
-    d.to = to;
-    setRowDrag({ id: d.id, dy, from: d.from, to, pitch: d.pitch });
+    if (d.mode === 'scroll') {
+      container.scrollTop = Math.max(0, Math.min(d.maxScroll, d.startScroll - (e.clientY - d.startY)));
+      return;
+    }
+    updateRowDrag();
+    if (d.frame === null) d.frame = requestAnimationFrame(edgeScroll);
   };
   const endRowDrag = (e: React.PointerEvent<HTMLElement>, commit: boolean) => {
     const d = rowDragRef.current;
     if (!d || e.pointerId !== d.pointerId) return;
+    stopRowDragTimers();
     rowDragRef.current = null;
     setRowDrag(null);
     if (!d.moved) return;
-    // ドラッグのあとの click では、調整する服を切り替えない
+    // ドラッグ（や、なぞって流した）あとの click では、調整する服を切り替えない
     suppressClickRef.current = true;
     setTimeout(() => {
       suppressClickRef.current = false;
     }, 0);
-    if (!commit) return;
-    // 一覧は上が手前。reorderLayer は下から数える
-    const others = d.centers.length - 1;
+    if (!commit || d.mode !== 'drag' || d.to === d.from) return;
+    // 一覧は上が手前。reorderLayer は、動かす服を抜いた一覧を下から数える
+    const others = d.slots.length - 1;
     applyLayerChanges(reorderLayer(current, d.id, others - d.to) ?? []);
   };
+  // 画面を閉じるとき・別の服に切り替わるときは、タイマーを止める
+  useEffect(() => () => stopRowDragTimers(), []);
   // 行の見た目: 動かしている行は指に付いていき、ほかの行は場所をあける。index は一覧の上からの番号（ドールの行も数える）
   const rowStyle = (index: number): React.CSSProperties | undefined => {
     if (!rowDrag) return undefined;
@@ -613,8 +687,9 @@ export function ItemAdjustPanel({
   return (
     <div
       className="item-adjust-overlay"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
+      // 一覧の行を動かしているあいだは、ほかの指（手のひら）で服を動かさない
+      onTouchStart={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchStart(e))}
+      onTouchMove={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchMove(e))}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
       onMouseDown={handleMouseDown}

@@ -994,6 +994,20 @@ test('調整画面の一覧をドラッグして、重なりを並べ替えら�
   await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
   await expect(page.getByTestId('adjust-picker-item').nth(1)).toHaveClass(/on/);
   await expect.poll(async () => near(await screenPixel(page, DOLL_X, OVERLAP_Y), RED, 12)).toBe(true);
+  // となりの行までの 6 割まで動かして離せば、入れ替わる（となりの行を完全に越えなくてよい）
+  {
+    const r0 = (await rows.nth(0).boundingBox())!;
+    const r1 = (await rows.nth(1).boundingBox())!;
+    const x = r0.x + r0.width / 2;
+    const y = r0.y + r0.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + (r1.y - r0.y) * 0.6, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(names).toEqual(['gre', 'red', 'ドール']);
+    await dragPickerRow(page, 1, 0);
+    await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+  }
   // 少しだけ動かして離すと、並びは変わらず、その服の調整に切り替わる
   const top = (await rows.nth(0).boundingBox())!;
   await page.mouse.move(top.x + 20, top.y + 20);
@@ -1014,4 +1028,103 @@ test('調整画面の一覧をドラッグして、重なりを並べ替えら�
   await page.reload();
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
   await expectPixel(page, DOLL_X, OVERLAP_Y, GREEN);
+});
+
+test.describe('調整画面の一覧を、指で動かす', () => {
+  test.use({ hasTouch: true });
+
+  type Pt = { x: number; y: number };
+  // 指の入力（1 本目・2 本目…の順に、いま画面に触れている指を全部渡す）
+  async function fingers(page: Page) {
+    const client = await page.context().newCDPSession(page);
+    return (type: 'touchStart' | 'touchMove' | 'touchEnd', points: Pt[]) =>
+      client.send('Input.dispatchTouchEvent', { type, touchPoints: points.map((p, i) => ({ x: p.x, y: p.y, id: i + 1 })) });
+  }
+  const rowsOf = (page: Page) => page.locator('[data-testid="adjust-picker-items"] > *');
+  const namesOf = (page: Page) => rowsOf(page).evaluateAll((els) => els.map((el) => (el.getAttribute('title') ?? '').slice(0, 3)));
+  const center = async (page: Page, index: number): Promise<Pt> => {
+    const box = (await rowsOf(page).nth(index).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+  const scrollTop = (page: Page) => page.getByTestId('adjust-picker-items').evaluate((el) => el.scrollTop);
+
+  test('一覧が画面に収まるとき: つかんですぐ動かせば並べ替わる。2 本目の指が服に触れても、服は動かない', async ({ page }) => {
+    await openApp(page);
+    await dragItemToDoll(page, 'トップス', 'red');
+    await dragItemToDoll(page, 'ボトムス', 'green');
+    await page.locator('.tool-button').first().click();
+    await expect.poll(() => namesOf(page)).toEqual(['red', 'gre', 'ドール']);
+    const handle = () => page.getByTestId('sticker-rotate').boundingBox();
+    const before = (await handle())!;
+    const touch = await fingers(page);
+    const from = await center(page, 0);
+    const to = await center(page, 1);
+    await touch('touchStart', [from]);
+    await touch('touchMove', [{ x: from.x, y: (from.y + to.y) / 2 }]);
+    // 2 本目の指（手のひら）が服の上に触れて動く
+    const palm = { x: 1000, y: 700 }; // 服の枠の外（何も無い所）
+    const mid = { x: from.x, y: (from.y + to.y) / 2 };
+    const moved = { x: palm.x + 100, y: palm.y + 60 };
+    await touch('touchStart', [mid, palm]);
+    await touch('touchMove', [mid, moved]);
+    await touch('touchMove', [{ x: from.x, y: to.y + 6 }, moved]);
+    await touch('touchEnd', []);
+    await expect.poll(() => namesOf(page)).toEqual(['gre', 'red', 'ドール']);
+    const after = (await handle())!;
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+  });
+
+  test('一覧が画面に収まらないとき: すばやくなぞると流れ、長く押してから動かすと並べ替わり、端で止めていても流れ続ける', async ({ page }) => {
+    await openApp(page);
+    await dragItemToDoll(page, 'トップス', 'red');
+    await dragItemToDoll(page, 'ボトムス', 'green');
+    await dragItemToDoll(page, 'ソックス', 'sock');
+    await dragItemToDoll(page, 'くつ', 'shoe');
+    await page.locator('.tool-button').first().click();
+    await expect(rowsOf(page)).toHaveCount(5);
+    // 画面を低くして、一覧が収まらないようにする
+    await page.setViewportSize({ width: VIEW_W, height: 300 });
+    const list = page.getByTestId('adjust-picker-items');
+    await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(60);
+    const maxScroll = await list.evaluate((el) => el.scrollHeight - el.clientHeight);
+    const order = await namesOf(page);
+    const on = await page.locator('[data-testid="adjust-picker-item"].on').getAttribute('title');
+    const touch = await fingers(page);
+
+    // すばやくなぞる: 一覧が流れる。並びも、調整する服も変わらない
+    let p = await center(page, 1);
+    await touch('touchStart', [p]);
+    for (const dy of [-20, -40, -60]) await touch('touchMove', [{ x: p.x, y: p.y + dy }]);
+    await touch('touchEnd', []);
+    await expect.poll(() => scrollTop(page)).toBeGreaterThanOrEqual(50);
+    expect(await namesOf(page)).toEqual(order);
+    expect(await page.locator('[data-testid="adjust-picker-item"].on').getAttribute('title')).toBe(on);
+
+    // 長く押してから動かす: 行が浮いて、並べ替わる
+    await list.evaluate((el) => (el.scrollTop = 0));
+    p = await center(page, 0);
+    const next = await center(page, 1);
+    await touch('touchStart', [p]);
+    await expect(page.locator('[data-dragging="true"]')).toHaveCount(1); // 押し続けると浮く
+    for (const f of [0.3, 0.6, 0.9]) await touch('touchMove', [{ x: p.x, y: p.y + (next.y - p.y) * f }]);
+    await touch('touchEnd', []);
+    await expect.poll(() => namesOf(page)).toEqual([order[1], order[0], ...order.slice(2)]);
+
+    // 浮かせた行を一覧の下の端へ持っていき、指を止める: 一覧は下まで流れ続ける
+    await list.evaluate((el) => (el.scrollTop = 0));
+    p = await center(page, 0);
+    const box = (await list.boundingBox())!;
+    await touch('touchStart', [p]);
+    await expect(page.locator('[data-dragging="true"]')).toHaveCount(1);
+    await touch('touchMove', [{ x: p.x, y: p.y + 10 }]);
+    await touch('touchMove', [{ x: p.x, y: box.y + box.height - 8 }]);
+    await expect.poll(() => scrollTop(page), { timeout: 5000 }).toBe(maxScroll);
+    // 下の端で止まる（動かしている行のぶん、余計に流れていかない）
+    await page.waitForTimeout(300);
+    expect(await scrollTop(page)).toBe(maxScroll);
+    await touch('touchEnd', []);
+    // いちばん下（ドールの後ろ）に入る
+    await expect.poll(async () => (await namesOf(page)).at(-1)).toBe(order[1]);
+  });
 });
