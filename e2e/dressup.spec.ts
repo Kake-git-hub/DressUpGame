@@ -787,40 +787,101 @@ test('調整の × で脱がせても、調整は続き、残りの服に切り�
 });
 
 
-test('うしろがみは別の 1 点: 髪と一緒に付き、うしろがみだけを動かせる', async ({ page }) => {
+test('髪は 1 点: 前の分と後ろの分が一緒に付き、位置と色は一緒に変わる（重なりは 1 枚ずつ）', async ({ page }) => {
   const PURPLE: Rgba = [128, 0, 255, 255];
   const SIDE_X = DOLL_X + (250 - IMG / 2) * BASE_SCALE; // トップスの左の外。うしろの分だけが見える所
+  const DROP = 280 * BASE_SCALE; // 下へ動かす量（ボトムスの高さまで）
   await openApp(page);
-  // blue には「後ろに描く分」がある: 着せると、前の分（青）と、うしろがみ（むらさき）が付く
+  // blue には「後ろに描く分」がある: 着せると、前の分（青）と、後ろの分（むらさき）が付く
   await dragItemToDoll(page, 'トップス', 'blue');
   await expectPixel(page, DOLL_X, TOP_Y, BLUE);
   await expectPixel(page, SIDE_X, TOP_Y, PURPLE);
-  await expect(page.locator('.palette-section button', { hasText: 'うしろがみ' })).toBeVisible();
-  // 調整: 一覧は上から「前の分 → ドール → うしろがみ」。最初は前の分を選んでいる
+  // メニューのカテゴリは 1 つ（うしろがみのカテゴリは無い）
+  await expect(page.locator('.palette-section button', { hasText: 'うしろがみ' })).toHaveCount(0);
+  // 調整: 一覧は上から「前の分 → ドール → 後ろの分」の 2 枚。最初は前の分を選んでいる
   await page.locator('.tool-button').first().click();
   const rows = page.locator('[data-testid="adjust-picker-items"] > *');
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(1)).toHaveAttribute('data-testid', 'adjust-picker-doll');
   const pickerItems = page.getByTestId('adjust-picker-item');
   await expect(pickerItems.nth(0)).toHaveClass(/on/);
-  // うしろがみを選んで、下へ動かす（ボトムスの高さへ）
-  await pickerItems.nth(1).click();
-  await expect(pickerItems.nth(1)).toHaveClass(/on/);
-  await page.mouse.move(SIDE_X, TOP_Y);
+  // 前の分を下へ動かすと、後ろの分も、その場で一緒に動く
+  const before = (await page.getByTestId('adjust-partner').boundingBox())!;
+  await page.mouse.move(DOLL_X, TOP_Y);
   await page.mouse.down();
-  await page.mouse.move(SIDE_X, TOP_Y + 280 * BASE_SCALE, { steps: 6 });
+  await page.mouse.move(DOLL_X, TOP_Y + DROP, { steps: 6 });
   await page.mouse.up();
+  const moved = (await page.getByTestId('adjust-partner').boundingBox())!;
+  expect(Math.abs(moved.y - before.y - DROP)).toBeLessThan(2);
+  await expect.poll(async () => near(await screenPixel(page, SIDE_X, BOTTOM_Y), PURPLE, 12), { timeout: 5000, message: '調整中に、後ろの分も動く' }).toBe(true);
+  // 色も一緒に変わる（色相 120 度: 青 → 赤、むらさき → だいだい）
+  const ORANGE: Rgba = [255, 128, 0, 255];
+  await page.locator('.hue-slider-vertical').fill('120');
+  await expect.poll(async () => near(await screenPixel(page, DOLL_X, BOTTOM_Y), RED, 12), { timeout: 5000, message: '調整中に、前の分の色が変わる' }).toBe(true);
+  await expect.poll(async () => near(await screenPixel(page, SIDE_X, BOTTOM_Y), ORANGE, 12), { timeout: 5000, message: '調整中に、後ろの分の色も変わる' }).toBe(true);
   await page.locator('.item-adjust-done-btn-small').click();
-  // うしろがみだけが動き、前の分はそのまま
-  await expectPixel(page, SIDE_X, BOTTOM_Y, PURPLE);
-  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
-  expect(near(await canvasPixel(page, SIDE_X, TOP_Y), PURPLE)).toBe(false);
+  // 確定後も、両方が動いて、両方の色が変わっている
+  await expectPixel(page, DOLL_X, BOTTOM_Y, RED);
+  await expectPixel(page, SIDE_X, BOTTOM_Y, ORANGE);
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
   // 読み込み直しても、そのまま
   await page.reload();
-  await expectPixel(page, SIDE_X, BOTTOM_Y, PURPLE);
-  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
-  // 後ろの分の無い服に替えると、対のうしろがみも外れる
+  await expectPixel(page, DOLL_X, BOTTOM_Y, RED);
+  await expectPixel(page, SIDE_X, BOTTOM_Y, ORANGE);
+  // 後ろの分を選んで動かしても、前の分が一緒に動く（上へ戻す）
+  await page.locator('.tool-button').first().click();
+  await pickerItems.nth(1).click();
+  await expect(pickerItems.nth(1)).toHaveClass(/on/);
+  await expect(page.locator('.hue-slider-vertical')).toHaveValue('120');
+  await page.mouse.move(SIDE_X, BOTTOM_Y);
+  await page.mouse.down();
+  await page.mouse.move(SIDE_X, BOTTOM_Y - DROP, { steps: 6 });
+  await page.mouse.up();
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expectPixel(page, SIDE_X, TOP_Y, ORANGE);
+  // 重なりは 1 枚ずつ: 後ろの分だけを、ドールの前へ出せる（前の分より下なので、まん中は前の分のまま）
+  await page.locator('.tool-button').first().click();
+  await pickerItems.nth(1).click();
+  await page.getByTestId('layer-front').click();
+  await expect(rows.nth(2)).toHaveAttribute('data-testid', 'adjust-picker-doll');
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  // × で脱がせると、前の分も後ろの分も脱げる（どちらを選んでいても）
+  await page.locator('.tool-button').first().click();
+  await pickerItems.nth(1).click();
+  await page.getByTestId('sticker-remove').click();
+  await expect(page.locator('.item-adjust-overlay')).toHaveCount(0);
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await expect.poll(async () => near(await canvasPixel(page, SIDE_X, TOP_Y), ORANGE), { timeout: 10_000 }).toBe(false);
+  // 後ろの分の無い服に替えると、後ろの分も外れる
+  await dragItemToDoll(page, 'トップス', 'blue');
+  await expectPixel(page, SIDE_X, TOP_Y, PURPLE);
   await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
-  await expect.poll(async () => near(await canvasPixel(page, SIDE_X, BOTTOM_Y), PURPLE), { timeout: 10_000 }).toBe(false);
+  await expect.poll(async () => near(await canvasPixel(page, SIDE_X, TOP_Y), PURPLE), { timeout: 10_000 }).toBe(false);
+});
+
+test('色スライダー: 黒い服にも色が付く（調整中の表示と、確定後が同じ色）', async ({ page }) => {
+  const BLACK: Rgba = [28, 28, 32, 255];
+  const chroma = (c: Rgba) => Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]);
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'black');
+  await expectPixel(page, DOLL_X, TOP_Y, BLACK);
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  await page.locator('.hue-slider-vertical').fill('120');
+  // 黒い所に、はっきり色が付く（色相だけを回したのでは、黒のまま）
+  await expect.poll(async () => chroma(await screenPixel(page, DOLL_X, TOP_Y)), { timeout: 5000, message: '調整中に色が付く' }).toBeGreaterThan(60);
+  const shown = await screenPixel(page, DOLL_X, TOP_Y);
+  expect(shown[1]).toBeGreaterThan(shown[0]); // 緑のなかま
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expect.poll(async () => near(await canvasPixel(page, DOLL_X, TOP_Y), shown, 6), { timeout: 10_000, message: '確定後も同じ色' }).toBe(true);
+  // 読み込み直しても同じ色。色を戻すと黒に戻る
+  await page.reload();
+  await expectPixel(page, DOLL_X, TOP_Y, shown);
+  await page.locator('.tool-button').first().click();
+  await page.getByTestId('hue-reset').click();
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, TOP_Y, BLACK);
 });

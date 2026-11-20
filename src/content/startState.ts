@@ -6,6 +6,7 @@ import type { ClothingItemData, EquippedItem } from '../types';
 import type { LoadedContent } from './loadContent';
 import { fromSavedOutfit } from '../services/outfitStorage';
 import type { SavedOutfitEntry } from '../services/outfitStorage';
+import { syncPairs } from '../engine/pairs';
 
 export interface StartState {
   dollId: string; // ドールが 1 体も無ければ ''
@@ -29,7 +30,8 @@ export function resolveStartState(
   // 服はそのドールのものだけ復元する（別のドールの服を着せない）。一覧から消えた服は外れる
   const available = content.clothing.filter(usable);
   const saved = addBackHair ? withBackHair(savedOutfit, available) : savedOutfit;
-  const outfit = fromSavedOutfit(saved, available);
+  // 髪は、前髪と対のうしろがみを一緒に動かす。別々に調整していた保存（v0.19〜v0.20）は、前髪にそろえる
+  const outfit = syncPairs(fromSavedOutfit(saved, available));
   // 背景は、そのドールで使えるもの（専用・共通）だけ
   const background = content.backgrounds.find((bg) => bg.id === savedBackgroundId && usable(bg));
   return { dollId, backgroundId: background?.id ?? null, outfit };

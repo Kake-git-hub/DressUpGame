@@ -131,8 +131,10 @@ describe('loadContent', () => {
     const back = clothing.find((c) => c.id === backItemId('アニメ/ヘア/ロング'))!;
     // 前髪: もとのカテゴリのまま。対のうしろがみを指す
     expect(front).toMatchObject({ type: 'ヘアスタイル', imageUrl: `${BASE}files/h.webp`, layerOrder: 11, backItemId: back.id });
-    // うしろがみ: 別のカテゴリ。ドールの後ろ。メニューでは髪のすぐ次
+    // うしろがみ: ドールの後ろに描く別の 1 枚。対の前髪を指し、前髪の中心（キャンバスの中心から -12, -397）を軸にする
     expect(back).toMatchObject({
+      frontItemId: front.id,
+      pivot: { x: -12, y: -397 },
       name: 'ロング',
       type: BACK_HAIR_TYPE,
       imageUrl: `${BASE}files/hb.webp`,
@@ -148,7 +150,31 @@ describe('loadContent', () => {
     expect(back.categoryOrder).toBeGreaterThan(11);
     expect(back.categoryOrder).toBeLessThan(12);
     expect(back.backItemId).toBeUndefined();
+    expect(front.frontItemId).toBeUndefined();
+    expect(front.pivot).toBeUndefined();
     expect(clothing).toHaveLength(5);
+  });
+
+  it('服が 1 点も無いドール（作りかけ）は、遊ぶ側に出さない。背景も出さない', async () => {
+    const withEmpty: Manifest = structuredClone(manifest);
+    withEmpty.dolls.push({
+      id: 'おとこのこ',
+      name: 'おとこのこ',
+      image: { file: 'files/boy.webp', canvasW: 1024, canvasH: 1024, box: { x: 300, y: 50, w: 400, h: 900 } },
+      categories: [{ id: 'トップス', label: 'トップス', layer: 4, menuOrder: 5, overlap: false, movable: false }],
+      items: [],
+      backgrounds: [{ id: 'おとこのこ/bg/1', name: '1', file: 'files/bg2.jpg', thumb: 'files/bg2t.jpg' }],
+    });
+    const content = await loadContent(BASE, okFetch(withEmpty));
+    expect(content.dolls.map((d) => d.id)).toEqual(['アニメ']);
+    expect(content.backgrounds.some((b) => b.dollId === 'おとこのこ')).toBe(false);
+  });
+
+  it('どのドールにも服が無いときは、ドールをそのまま出す（始めたばかりの素材でも開ける）', async () => {
+    const bare: Manifest = structuredClone(manifest);
+    bare.dolls[0].items = [];
+    const content = await loadContent(BASE, okFetch(bare));
+    expect(content.dolls.map((d) => d.id)).toEqual(['アニメ']);
   });
 
   it('服ごとの layer / overlap の上書きを優先する', async () => {

@@ -59,6 +59,8 @@ export function DressUpMenu({
     const groups = new Map<string, { items: ClothingItemData[]; categoryOrder: number; layerOrder: number }>();
     
     items.forEach(item => {
+      // うしろがみは、髪の 1 点と一緒に付く。メニューには出さない
+      if (item.frontItemId) return;
       const key = item.type;
       if (!groups.has(key)) {
         groups.set(key, { 
@@ -259,8 +261,7 @@ export function DressUpMenu({
 
             {items.length === 0 && (
               <p style={styles.emptyMessage}>
-                アイテムがありません<br />
-                設定からプリセットを取り込んでください
+                まだ ふくが ありません
               </p>
             )}
           </div>

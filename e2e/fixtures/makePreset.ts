@@ -43,6 +43,8 @@ async function presetFiles(): Promise<Array<[string, Buffer]>> {
     // トップス: y=240〜520
     ['doll-test/clothing/04_1_トップス/red.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#ff0000' })],
     ['doll-test/clothing/04_1_トップス/blue.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#0000ff' })],
+    // 黒い服（黒髪と同じ: 色相を回しても色が変わらないので、色スライダーは色を付ける）
+    ['doll-test/clothing/04_1_トップス/black.png', await png({ left: 292, top: 240, width: 440, height: 280, color: '#1c1c20' })],
     // ボトムス: y=520〜800
     ['doll-test/clothing/03_2_ボトムス/green.png', await png({ left: 292, top: 520, width: 440, height: 280, color: '#00a000' })],
     // くつ: 足もと（y=850〜911）の茶色。まん中（x=480〜543、y=855〜894）があいている（靴の開き）。

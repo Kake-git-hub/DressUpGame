@@ -258,6 +258,10 @@ export interface ClothingItemData {
   under?: { url: string; canvasW: number; canvasH: number; box: Box };
   // 対になる「うしろがみ」の ID（前髪だけが持つ）。着せると、対のうしろがみも一緒に付く
   backItemId?: string;
+  // 対になる前髪の ID（うしろがみだけが持つ）。メニューには出さず、位置・大きさ・向き・色は前髪とそろえる
+  frontItemId?: string;
+  // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする
+  pivot?: Position;
 }
 
 // 装備中のアイテム（動的zIndex付き）

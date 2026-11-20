@@ -11,6 +11,7 @@ import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
+import { adjustBaseId, partnerOf } from './engine/pairs';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
 import { resolveStartState } from './content/startState';
@@ -30,7 +31,7 @@ import { DEFAULT_DOLL_TRANSFORM } from './types';
 import './App.css';
 
 // アプリバージョン
-const APP_VERSION = '0.20.0';
+const APP_VERSION = '0.21.0';
 
 // メニュー幅（px）
 const MENU_WIDTH = 160;
@@ -215,11 +216,13 @@ function App() {
     return equippedItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, equippedItems]);
 
-  // 調整中の服より手前のもの（服・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない
+  // 調整中の服より手前のもの（服・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない。
+  // 髪は、前髪とうしろがみが一緒に動くので、下にあるほう（うしろがみ）から上を、調整画面が描く
   const hiddenSheets = useMemo(() => {
     if (!isAdjustingItem || adjustingItemId === null) return undefined;
-    const above = sheetsAbove(equippedItems, adjustingItemId);
-    return { items: above.flatMap((s) => (s.kind === 'item' ? [s.item.id] : [])), doll: above.some((s) => s.kind === 'doll') };
+    const baseId = adjustBaseId(equippedItems, adjustingItemId);
+    const above = sheetsAbove(equippedItems, baseId);
+    return { items: [baseId, ...above.flatMap((s) => (s.kind === 'item' ? [s.item.id] : []))], doll: above.some((s) => s.kind === 'doll') };
   }, [isAdjustingItem, adjustingItemId, equippedItems]);
 
   // 調整ボタンクリックで調整モード開始
@@ -254,10 +257,11 @@ function App() {
     setAdjustingItemId(null);
   }, []);
 
-  // 調整画面の枠の × で、その服を脱がせる。調整は続け、いちばん手前の服に切り替える（服が無くなったら終える）
+  // 調整画面の枠の × で、その服を脱がせる（髪は、前髪とうしろがみを一緒に）。調整は続け、いちばん手前の服に切り替える（服が無くなったら終える）
   const handleAdjustRemove = useCallback(
     (itemId: string) => {
-      const rest = equippedItems.filter((item) => item.id !== itemId);
+      const partnerId = partnerOf(equippedItems, itemId)?.id;
+      const rest = equippedItems.filter((item) => item.id !== itemId && item.id !== partnerId);
       unequipItemById(itemId);
       if (rest.length > 0) {
         setAdjustingItemId(rest[rest.length - 1].id); // equippedItems は重ね順（最後がいちばん手前）

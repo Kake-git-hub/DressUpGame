@@ -8,12 +8,13 @@
  */
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { PlacedDoll, PlacedImage, PlacedItem } from './PlacedItem';
-import { canvasGeometry, itemOrigin, lookOf } from './placement';
+import { canvasGeometry, itemOrigin, itemPivotOnCanvas, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { activeHides, hidesFor } from '../engine/hides';
-import { isBehindDoll, moveLayer as nextLayerAdjust, sheetsAbove, sortByLayer } from '../engine/layers';
+import { drawOrder, isBehindDoll, moveLayer as nextLayerAdjust, sortByLayer } from '../engine/layers';
+import { adjustBaseId, partnerOf } from '../engine/pairs';
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
@@ -254,9 +255,24 @@ export function ItemAdjustPanel({
     setRotation(0);
   }, []);
 
+  // 髪は、前髪と対のうしろがみを一緒に動かす: 位置・大きさ・向き・色は、対の相手にも同じ値を入れる（重なりの順番は別々）
+  const partner = item ? partnerOf(equippedItems, item.id) : null;
+  // 黒っぽい絵か（絵を読んだときに分かる）。前髪とうしろがみは、どちらかが黒っぽければ、両方とも同じ色変えにする
+  const [darkById, setDarkById] = useState<Record<string, boolean>>({});
+  const reportDark = (id: string) => (dark: boolean) => setDarkById((prev) => (prev[id] === dark ? prev : { ...prev, [id]: dark }));
+  const pairDark = item && partner ? !!(darkById[item.id] || darkById[partner.id]) : undefined;
+
   // 重なりの前後: 着ている服（調整中の服は、調整中の値）とドールを、下から並べた一覧の中で動かす。
   // ドールより下へ動かすと、ドールの後ろに回る
-  const current = item ? [...equippedItems.filter((i) => i.id !== item.id), { ...item, layerAdjust }] : [];
+  const current = item
+    ? equippedItems.map((i) =>
+        i.id === item.id
+          ? { ...item, layerAdjust }
+          : i.id === partner?.id
+            ? { ...i, adjustOffsetX: offsetX, adjustOffsetY: offsetY, adjustScale: scale, adjustRotation: rotation, colorHue }
+            : i,
+      )
+    : [];
   const stack = sortByLayer(current);
   const canMove = (direction: 1 | -1) => !!item && nextLayerAdjust(current, item.id, direction) !== null;
   const moveLayer = (direction: 1 | -1) => {
@@ -529,89 +545,101 @@ export function ItemAdjustPanel({
         const origin = itemOrigin(item, look, geometry, dollTransform);
         const { box, canvasW, canvasH } = item;
         const k = previewUnit * dollTransform.scale; // 元キャンバスの 1px → 画面の px
-        // 服の中心（拡大・回転の軸）。画面の座標
-        const centerX = origin.x + (box.x + box.w / 2 - canvasW / 2) * k;
-        const centerY = origin.y + (box.y + box.h / 2 - canvasH / 2) * k;
+        // 拡大・回転の軸（ふつうは服の中心。うしろがみは、前髪の中心）。画面の座標
+        const pivot = itemPivotOnCanvas(item);
+        const centerX = origin.x + (pivot.x - canvasW / 2) * k;
+        const centerY = origin.y + (pivot.y - canvasH / 2) * k;
         const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
 
-        return (
-          <>
-            <PlacedItem item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50} alwaysHue showUnder testId="adjust-preview">
-              {/* シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転 */}
-              <div
-                className="sticker-frame"
-                data-testid="sticker-frame"
-                style={{
-                  left: `${box.x * previewUnit}px`,
-                  top: `${box.y * previewUnit}px`,
-                  width: `${box.w * previewUnit}px`,
-                  height: `${box.h * previewUnit}px`,
-                  borderWidth: `${2 * counter}px`,
-                }}
+        // シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転
+        const frame = (
+          <div
+            className="sticker-frame"
+            data-testid="sticker-frame"
+            style={{
+              left: `${box.x * previewUnit}px`,
+              top: `${box.y * previewUnit}px`,
+              width: `${box.w * previewUnit}px`,
+              height: `${box.h * previewUnit}px`,
+              borderWidth: `${2 * counter}px`,
+            }}
+          >
+            {onRemove && (
+              <button
+                className="sticker-handle sticker-remove"
+                style={{ transform: `translate(-50%, -50%) scale(${counter})` }}
+                {...stopGesture}
+                onClick={() => onRemove(item.id)}
+                title="ぬがせる"
+                aria-label="ぬがせる"
+                data-testid="sticker-remove"
               >
-                {onRemove && (
-                  <button
-                    className="sticker-handle sticker-remove"
-                    style={{ transform: `translate(-50%, -50%) scale(${counter})` }}
-                    {...stopGesture}
-                    onClick={() => onRemove(item.id)}
-                    title="ぬがせる"
-                    aria-label="ぬがせる"
-                    data-testid="sticker-remove"
-                  >
-                    ×
-                  </button>
-                )}
-                <button
-                  className="sticker-handle sticker-reset"
-                  style={{ transform: `translate(50%, -50%) scale(${counter})` }}
-                  {...stopGesture}
-                  onClick={handleResetPlacement}
-                  title="位置・大きさ・向きをもどす"
-                  aria-label="位置・大きさ・向きをもどす"
-                  data-testid="sticker-reset"
-                >
-                  ↺
-                </button>
-                <div
-                  className="sticker-handle sticker-rotate"
-                  style={{ transform: `translate(50%, 50%) scale(${counter})` }}
-                  {...stopGesture}
-                  onPointerDown={(e) => startHandle(e, centerX, centerY)}
-                  onPointerMove={moveHandle}
-                  onPointerUp={endHandle}
-                  onPointerCancel={endHandle}
-                  title="ひっぱって大きさと向きを変える"
-                  aria-label="大きさと向き"
-                  data-testid="sticker-rotate"
-                >
-                  ⤡
-                </div>
-              </div>
-            </PlacedItem>
-            {/* 調整中の服より手前のもの（服・ドール）。キャンバスの代わりに、ここに重ねる */}
-            {(() => {
-              // 手前の服のうち、ほかの服が隠す所を持つもの（くつの下の靴下など）。キャンバスと同じように消して描く
-              const clip = hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items;
-              return sheetsAbove(current, item.id).map((sheet, i) =>
-              sheet.kind === 'doll' ? (
-                doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={51 + i} />
-              ) : (
-                <PlacedItem
-                  key={sheet.item.id}
-                  item={sheet.item}
-                  look={lookOf(sheet.item)}
-                  clip={clip.get(sheet.item.id)}
-                  geometry={geometry}
-                  dollTransform={dollTransform}
-                  zIndex={51 + i}
-                  className="adjust-front-item"
-                />
-              ),
-              );
-            })()}
-          </>
+                ×
+              </button>
+            )}
+            <button
+              className="sticker-handle sticker-reset"
+              style={{ transform: `translate(50%, -50%) scale(${counter})` }}
+              {...stopGesture}
+              onClick={handleResetPlacement}
+              title="位置・大きさ・向きをもどす"
+              aria-label="位置・大きさ・向きをもどす"
+              data-testid="sticker-reset"
+            >
+              ↺
+            </button>
+            <div
+              className="sticker-handle sticker-rotate"
+              style={{ transform: `translate(50%, 50%) scale(${counter})` }}
+              {...stopGesture}
+              onPointerDown={(e) => startHandle(e, centerX, centerY)}
+              onPointerMove={moveHandle}
+              onPointerUp={endHandle}
+              onPointerCancel={endHandle}
+              title="ひっぱって大きさと向きを変える"
+              aria-label="大きさと向き"
+              data-testid="sticker-rotate"
+            >
+              ⤡
+            </div>
+          </div>
         );
+
+        // キャンバスの代わりに、ここに重ねて描くもの（下から）: 調整中の服と対の相手のうち下にあるほうと、それより手前の服・ドール。
+        // 重なりの順番と、対の相手の位置・色を、その場で見せる
+        const order = drawOrder(current);
+        const sheets = order.slice(order.findIndex((s) => s.kind === 'item' && s.item.id === adjustBaseId(current, item.id)));
+        // 手前の服のうち、ほかの服が隠す所を持つもの（くつの下の靴下など）。キャンバスと同じように消して描く
+        const clip = hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items;
+        return sheets.map((sheet, i) => {
+          if (sheet.kind === 'doll') {
+            return doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} />;
+          }
+          if (sheet.item.id === item.id) {
+            return (
+              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} showUnder testId="adjust-preview">
+                {frame}
+              </PlacedItem>
+            );
+          }
+          if (sheet.item.id === partner?.id) {
+            return (
+              <PlacedItem key={partner.id} item={partner} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(partner.id)} testId="adjust-partner" />
+            );
+          }
+          return (
+            <PlacedItem
+              key={sheet.item.id}
+              item={sheet.item}
+              look={lookOf(sheet.item)}
+              clip={clip.get(sheet.item.id)}
+              geometry={geometry}
+              dollTransform={dollTransform}
+              zIndex={50 + i}
+              className="adjust-front-item"
+            />
+          );
+        });
       })()}
 
       {/* ドールモード時：ドール画像のプレビュー */}

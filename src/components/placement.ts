@@ -53,6 +53,12 @@ export const lookOf = (item: EquippedItem): ItemLook => ({
   hue: item.colorHue ?? 0,
 });
 
+// 拡大・回転の軸（服のキャンバス上の px）。ふつうは服そのものの中心。pivot を持つ服（うしろがみ）は、そこが軸（PixiEngine の itemPivot と同じ）
+export function itemPivotOnCanvas(item: Pick<EquippedItem, 'box' | 'canvasW' | 'canvasH' | 'pivot'>): { x: number; y: number } {
+  if (item.pivot) return { x: item.canvasW / 2 + item.pivot.x, y: item.canvasH / 2 + item.pivot.y };
+  return { x: item.box.x + item.box.w / 2, y: item.box.y + item.box.h / 2 };
+}
+
 // 服の原点（元キャンバスの中心）の画面上の位置
 export function itemOrigin(item: EquippedItem, look: ItemLook, g: CanvasGeometry, dollTransform: DollTransform) {
   let x: number;

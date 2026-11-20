@@ -5,6 +5,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
 import { sortByLayer } from '../engine/layers';
+import { SYNCED_KEYS, partnerOf } from '../engine/pairs';
 
 // 初期状態を作成
 const createInitialState = (
@@ -48,7 +49,7 @@ export interface UseDressUpReturn {
   equipItem: (item: ClothingItemData, back?: ClothingItemData) => void;
   // 服を脱がせる
   unequipItem: (type: ClothingType) => void;
-  // 着ている服を 1 着だけ脱がせる（重ね着できるカテゴリでも、ほかは残す）
+  // 着ている服を 1 着だけ脱がせる（重ね着できるカテゴリでも、ほかは残す）。髪は、前髪と対のうしろがみを一緒に脱がせる
   unequipItemById: (itemId: string) => void;
   // 指定タイプの装備アイテムを取得
   getEquippedItem: (type: ClothingType) => EquippedItem | null;
@@ -58,7 +59,7 @@ export interface UseDressUpReturn {
   resetAll: () => void;
   // 下着も含めて全て脱がせる
   resetAllIncludingUnderwear: () => void;
-  // アイテムの調整値を更新
+  // アイテムの調整値を更新。髪は、位置・大きさ・向き・色を、前髪と対のうしろがみの両方に入れる（重なりの順番は 1 枚ずつ）
   updateItemAdjustment: (itemId: string, adjustment: ItemAdjustment) => void;
   // 最後に着せたアイテムを取得
   getLastEquippedItem: () => EquippedItem | null;
@@ -110,10 +111,13 @@ export function useDressUp(
   }, []);
 
   const unequipItemById = useCallback((itemId: string) => {
-    setState((prev) => ({
-      ...prev,
-      equippedItems: prev.equippedItems.filter((e) => e.id !== itemId),
-    }));
+    setState((prev) => {
+      const partnerId = partnerOf(prev.equippedItems, itemId)?.id;
+      return {
+        ...prev,
+        equippedItems: prev.equippedItems.filter((e) => e.id !== itemId && e.id !== partnerId),
+      };
+    });
   }, []);
 
   // 指定タイプの装備アイテムを取得
@@ -151,11 +155,13 @@ export function useDressUp(
 
   // アイテムの調整値を更新
   const updateItemAdjustment = useCallback((itemId: string, adjustment: ItemAdjustment) => {
-    setState((prev) => ({
-      ...prev,
-      equippedItems: prev.equippedItems.map((item) =>
-        item.id === itemId
-          ? {
+    setState((prev) => {
+      const partnerId = partnerOf(prev.equippedItems, itemId)?.id;
+      return {
+        ...prev,
+        equippedItems: prev.equippedItems.map((item) => {
+          if (item.id === itemId) {
+            return {
               ...item,
               adjustOffsetX: adjustment.adjustOffsetX ?? item.adjustOffsetX,
               adjustOffsetY: adjustment.adjustOffsetY ?? item.adjustOffsetY,
@@ -163,10 +169,15 @@ export function useDressUp(
               adjustRotation: adjustment.adjustRotation ?? item.adjustRotation,
               layerAdjust: adjustment.layerAdjust ?? item.layerAdjust,
               colorHue: adjustment.colorHue ?? item.colorHue,
-            }
-          : item
-      ),
-    }));
+            };
+          }
+          if (item.id !== partnerId) return item;
+          const synced = { ...item };
+          for (const key of SYNCED_KEYS) if (adjustment[key] !== undefined) synced[key] = adjustment[key];
+          return synced;
+        }),
+      };
+    });
   }, []);
 
   // 最後に着せたアイテムを取得（最大equipOrderのアイテム）

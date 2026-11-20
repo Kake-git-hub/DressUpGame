@@ -7,7 +7,9 @@ import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter, Te
 import { isBehindDoll } from './layers';
 import { eraseHides } from './hides';
 import type { Hide } from './hides';
-import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform } from '../types';
+import { partnerOf } from './pairs';
+import { isDarkImage, recolor } from '../pipeline/recolor';
+import type { Box, ClothingItemData, DollConfig, EquippedItem, DollTransform, Position } from '../types';
 
 // ドール・服の表示高さ（画面の高さに対する割合）
 const HEIGHT_RATIO = 0.9;
@@ -31,11 +33,19 @@ function setCanvasOrigin(sprite: Sprite, placed: Placed, texture: { width: numbe
   sprite.pivot.set((canvasW / 2 - box.x) * sx, (canvasH / 2 - box.y) * sy);
 }
 
-// 服の中心（テクスチャ上）と、元キャンバスの中心から服の中心までのずれ（元キャンバスの px）
-export function itemPivot(placed: Placed, texture: { width: number; height: number }): { x: number; y: number; fromCanvasCenter: { x: number; y: number } } {
+// 拡大・回転の軸（テクスチャ上）と、元キャンバスの中心から軸までのずれ（元キャンバスの px）。
+// 軸は、ふつうは服の中心。pivot（元キャンバスの中心からの px）を持つ服は、そこが軸（うしろがみは、前髪の中心で回る）
+export function itemPivot(placed: Placed & { pivot?: Position }, texture: { width: number; height: number }): { x: number; y: number; fromCanvasCenter: { x: number; y: number } } {
   const canvasW = placed.canvasW ?? texture.width;
   const canvasH = placed.canvasH ?? texture.height;
   const box = placed.box ?? { x: 0, y: 0, w: texture.width, h: texture.height };
+  if (placed.pivot) {
+    return {
+      x: (canvasW / 2 + placed.pivot.x - box.x) * (texture.width / box.w),
+      y: (canvasH / 2 + placed.pivot.y - box.y) * (texture.height / box.h),
+      fromCanvasCenter: { x: placed.pivot.x, y: placed.pivot.y },
+    };
+  }
   return {
     x: texture.width / 2,
     y: texture.height / 2,
@@ -43,9 +53,24 @@ export function itemPivot(placed: Placed, texture: { width: number; height: numb
   };
 }
 
+// 絵の画素を読む（読めない絵は null）
+function pixelsOf(source: CanvasImageSource & { width: number; height: number }): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; image: ImageData } | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0);
+    return { canvas, ctx, image: ctx.getImageData(0, 0, canvas.width, canvas.height) };
+  } catch {
+    return null;
+  }
+}
+
 // 服に付いた「ドールのすぐ上に描く分」（くつの中の肌など）の原点。服と同じ軸（服の中心）で回り、大きくなるように、
 // 服の中心が、その絵のテクスチャ上のどこに当たるかを返す。scale は、テクスチャ 1px が元キャンバスの何 px か
-export function underPivot(item: Placed & { box: Box; canvasW: number; canvasH: number }, under: { canvasW: number; canvasH: number; box: Box }, texture: { width: number; height: number }): { x: number; y: number; scale: number } {
+export function underPivot(item: { box: Box; canvasW: number; canvasH: number }, under: { canvasW: number; canvasH: number; box: Box }, texture: { width: number; height: number }): { x: number; y: number; scale: number } {
   const k = texture.width / under.box.w;
   const centerX = item.box.x + item.box.w / 2 - item.canvasW / 2; // 元キャンバスの中心から、服の中心まで
   const centerY = item.box.y + item.box.h / 2 - item.canvasH / 2;
@@ -83,7 +108,8 @@ export class PixiEngine {
   private backgroundDrawId = 0;
   // 服が隠す所を消したドールのテクスチャ（作り直したら前のものは捨てる）
   private hiddenDollTexture: Texture | null = null;
-  private clippedTextures: Texture[] = []; // 隠す所を消した服（次の描き直しで捨てる）
+  private clippedTextures: Texture[] = []; // 隠す所を消した服・色を付けた黒っぽい服（次の描き直しで捨てる）
+  private darkImages = new Map<string, boolean>(); // 絵の URL → 黒っぽい絵か
 
   // 初期化
   async init(canvas: HTMLCanvasElement, width: number, height: number): Promise<void> {
@@ -557,12 +583,25 @@ export class PixiEngine {
               console.warn(`服が隠す所を読めませんでした。服をそのまま表示します (${item.name}):`, error);
             }
           }
-          return { item, texture, under: await loadUnder(), error: null };
+          // 黒っぽい絵（黒髪など）は、色相を回しても色が変わらないので、絵そのものに色を付ける
+          let recolored = false;
+          const hue = (item as EquippedItem).colorHue ?? 0;
+          if (hue !== 0 && !hidden?.has(item.id) && (await this.isDark(item, items))) {
+            const pixels = pixelsOf(texture.source.resource as CanvasImageSource & { width: number; height: number });
+            if (pixels) {
+              recolor(pixels.image.data, pixels.image.data, hue, true);
+              pixels.ctx.putImageData(pixels.image, 0, 0);
+              texture = Texture.from(pixels.canvas);
+              madeTextures.push(texture);
+              recolored = true;
+            }
+          }
+          return { item, texture, under: await loadUnder(), error: null, recolored };
         } catch (error) {
-          return { item, texture: null, under: null, error };
+          return { item, texture: null, under: null, error, recolored: false };
         }
       }
-      return { item, texture: null, under: null, error: null };
+      return { item, texture: null, under: null, error: null, recolored: false };
     });
 
     const drawId = ++this.clothingDrawId;
@@ -578,7 +617,7 @@ export class PixiEngine {
 
     const underSprites: Sprite[] = []; // ドールの前の服の「ドールのすぐ上の分」（服より下にまとめる）
     // ロード完了後、一時コンテナに描画
-    for (const { item, texture, under, error } of loadedItems) {
+    for (const { item, texture, under, error, recolored } of loadedItems) {
       // movableアイテムの場合、オフセットを取得
       const offsetX = (item as EquippedItem).offsetX ?? 0;
       const offsetY = (item as EquippedItem).offsetY ?? 0;
@@ -645,7 +684,7 @@ export class PixiEngine {
         // 回転を適用（度からラジアンに変換）
         clothingSprite.rotation = (adjustRotation * Math.PI) / 180;
 
-        if (colorHue !== 0) clothingSprite.filters = hueFilters();
+        if (colorHue !== 0 && !recolored) clothingSprite.filters = hueFilters();
 
         // ドールのすぐ上に描く分: 服と同じ位置・大きさ・向き。色は変えない
         let underSprite: Sprite | null = null;
@@ -705,6 +744,27 @@ export class PixiEngine {
 
     // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
     this.cacheClothingContainer();
+  }
+
+  // 黒っぽい絵か。髪は、前髪と対のうしろがみのどちらかが黒っぽければ、両方とも同じ色変えにする
+  private async isDark(item: ClothingItemData, items: (ClothingItemData | EquippedItem)[]): Promise<boolean> {
+    if (await this.isDarkImage(item.imageUrl)) return true;
+    const partner = partnerOf(items, item.id);
+    return partner ? this.isDarkImage(partner.imageUrl) : false;
+  }
+  private async isDarkImage(url: string): Promise<boolean> {
+    const known = this.darkImages.get(url);
+    if (known !== undefined) return known;
+    let dark = false;
+    try {
+      const texture = (await Assets.load(url)) as Texture;
+      const pixels = pixelsOf(texture.source.resource as CanvasImageSource & { width: number; height: number });
+      dark = pixels ? isDarkImage(pixels.image.data) : false;
+    } catch {
+      // 読めない絵は、ふつうの色変え
+    }
+    this.darkImages.set(url, dark);
+    return dark;
   }
 
   // 服コンテナをテクスチャにキャッシュ（パフォーマンス大幅改善）

@@ -285,7 +285,7 @@ describe('useDressUp', () => {
       id, name: id, type: 'hair', imageUrl: `${id}.png`, baseZIndex: 11, layerOrder: 11, ...(withBack ? { backItemId: `${id}#back` } : {}), ...geo,
     });
     const backOf = (id: string): ClothingItemData => ({
-      id: `${id}#back`, name: id, type: 'backhair', imageUrl: `${id}b.png`, baseZIndex: -1, layerOrder: -1, ...geo,
+      id: `${id}#back`, name: id, type: 'backhair', imageUrl: `${id}b.png`, baseZIndex: -1, layerOrder: -1, frontItemId: id, ...geo,
     });
     const ids = (r: { current: { equippedItems: { id: string }[] } }) => r.current.equippedItems.map((i) => i.id);
 
@@ -310,7 +310,7 @@ describe('useDressUp', () => {
       expect(ids(result)).toEqual(['c']);
     });
 
-    it('うしろがみだけを別のものに替えられる。そのあと髪を替えても、対でないうしろがみは、新しい対が無ければ残る', () => {
+    it('対でないうしろがみ（前の版の保存にある）は、髪を替えても、新しい対が無ければ残る', () => {
       const { result } = renderHook(() => useDressUp());
       act(() => result.current.equipItem(hair('a'), backOf('a')));
       act(() => result.current.equipItem(backOf('b')));
@@ -319,21 +319,39 @@ describe('useDressUp', () => {
       expect(ids(result)).toEqual(['b#back', 'c']);
     });
 
-    it('うしろがみだけを調整しても、前髪は変わらない', () => {
+    it('位置・大きさ・向き・色は、どちらを調整しても両方にかかる。重なりの順番は 1 枚ずつ', () => {
       const { result } = renderHook(() => useDressUp());
       act(() => result.current.equipItem(hair('a'), backOf('a')));
-      act(() => result.current.updateItemAdjustment('a#back', { adjustOffsetY: 30, colorHue: 90 }));
-      const [back, front] = result.current.equippedItems;
-      expect(back).toMatchObject({ adjustOffsetY: 30, colorHue: 90 });
-      expect(front.adjustOffsetY).toBeUndefined();
-      expect(front.colorHue).toBeUndefined();
+      act(() => result.current.updateItemAdjustment('a#back', { adjustOffsetY: 30, colorHue: 90, layerAdjust: 3 }));
+      let back = result.current.equippedItems.find((i) => i.id === 'a#back')!;
+      let front = result.current.equippedItems.find((i) => i.id === 'a')!;
+      expect(back).toMatchObject({ adjustOffsetY: 30, colorHue: 90, layerAdjust: 3 });
+      expect(front).toMatchObject({ adjustOffsetY: 30, colorHue: 90 });
+      expect(front.layerAdjust).toBeUndefined();
+
+      act(() => result.current.updateItemAdjustment('a', { adjustOffsetX: -5, adjustScale: 1.2, adjustRotation: 10, colorHue: 0, layerAdjust: -1 }));
+      back = result.current.equippedItems.find((i) => i.id === 'a#back')!;
+      front = result.current.equippedItems.find((i) => i.id === 'a')!;
+      expect(front).toMatchObject({ adjustOffsetX: -5, adjustOffsetY: 30, adjustScale: 1.2, adjustRotation: 10, colorHue: 0, layerAdjust: -1 });
+      expect(back).toMatchObject({ adjustOffsetX: -5, adjustOffsetY: 30, adjustScale: 1.2, adjustRotation: 10, colorHue: 0, layerAdjust: 3 });
     });
 
-    it('前髪だけ・うしろがみだけを脱がせられる', () => {
+    it('対でないうしろがみ（前の版で、別の髪のものに替えていた）は、前髪と一緒には変わらない', () => {
+      const { result } = renderHook(() => useDressUp());
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.equipItem(backOf('b')));
+      act(() => result.current.updateItemAdjustment('a', { adjustOffsetY: 30 }));
+      expect(result.current.equippedItems.find((i) => i.id === 'b#back')!.adjustOffsetY).toBeUndefined();
+    });
+
+    it('髪を脱がせると、前髪も対のうしろがみも脱げる（どちらを選んでいても）', () => {
       const { result } = renderHook(() => useDressUp());
       act(() => result.current.equipItem(hair('a'), backOf('a')));
       act(() => result.current.unequipItemById('a'));
-      expect(ids(result)).toEqual(['a#back']);
+      expect(ids(result)).toEqual([]);
+      act(() => result.current.equipItem(hair('a'), backOf('a')));
+      act(() => result.current.unequipItemById('a#back'));
+      expect(ids(result)).toEqual([]);
     });
   });
 });

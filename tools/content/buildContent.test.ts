@@ -80,10 +80,10 @@ describe('buildContent', () => {
   it('一覧ファイルが検証を通り、件数が合う', () => {
     expect(manifest.dolls).toHaveLength(1);
     expect(doll().id).toBe('test');
-    expect(doll().items).toHaveLength(13); // red, blue, opaque, big, green, shoe, sock, flat red, リボン, なまえだけ, star, おそろい×2
+    expect(doll().items).toHaveLength(14); // red, blue, black, opaque, big, green, shoe, sock, flat red, リボン, なまえだけ, star, おそろい×2
     expect(doll().backgrounds).toHaveLength(1);
     expect(manifest.backgrounds).toHaveLength(1);
-    expect(report).toMatchObject({ dolls: 1, items: 13, backgrounds: 2 });
+    expect(report).toMatchObject({ dolls: 1, items: 14, backgrounds: 2 });
   });
 
   it('服は切り抜かれ、box が元の位置を指す', async () => {

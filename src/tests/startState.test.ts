@@ -62,7 +62,7 @@ describe('resolveStartState', () => {
   describe('前髪とうしろがみに分ける前の保存', () => {
     const hairContent: LoadedContent = {
       ...content,
-      clothing: [{ ...item('A/hair', 'A'), backItemId: 'A/hair#back' }, { ...item('A/hair#back', 'A'), type: 'back' }, item('A/x', 'A')],
+      clothing: [{ ...item('A/hair', 'A'), backItemId: 'A/hair#back' }, { ...item('A/hair#back', 'A'), type: 'back', frontItemId: 'A/hair' }, item('A/x', 'A')],
     };
     const saved = [{ id: 'A/x', equipOrder: 0 }, { id: 'A/hair', equipOrder: 1, adjustOffsetX: 5, adjustScale: 1.1, colorHue: 40, layerAdjust: 2 }];
 
@@ -74,6 +74,18 @@ describe('resolveStartState', () => {
       expect(back.layerAdjust).toBeUndefined();
       expect(back.equipOrder).toBeLessThan(1);
       expect(back.equipOrder).toBeGreaterThan(0);
+    });
+
+    it('前髪とうしろがみを別々に調整していた保存は、うしろがみを前髪にそろえる（重なりの順番は、そのまま）', () => {
+      const separate = [
+        { id: 'A/hair#back', equipOrder: 0, adjustOffsetY: 40, colorHue: -90, adjustRotation: 5, layerAdjust: 1 },
+        { id: 'A/hair', equipOrder: 1, adjustOffsetX: 5, colorHue: 40 },
+      ];
+      const { outfit } = resolveStartState(hairContent, 'A', null, separate);
+      const back = outfit.find((i) => i.id === 'A/hair#back')!;
+      expect(back).toMatchObject({ adjustOffsetX: 5, colorHue: 40, layerAdjust: 1 });
+      expect(back.adjustOffsetY).toBeUndefined();
+      expect(back.adjustRotation).toBeUndefined();
     });
 
     it('分けたあとの保存なら、うしろがみを足さない（外したうしろがみが戻らない）', () => {

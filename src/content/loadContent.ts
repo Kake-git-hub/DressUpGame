@@ -23,8 +23,9 @@ export function resolveContentUrl(search: string, pageUrl: string): string {
   }
 }
 
-// 「後ろに描く分（back）」のある髪は、前髪と、うしろがみの 2 点に分けて読み込む。
-// うしろがみは別のカテゴリの 1 点なので、位置・大きさ・色・重なりを、前髪と別々に調整できる
+// 「後ろに描く分（back）」のある髪は、前髪と、うしろがみの 2 点（2 枚の絵）に分けて読み込む。
+// メニューに出るのは髪の 1 点だけ。うしろがみは髪と一緒に付き、位置・大きさ・向き・色は前髪とそろえる。
+// 重なりの順番だけは、1 枚ずつ変えられる
 export const BACK_HAIR_TYPE = 'うしろがみ';
 // ドールのすぐ後ろ
 const BACK_HAIR_LAYER = -1;
@@ -67,7 +68,10 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
   const dolls: DollData[] = [];
   const clothing: ClothingItemData[] = [];
   const backgrounds: BackgroundData[] = [];
+  // 服が 1 点も無いドール（スタジオで作りかけ）は、遊ぶ側には出さない。どのドールにも服が無いときは、そのまま出す
+  const anyItems = manifest.dolls.some((d) => d.items.length > 0);
   for (const doll of manifest.dolls) {
+    if (anyItems && doll.items.length === 0) continue;
     dolls.push({
       id: doll.id,
       name: doll.name,
@@ -112,13 +116,19 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
           position: { x: 0, y: 0 },
           baseZIndex: BACK_HAIR_LAYER,
           layerOrder: BACK_HAIR_LAYER,
-          categoryOrder: category.menuOrder + 0.5, // メニューでは、髪のすぐ次
+          categoryOrder: category.menuOrder + 0.5,
           allowOverlap: false,
           movable: false,
           dollId: doll.id,
           canvasW: item.back.canvasW,
           canvasH: item.back.canvasH,
           box: item.back.box,
+          frontItemId: item.id,
+          // 前髪と同じ軸で回り、大きくなる（前髪の中心）
+          pivot: {
+            x: item.image.box.x + item.image.box.w / 2 - item.image.canvasW / 2,
+            y: item.image.box.y + item.image.box.h / 2 - item.image.canvasH / 2,
+          },
         });
       }
     }
