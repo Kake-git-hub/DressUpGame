@@ -1,0 +1,123 @@
+import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { MyItem } from '../cloud/backend';
+import { mergeMyItems, openLibrary } from '../cloud/library';
+import { BACK_HAIR_TYPE } from '../content/loadContent';
+import type { LoadedContent } from '../content/loadContent';
+
+const blob = (text: string) => new Blob([text], { type: 'image/png' });
+const image = (file: string, box = { x: 392, y: 300, w: 240, h: 200 }) => ({ file, canvasW: 1024, canvasH: 1024, box });
+const myItem = (id: string, extra: Partial<MyItem> = {}, itemExtra: Partial<MyItem['item']> = {}): MyItem => ({
+  id,
+  dollId: 'アニメ',
+  item: { id, name: `服 ${id}`, category: 'トップス', image: image('image'), thumb: 'thumb', ...itemExtra },
+  files: { image: blob(`image-${id}`), thumb: blob(`thumb-${id}`) },
+  createdAt: 1,
+  ...extra,
+});
+
+describe('端末の中の「自分の服」（IndexedDB）', () => {
+  let factory: IDBFactory;
+  beforeEach(() => {
+    factory = new IDBFactory();
+  });
+
+  it('入れる・読む・消す。絵（Blob）も一緒に残る。開き直しても残る', async () => {
+    const library = openLibrary(factory);
+    expect(await library.all()).toEqual([]);
+    await library.put(myItem('my:1'));
+    await library.put(myItem('my:2', { createdAt: 2 }));
+    const again = openLibrary(factory);
+    const items = await again.all();
+    expect(items.map((i) => i.id)).toEqual(['my:1', 'my:2']);
+    expect(items[0].files.image).toBeDefined();
+    expect(items[0].item.name).toBe('服 my:1');
+    await again.remove('my:1');
+    expect((await library.all()).map((i) => i.id)).toEqual(['my:2']);
+  });
+
+  it('同じ ID をもう一度入れると、置き換わる', async () => {
+    const library = openLibrary(factory);
+    await library.put(myItem('my:1'));
+    await library.put(myItem('my:1', {}, { name: 'あたらしい' }));
+    const items = await library.all();
+    expect(items).toHaveLength(1);
+    expect(items[0].item.name).toBe('あたらしい');
+  });
+
+  it('replaceAll は、中身を丸ごと入れ替える（サーバーと合わせるとき）', async () => {
+    const library = openLibrary(factory);
+    await library.put(myItem('my:1'));
+    await library.replaceAll([myItem('my:2'), myItem('my:3')]);
+    expect((await library.all()).map((i) => i.id)).toEqual(['my:2', 'my:3']);
+  });
+
+  it('IndexedDB が使えない端末では、空として動く（落ちない）', async () => {
+    const library = openLibrary(null);
+    await library.put(myItem('my:1'));
+    expect(await library.all()).toEqual([]);
+    await library.remove('my:1');
+    await library.replaceAll([]);
+    const broken = { open: () => { throw new Error('使えません'); } } as unknown as IDBFactory;
+    expect(await openLibrary(broken).all()).toEqual([]);
+  });
+});
+
+describe('自分の服を、公開の素材に重ねる', () => {
+  const content: LoadedContent = {
+    dolls: [{ id: 'アニメ', name: 'アニメ', bodyImageUrl: 'https://x/d.webp', canvasW: 1024, canvasH: 1024, box: { x: 300, y: 50, w: 400, h: 900 } }],
+    clothing: [
+      { id: 'アニメ/トップス/シャツ', name: 'シャツ', type: 'トップス', imageUrl: 'https://x/a.webp', thumbnailUrl: 'https://x/t.webp', position: { x: 0, y: 0 }, baseZIndex: 4, layerOrder: 4, categoryOrder: 1, dollId: 'アニメ', canvasW: 1024, canvasH: 1024, box: { x: 292, y: 240, w: 440, h: 280 } },
+    ],
+    backgrounds: [],
+    categories: {
+      アニメ: [
+        { id: 'トップス', label: 'トップス', layer: 4, menuOrder: 1, overlap: false, movable: false },
+        { id: 'ヘア', label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false },
+      ],
+    },
+  };
+
+  it('そのドール・カテゴリの服として足す。絵は data: の URL。mine の印が付く。公開の服はそのまま', async () => {
+    const merged = await mergeMyItems(content, [myItem('my:1')]);
+    expect(merged.clothing).toHaveLength(2);
+    expect(merged.clothing[0]).toEqual(content.clothing[0]);
+    const mine = merged.clothing[1];
+    expect(mine).toMatchObject({ id: 'my:1', name: '服 my:1', type: 'トップス', dollId: 'アニメ', layerOrder: 4, categoryOrder: 1, mine: true, canvasW: 1024, box: { x: 392, y: 300, w: 240, h: 200 } });
+    expect(mine.imageUrl).toMatch(/^data:image\/png;base64,/);
+    expect(mine.thumbnailUrl).toMatch(/^data:image\/png;base64,/);
+    expect(atob(mine.imageUrl.split(',')[1])).toBe('image-my:1');
+    // もとの content は書き換えない
+    expect(content.clothing).toHaveLength(1);
+  });
+
+  it('公開の素材に無いドール・カテゴリの服は、足さない（落ちない）。絵が欠けている服も足さない', async () => {
+    const merged = await mergeMyItems(content, [
+      myItem('my:1', { dollId: '消えたドール' }),
+      myItem('my:2', {}, { category: '消えたカテゴリ' }),
+      myItem('my:3', { files: { thumb: blob('t') } }),
+      myItem('my:4'),
+    ]);
+    expect(merged.clothing.map((c) => c.id)).toEqual(['アニメ/トップス/シャツ', 'my:4']);
+  });
+
+  it('髪（back つき）は、前髪とうしろがみの 2 点になる。セットの印は、セットの ID と名前になる', async () => {
+    const hair = myItem(
+      'my:h',
+      { set: { id: 'my:set-1', name: 'うみのセット' }, files: { image: blob('f'), thumb: blob('t'), back: blob('b') } },
+      { category: 'ヘア', back: image('back', { x: 350, y: 30, w: 300, h: 600 }) },
+    );
+    const merged = await mergeMyItems(content, [hair, myItem('my:1', { set: { id: 'my:set-1', name: 'うみのセット' } })]);
+    const front = merged.clothing.find((c) => c.id === 'my:h')!;
+    const back = merged.clothing.find((c) => c.type === BACK_HAIR_TYPE)!;
+    expect(front).toMatchObject({ setId: 'my:set-1', setName: 'うみのセット', backItemId: back.id, mine: true });
+    expect(back.frontItemId).toBe('my:h');
+    expect(back.imageUrl).toMatch(/^data:/);
+    expect(merged.clothing.find((c) => c.id === 'my:1')).toMatchObject({ setId: 'my:set-1', setName: 'うみのセット' });
+  });
+
+  it('自分の服が無ければ、同じ content を返す', async () => {
+    expect(await mergeMyItems(content, [])).toBe(content);
+  });
+});

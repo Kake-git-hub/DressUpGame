@@ -263,6 +263,8 @@ export interface ClothingItemData {
   // セット（同じテーマで一度に作った服の集まり）。メニューの「セット」で、同じ ID の服をまとめて着せる
   setId?: string;
   setName?: string;
+  // 自分の服（アプリのスタジオで作った・届けてもらった服。その端末の利用者にだけ出る）
+  mine?: boolean;
   // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする
   pivot?: Position;
 }

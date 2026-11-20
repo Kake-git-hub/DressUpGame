@@ -3,7 +3,7 @@
  */
 import type { BackgroundData, ClothingItemData, DollData } from '../types';
 import { parseManifest } from './manifest';
-import type { ManifestBackground } from './manifest';
+import type { ManifestBackground, ManifestCategory, ManifestItem } from './manifest';
 
 export const DEFAULT_CONTENT_URL = 'https://kake-git-hub.github.io/DressUpGame-content/';
 
@@ -35,6 +35,73 @@ export interface LoadedContent {
   dolls: DollData[];
   clothing: ClothingItemData[];
   backgrounds: BackgroundData[];
+  // ドールごとのカテゴリ（自分の服を、あとから重ねるときに使う）
+  categories?: Record<string, ManifestCategory[]>;
+}
+
+/**
+ * 一覧の服 1 点を、アプリの服に変える。「後ろに描く分（back）」のある髪は、前髪とうしろがみの 2 点になる。
+ * url: 一覧の中の絵の名前 → 読める URL。set: セットの印（ID と名前）
+ */
+export function itemToClothing(
+  dollId: string,
+  category: ManifestCategory,
+  item: ManifestItem,
+  url: (file: string) => string,
+  set?: { id: string; name: string },
+): ClothingItemData[] {
+  const layer = item.layer ?? category.layer;
+  const result: ClothingItemData[] = [
+    {
+      id: item.id,
+      name: item.name,
+      type: category.label,
+      imageUrl: url(item.image.file),
+      thumbnailUrl: url(item.thumb),
+      position: { x: 0, y: 0 },
+      baseZIndex: layer,
+      layerOrder: layer,
+      categoryOrder: category.menuOrder,
+      allowOverlap: item.overlap ?? category.overlap,
+      movable: category.movable,
+      dollId,
+      canvasW: item.image.canvasW,
+      canvasH: item.image.canvasH,
+      box: item.image.box,
+      ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
+      ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
+      ...(item.back ? { backItemId: backItemId(item.id) } : {}),
+      // セットの印（うしろがみの分には付けない。髪と一緒に付くので）
+      ...(set ? { setId: set.id, setName: set.name } : {}),
+    },
+  ];
+  if (item.back) {
+    result.push({
+      id: backItemId(item.id),
+      name: item.name,
+      type: BACK_HAIR_TYPE,
+      imageUrl: url(item.back.file),
+      // うしろがみのサムネイル（体の裏の塗りつぶしを、うすい体の形で隠した絵）。無ければ絵そのもの
+      thumbnailUrl: url(item.backThumb ?? item.back.file),
+      position: { x: 0, y: 0 },
+      baseZIndex: BACK_HAIR_LAYER,
+      layerOrder: BACK_HAIR_LAYER,
+      categoryOrder: category.menuOrder + 0.5,
+      allowOverlap: false,
+      movable: false,
+      dollId,
+      canvasW: item.back.canvasW,
+      canvasH: item.back.canvasH,
+      box: item.back.box,
+      frontItemId: item.id,
+      // 前髪と同じ軸で回り、大きくなる（前髪の中心）
+      pivot: {
+        x: item.image.box.x + item.image.box.w / 2 - item.image.canvasW / 2,
+        y: item.image.box.y + item.image.box.h / 2 - item.image.canvasH / 2,
+      },
+    });
+  }
+  return result;
 }
 
 // 応答を待つ上限。つながらない回線で「よみこみちゅう」のまま止まらないようにする
@@ -68,6 +135,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
   const dolls: DollData[] = [];
   const clothing: ClothingItemData[] = [];
   const backgrounds: BackgroundData[] = [];
+  const categoriesByDoll: Record<string, ManifestCategory[]> = {};
   // 服が 1 点も無いドール（スタジオで作りかけ）は、遊ぶ側には出さない。どのドールにも服が無いときは、そのまま出す
   const anyItems = manifest.dolls.some((d) => d.items.length > 0);
   for (const doll of manifest.dolls) {
@@ -82,61 +150,15 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
     });
     const categories = new Map(doll.categories.map((c) => [c.id, c]));
     const setNames = new Map((doll.sets ?? []).map((x) => [x.id, x.name]));
+    categoriesByDoll[doll.id] = doll.categories;
     for (const item of doll.items) {
       const category = categories.get(item.category);
       if (!category) continue; // parseManifest が保証しているので通らない
-      const layer = item.layer ?? category.layer;
-      clothing.push({
-        id: item.id,
-        name: item.name,
-        type: category.label,
-        imageUrl: url(item.image.file),
-        thumbnailUrl: url(item.thumb),
-        position: { x: 0, y: 0 },
-        baseZIndex: layer,
-        layerOrder: layer,
-        categoryOrder: category.menuOrder,
-        allowOverlap: item.overlap ?? category.overlap,
-        movable: category.movable,
-        dollId: doll.id,
-        canvasW: item.image.canvasW,
-        canvasH: item.image.canvasH,
-        box: item.image.box,
-        ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
-        ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
-        ...(item.back ? { backItemId: backItemId(item.id) } : {}),
-        // セットの印（うしろがみの分には付けない。髪と一緒に付くので）
-        ...(item.set && setNames.has(item.set) ? { setId: item.set, setName: setNames.get(item.set)! } : {}),
-      });
-      if (item.back) {
-        clothing.push({
-          id: backItemId(item.id),
-          name: item.name,
-          type: BACK_HAIR_TYPE,
-          imageUrl: url(item.back.file),
-          // うしろがみのサムネイル（体の裏の塗りつぶしを、うすい体の形で隠した絵）。無ければ絵そのもの
-          thumbnailUrl: url(item.backThumb ?? item.back.file),
-          position: { x: 0, y: 0 },
-          baseZIndex: BACK_HAIR_LAYER,
-          layerOrder: BACK_HAIR_LAYER,
-          categoryOrder: category.menuOrder + 0.5,
-          allowOverlap: false,
-          movable: false,
-          dollId: doll.id,
-          canvasW: item.back.canvasW,
-          canvasH: item.back.canvasH,
-          box: item.back.box,
-          frontItemId: item.id,
-          // 前髪と同じ軸で回り、大きくなる（前髪の中心）
-          pivot: {
-            x: item.image.box.x + item.image.box.w / 2 - item.image.canvasW / 2,
-            y: item.image.box.y + item.image.box.h / 2 - item.image.canvasH / 2,
-          },
-        });
-      }
+      const set = item.set && setNames.has(item.set) ? { id: item.set, name: setNames.get(item.set)! } : undefined;
+      clothing.push(...itemToClothing(doll.id, category, item, url, set));
     }
     for (const bg of doll.backgrounds) backgrounds.push(toBackground(bg, doll.id));
   }
   for (const bg of manifest.backgrounds) backgrounds.push(toBackground(bg));
-  return { dolls, clothing, backgrounds };
+  return { dolls, clothing, backgrounds, categories: categoriesByDoll };
 }

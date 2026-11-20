@@ -11,7 +11,8 @@ export function contentUrlsForDoll(
   clothing: ClothingItemData[],
   backgrounds: BackgroundData[]
 ): string[] {
-  const items = clothing.filter((item) => !item.dollId || item.dollId === doll.id);
+  // 自分の服は、端末の中に絵があるので取りに行かない
+  const items = clothing.filter((item) => !item.mine && (!item.dollId || item.dollId === doll.id));
   const bgs = backgrounds.filter((bg) => !bg.dollId || bg.dollId === doll.id);
   const thumbs = [...items.map((i) => i.thumbnailUrl), ...bgs.map((b) => b.thumbnailUrl)];
   return [

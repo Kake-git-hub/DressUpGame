@@ -58,6 +58,12 @@ describe('contentUrlsForDoll', () => {
   });
   const bg = (id: string, dollId?: string): BackgroundData => ({ id, name: id, imageUrl: `${id}.jpg`, thumbnailUrl: `${id}-t.jpg`, dollId });
 
+  it('自分の服（端末の中にある絵）は、先読みしない', () => {
+    const mine: ClothingItemData = { ...item('m', 'd1'), imageUrl: 'data:image/png;base64,AAAA', thumbnailUrl: 'data:image/png;base64,BBBB', mine: true };
+    const urls = contentUrlsForDoll('https://x.test/c/', doll, [item('a', 'd1'), mine], []);
+    expect(urls).toEqual(['https://x.test/c/manifest.json', 'doll.webp', 'a-t.webp', 'a.webp']);
+  });
+
   it('そのドールの画像・服・サムネイル・背景（共通を含む）と一覧ファイルを返す', () => {
     const urls = contentUrlsForDoll('https://x.test/c/', doll, [item('a', 'd1'), item('b', 'd2')], [bg('own', 'd1'), bg('other', 'd2'), bg('shared')]);
     expect(urls).toEqual([
