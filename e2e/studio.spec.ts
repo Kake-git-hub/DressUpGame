@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import sharp from 'sharp';
 import type { Page } from '@playwright/test';
 
 const STUDIO = 'http://127.0.0.1:4174/DressUpGame/studio.html';
@@ -182,5 +183,94 @@ test.describe('スタジオ', () => {
     await expect(page.getByTestId('publish-dialog')).toContainText('git の作業フォルダではない');
     const manifest = await request.get('http://127.0.0.1:4174/DressUpGame/local-content/manifest.json');
     expect((await manifest.json()).dolls[0].items).toHaveLength(1);
+  });
+
+  // 自動生成の候補（髪の前の範囲・くつの中の肌）を、カードで見て保存する。
+  // この環境には AI のキーが無いので、生成の API だけを画面の側で差し替え、保存は本物のサーバーに送る
+  test.describe('自動生成の候補（差し替えた API）', () => {
+    const W = 1228; // 作業用のキャンバス（ドールの 1024 のまわりに 102 の余白）
+    const layer = async (rects: { x: number; y: number; w: number; h: number; color: string }[], holes: { x: number; y: number; w: number; h: number }[] = []) => {
+      const base = await sharp({ create: { width: W, height: W, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        .composite(await Promise.all(rects.map(async (r) => ({ input: await sharp({ create: { width: r.w, height: r.h, channels: 4, background: r.color } }).png().toBuffer(), left: r.x, top: r.y }))))
+        .raw()
+        .toBuffer();
+      for (const h of holes) for (let y = h.y; y < h.y + h.h; y++) for (let x = h.x; x < h.x + h.w; x++) base[(y * W + x) * 4 + 3] = 0;
+      return sharp(base, { raw: { width: W, height: W, channels: 4 } }).png().toBuffer();
+    };
+    // 生成の API を差し替える。images: kind → PNG
+    async function fakeJob(page: Page, category: string, name: string, images: Record<string, Buffer>, flags: Record<string, boolean>) {
+      await page.route('**/api/status', async (route) => {
+        const real = await (await route.fetch()).json();
+        await route.fulfill({ json: { ...real, ai: { text: true, image: true } } });
+      });
+      const item = { category, name, description: 'test', colors: [] };
+      await page.route('**/api/plan', (route) => route.fulfill({ json: { items: [item], maxImages: 2 } }));
+      await page.route('**/api/jobs', (route) => route.fulfill({ json: { id: 'fake' } }));
+      await page.route('**/api/jobs?id=fake', (route) =>
+        route.fulfill({ json: { id: 'fake', kind: 'items', dollId: 'アニメ', done: true, error: null, candidates: [{ item, status: 'passed', attempts: 1, notes: [], warnings: [], hasImage: true, hasShape: false, hasHide: false, hasFront: false, hasUnder: false, ...flags }] } }),
+      );
+      await page.route('**/api/jobs/image?**', (route) => {
+        const kind = new URL(route.request().url()).searchParams.get('kind') ?? 'png';
+        const body = images[kind];
+        return body ? route.fulfill({ body, contentType: 'image/png' }) : route.fulfill({ status: 404, json: { error: 'ない' } });
+      });
+      await page.reload();
+      await page.getByTestId('tab-generate').click();
+      await page.getByTestId('theme').fill('てすと');
+      await page.getByTestId(`target-${category}`).click();
+      await page.getByTestId('make').click();
+      await expect(page.getByTestId('item-card')).toHaveCount(1);
+    }
+    const canvasPixel = (page: Page, x: number, y: number) =>
+      page.getByTestId('card-canvas').evaluate((c: HTMLCanvasElement, [px, py]) => Array.from(c.getContext('2d')!.getImageData(px, py, 1, 1).data), [x, y]);
+    const near = (a: number[], b: number[], tolerance = 10) => b.every((v, i) => Math.abs(a[i] - v) <= tolerance);
+    // 保存のときに送った中身を控えてから、本物のサーバーに送る
+    async function captureSave(page: Page) {
+      const sent: Record<string, unknown>[] = [];
+      await page.route('**/api/items', async (route) => {
+        if (route.request().method() === 'POST') sent.push(route.request().postDataJSON() as Record<string, unknown>);
+        await route.continue();
+      });
+      return sent;
+    }
+
+    test('髪: 前の範囲で前髪と後ろ髪に分けて見せ、前の範囲と一緒に保存する', async ({ page, request }) => {
+      expect((await request.put('http://127.0.0.1:4174/api/categories', { data: { dollId: 'アニメ', category: { label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false } } })).ok()).toBe(true);
+      const BROWN = '#5a3214';
+      const cap = { x: 540, y: 110, w: 150, h: 80 }; // 頭の上（前）
+      const long = { x: 500, y: 150, w: 230, h: 350 }; // 体の後ろにたれる髪
+      const png = await layer([{ ...long, color: BROWN }, { ...cap, color: BROWN }]);
+      const front = await layer([{ ...cap, color: '#ffffff' }]);
+      await fakeJob(page, 'ヘアスタイル', 'まえとうしろ', { png, source: png, front }, { hasFront: true });
+      // 頭の横（ドールの外）は後ろ髪の色、顔のまん中はドールの肌（後ろ髪はドールの後ろ）
+      await expect.poll(async () => near(await canvasPixel(page, 550, 220), [90, 50, 20, 255])).toBe(true);
+      await expect.poll(async () => (await canvasPixel(page, 615, 230))[0]).toBeGreaterThan(200);
+      const sent = await captureSave(page);
+      await page.getByTestId('card-save').click();
+      await expect(page.getByTestId('item-card')).toHaveCount(0);
+      expect(typeof sent[0]?.front).toBe('string');
+      expect(sent[0]?.shape).toBeUndefined();
+      const saved = items().find((i) => i.name === 'まえとうしろ') as Item & { back?: { box: { h: number } }; backThumb?: string };
+      expect(saved.back).toBeDefined();
+      expect(saved.backThumb).toBeDefined();
+      expect(saved.image.box.h).toBeLessThanOrEqual(cap.h + 2);
+    });
+
+    test('くつ: 靴の開きに肌を見せ、肌の絵と一緒に保存する', async ({ page }) => {
+      const shoeBox = { x: 540, y: 1030, w: 150, h: 80 };
+      const hole = { x: 590, y: 1040, w: 50, h: 30 };
+      const png = await layer([{ ...shoeBox, color: '#804000' }], [hole]);
+      const under = await layer([{ x: 585, y: 1035, w: 60, h: 40, color: '#ff80c0' }]);
+      const hide = await layer([{ x: 530, y: 1020, w: 170, h: 100, color: '#ffffff' }]);
+      await fakeJob(page, 'くつ', 'ひらいたくつ', { png, source: png, under, hide }, { hasUnder: true, hasHide: true });
+      await expect.poll(async () => near(await canvasPixel(page, 615, 1055), [255, 128, 192, 255])).toBe(true);
+      const sent = await captureSave(page);
+      await page.getByTestId('card-save').click();
+      await expect(page.getByTestId('item-card')).toHaveCount(0);
+      expect(typeof sent[0]?.under).toBe('string');
+      expect(typeof sent[0]?.hide).toBe('string');
+      const saved = items().find((i) => i.name === 'ひらいたくつ') as Item & { under?: { box: { x: number; y: number } } };
+      expect(saved.under?.box).toMatchObject({ x: 585, y: 1035 });
+    });
   });
 });

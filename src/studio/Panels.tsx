@@ -299,7 +299,7 @@ function JobCards({ id, doll, onChanged, onRedo }: Common & { id: string; onRedo
           <div key={`${i}-${c.attempts}`}>
             <ItemCard
               doll={doll}
-              source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), shapeUrl: c.hasShape ? api.jobImageUrl(id, i, 'shape', c.attempts) : null, hideUrl: c.hasHide ? api.jobImageUrl(id, i, 'hide', c.attempts) : null, warnings: c.warnings, notes: c.notes }}
+              source={{ key: `${id}-${i}`, name: c.item.name, category: c.item.category ?? '', cutUrl: api.jobImageUrl(id, i, 'png', c.attempts), sourceUrl: api.jobImageUrl(id, i, 'source', c.attempts), shapeUrl: c.hasShape ? api.jobImageUrl(id, i, 'shape', c.attempts) : null, hideUrl: c.hasHide ? api.jobImageUrl(id, i, 'hide', c.attempts) : null, frontUrl: c.hasFront ? api.jobImageUrl(id, i, 'front', c.attempts) : null, underUrl: c.hasUnder ? api.jobImageUrl(id, i, 'under', c.attempts) : null, warnings: c.warnings, notes: c.notes }}
               onDiscard={() => hide(i)}
               onSaved={() => { hide(i); void onChanged(); }}
               onRedo={() => { hide(i); onRedo(c.item as PlannedItem); }}

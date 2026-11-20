@@ -7,6 +7,7 @@ import type { ManifestDoll } from '../content/manifest';
 import { alphaBBox } from '../pipeline/alpha';
 import type { Box } from '../pipeline/alpha';
 import type { BodyParts } from '../pipeline/bodyParts';
+import { hairFromMask } from '../pipeline/hairLayers';
 import { hairFrontBottom, isBackHairCategory, splitHair, splitsHair } from '../pipeline/hairSplit';
 import { defaultLimbs, hideMask, limbZones } from '../pipeline/limbZones';
 import type { Limb } from '../pipeline/limbZones';
@@ -25,6 +26,10 @@ export interface CardSource {
   shapeUrl?: string | null; // AI が描いた体と服の形（手足の先を服に合わせるのに使う）
   // 差し替え式の品目（くつ・てぶくろ）: 着ているあいだドールを隠す所（白で不透明）。あれば、これをそのまま使う
   hideUrl?: string | null;
+  // 髪（本物のドールに描かせたもの）: 前髪の範囲。あれば、これで前髪と後ろ髪に分ける
+  frontUrl?: string | null;
+  // くつ: 靴の中に見える足の肌。ドールのすぐ上、服の下に描く
+  underUrl?: string | null;
   warnings: Warning[];
   notes: string[];
 }
@@ -66,7 +71,8 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
   );
   const viewRef = useRef<HTMLCanvasElement>(null);
   const cutRef = useRef<HTMLCanvasElement | null>(null); // 編集中の服
-  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null; hide: HTMLImageElement | null } | null>(null);
+  const images = useRef<{ doll: HTMLImageElement; cut: HTMLImageElement; source: HTMLImageElement; shape: HTMLImageElement | null; hide: HTMLImageElement | null; front: HTMLImageElement | null; under: HTMLImageElement | null } | null>(null);
+  const underRef = useRef<HTMLCanvasElement | null>(null); // 靴の中の肌（微調整に合わせて動かしたもの）
   const hideRef = useRef<HTMLCanvasElement | null>(null); // 着ているあいだドールを隠す所（白）
   const [parts, setParts] = useState<BodyParts | null>(null);
   const [swap, setSwap] = useState(true); // 差し替え式の品目で、ドールの手足の先を隠すか
@@ -140,6 +146,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
         ctx.drawImage(hideRef.current, 0, 0);
         ctx.globalCompositeOperation = 'source-over';
       }
+      if (underRef.current && loaded.under) ctx.drawImage(underRef.current, 0, 0);
     }
     ctx.drawImage(cut, 0, 0);
   }, [view, drawNudged, canvasW, canvasH, box, hasHide, isHair, isBackHair]);
@@ -168,7 +175,17 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       bodyShape = new Uint8Array(canvasW * canvasH);
       for (let p = 0; p < bodyShape.length; p++) bodyShape[p] = shapePixels[p * 4 + 3];
     }
-    const split = splitHair(pixels((ctx) => ctx.drawImage(cut, 0, 0)), alpha, canvasW, canvasH, undefined, { ...(parts ? { frontBottom: hairFrontBottom(parts.head) + padY } : {}), bodyShape });
+    // 本物のドールに描かせた髪は、生成のときに決まった前髪の範囲（微調整に合わせて動かす）で分ける
+    let frontMask: Uint8Array | null = null;
+    if (loaded.front) {
+      const frontPixels = pixels((ctx) => drawNudged(ctx, loaded.front!));
+      frontMask = new Uint8Array(canvasW * canvasH);
+      for (let p = 0; p < frontMask.length; p++) frontMask[p] = frontPixels[p * 4 + 3];
+    }
+    const cutPixels = pixels((ctx) => ctx.drawImage(cut, 0, 0));
+    const split = frontMask
+      ? hairFromMask(cutPixels, frontMask, alpha, canvasW, canvasH)
+      : splitHair(cutPixels, alpha, canvasW, canvasH, undefined, { ...(parts ? { frontBottom: hairFrontBottom(parts.head) + padY } : {}), bodyShape });
     if (!split) return;
     const toCanvas = (data: Uint8ClampedArray) => {
       const c = document.createElement('canvas');
@@ -190,10 +207,12 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       source.shapeUrl ? loadImage(source.shapeUrl).catch(() => null) : Promise.resolve(null),
       loadParts(doll.id).catch(() => null), // 型紙の部位（手足の先を合わせる・前髪の範囲を決めるのに使う）
       source.hideUrl ? loadImage(source.hideUrl).catch(() => null) : Promise.resolve(null),
+      source.frontUrl ? loadImage(source.frontUrl).catch(() => null) : Promise.resolve(null),
+      source.underUrl ? loadImage(source.underUrl).catch(() => null) : Promise.resolve(null),
     ])
-      .then(([d, c, s, shape, p, hide]) => {
+      .then(([d, c, s, shape, p, hide, front, under]) => {
         if (cancelled) return;
-        images.current = { doll: d, cut: c, source: s, shape, hide };
+        images.current = { doll: d, cut: c, source: s, shape, hide, front, under };
         setParts(p);
         const canvas = document.createElement('canvas');
         canvas.width = c.naturalWidth;
@@ -213,7 +232,21 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl, source.hideUrl]);
+  }, [doll.id, doll.image.file, source.cutUrl, source.sourceUrl, source.shapeUrl, source.hideUrl, source.frontUrl, source.underUrl]);
+
+  // 靴の中の肌を、微調整に合わせて動かす
+  useEffect(() => {
+    const under = images.current?.under;
+    if (!ready || !under) {
+      underRef.current = null;
+      return;
+    }
+    const canvas = underRef.current ?? document.createElement('canvas');
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    drawNudged(canvas.getContext('2d')!, under);
+    underRef.current = canvas;
+  }, [ready, drawNudged, canvasW, canvasH]);
 
   // 隠す所を作る: 手首・すねから先で、AI が描いた形（微調整に合わせて動かす）の外にあるドール
   useEffect(() => {
@@ -388,9 +421,20 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
       const blob = await new Promise<Blob | null>((resolve) => cut.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('画像を作れませんでした');
       const hideBlob = hasHide && hideRef.current ? await new Promise<Blob | null>((resolve) => hideRef.current!.toBlob(resolve, 'image/png')) : null;
-      // 髪: AI が描いた体と髪の形も送る（後ろ髪の穴を、画面と同じように埋めるため）
+      const nudgedPng = async (img: HTMLImageElement) => {
+        const c = document.createElement('canvas');
+        c.width = canvasW;
+        c.height = canvasH;
+        drawNudged(c.getContext('2d')!, img);
+        const b = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
+        return b ? blobToBase64(b) : undefined;
+      };
+      // 髪（本物のドールに描かせたもの）: 前髪の範囲を送る。くつ: 靴の中の肌を送る
+      const front = isHair && images.current?.front ? await nudgedPng(images.current.front) : undefined;
+      const under = images.current?.under ? await nudgedPng(images.current.under) : undefined;
+      // 髪（前髪の範囲が無いもの）: AI が描いた体と髪の形も送る（後ろ髪の穴を、画面と同じように埋めるため）
       let shape: string | undefined;
-      if (isHair && images.current?.shape) {
+      if (isHair && !front && images.current?.shape) {
         const c = document.createElement('canvas');
         c.width = canvasW;
         c.height = canvasH;
@@ -398,7 +442,7 @@ export function ItemCard({ doll, source, onSaved, onDiscard, onRedo }: Props) {
         const shapeBlob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
         if (shapeBlob) shape = await blobToBase64(shapeBlob);
       }
-      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined, shape });
+      await api.addItem({ dollId: doll.id, category, name: name.trim(), png: await blobToBase64(blob), replaceId, hide: hideBlob ? await blobToBase64(hideBlob) : undefined, shape, front, under });
       onSaved();
     } catch (e) {
       setError(e instanceof ApiError || e instanceof Error ? e.message : String(e));
