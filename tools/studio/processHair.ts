@@ -30,9 +30,10 @@ const CLOSE_TO_SKIN_LIMIT = 0.25;
 
 /**
  * generated: AI が返した絵。reference: AI に渡した拡大図。tileDoll: 枠の中のドール（to の大きさ）。
- * tile: 拡大図の枠。canvasW・canvasH: 戻す先（作業用キャンバス）の大きさ。background: 拡大図の背景色
+ * tile: 拡大図の枠。canvasW・canvasH: 戻す先（作業用キャンバス）の大きさ。background: 拡大図の背景色。
+ * neckY: 枠の中での、首（肩の上）の y。分かっていれば、頭のまわりの髪も前髪に入れる
  */
-export async function processHair(generated: Buffer, reference: Buffer, tileDoll: DollTemplate, tile: Tile, canvasW: number, canvasH: number, background: Rgb): Promise<HairResult> {
+export async function processHair(generated: Buffer, reference: Buffer, tileDoll: DollTemplate, tile: Tile, canvasW: number, canvasH: number, background: Rgb, neckY?: number): Promise<HairResult> {
   const { w, h } = tile.to;
   let image: Uint8ClampedArray;
   try {
@@ -44,7 +45,7 @@ export async function processHair(generated: Buffer, reference: Buffer, tileDoll
   const match = matchToReference(image, ref, w, h);
   const dollAlpha = new Uint8Array(w * h);
   for (let p = 0; p < dollAlpha.length; p++) dollAlpha[p] = tileDoll.rgba[p * 4 + 3];
-  const hair = extractHair(match.rgba, ref, dollAlpha, w, h, background);
+  const hair = extractHair(match.rgba, ref, dollAlpha, w, h, background, neckY);
 
   const rgba = new Uint8ClampedArray(canvasW * canvasH * 4);
   const source = new Uint8ClampedArray(canvasW * canvasH * 4);

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { alphaBBox } from '../../src/pipeline/alpha.ts';
 import type { Tile } from '../../src/pipeline/frames.ts';
-import { pasteTile, renderFrame, tileTemplate, toTile } from './frame.ts';
+import { pasteTile, pasteTileAlpha, renderFrame, tileTemplate, toTile } from './frame.ts';
 import type { DollTemplate } from './processGenerated.ts';
 
 // 四角い頭と胴のドール（肌色）。k 倍の大きさでも作れる
@@ -81,6 +81,25 @@ describe('tileTemplate と pasteTile', () => {
 });
 
 describe('toTile', () => {
+  it('不透明度だけの絵（形・隠す所）も、枠の位置に正しく戻る', async () => {
+    // 枠の中（200×200）の下半分が 255。キャンバス 100×100 の (20,10)〜(60,50) に戻す
+    const alpha = new Uint8Array(200 * 200);
+    for (let y = 100; y < 200; y++) for (let x = 0; x < 200; x++) alpha[y * 200 + x] = 255;
+    const target = new Uint8Array(100 * 100);
+    await pasteTileAlpha(target, 100, 100, alpha, { from: { x: 20, y: 10, w: 40, h: 40 }, to: { x: 0, y: 0, w: 200, h: 200 } });
+    expect(target[15 * 100 + 40]).toBe(0); // 上半分
+    expect(target[45 * 100 + 25]).toBe(255); // 下半分の左
+    expect(target[45 * 100 + 55]).toBe(255); // 下半分の右
+    expect(target[45 * 100 + 70]).toBe(0); // 枠の外
+    expect(target[60 * 100 + 40]).toBe(0);
+    // 同じ大きさ（拡大なし）でも同じ
+    const same = new Uint8Array(200 * 200);
+    await pasteTileAlpha(same, 200, 200, alpha, { from: { x: 0, y: 0, w: 200, h: 200 }, to: { x: 0, y: 0, w: 200, h: 200 } });
+    expect(same[50 * 200 + 100]).toBe(0);
+    expect(same[150 * 200 + 100]).toBe(255);
+    expect(same[199 * 200 + 199]).toBe(255);
+  });
+
   it('キャンバス上の箱を、枠の中の位置に直す', () => {
     expect(toTile({ x: 80, y: 20, w: 40, h: 40 }, tile)).toEqual({ x: 307, y: 205, w: 410, h: 410 });
   });

@@ -37,8 +37,28 @@ const OUTSIDE_CORE = 2; // 外の髪: この太さの芯を持たないかたま
 const FRONT_THIN = 3; // 前: これより細い所（後ろ髪のふちが体の輪郭線にかぶっただけの所）は前にしない
 const FRONT_GROW = 6; // 前: 太い所からこの範囲の髪（毛先）と、この範囲の体の外の髪は前に入れる
 const FRONT_AREA = 150; // 前: これより小さいかたまりは前にしない
+// 絵の線: まわり（この半径）の髪の明るさの平均の、この割合より暗い画素
+const LINE_WINDOW = 10;
+const LINE_DARK = 0.8;
+// 線で分けた房のうち、ドールの上の髪がこの割合以上ある房は、ドールの外の部分もふくめて前にする
+const LOBE_ON_SHARE = 0.3;
+// 首より上の画素がこの割合以上ある房は、房ごと前にする（頭のまわりの髪）
+const LOBE_ABOVE_SHARE = 0.8;
+const LOBE_RIM = 3; // 房と一緒に前に入れる、まわりの線の幅
+// 前髪はひとつながりにする: 離れているかたまりは、髪をたどった道でつなぐ。
+// 道が通る房がこれより小さければ（三つ編みのひと節など）房ごと前にし、大きければ（後ろ髪の広がり）道のまわりだけを足す
+const JOIN_LOBE_AREA = 12000;
+const LINE_COST = 3;
+const BIG_COST = 6;
+// 道のまわりを足すときの、太さの半分（つなぐかたまりの太さに合わせる）の下限と上限
+const PATH_MIN = 12;
+const PATH_MAX = 40;
+const DOLL_EDGE = 5; // ドールからこの範囲にある、細い外の「髪」は、ドールのふちが少しずれただけの所
+const EDGE_THIN = 2;
 const BRIDGE = 4; // 髪のかたまりを数えるとき、この幅のすき間はつながっているとみなす
-const STRAY_SHARE = 0.05; // 外の髪につながらず、いちばん大きい髪のこの割合より小さいかたまりは、髪ではない描き変え
+const STRAY_SHARE = 0.05; // ドールの上の離れたかたまり: いちばん大きい髪の、この割合より小さければ、髪ではない描き変え
+const STRAY_OUTSIDE_SHARE = 0.3; // ドールの外の画素がこの割合より少ないかたまりを「ドールの上のかたまり」とみなす
+const STRAY_OUT_AREA = 1500; // ドールの外の離れたかたまり: これより小さければ、髪ではない
 const TUCK = 8; // 髪に接する体のふちを、この幅だけ塗る（境目にすき間を作らない）
 const EDGE_REACH = 3; // ふちの背景色を取る幅
 // 肌と接する髪のふち: 色の差 FEATHER_START〜FEATHER_FULL を、不透明度 0.5〜1 にする
@@ -51,9 +71,10 @@ const UNLIKE_DISTANCE = 60;
 
 /**
  * image: AI の絵（位置合わせ済み・不透明）。reference: AI に渡した絵。dollAlpha: ドールの不透明度（0〜255）。
- * すべて同じ大きさ。background: 絵の背景色
+ * すべて同じ大きさ。background: 絵の背景色。
+ * neckY: 首（肩の上）の y。分かっていれば、それより上の髪（頭のまわりの髪）は、ドールの外でも前髪に入れる
  */
-export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLike<number>, width: number, height: number, background: Rgb): HairExtract {
+export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLike<number>, width: number, height: number, background: Rgb, neckY?: number): HairExtract {
   const total = width * height;
   const k = width / BASE_WIDTH;
   const px = (v: number) => Math.max(1, Math.round(v * k));
@@ -71,12 +92,13 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
   const cut = new Uint8ClampedArray(image);
   cutOutClothing(cut, width, height, { background, silhouette: null });
 
-  // ドールの上: 渡した絵との色の差（まわり 1px のうち、いちばん近い色との距離。1px のずれは違いとみなさない）
+  // 渡した絵との色の差（まわり 1px のうち、いちばん近い色との距離。1px のずれは違いとみなさない）。
+  // 髪は「渡した絵と違う所」。ドールの外でも、渡した絵と同じ所（ドールのふちのにじみ）は髪ではない
   const distance = new Float32Array(total);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = y * width + x;
-      if (!doll[p]) continue;
+      if (!doll[p] && cut[p * 4 + 3] < 128) continue; // 背景
       const i = p * 4;
       let best = Infinity;
       for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1) && best > 0; yy++) {
@@ -95,7 +117,7 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
   for (let p = 0; p < total; p++) {
     // ドールの上で色が変わっていても、背景の色になった所（AI がドールを少し削った所）は髪ではない
     if (doll[p]) inHair[p] = distance[p] > HAIR_SAME && cut[p * 4 + 3] >= 128 ? 1 : 0;
-    else outHair[p] = cut[p * 4 + 3] >= 128 ? 1 : 0;
+    else outHair[p] = cut[p * 4 + 3] >= 128 && distance[p] > HAIR_SAME ? 1 : 0;
   }
   components(inHair, width, height, (pixels, count) => {
     if (count < area(SPECK_AREA)) for (let n = 0; n < count; n++) inHair[pixels[n]] = 0;
@@ -108,30 +130,50 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
     });
   }
 
-  // 髪から離れた所の描き変え（AI がドールに描き足したもの）は、髪に入れない
+  // ドールのふちに沿った細い線は、AI がドールの輪郭を少し外へ描いただけの所。髪にしない
+  {
+    const thickOut = dilate(erode(outHair, width, height, px(EDGE_THIN)), width, height, px(EDGE_THIN));
+    const nearDoll = dilate(doll, width, height, px(DOLL_EDGE));
+    for (let p = 0; p < total; p++) if (outHair[p] && nearDoll[p] && !thickOut[p]) outHair[p] = 0;
+    // ドールの上でも同じ: ふちの帯にある細い線は、輪郭線の色が少し変わっただけの所
+    const background = new Uint8Array(total);
+    for (let p = 0; p < total; p++) background[p] = doll[p] ? 0 : 1;
+    const edgeBand = dilate(background, width, height, px(DOLL_EDGE));
+    const thickIn = dilate(erode(inHair, width, height, px(EDGE_THIN)), width, height, px(EDGE_THIN));
+    for (let p = 0; p < total; p++) if (inHair[p] && edgeBand[p] && !thickIn[p]) inHair[p] = 0;
+  }
+
+  // 髪から離れたかたまりのうち、髪ではない描き変え（AI がドールに描き足したもの、手のふちを少し描き変えた所）は、髪に入れない。
+  //  - ほとんどがドールの上にあるかたまり: いちばん大きい髪の STRAY_SHARE より小さければ、描き変え
+  //  - ドールの外のかたまり: 腕の後ろを通って分かれた髪のこともあるので、ごく小さいものだけを捨てる
   let stray = 0;
   {
     const any = new Uint8Array(total);
     for (let p = 0; p < total; p++) any[p] = inHair[p] | outHair[p];
     const bridged = dilate(any, width, height, px(BRIDGE));
-    const pieces: { pixels: Int32Array; size: number; outside: boolean }[] = [];
+    const pieces: { pixels: Int32Array; outside: number }[] = [];
     components(bridged, width, height, (pixels, count) => {
       const own: number[] = [];
-      let outside = false;
+      let outside = 0;
       for (let n = 0; n < count; n++) {
         const p = pixels[n];
-        if (outHair[p]) outside = true;
-        if (inHair[p]) own.push(p);
+        if (!any[p]) continue;
+        own.push(p);
+        if (outHair[p]) outside++;
       }
-      let size = own.length;
-      if (outside) for (let n = 0; n < count; n++) if (outHair[pixels[n]]) size++;
-      pieces.push({ pixels: Int32Array.from(own), size, outside });
+      pieces.push({ pixels: Int32Array.from(own), outside });
     });
-    const largest = pieces.reduce((m, piece) => Math.max(m, piece.size), 0);
+    const largest = pieces.reduce((m, piece) => Math.max(m, piece.pixels.length), 0);
     for (const piece of pieces) {
-      if (piece.outside || piece.size >= largest * STRAY_SHARE) continue;
-      for (const p of piece.pixels) inHair[p] = 0;
-      stray += piece.pixels.length;
+      const size = piece.pixels.length;
+      if (size === largest) continue;
+      const onDoll = piece.outside < size * STRAY_OUTSIDE_SHARE;
+      if (onDoll ? size >= largest * STRAY_SHARE : size >= area(STRAY_OUT_AREA)) continue;
+      for (const p of piece.pixels) {
+        inHair[p] = 0;
+        outHair[p] = 0;
+      }
+      stray += size;
     }
   }
 
@@ -154,17 +196,7 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
   }
 
   // 前の範囲
-  const front = new Uint8Array(total);
-  {
-    const thick = dilate(erode(inHair, width, height, px(FRONT_THIN)), width, height, px(FRONT_GROW));
-    const on = new Uint8Array(total);
-    for (let p = 0; p < total; p++) on[p] = inHair[p] & thick[p];
-    components(on, width, height, (pixels, count) => {
-      if (count < area(FRONT_AREA)) for (let n = 0; n < count; n++) on[pixels[n]] = 0;
-    });
-    const near = dilate(on, width, height, px(FRONT_GROW));
-    for (let p = 0; p < total; p++) if (on[p] || (outHair[p] && near[p])) front[p] = 255;
-  }
+  const front = frontOf(image, inHair, outHair, width, height, px, area, neckY);
 
   // 髪の全体の絵
   const rgba = new Uint8ClampedArray(total * 4);
@@ -217,6 +249,219 @@ export function extractHair(image: Pixels, reference: Pixels, dollAlpha: ArrayLi
   }
 
   return { rgba, front, unlike: unlike / total, stray: dollCount ? stray / dollCount : 0, closeToSkin: onDoll ? marginal / onDoll : 0 };
+}
+
+/**
+ * 前の範囲（0 / 255）: ドールの上に描かれた髪と、それをひとつながりにする、あいだの髪。
+ *  1. ドールの上の、太さのある髪（細い線は、後ろ髪のふちが体の輪郭線にかぶっただけの所）と、そのすぐ外
+ *  2. 髪を、絵の線（輪郭線）で房に分ける。ドールの上の髪を多く含む房は、ドールの外の部分もふくめて、房ごと前にする
+ *     （切れ目が絵の線に沿うので、前髪だけを着せても自然に見える）。
+ *     首の高さが分かっていれば、ほとんどが首より上にある房（頭のまわりの髪）も、房ごと前にする
+ *  3. まだ離れているかたまり（顔の横から首の横を通って胸にたれる房は、首の横でドールの外に出る）は、
+ *     髪の中をたどる道でつなぐ。道が通る小さな房は、房ごと前にする。後ろ髪とつながった大きな房は、
+ *     首より上を通るなら首より上だけ（切れ目は肩の高さの横線になる）、そうでなければ道のまわりだけ
+ * 足すのは髪の画素だけ。後ろ髪にも同じ画素があるので、重ねた見た目は変わらない
+ */
+function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: number, height: number, px: (v: number) => number, area: (v: number) => number, neckY?: number): Uint8Array {
+  const total = width * height;
+  const any = new Uint8Array(total);
+  for (let p = 0; p < total; p++) any[p] = inHair[p] | outHair[p];
+
+  // 1. ドールの上の、太さのある髪
+  const on = new Uint8Array(total);
+  {
+    const thick = dilate(erode(inHair, width, height, px(FRONT_THIN)), width, height, px(FRONT_GROW));
+    for (let p = 0; p < total; p++) on[p] = inHair[p] & thick[p];
+    components(on, width, height, (pixels, count) => {
+      if (count < area(FRONT_AREA)) for (let n = 0; n < count; n++) on[pixels[n]] = 0;
+    });
+  }
+  const mask = new Uint8Array(total);
+  {
+    const near = dilate(on, width, height, px(FRONT_GROW));
+    for (let p = 0; p < total; p++) mask[p] = on[p] || (outHair[p] && near[p]) ? 1 : 0;
+  }
+  if (!mask.includes(1)) return new Uint8Array(total);
+
+  // 2. 絵の線で房に分ける。線 = まわりの髪より、はっきり暗い画素
+  const line = hairLines(image, any, width, height, px(LINE_WINDOW));
+  const lobe = new Int32Array(total); // 房の番号（1〜）。線と、髪でない所は 0
+  const lobeSize: number[] = [0];
+  const lobeOn: number[] = [0];
+  const lobeAbove: number[] = [0]; // 首より上にある画素
+  const neckStart = neckY === undefined ? 0 : Math.max(0, Math.min(height, Math.round(neckY))) * width;
+  {
+    const open = new Uint8Array(total);
+    for (let p = 0; p < total; p++) open[p] = any[p] && !line[p] ? 1 : 0;
+    components(open, width, height, (pixels, count) => {
+      const id = lobeSize.length;
+      let onDoll = 0;
+      let above = 0;
+      for (let n = 0; n < count; n++) {
+        lobe[pixels[n]] = id;
+        if (on[pixels[n]]) onDoll++;
+        if (pixels[n] < neckStart) above++;
+      }
+      lobeSize.push(count);
+      lobeOn.push(onDoll);
+      lobeAbove.push(above);
+    });
+  }
+  const smallLobe = area(JOIN_LOBE_AREA);
+  const takeLobe = new Uint8Array(lobeSize.length); // 1 = 房ごと、2 = 首より上だけ
+  for (let id = 1; id < lobeSize.length; id++) {
+    if (lobeOn[id] >= lobeSize[id] * LOBE_ON_SHARE || lobeAbove[id] >= lobeSize[id] * LOBE_ABOVE_SHARE) takeLobe[id] = 1;
+  }
+  const addLobes = () => {
+    const added = new Uint8Array(total);
+    for (let p = 0; p < total; p++) {
+      const take = takeLobe[lobe[p]];
+      if (take === 1 || (take === 2 && p < neckStart)) added[p] = 1;
+    }
+    // 房のまわりの線も一緒に（房の外へ数 px。となりの房に少し入っても、同じ髪の画素）
+    const grown = dilate(added, width, height, px(LOBE_RIM));
+    for (let p = 0; p < total; p++) if (grown[p] && any[p]) mask[p] = 1;
+  };
+  addLobes();
+
+  // 3. 離れているかたまりを、髪の中の道でつなぐ
+  const label = new Int32Array(total);
+  const sizes: number[] = [0];
+  const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [{ x0: 0, y0: 0, x1: 0, y1: 0 }];
+  components(mask, width, height, (pixels, count) => {
+    const id = sizes.length;
+    const box = { x0: width, y0: height, x1: 0, y1: 0 };
+    for (let n = 0; n < count; n++) {
+      const p = pixels[n];
+      label[p] = id;
+      const x = p % width;
+      const y = (p - x) / width;
+      if (x < box.x0) box.x0 = x;
+      if (x > box.x1) box.x1 = x;
+      if (y < box.y0) box.y0 = y;
+      if (y > box.y1) box.y1 = y;
+    }
+    sizes.push(count);
+    boxes.push(box);
+  });
+  if (sizes.length > 2) {
+    let main = 1;
+    for (let id = 2; id < sizes.length; id++) if (sizes[id] > sizes[main]) main = id;
+    // 道の歩きにくさ: 小さな房の中は 1、線は LINE_COST、大きな房（後ろ髪の広がり）は BIG_COST。房に沿って進む道を選ぶ
+    const costOf = (p: number) => (mask[p] ? 1 : lobe[p] === 0 ? LINE_COST : lobeSize[lobe[p]] <= smallLobe ? 1 : BIG_COST);
+    const distance = new Int32Array(total).fill(-1);
+    const parent = new Int32Array(total).fill(-1);
+    const buckets: number[][] = Array.from({ length: BIG_COST + 1 }, () => []);
+    for (let p = 0; p < total; p++) {
+      if (label[p] === main) {
+        distance[p] = 0;
+        parent[p] = p;
+        buckets[0].push(p);
+      }
+    }
+    const reached = new Int32Array(sizes.length).fill(-1);
+    let left = sizes.length - 2;
+    for (let d = 0, idle = 0; idle <= BIG_COST && left > 0; d++) {
+      const bucket = buckets[d % (BIG_COST + 1)];
+      if (bucket.length === 0) {
+        idle++;
+        continue;
+      }
+      idle = 0;
+      const current = bucket.splice(0, bucket.length);
+      for (const p of current) {
+        if (distance[p] !== d) continue; // もっと近い道で、すでに済んでいる
+        const id = label[p];
+        if (id > 0 && id !== main && reached[id] < 0) {
+          reached[id] = p;
+          left--;
+        }
+        const x = p % width;
+        for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width]) {
+          if (q < 0 || q >= total || !any[q]) continue;
+          const next = d + costOf(q);
+          if (distance[q] >= 0 && distance[q] <= next) continue;
+          distance[q] = next;
+          parent[q] = p;
+          buckets[next % (BIG_COST + 1)].push(q);
+        }
+      }
+    }
+    const path = new Uint8Array(total);
+    let wide = 0;
+    for (let id = 1; id < sizes.length; id++) {
+      if (id === main || reached[id] < 0) continue;
+      const box = boxes[id];
+      wide = Math.max(wide, Math.max(px(PATH_MIN), Math.min(px(PATH_MAX), Math.round(Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2))));
+      for (let p = reached[id]; label[p] !== main; p = parent[p]) {
+        const id2 = lobe[p];
+        if (id2 > 0 && takeLobe[id2] === 0) {
+          // 小さな房は房ごと。後ろ髪とつながった大きな房は、首より上を通るなら、首より上だけ（切れ目は肩の高さの横線になる）
+          if (lobeSize[id2] <= smallLobe) takeLobe[id2] = 1;
+          else if (p < neckStart) takeLobe[id2] = 2;
+        }
+        // 首より上で大きな房を通る所は、上の決まりで足りる。それ以外の所は、道のまわりを足す
+        if (!(id2 > 0 && takeLobe[id2] === 2)) path[p] = 1;
+      }
+    }
+    addLobes();
+    // 大きな房や線の上を通る所は、道のまわりだけを足す
+    const band = dilate(path, width, height, Math.max(px(PATH_MIN), wide));
+    for (let p = 0; p < total; p++) if (band[p] && any[p] && (lobe[p] === 0 || lobeSize[lobe[p]] > smallLobe || takeLobe[lobe[p]])) mask[p] = 1;
+  }
+  // 足した房のふちにできた小さなかけらは、前にしない（いちばん大きいかたまりは残す）
+  {
+    let largest = 0;
+    components(mask, width, height, (_pixels, count) => {
+      if (count > largest) largest = count;
+    });
+    components(mask, width, height, (pixels, count) => {
+      if (count < area(FRONT_AREA) && count < largest) for (let n = 0; n < count; n++) mask[pixels[n]] = 0;
+    });
+  }
+  const front = new Uint8Array(total);
+  for (let p = 0; p < total; p++) if (mask[p]) front[p] = 255;
+  return front;
+}
+
+// 髪の絵の線: まわり（半径 window）の髪の明るさの平均より、はっきり暗い画素。線のすき間をふさぐために 1px 太らせる
+function hairLines(image: Pixels, hair: Uint8Array, width: number, height: number, window: number): Uint8Array {
+  const total = width * height;
+  const w1 = width + 1;
+  const sum = new Float64Array(w1 * (height + 1));
+  const count = new Int32Array(w1 * (height + 1));
+  const light = new Float32Array(total);
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    let rowCount = 0;
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x;
+      if (hair[p]) {
+        light[p] = image[p * 4] * 0.3 + image[p * 4 + 1] * 0.59 + image[p * 4 + 2] * 0.11;
+        rowSum += light[p];
+        rowCount++;
+      }
+      sum[(y + 1) * w1 + x + 1] = sum[y * w1 + x + 1] + rowSum;
+      count[(y + 1) * w1 + x + 1] = count[y * w1 + x + 1] + rowCount;
+    }
+  }
+  const line = new Uint8Array(total);
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - window);
+    const y1 = Math.min(height, y + window + 1);
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x;
+      if (!hair[p]) continue;
+      const x0 = Math.max(0, x - window);
+      const x1 = Math.min(width, x + window + 1);
+      const n = count[y1 * w1 + x1] - count[y0 * w1 + x1] - count[y1 * w1 + x0] + count[y0 * w1 + x0];
+      const mean = (sum[y1 * w1 + x1] - sum[y0 * w1 + x1] - sum[y1 * w1 + x0] + sum[y0 * w1 + x0]) / Math.max(1, n);
+      if (light[p] < mean * LINE_DARK) line[p] = 1;
+    }
+  }
+  const grown = dilate(line, width, height, 1);
+  for (let p = 0; p < total; p++) if (!hair[p]) grown[p] = 0;
+  return grown;
 }
 
 /**

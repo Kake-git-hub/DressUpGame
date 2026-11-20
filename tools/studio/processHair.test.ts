@@ -59,6 +59,20 @@ describe('processHair（本物の生成画像）', async () => {
     expect(plain.shape).toBeNull();
   });
 
+  it('茶色のロング・金の三つ編みも、警告なしで取り出せる', async () => {
+    for (const [slug, background] of [['h2-brown', GREEN], ['h3-braids', [0, 0, 255] as Rgb]] as const) {
+      const ref = await png(`${slug}-ref.webp`);
+      const rgba = await rawOf(ref);
+      const mask = new Uint8Array(SIZE * SIZE);
+      for (let p = 0; p < SIZE * SIZE; p++) {
+        if (pixelDistance(rgba, p * 4, background) >= 70) mask[p] = 1;
+        else rgba[p * 4 + 3] = 0;
+      }
+      const result = await processHair(await png(`${slug}-gen.webp`), ref, { rgba, mask, canvasW: SIZE, canvasH: SIZE }, tile, SIZE, SIZE, background);
+      expect(result.warnings).toEqual([]);
+    }
+  }, 30_000);
+
   it('AI が絵を右下へずらしても、元の位置に戻して取り出す', async () => {
     const shifted = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: { r: 0, g: 255, b: 0 } } })
       .composite([{ input: await sharp(generated).extract({ left: 0, top: 0, width: SIZE - 20, height: SIZE - 12 }).toBuffer(), left: 20, top: 12 }])

@@ -33,7 +33,7 @@ const extract = (image: Uint8ClampedArray) => extractHair(image, reference(), do
 describe('extractHair', () => {
   it('ドールの上に描かれた髪は前の範囲、体から離れた外の髪は後ろだけ', () => {
     const image = reference();
-    rect(image, 60, 20, 195, 100, BROWN); // 頭の上・左右・顔の上半分をおおう髪
+    rect(image, 20, 20, 235, 100, BROWN); // 頭の上・左右・顔の上半分をおおう、横に広い髪（ドールの上にあるのは 2 割ほど）
     const hair = extract(image);
     expect(alpha(hair.rgba, 128, 70)).toBe(255); // ドールの上
     expect(alpha(hair.rgba, 70, 70)).toBe(255); // 体の外
@@ -74,6 +74,27 @@ describe('extractHair', () => {
     expect(hair.front[180 * S + 99]).toBe(0);
   });
 
+  it('体の外の、髪から離れた小さなかけら（AI が手のふちを少し描き変えた所）は、髪にしない', () => {
+    const image = reference();
+    rect(image, 60, 20, 195, 100, BROWN);
+    rect(image, 88, 200, 95, 207, SKIN); // 体のすぐ左に、肌色の小さなはみ出し
+    const hair = extract(image);
+    expect(alpha(hair.rgba, 90, 205)).toBe(0);
+    expect(hair.stray).toBeGreaterThan(0);
+  });
+
+  it('ドールの輪郭線だけが描き変わっていても（線の色が少し違う）、髪にしない', () => {
+    const image = reference();
+    rect(image, 20, 20, 235, 100, BROWN);
+    // 体の左右のふち 2px を、暗い色に（髪につながる所から、足もとまで）
+    rect(image, DOLL.x0, 101, DOLL.x0 + 1, DOLL.y1, [43, 36, 52]);
+    rect(image, DOLL.x1 - 1, 101, DOLL.x1, DOLL.y1, [43, 36, 52]);
+    const hair = extract(image);
+    expect(alpha(hair.rgba, DOLL.x0, 200)).toBe(0);
+    expect(alpha(hair.rgba, DOLL.x1, 150)).toBe(0);
+    expect(alpha(hair.rgba, 128, 70)).toBe(255);
+  });
+
   it('髪が頭の上にしか無くても、1 つも無くても、落ちない', () => {
     const above = reference();
     rect(above, 100, 5, 155, 30, BROWN);
@@ -103,6 +124,110 @@ describe('extractHair', () => {
     const clear = reference();
     rect(clear, 60, 20, 195, 100, BROWN);
     expect(extract(clear).closeToSkin).toBeLessThan(0.05);
+  });
+});
+
+describe('extractHair: 前髪はひとつながり', () => {
+  // 頭・細い首・胴のあるドール。首の横は、ドールの外
+  const HEAD = { x0: 104, y0: 40, x1: 151, y1: 90 };
+  const NECK = { x0: 120, y0: 91, x1: 135, y1: 110 };
+  const BODY = { x0: 90, y0: 111, x1: 165, y1: 229 };
+  const parts = [HEAD, NECK, BODY];
+  function neckReference(): Uint8ClampedArray {
+    const px = new Uint8ClampedArray(S * S * 4);
+    rect(px, 0, 0, S - 1, S - 1, GREEN);
+    for (const b of parts) rect(px, b.x0, b.y0, b.x1, b.y1, SKIN);
+    return px;
+  }
+  function neckDoll(): Uint8Array {
+    const a = new Uint8Array(S * S);
+    for (const b of parts) for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) a[y * S + x] = 255;
+    return a;
+  }
+  // 頭の上の髪と、顔の横 → 首の横（ドールの外）→ 胸の上、と前にたれる房。それとは別に、体から離れた後ろ髪
+  function lockImage(): Uint8ClampedArray {
+    const image = neckReference();
+    rect(image, 96, 30, 159, 60, BROWN); // 頭の上
+    rect(image, 100, 60, 112, 160, BROWN); // 前にたれる房
+    rect(image, 40, 60, 75, 200, BROWN); // 離れた後ろ髪
+    return image;
+  }
+  function pieces(front: Uint8Array): number {
+    const seen = new Uint8Array(S * S);
+    let count = 0;
+    for (let start = 0; start < S * S; start++) {
+      if (!front[start] || seen[start]) continue;
+      count++;
+      const stack = [start];
+      seen[start] = 1;
+      while (stack.length) {
+        const p = stack.pop()!;
+        for (const q of [p - 1, p + 1, p - S, p + S]) if (q >= 0 && q < S * S && front[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    return count;
+  }
+
+  it('首の横を通る房は、ドールの外の部分もふくめて、頭の髪とつながった 1 枚の前髪になる', () => {
+    const hair = extractHair(lockImage(), neckReference(), neckDoll(), S, S, GREEN);
+    expect(hair.front[45 * S + 128]).toBe(255); // 頭の上
+    expect(hair.front[140 * S + 106]).toBe(255); // 胸の上の房
+    expect(hair.front[100 * S + 106]).toBe(255); // 首の横（ドールの外）の、つなぎ目
+    expect(pieces(hair.front)).toBe(1);
+  });
+
+  it('前髪から離れた後ろ髪は、前に入れない', () => {
+    const hair = extractHair(lockImage(), neckReference(), neckDoll(), S, S, GREEN);
+    expect(hair.front[100 * S + 55]).toBe(0);
+    expect(hair.front[190 * S + 55]).toBe(0);
+  });
+
+  it('つなぎ目が遠くても（長い首）、髪をたどってつなぐ', () => {
+    // 房が、頭の髪から 60px 下でようやく体にかかる
+    const image = neckReference();
+    rect(image, 60, 30, 159, 60, BROWN);
+    rect(image, 60, 60, 72, 200, BROWN); // 体の左の外を下りて…
+    rect(image, 60, 150, 110, 162, BROWN); // …胸の前へ回りこむ
+    const hair = extractHair(image, neckReference(), neckDoll(), S, S, GREEN);
+    expect(hair.front[156 * S + 100]).toBe(255);
+    expect(pieces(hair.front)).toBe(1);
+  });
+});
+
+describe('extractHair: 前髪の切れ目は、絵の線に沿う', () => {
+  const LINE = [40, 20, 10];
+
+  it('ドールの上にかかる房は、ドールの外の部分もふくめて、房ごと前になる。線の向こうの別の房は前にしない', () => {
+    const image = reference();
+    rect(image, 150, 60, 175, 120, BROWN); // 体の右のふちにかかる房（4 割がドールの上）
+    rect(image, 176, 60, 177, 120, LINE); // 房を分ける線
+    rect(image, 178, 60, 205, 120, BROWN); // となりの房（ドールの外）
+    const hair = extract(image);
+    expect(hair.front[90 * S + 155]).toBe(255); // ドールの上
+    expect(hair.front[90 * S + 172]).toBe(255); // 同じ房の、ドールの外
+    expect(hair.front[90 * S + 195]).toBe(0); // 線の向こうの房
+  });
+
+  it('首の高さが分かっていれば、頭のまわりの髪（ほとんどが首より上の房）は、ドールの外でも前になる', () => {
+    const image = reference();
+    rect(image, 80, 10, 175, 45, BROWN); // 頭の上にのった髪。ドールの上にあるのは下の端だけ
+    const withNeck = extractHair(image, reference(), dollAlpha(), S, S, GREEN, 110);
+    expect(withNeck.front[20 * S + 128]).toBe(255);
+    expect(withNeck.front[20 * S + 90]).toBe(255);
+    const without = extract(image);
+    expect(without.front[20 * S + 128]).toBe(0);
+  });
+
+  it('首より下へ長くのびる房（ツインテールなど）は、首の高さが分かっていても、前にしない', () => {
+    const image = reference();
+    rect(image, 80, 10, 175, 45, BROWN);
+    rect(image, 60, 10, 61, 200, LINE);
+    rect(image, 30, 10, 59, 200, BROWN); // 頭の横から腰までたれる房（ドールの外）
+    rect(image, 62, 10, 79, 45, BROWN);
+    const hair = extractHair(image, reference(), dollAlpha(), S, S, GREEN, 110);
+    expect(hair.front[20 * S + 128]).toBe(255);
+    expect(hair.front[150 * S + 45]).toBe(0);
+    expect(hair.front[30 * S + 45]).toBe(0);
   });
 });
 
@@ -139,7 +264,7 @@ describe('fillUnderDoll', () => {
 describe('hairFromMask', () => {
   it('前の範囲の髪だけが前髪になり、後ろ髪は髪の全体＋体の裏', () => {
     const image = reference();
-    rect(image, 60, 20, 195, 100, BROWN);
+    rect(image, 20, 20, 235, 100, BROWN);
     const hair = extract(image);
     const layers = hairFromMask(hair.rgba, hair.front, dollAlpha(), S, S);
     expect(alpha(layers.front, 128, 70)).toBe(255);

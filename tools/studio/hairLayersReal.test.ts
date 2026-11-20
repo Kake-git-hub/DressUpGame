@@ -13,6 +13,7 @@ import type { Rgb } from '../../src/pipeline/keyColors.ts';
 const SIZE = 1024;
 const GREEN: Rgb = [0, 255, 0];
 const BLUE: Rgb = [0, 0, 255];
+const NECK_Y = 460; // 試作の拡大図での、首（肩の上）の高さ
 const file = (name: string) => path.join(import.meta.dirname, 'fixtures', 'diff', name);
 
 async function raw(name: string): Promise<Uint8ClampedArray> {
@@ -29,7 +30,7 @@ async function load(slug: string, background: Rgb) {
   const reference = await raw(`${slug}-ref.webp`);
   const image = await raw(`${slug}-gen.webp`);
   const doll = dollOf(reference, background);
-  return { doll, hair: extractHair(image, reference, doll, SIZE, SIZE, background) };
+  return { doll, hair: extractHair(image, reference, doll, SIZE, SIZE, background, NECK_Y) };
 }
 
 describe('extractHair（本物の生成画像）', async () => {
@@ -58,10 +59,55 @@ describe('extractHair（本物の生成画像）', async () => {
     });
   }
 
+  for (const [name, { hair }] of Object.entries(all)) {
+    it(`${name}: 前髪は、ひとつながり`, () => {
+      const seen = new Uint8Array(SIZE * SIZE);
+      const sizes: number[] = [];
+      for (let start = 0; start < SIZE * SIZE; start++) {
+        if (!hair.front[start] || seen[start]) continue;
+        let size = 0;
+        const stack = [start];
+        seen[start] = 1;
+        while (stack.length) {
+          const p = stack.pop()!;
+          size++;
+          const x = p % SIZE;
+          for (const q of [x > 0 ? p - 1 : -1, x < SIZE - 1 ? p + 1 : -1, p - SIZE, p + SIZE]) if (q >= 0 && q < SIZE * SIZE && hair.front[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+        }
+        sizes.push(size);
+      }
+      expect(sizes.length).toBe(1);
+    });
+  }
+
   it('三つ編み: 体の前にたれた三つ編みが、前の範囲に入る', () => {
     let belowChin = 0;
     for (let y = Math.round(SIZE * 0.32); y < SIZE; y++) for (let x = 0; x < SIZE; x++) if (braids.hair.front[y * SIZE + x]) belowChin++;
     expect(belowChin).toBeGreaterThan(5000);
+  });
+
+  it('頭の上のふくらみ（ドールの外）も前に入り、前髪だけで頭をおおう', () => {
+    for (const { doll, hair } of Object.values(all)) {
+      expect(doll[170 * SIZE + 512]).toBe(0); // 頭より上
+      expect(hair.front[170 * SIZE + 512]).toBe(255);
+    }
+  });
+
+  it('ツインテールのしっぽと、肩より下の後ろ髪の広がりは、前にしない', () => {
+    // 左のしっぽ（x < 300、y 250〜700）は、ほとんどが後ろだけ
+    let tail = 0;
+    let tailFront = 0;
+    for (let y = 250; y < 700; y++) {
+      for (let x = 0; x < 300; x++) {
+        if (pink.hair.rgba[(y * SIZE + x) * 4 + 3] < 128) continue;
+        tail++;
+        if (pink.hair.front[y * SIZE + x]) tailFront++;
+      }
+    }
+    expect(tail).toBeGreaterThan(20000);
+    expect(tailFront / tail).toBeLessThan(0.05);
+    expect(brown.hair.rgba[(800 * SIZE + 215) * 4 + 3]).toBe(255); // 体の左に広がる後ろ髪
+    expect(brown.hair.front[800 * SIZE + 215]).toBe(0);
   });
 
   it('ツインテール: 前の範囲は、ほとんどが頭のまわり（体の後ろの髪は前にしない）', () => {
@@ -88,6 +134,12 @@ describe('extractHair（本物の生成画像）', async () => {
       }
     }
     expect(opaque / band).toBeGreaterThan(0.95);
+  });
+
+  it('三つ編み: 手のまわりの小さな描き変えを、髪にしない（三つ編みの先より下に、髪は無い）', () => {
+    let low = 0;
+    for (let p = Math.round(SIZE * 0.87) * SIZE; p < SIZE * SIZE; p++) if (braids.hair.rgba[p * 4 + 3] > 0) low++;
+    expect(low).toBe(0);
   });
 
   it('髪のふちに、背景の緑が残らない', () => {

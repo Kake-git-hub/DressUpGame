@@ -77,10 +77,13 @@ export async function pasteTile(target: Uint8ClampedArray, canvasW: number, canv
 // 不透明度だけの版（形・隠す所など）
 export async function pasteTileAlpha(target: Uint8Array, canvasW: number, canvasH: number, alpha: Uint8Array, tile: Tile): Promise<void> {
   const { from, to } = tile;
+  // sharp は、1 チャンネルの入力でも 3 チャンネルで返すことがある。1 チャンネルに取り直す
   const small = await sharp(Buffer.from(alpha.buffer, alpha.byteOffset, alpha.byteLength), { raw: { width: to.w, height: to.h, channels: 1 } })
     .resize(from.w, from.h, { fit: 'fill', kernel: 'lanczos3' })
+    .extractChannel(0)
     .raw()
     .toBuffer();
+  if (small.length !== from.w * from.h) throw new Error(`pasteTileAlpha: ${from.w}×${from.h} の 1 チャンネルを期待しましたが、${small.length} バイトでした`);
   for (let y = 0; y < from.h; y++) {
     if (from.y + y < 0 || from.y + y >= canvasH) continue;
     for (let x = 0; x < from.w; x++) {
