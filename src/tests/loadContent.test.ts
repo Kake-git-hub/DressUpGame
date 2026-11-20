@@ -252,4 +252,27 @@ describe('resolveContentUrl', () => {
   it('ページの外へ出る相対パス（../）も同じオリジンなら使える', () => {
     expect(resolveContentUrl('?content=../other/', PAGE)).toBe('https://kake-git-hub.github.io/other/');
   });
+
+  it('セットの印（set）のある服には、セットの ID と名前が付く。うしろがみの分には付かない', async () => {
+    const m: Manifest = structuredClone(manifest);
+    m.dolls[0].sets = [{ id: 'アニメ/セット/うみ', name: 'うみ' }];
+    m.dolls[0].categories.push({ id: 'ヘア', label: 'ヘアスタイル', layer: 11, menuOrder: 11, overlap: false, movable: false });
+    m.dolls[0].items[0].set = 'アニメ/セット/うみ';
+    m.dolls[0].items.push({
+      id: 'アニメ/ヘア/ロング',
+      name: 'ロング',
+      category: 'ヘア',
+      image: { file: 'files/h.webp', canvasW: 1024, canvasH: 1024, box: { x: 400, y: 40, w: 200, h: 150 } },
+      thumb: 'files/ht.webp',
+      back: { file: 'files/hb.webp', canvasW: 1024, canvasH: 1024, box: { x: 350, y: 30, w: 300, h: 600 } },
+      set: 'アニメ/セット/うみ',
+    });
+    const { clothing } = await loadContent(BASE, okFetch(m));
+    const inSet = clothing.filter((c) => c.setId === 'アニメ/セット/うみ');
+    expect(inSet.map((c) => c.id)).toEqual([m.dolls[0].items[0].id, 'アニメ/ヘア/ロング']);
+    expect(inSet.every((c) => c.setName === 'うみ')).toBe(true);
+    expect(clothing.find((c) => c.type === BACK_HAIR_TYPE)).not.toHaveProperty('setId');
+    // 印の無い服には付かない
+    expect(clothing.filter((c) => !c.setId).length).toBe(clothing.length - 2);
+  });
 });

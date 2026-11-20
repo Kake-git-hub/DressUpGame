@@ -41,6 +41,14 @@ export interface ManifestItem {
   backThumb?: string;
   // ドールのすぐ上、ほかの服の下に描く分。くつの中に見える足の肌など。色スライダーはかけない
   under?: ManifestImage;
+  // セット（同じテーマで一度に作った服の集まり）の ID。ManifestDoll.sets にあるもの
+  set?: string;
+}
+
+// セット: 同じテーマで一度に作った、ふつうの服の集まり。印だけで、絵は持たない（パーツは 1 点ずつ着られ、消せる）
+export interface ManifestSet {
+  id: string;
+  name: string;
 }
 
 export interface ManifestBackground {
@@ -57,6 +65,7 @@ export interface ManifestDoll {
   categories: ManifestCategory[];
   items: ManifestItem[];
   backgrounds: ManifestBackground[]; // このドール専用の背景
+  sets?: ManifestSet[]; // このドールのセット（無ければ項目ごと無い）
 }
 
 export interface Manifest {
@@ -138,6 +147,16 @@ function doll(v: unknown, path: string): ManifestDoll {
   });
   unique(categories.map((c) => c.id), `${path}.categories`);
   const categoryIds = new Set(categories.map((c) => c.id));
+  // セット（省略できる）
+  const sets =
+    o.sets === undefined
+      ? []
+      : arr(o.sets, `${path}.sets`).map((v, i): ManifestSet => {
+          const r = rec(v, `${path}.sets[${i}]`);
+          return { id: str(r.id, `${path}.sets[${i}].id`), name: str(r.name, `${path}.sets[${i}].name`) };
+        });
+  unique(sets.map((x) => x.id), `${path}.sets`);
+  const setIds = new Set(sets.map((x) => x.id));
   const items = arr(o.items, `${path}.items`).map((it, i): ManifestItem => {
     const p = `${path}.items[${i}]`;
     const r = rec(it, p);
@@ -156,6 +175,11 @@ function doll(v: unknown, path: string): ManifestDoll {
     if (r.back !== undefined) item.back = image(r.back, `${p}.back`);
     if (r.backThumb !== undefined) item.backThumb = str(r.backThumb, `${p}.backThumb`);
     if (r.under !== undefined) item.under = image(r.under, `${p}.under`);
+    // セットの印。一覧に無いセットを指していたら、印を捨てる（服はそのまま使える）
+    if (r.set !== undefined) {
+      const setId = str(r.set, `${p}.set`);
+      if (setIds.has(setId)) item.set = setId;
+    }
     return item;
   });
   unique(items.map((i) => i.id), `${path}.items`);
@@ -168,6 +192,7 @@ function doll(v: unknown, path: string): ManifestDoll {
     categories,
     items,
     backgrounds,
+    ...(sets.length > 0 ? { sets } : {}),
   };
 }
 

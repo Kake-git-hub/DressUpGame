@@ -260,6 +260,9 @@ export interface ClothingItemData {
   backItemId?: string;
   // 対になる前髪の ID（うしろがみだけが持つ）。メニューには出さず、位置・大きさ・向き・色は前髪とそろえる
   frontItemId?: string;
+  // セット（同じテーマで一度に作った服の集まり）。メニューの「セット」で、同じ ID の服をまとめて着せる
+  setId?: string;
+  setName?: string;
   // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする
   pivot?: Position;
 }

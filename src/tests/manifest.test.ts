@@ -97,4 +97,45 @@ describe('parseManifest', () => {
   ])('%s なら Error', (_name, make) => {
     expect(() => parseManifest(make())).toThrow();
   });
+
+  describe('セット（同じテーマで作った服の集まり）', () => {
+    const withSet = () => {
+      const m = valid();
+      m.dolls[0].sets = [{ id: 'アニメ/セット/うみ', name: 'うみ' }];
+      m.dolls[0].items[0].set = 'アニメ/セット/うみ';
+      return m;
+    };
+    it('sets と set を保つ', () => {
+      expect(parseManifest(withSet())).toEqual(withSet());
+    });
+    it('sets・set の無い一覧は、そのまま読める（sets は足さない）', () => {
+      const parsed = parseManifest(valid());
+      expect(parsed.dolls[0]).not.toHaveProperty('sets');
+      expect(parsed.dolls[0].items[0]).not.toHaveProperty('set');
+    });
+    it('set が sets に無い ID なら、その印を捨てる（落ちない）', () => {
+      const m = withSet();
+      m.dolls[0].items[0].set = '無いセット';
+      const parsed = parseManifest(m);
+      expect(parsed.dolls[0].items[0]).not.toHaveProperty('set');
+      expect(parsed.dolls[0].sets).toEqual([{ id: 'アニメ/セット/うみ', name: 'うみ' }]);
+    });
+    it('空の sets は出さない', () => {
+      const m = valid();
+      m.dolls[0].sets = [];
+      expect(parseManifest(m).dolls[0]).not.toHaveProperty('sets');
+    });
+    it('sets の形が違えば・ID が重なれば・set が文字列でなければ Error', () => {
+      const bad = withSet() as unknown as { dolls: { sets: unknown; items: { set: unknown }[] }[] };
+      bad.dolls[0].sets = [{ id: 'a', name: '' }];
+      expect(() => parseManifest(bad)).toThrow(/sets\[0\]\.name/);
+      bad.dolls[0].sets = [{ id: 'a', name: 'x' }, { id: 'a', name: 'y' }];
+      expect(() => parseManifest(bad)).toThrow(/sets/);
+      bad.dolls[0].sets = 'x';
+      expect(() => parseManifest(bad)).toThrow(/sets/);
+      const bad2 = withSet() as unknown as { dolls: { items: { set: unknown }[] }[] };
+      bad2.dolls[0].items[0].set = 5;
+      expect(() => parseManifest(bad2)).toThrow(/set/);
+    });
+  });
 });

@@ -81,6 +81,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
       box: doll.image.box,
     });
     const categories = new Map(doll.categories.map((c) => [c.id, c]));
+    const setNames = new Map((doll.sets ?? []).map((x) => [x.id, x.name]));
     for (const item of doll.items) {
       const category = categories.get(item.category);
       if (!category) continue; // parseManifest が保証しているので通らない
@@ -104,6 +105,8 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
         ...(item.hide ? { hide: { url: url(item.hide.file), box: item.hide.box } } : {}),
         ...(item.under ? { under: { url: url(item.under.file), canvasW: item.under.canvasW, canvasH: item.under.canvasH, box: item.under.box } } : {}),
         ...(item.back ? { backItemId: backItemId(item.id) } : {}),
+        // セットの印（うしろがみの分には付けない。髪と一緒に付くので）
+        ...(item.set && setNames.has(item.set) ? { setId: item.set, setName: setNames.get(item.set)! } : {}),
       });
       if (item.back) {
         clothing.push({
