@@ -949,3 +949,69 @@ test('ホーム画面から開いたときは、上のバーの分（24px 以上
   // キャンバスは動かない（この段階では、描く位置を変えない）
   expect((await page.getByTestId('avatar-canvas').boundingBox())!.y).toBe(0);
 });
+
+/** 調整画面の一覧で、from 番目の行（上から、ドールの行も数える）を to 番目の行の位置までドラッグする */
+async function dragPickerRow(page: Page, from: number, to: number, end: 'up' | 'cancel' = 'up'): Promise<void> {
+  const rows = page.locator('[data-testid="adjust-picker-items"] > *');
+  const a = (await rows.nth(from).boundingBox())!;
+  const b = (await rows.nth(to).boundingBox())!;
+  const x = a.x + a.width / 2;
+  const fromY = a.y + a.height / 2;
+  // 相手の行の中心を少し越えた所まで
+  const toY = b.y + b.height / 2 + (to > from ? 6 : -6);
+  await page.mouse.move(x, fromY);
+  await page.mouse.down();
+  await page.mouse.move(x, (fromY + toY) / 2, { steps: 4 });
+  await page.mouse.move(x, toY, { steps: 4 });
+  if (end === 'cancel') {
+    await page.locator('[data-dragging="true"]').dispatchEvent('pointercancel', { pointerId: 1, bubbles: true });
+    await page.mouse.up();
+  } else {
+    await page.mouse.up();
+  }
+}
+
+test('調整画面の一覧をドラッグして、重なりを並べ替えられる', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  // ボトムスを上に動かして、トップスに重ねる（トップスが手前）
+  await page.locator('.tool-button').first().click();
+  const OVERLAP_Y = imgY(480);
+  await page.mouse.move(DOLL_X, BOTTOM_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X, BOTTOM_Y - 120 * BASE_SCALE, { steps: 6 });
+  await page.mouse.up();
+  const rows = page.locator('[data-testid="adjust-picker-items"] > *');
+  const names = () => rows.evaluateAll((els) => els.map((el) => (el.getAttribute('title') ?? '').slice(0, 3)));
+  await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+  // 調整中の服（ボトムス）を、いちばん上へ: その場でボトムスが手前になる
+  await dragPickerRow(page, 1, 0);
+  await expect.poll(names).toEqual(['gre', 'red', 'ドール']);
+  await expect.poll(async () => near(await screenPixel(page, DOLL_X, OVERLAP_Y), GREEN, 12)).toBe(true);
+  // 調整中でない服（トップス）を、いちばん上へ戻す: 調整する服は変わらない
+  await dragPickerRow(page, 1, 0);
+  await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+  await expect(page.getByTestId('adjust-picker-item').nth(1)).toHaveClass(/on/);
+  await expect.poll(async () => near(await screenPixel(page, DOLL_X, OVERLAP_Y), RED, 12)).toBe(true);
+  // 少しだけ動かして離すと、並びは変わらず、その服の調整に切り替わる
+  const top = (await rows.nth(0).boundingBox())!;
+  await page.mouse.move(top.x + 20, top.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(top.x + 20, top.y + 23);
+  await page.mouse.up();
+  await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+  await expect(page.getByTestId('adjust-picker-item').nth(0)).toHaveClass(/on/);
+  // 途中で取り消されたら、何も変わらない
+  await dragPickerRow(page, 0, 1, 'cancel');
+  await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
+  await expect(page.locator('[data-dragging="true"]')).toHaveCount(0);
+  // トップスをドールの行より下へ: ドールの後ろに回る。確定して読み込み直しても同じ
+  await dragPickerRow(page, 0, 2);
+  await expect.poll(names).toEqual(['gre', 'ドール', 'red']);
+  await page.locator('.item-adjust-done-btn-small').click();
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await page.reload();
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await expectPixel(page, DOLL_X, OVERLAP_Y, GREEN);
+});

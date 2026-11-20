@@ -668,6 +668,20 @@ textarea {
   border-radius: 10px;
   background: #f3edff;
 }
+/* 一覧のドラッグ（重なりの並べ替え）。行は指に付いてきて、ほかの行は場所をあける */
+.item-adjust-picker-items button {
+  touch-action: none;
+}
+.item-adjust-picker-items.sorting > * {
+  transition: transform 0.12s ease-out;
+}
+.item-adjust-picker-items.sorting > .dragging {
+  position: relative;
+  z-index: 2;
+  transition: none;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+  cursor: grabbing;
+}
 .item-adjust-picker-items button.on {
   border-color: #ff69b4;
   background: #ffe8f3;

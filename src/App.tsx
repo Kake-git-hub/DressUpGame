@@ -550,6 +550,7 @@ function App() {
           equippedItems={equippedItems}
           onRemove={handleAdjustRemove}
           onSelect={setAdjustingItemId}
+          onLayerChange={(id, layerAdjust) => updateItemAdjustment(id, { layerAdjust })}
         />
       )}
 
