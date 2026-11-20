@@ -18,6 +18,9 @@ import { hairFrontBottom, splitHair, splitsHair } from '../../src/pipeline/hairS
 import type { Rgb } from '../../src/pipeline/keyColors.ts';
 import type { Manifest, ManifestDoll } from '../../src/content/manifest.ts';
 import { ContentError, ContentStore } from '../content/manifestEdit.ts';
+import { merge3 } from '../content/merge3.ts';
+import type { Json } from '../content/merge3.ts';
+import { parseManifest } from '../../src/content/manifest.ts';
 import { AiError } from './ai.ts';
 import type { AiClients } from './ai.ts';
 import { BudgetError } from './budget.ts';
@@ -80,6 +83,8 @@ const MAX_ITEMS_PER_PLAN = 30;
 const MAX_JOBS_KEPT = 20;
 // 公開されている素材を確かめるときに待つ上限
 const SYNC_FETCH_TIMEOUT_MS = 30_000;
+// 手元と公開先の両方で変わっていたら、中身を重ねるファイル（ほかは画像で、名前が中身のハッシュ）
+const SYNC_MERGED = ['manifest.json', 'studio/templates.json'];
 
 interface Job {
   id: string;
@@ -115,6 +120,7 @@ export class StudioApi {
   private readonly options: StudioOptions;
   private readonly templates = new Map<string, DollTemplate>();
   private readonly jobs = new Map<string, Job>();
+  private syncing: Promise<SyncResult> | null = null; // 走っている取り込み
 
   constructor(options: StudioOptions) {
     this.options = options;
@@ -325,7 +331,14 @@ export class StudioApi {
    * 手元に未公開の変更があるとき・手元だけの記録があるときは、何も変えずに知らせる（手元の作業を壊さない）。
    * つながらない・公開先が無いときも、エラーにしない
    */
-  async sync(): Promise<SyncResult> {
+  sync(): Promise<SyncResult> {
+    // 同時に呼ばれたら、走っている 1 回の結果を返す（2 つの取り込みが、同じフォルダを同時に書き換えないように）
+    this.syncing ??= this.syncOnce().finally(() => {
+      this.syncing = null;
+    });
+    return this.syncing;
+  }
+  private async syncOnce(): Promise<SyncResult> {
     const before = await this.gitStatus();
     if (!before.isRepo) return { state: 'no-repo', updated: false, behind: 0, message: `素材フォルダ（${this.store.dir}）が git の作業フォルダではないので、公開されている素材は確かめていません` };
     try {
@@ -336,22 +349,90 @@ export class StudioApi {
     }
     const { behind, changedFiles } = await this.gitStatus();
     if (behind === 0) return { state: 'latest', updated: false, behind: 0, message: '素材は、公開されているものと同じ（最新）です' };
-    if (changedFiles > 0) {
-      return {
-        state: 'blocked',
-        updated: false,
-        behind,
-        message: `公開されている素材のほうが ${behind} 件新しいですが、未公開の変更が ${changedFiles} 件あるので取り込めません（このまま「公開」しても、公開先のほうが新しいので失敗します）`,
-      };
+    // 手元にだけある記録（前回 push できなかった公開）があると、早送りでは取り込めない
+    const ahead = Number(await this.git('rev-list', '--count', '@{upstream}..HEAD').catch(() => '0')) || 0;
+    if (ahead > 0) {
+      return { state: 'blocked', updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、手元にだけある記録（前回 push できなかった公開）が ${ahead} 件あるので、自動では取り込めません` };
     }
     try {
-      await this.git('merge', '--ff-only', '--quiet', '@{upstream}');
-    } catch {
-      return { state: 'blocked', updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、手元にだけある記録（前回 push できなかった分）があるので、自動では取り込めません` };
+      if (changedFiles > 0) await this.pullKeepingLocalChanges();
+      else await this.git('merge', '--ff-only', '--quiet', '@{upstream}');
+    } catch (error) {
+      const reason = error instanceof ContentError ? error.message : ((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+      return { state: 'blocked', updated: false, behind, message: `公開されている素材のほうが ${behind} 件新しいですが、取り込めませんでした（${reason}）。手元の内容は変えていません` };
     }
     // ドールの画像が変わったかもしれないので、読み込んだ型を捨てる
     this.templates.clear();
-    return { state: 'updated', updated: true, behind: 0, message: `公開されている新しい素材を ${behind} 件取り込みました` };
+    return {
+      state: 'updated',
+      updated: true,
+      behind: 0,
+      message: `公開されている新しい素材を ${behind} 件取り込みました${changedFiles > 0 ? '。手元の未公開の変更は、そのまま残しています（「公開」を押すと公開されます）' : ''}`,
+    };
+  }
+
+  /**
+   * 未公開の変更を残したまま、公開されている素材を取り込む。
+   * 一覧ファイルと型紙は、手元の変更を、公開されている新しい内容に重ねる（merge3）。
+   * 画像は名前が中身のハッシュなので、同じ名前なら同じ中身。うまくいかなければ、手元を元に戻して Error
+   */
+  private async pullKeepingLocalChanges(): Promise<void> {
+    const dir = this.store.dir;
+    const lines = (await this.git('-c', 'core.quotepath=false', 'status', '--porcelain', '-uall')).split('\n').filter(Boolean);
+    // 1 行は「状態（1〜2 文字）＋空白＋ファイル名」。出力の前後の空白は取ってあるので、先頭の行は状態の前の空白が無いことがある
+    const changed = lines.flatMap((line) => {
+      const m = /^\s*(\S{1,2})\s+(.+)$/.exec(line);
+      return m ? [{ untracked: m[1] === '??', file: m[2].replace(/^"|"$/g, '') }] : [];
+    });
+    const incoming = new Set((await this.git('-c', 'core.quotepath=false', 'diff', '--name-only', 'HEAD', '@{upstream}')).split('\n').filter(Boolean));
+    const show = async (rev: string, file: string): Promise<Json> => {
+      try {
+        return JSON.parse(await this.git('show', `${rev}:${file}`)) as Json;
+      } catch {
+        return undefined; // その版には無い
+      }
+    };
+
+    // 重ねるファイル（手元で変えていて、公開先でも変わったもの）と、取り込みのじゃまになる手元のファイル
+    const merges: { file: string; text: string; merged: Json; tracked: boolean }[] = [];
+    const duplicates: { file: string; data: Buffer }[] = []; // 手元にも公開先にも同じ中身で増えた画像
+    for (const { file, untracked } of changed) {
+      if (!incoming.has(file)) continue; // 公開先では変わっていない。git がそのまま残す
+      const full = path.join(dir, file);
+      if (SYNC_MERGED.includes(file)) {
+        const text = await fs.readFile(full, 'utf8');
+        const merged = merge3(await show('HEAD', file), JSON.parse(text) as Json, await show('@{upstream}', file));
+        if (file === 'manifest.json') parseManifest(merged); // アプリが読めない一覧にはしない
+        merges.push({ file, text, merged, tracked: !untracked });
+      } else if (untracked && (await this.git('hash-object', '--', file)) === (await this.git('rev-parse', `@{upstream}:${file}`))) {
+        duplicates.push({ file, data: await fs.readFile(full) });
+      } else {
+        throw new ContentError(`「${file}」が、手元と公開先の両方で変わっています`);
+      }
+    }
+
+    // 取り込む前の手元の内容は、控えとして残す（.git の中。公開されない）
+    if (merges.length > 0) {
+      const backup = path.join(dir, '.git', 'studio-backup', new Date().toISOString().replace(/[:.]/g, '-'));
+      for (const m of merges) {
+        await fs.mkdir(path.dirname(path.join(backup, m.file)), { recursive: true });
+        await fs.writeFile(path.join(backup, m.file), m.text);
+      }
+    }
+    try {
+      for (const m of merges) {
+        if (m.tracked) await this.git('checkout', 'HEAD', '--', m.file);
+        else await fs.rm(path.join(dir, m.file));
+      }
+      for (const d of duplicates) await fs.rm(path.join(dir, d.file));
+      await this.git('merge', '--ff-only', '--quiet', '@{upstream}');
+    } catch (error) {
+      // 手元を元に戻す
+      for (const m of merges) await fs.writeFile(path.join(dir, m.file), m.text);
+      for (const d of duplicates) await fs.writeFile(path.join(dir, d.file), d.data);
+      throw error;
+    }
+    for (const m of merges) await fs.writeFile(path.join(dir, m.file), JSON.stringify(m.merged, null, 1) + '\n');
   }
 
   private async route(req: ApiRequest): Promise<ApiResponse> {
@@ -635,8 +716,12 @@ export class StudioApi {
         const b = this.body<{ message?: string }>(req);
         const status = await this.gitStatus();
         if (!status.isRepo) throw new HttpError(409, `素材フォルダ（${this.store.dir}）が git の作業フォルダではないので、公開できません。保存した内容は残っています`);
+        // 公開先のほうが新しければ、先に取り込む（手元の変更は残る）。取り込めないときは、公開しない
+        const synced = await this.sync();
+        if (synced.state === 'blocked') throw new HttpError(409, `公開できませんでした。${synced.message}`);
         const removed = await this.store.removeUnusedFiles();
         const log: string[] = [];
+        if (synced.state === 'updated') log.push(synced.message);
         if (removed.length > 0) log.push(`使われていない画像を ${removed.length} 個消しました`);
         try {
           // 素材として書いたものだけを対象にする

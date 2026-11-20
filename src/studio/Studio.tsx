@@ -24,9 +24,16 @@ const load = (): Promise<[Status, Manifest] | string> =>
 
 // 公開されている素材（ほかの PC やクラウドから公開された新しいドールなど）を取り込んでから、状態と一覧を読む。
 // 取り込みの結果は、いつも画面に出す（ドールが出てこないときに、理由が分かるように）
-async function syncAndLoad(): Promise<[SyncResult | null, [Status, Manifest] | string]> {
-  const synced = await api.sync().catch(() => null);
-  return [synced, await load()];
+// 同時に呼ばれたら（画面を開いたときの処理は、開発用の設定で 2 回走る）、走っている 1 回の結果を使う
+let syncingAndLoading: Promise<[SyncResult | null, [Status, Manifest] | string]> | null = null;
+function syncAndLoad(): Promise<[SyncResult | null, [Status, Manifest] | string]> {
+  syncingAndLoading ??= (async (): Promise<[SyncResult | null, [Status, Manifest] | string]> => {
+    const synced = await api.sync().catch(() => null);
+    return [synced, await load()];
+  })().finally(() => {
+    syncingAndLoading = null;
+  });
+  return syncingAndLoading;
 }
 
 export function Studio() {

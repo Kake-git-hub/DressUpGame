@@ -698,16 +698,77 @@ describe('公開されている素材の取り込み', () => {
     expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ state: 'latest', updated: false, behind: 0 });
   });
 
-  it('未公開の変更があるときは、取り込まずに知らせる（手元の変更を壊さない）', async () => {
+  it('未公開の変更があっても、それを残したまま取り込む（作者の PC: 服を消したあと、クラウドからドールが公開された）', async () => {
+    // 公開する前に、服を 2 点入れておく
+    const png = async (color: string) => (await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: await sharp({ create: { width: 200, height: 100, channels: 4, background: color } }).png().toBuffer(), left: 400, top: 300 }]).png().toBuffer()).toString('base64');
+    const keep = await ok<{ id: string }>('POST', '/api/items', { dollId, category: 'トップス', name: 'のこす', png: await png('#ff0000') });
+    const gone = await ok<{ id: string }>('POST', '/api/items', { dollId, category: 'トップス', name: 'けす', png: await png('#0000ff') });
+    await publishFromElsewhere();
+    // 手元の未公開の変更: 服を 1 点消す、背景を 1 枚足す、型紙を保存する
+    await ok('DELETE', `/api/items?id=${encodeURIComponent(gone.id)}`);
+    await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
+    const template = await ok<{ parts: Record<string, unknown>; regions: Record<string, unknown> }>('GET', `/api/template?doll=${encodeURIComponent(dollId)}`);
+    await ok('PUT', '/api/template', { dollId, template });
+
+    const r = await ok<Sync>('POST', '/api/sync', {});
+    expect(r).toMatchObject({ state: 'updated', updated: true, behind: 0 });
+    expect(r.message).toMatch(/1 件/);
+    expect(r.message).toMatch(/未公開の変更/);
+    // 公開されたドールが入り、手元の変更（消した服・足した背景・型紙）は残っている
+    const content = await ok<{ dolls: { name: string; items: { id: string }[] }[]; backgrounds: { name: string }[] }>('GET', '/api/content');
+    expect(content.dolls.map((d) => d.name)).toEqual(['テスト', 'あたらしいドール']);
+    expect(content.dolls[0].items.map((i) => i.id)).toEqual([keep.id]);
+    expect(content.backgrounds.map((b) => b.name)).toEqual(['そら']);
+    expect(await api.store.readStudioData<Record<string, unknown>>('templates', {})).toHaveProperty(dollId);
+    // 未公開の変更として残っていて、そのまま公開できる
+    const status = await ok<{ git: { behind: number; changedFiles: number } }>('GET', '/api/status');
+    expect(status.git.behind).toBe(0);
+    expect(status.git.changedFiles).toBeGreaterThan(0);
+    await ok('POST', '/api/publish', { message: 'まとめて公開' });
+    expect(git(path.join(dir, 'remote.git'), 'log', '--oneline', 'main').trim().split('\n')).toHaveLength(3);
+    const published = JSON.parse(git(path.join(dir, 'remote.git'), 'show', 'main:manifest.json')) as { dolls: { name: string; items: unknown[] }[] };
+    expect(published.dolls.map((d) => [d.name, d.items.length])).toEqual([['テスト', 1], ['あたらしいドール', 0]]);
+    // 取り込む前の一覧は、控えとして残してある
+    const backups = await fs.readdir(path.join(dir, 'content', '.git', 'studio-backup'));
+    expect(backups).toHaveLength(1);
+  }, 60_000);
+
+  it('取り込みが同時に 2 回呼ばれても、1 回だけ行う（画面を開いたときの処理は、開発用の設定で 2 回走る）', async () => {
     await publishFromElsewhere();
     await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
+    const [a, b] = await Promise.all([ok<Sync>('POST', '/api/sync', {}), ok<Sync>('POST', '/api/sync', {})]);
+    expect(a).toMatchObject({ state: 'updated', behind: 0 });
+    expect(b).toEqual(a);
+    expect(await dollNames()).toEqual(['テスト', 'あたらしいドール']);
+    expect(await fs.readdir(path.join(dir, 'content', '.git', 'studio-backup'))).toHaveLength(1);
+    // 終わったあとは、また新しく確かめる
+    expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ state: 'latest' });
+  }, 60_000);
+
+  it('公開のときも、先に取り込む（公開先のほうが新しくても、公開が失敗しない）', async () => {
+    await publishFromElsewhere();
+    await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
+    const r = await ok<{ log: string }>('POST', '/api/publish', {});
+    expect(r.log).toMatch(/取り込みました/);
+    const published = JSON.parse(git(path.join(dir, 'remote.git'), 'show', 'main:manifest.json')) as { dolls: { name: string }[]; backgrounds: { name: string }[] };
+    expect(published.dolls.map((d) => d.name)).toEqual(['テスト', 'あたらしいドール']);
+    expect(published.backgrounds.map((b) => b.name)).toEqual(['そら']);
+  }, 60_000);
+
+  it('手元にだけある記録（push できなかった公開）があるときは、取り込まずに知らせる。手元は変えない', async () => {
+    await publishFromElsewhere();
+    const content = path.join(dir, 'content');
+    await ok('POST', '/api/backgrounds?name=そら', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#aaccff' } }).png().toBuffer());
+    git(content, 'add', '-A');
+    git(content, 'commit', '-q', '-m', 'push していない公開');
+    await ok('POST', '/api/backgrounds?name=うみ', await sharp({ create: { width: 300, height: 300, channels: 3, background: '#2060c0' } }).png().toBuffer());
+    const before = await fs.readFile(path.join(content, 'manifest.json'), 'utf8');
     const r = await ok<Sync>('POST', '/api/sync', {});
     expect(r).toMatchObject({ state: 'blocked', updated: false, behind: 1 });
-    expect(r.message).toMatch(/未公開の変更/);
+    expect(await fs.readFile(path.join(content, 'manifest.json'), 'utf8')).toBe(before);
     expect(await dollNames()).toEqual(['テスト']);
-    // 状態にも、公開されているほうが新しいことが出る
     expect((await ok<{ git: { behind: number } }>('GET', '/api/status')).git.behind).toBe(1);
-  });
+  }, 60_000);
 
   it('git の作業フォルダでない・公開先が無いときは、何もしない（エラーにしない）', async () => {
     expect(await ok<Sync>('POST', '/api/sync', {})).toMatchObject({ state: 'no-repo', updated: false, behind: 0 });
