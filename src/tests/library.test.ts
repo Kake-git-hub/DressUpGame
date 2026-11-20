@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyItem } from '../cloud/backend';
 import { mergeMyItems, openLibrary } from '../cloud/library';
 import { BACK_HAIR_TYPE } from '../content/loadContent';
@@ -90,6 +90,24 @@ describe('自分の服を、公開の素材に重ねる', () => {
     expect(atob(mine.imageUrl.split(',')[1])).toBe('image-my:1');
     // もとの content は書き換えない
     expect(content.clothing).toHaveLength(1);
+  });
+
+  it('一度 data: に直した絵は覚えておく（服が増えた・減ったときに重ね直しても、同じ絵を読み直さない）。中身が替わった絵は、読み直す', async () => {
+    const reads = vi.spyOn(FileReader.prototype, 'readAsDataURL');
+    try {
+      const first = await mergeMyItems(content, [myItem('my:cache-1')]);
+      expect(reads).toHaveBeenCalledTimes(2); // 服の絵と、サムネイル
+      // 控えを読み直すと、Blob は別のものになる（中身は同じ）
+      const again = await mergeMyItems(content, [myItem('my:cache-1'), myItem('my:cache-2')]);
+      expect(reads).toHaveBeenCalledTimes(4); // 増えた 1 点の分だけ
+      expect(again.clothing[1].imageUrl).toBe(first.clothing[1].imageUrl);
+      // 同じ ID で、絵の中身が替わった（大きさが違う）
+      const changed = await mergeMyItems(content, [myItem('my:cache-1', { files: { image: blob('a-much-longer-image'), thumb: blob('thumb-my:cache-1') } })]);
+      expect(reads).toHaveBeenCalledTimes(5);
+      expect(atob(changed.clothing[1].imageUrl.split(',')[1])).toBe('a-much-longer-image');
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   it('公開の素材に無いドール・カテゴリの服は、足さない（落ちない）。絵が欠けている服も足さない', async () => {
