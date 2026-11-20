@@ -1,19 +1,23 @@
 /**
  * 品目を決め打ちで渡して、本物の画像生成を回すコマンド（企画と見た目の検品は、人が代わる）
  *
- *   npx tsx tools/studio/tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ>
+ *   npx tsx tools/studio/tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ> [--with <品目の ID>]
  *   npx tsx tools/studio/tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...> [replace]
  *
  * 品目の JSON: [{ "category": "くつ", "name": "…", "description": "英語の説明", "colors": ["#rrggbb"] }, …]
- * 出力フォルダに、品目ごとに 切り抜き（-cut.png）・隠す所（-hide.png）・AI の形（-shape.png）・ドールに着せた絵（-worn.jpg）と、
- * 結果の一覧（result.json）を書く。save は、選んだ番号の候補を素材フォルダに登録する（公開はしない）。
- * 最後に replace を付けると、同じカテゴリ・同じ名前の品目を置き換える。
+ * 出力フォルダに、品目ごとに 切り抜き（-cut.png）・隠す所（-hide.png）・AI の形（-shape.png）・前髪の範囲（-front.png）・
+ * くつの中の肌（-under.png）・ドールに着せた絵（-worn.jpg）と、結果の一覧（result.json）を書く。
+ * 髪は、サムネイル（-thumb.png）と、うしろがみのサムネイル（-backthumb.png）も書く。
+ * --with を付けると、その品目（靴下など）も重ねた絵（-worn-with.jpg）を書く。
+ * save は、選んだ番号の候補を素材フォルダに登録する（公開はしない）。最後に replace を付けると、同じカテゴリ・同じ名前の品目を置き換える。
  * Claude API のキーが無い環境のためのもの。見た目の検品は必ず「合格」を返すので、できた絵は人が見て選ぶこと。
+ * STUDIO_FAKE_IMAGE=<画像ファイル> を付けると、画像生成の代わりにその画像を返す（道具そのものの確認用。枚数は数えない）。
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import type { TextAi } from './ai.ts';
+import { hairFromMask, hairThumbs } from '../../src/pipeline/hairLayers.ts';
+import type { ImageAi, TextAi } from './ai.ts';
 import { createAiFromEnv } from './ai.ts';
 import { StudioApi } from './api.ts';
 import type { ApiResponse } from './api.ts';
@@ -22,7 +26,8 @@ import { Budget } from './budget.ts';
 const noInspection: TextAi = { json: async <T>() => ({ ok: true, reason: '（人が見て確かめる）', fix: '' }) as T };
 
 function makeApi(contentDir: string, outDir: string): StudioApi {
-  const image = createAiFromEnv().image;
+  const fake = process.env.STUDIO_FAKE_IMAGE;
+  const image: ImageAi | null = fake ? { generate: () => fs.readFile(fake) } : createAiFromEnv().image;
   return new StudioApi({
     contentDir,
     ai: { text: noInspection, image },
@@ -49,9 +54,28 @@ interface View {
   hasImage: boolean;
   hasShape: boolean;
   hasHide: boolean;
+  hasFront?: boolean;
+  hasUnder?: boolean;
 }
 
-async function generate(contentDir: string, dollId: string, itemsFile: string, outDir: string): Promise<void> {
+type Rgba = { data: Uint8ClampedArray; width: number; height: number };
+const rawOf = async (input: Buffer | string, width?: number, height?: number): Promise<Rgba> => {
+  let pipeline = sharp(input).ensureAlpha();
+  if (width && height) pipeline = pipeline.resize(width, height, { fit: 'fill' });
+  const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+  return { data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width: info.width, height: info.height };
+};
+const pngOf = (rgba: Uint8ClampedArray, width: number, height: number) => sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } }).png().toBuffer();
+// 品目の画像（切り抜き済み）を、キャンバス（width × height、中心を合わせる）の上に置いた PNG
+async function placedPng(contentDir: string, image: { file: string; canvasW: number; canvasH: number; box: { x: number; y: number; w: number; h: number } }, width: number, height: number): Promise<Buffer> {
+  const part = await sharp(path.join(contentDir, image.file)).resize(image.box.w, image.box.h, { fit: 'fill' }).png().toBuffer();
+  return sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: part, left: Math.round((width - image.canvasW) / 2) + image.box.x, top: Math.round((height - image.canvasH) / 2) + image.box.y }])
+    .png()
+    .toBuffer();
+}
+
+async function generate(contentDir: string, dollId: string, itemsFile: string, outDir: string, withId: string | null): Promise<void> {
   await fs.mkdir(outDir, { recursive: true });
   const api = makeApi(contentDir, outDir);
   const items = JSON.parse(await fs.readFile(itemsFile, 'utf8')) as unknown[];
@@ -60,30 +84,61 @@ async function generate(contentDir: string, dollId: string, itemsFile: string, o
   const job = await ok<{ candidates: View[] }>(api, 'GET', `/api/jobs?id=${id}`);
   const manifest = await api.store.read();
   const doll = manifest.dolls.find((d) => d.id === dollId)!;
-  const dollPng = await sharp(path.join(contentDir, doll.image.file)).resize(doll.image.box.w, doll.image.box.h, { fit: 'fill' }).png().toBuffer();
+  const withItem = withId ? doll.items.find((i) => i.id === withId) : undefined;
+  if (withId && !withItem) throw new Error(`品目「${withId}」がありません`);
   for (const [i, c] of job.candidates.entries()) {
     console.log(`${i}: ${c.item.category} ${c.item.name} → ${c.status} ${[...c.warnings.map((w) => w.message), ...c.notes].join(' / ')}`);
     if (!c.hasImage) continue;
     const get = async (kind: string) => (await call(api, 'GET', `/api/jobs/image?id=${id}&index=${i}&kind=${kind}`)).body as Buffer;
+    const write = (suffix: string, data: Buffer) => fs.writeFile(path.join(outDir, `${i}-${suffix}`), data);
     const cut = await get('png');
-    await fs.writeFile(path.join(outDir, `${i}-cut.png`), cut);
-    if (c.hasShape) await fs.writeFile(path.join(outDir, `${i}-shape.png`), await get('shape'));
+    await write('cut.png', cut);
+    if (c.hasShape) await write('shape.png', await get('shape'));
     const meta = await sharp(cut).metadata();
-    const pad = Math.round((meta.width! - doll.image.canvasW) / 2);
-    // ドール（差し替え式なら、隠す所を消してから）に重ねる
-    let body = await sharp({ create: { width: meta.width!, height: meta.height!, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: dollPng, left: doll.image.box.x + pad, top: doll.image.box.y + pad }])
-      .png()
-      .toBuffer();
+    const W = meta.width!;
+    const H = meta.height!;
+    // ドール（差し替え式なら、隠す所を消してから）
+    let body = await placedPng(contentDir, doll.image, W, H);
+    let hide: Buffer | null = null;
     if (c.hasHide) {
-      const hide = await get('hide');
-      await fs.writeFile(path.join(outDir, `${i}-hide.png`), hide);
+      hide = await get('hide');
+      await write('hide.png', hide);
       body = await sharp(body).composite([{ input: hide, blend: 'dest-out' }]).png().toBuffer();
     }
-    await sharp({ create: { width: meta.width!, height: meta.height!, channels: 3, background: '#c8d0e0' } })
-      .composite([{ input: body }, { input: cut }])
-      .jpeg({ quality: 90 })
-      .toFile(path.join(outDir, `${i}-worn.jpg`));
+    const under = c.hasUnder ? await get('under') : null;
+    if (under) await write('under.png', under);
+    // 着せた絵: 髪は 後ろ髪 → ドール → 前髪。ほかは ドール → 肌 → [重ねる品目] → 品目
+    let behind: Buffer[] = [];
+    let above: Buffer[] = [cut];
+    if (c.hasFront) {
+      const frontPng = await get('front');
+      await write('front.png', frontPng);
+      const dollAlpha = await rawOf(body);
+      const alpha = new Uint8Array(W * H);
+      for (let p = 0; p < alpha.length; p++) alpha[p] = dollAlpha.data[p * 4 + 3];
+      const front = await rawOf(frontPng);
+      const mask = new Uint8Array(W * H);
+      for (let p = 0; p < mask.length; p++) mask[p] = front.data[p * 4 + 3];
+      const layers = hairFromMask((await rawOf(cut)).data, mask, alpha, W, H);
+      behind = [await pngOf(layers.back, W, H)];
+      above = [await pngOf(layers.front, W, H)];
+      const thumbs = hairThumbs(layers.front, layers.back, alpha, W, H);
+      const thumb = async (rgba: Uint8ClampedArray) => sharp(await pngOf(rgba, W, H)).trim({ threshold: 0 }).resize(192, 192, { fit: 'contain', background: { r: 247, g: 243, b: 251, alpha: 1 } }).flatten({ background: '#f7f3fb' }).png().toBuffer();
+      await write('thumb.png', await thumb(thumbs.hair));
+      await write('backthumb.png', await thumb(thumbs.back));
+    }
+    const worn = async (extra: Buffer[]) =>
+      sharp({ create: { width: W, height: H, channels: 3, background: '#c8d0e0' } })
+        .composite([...behind, body, ...(under ? [under] : []), ...extra, ...above].map((input) => ({ input })))
+        .jpeg({ quality: 90 })
+        .toBuffer();
+    await write('worn.jpg', await worn([]));
+    if (withItem) {
+      // 重ねる品目も、くつの隠す所で消す（ゲームと同じ）
+      let other = await placedPng(contentDir, withItem.image, W, H);
+      if (hide) other = await sharp(other).composite([{ input: hide, blend: 'dest-out' }]).png().toBuffer();
+      await write('worn-with.jpg', await worn([other]));
+    }
   }
   await fs.writeFile(path.join(outDir, 'result.json'), JSON.stringify(job.candidates, null, 1));
 }
@@ -97,15 +152,34 @@ async function save(contentDir: string, dollId: string, outDir: string, picks: s
     const c = candidates[i];
     const png = await read(`${i}-cut.png`);
     if (!c || !png) throw new Error(`${i} 番の候補がありません`);
-    const saved = await ok<{ id: string }>(api, 'POST', '/api/items', { dollId, category: c.item.category, name: c.item.name, png, hide: await read(`${i}-hide.png`), shape: await read(`${i}-shape.png`), replaceId: existing.find((e) => e.category === c.item.category && e.name === c.item.name)?.id });
+    const front = await read(`${i}-front.png`);
+    const saved = await ok<{ id: string }>(api, 'POST', '/api/items', {
+      dollId,
+      category: c.item.category,
+      name: c.item.name,
+      png,
+      hide: await read(`${i}-hide.png`),
+      shape: front ? undefined : await read(`${i}-shape.png`),
+      front,
+      under: await read(`${i}-under.png`),
+      replaceId: existing.find((e) => e.category === c.item.category && e.name === c.item.name)?.id,
+    });
     console.log(`登録しました: ${saved.id}`);
   }
 }
 
 const args = process.argv.slice(2);
-const run = args[0] === 'save' && (args.length === 5 || (args.length === 6 && args[5] === 'replace')) ? save(args[1], args[2], args[3], args[4], args[5] === 'replace') : args.length === 4 ? generate(args[0], args[1], args[2], args[3]) : null;
+const withAt = args.indexOf('--with');
+const withId = withAt >= 0 ? (args[withAt + 1] ?? null) : null;
+const plain = withAt >= 0 ? args.slice(0, withAt) : args;
+const run =
+  plain[0] === 'save' && (plain.length === 5 || (plain.length === 6 && plain[5] === 'replace'))
+    ? save(plain[1], plain[2], plain[3], plain[4], plain[5] === 'replace')
+    : plain.length === 4 && (withAt < 0 || withId)
+      ? generate(plain[0], plain[1], plain[2], plain[3], withId)
+      : null;
 if (!run) {
-  console.log('使い方:\n  tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ>\n  tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...> [replace]');
+  console.log('使い方:\n  tryItems.ts <素材フォルダ> <ドールの ID> <品目の JSON> <出力フォルダ> [--with <品目の ID>]\n  tryItems.ts save <素材フォルダ> <ドールの ID> <出力フォルダ> <番号,番号,...> [replace]');
   process.exitCode = 1;
 } else {
   run.catch((error: Error) => {
