@@ -6,7 +6,17 @@
 - ロードマップ: `docs/superpowers/plans/2026-11-16-roadmap.md`
 - 各段階の計画と結果: `docs/superpowers/plans/`
 
-## 0. 最新（2026-11-19、v0.18.0）: 新ドールと部位の差し替え式生成
+## 0. 最新（2026-11-20、v0.20.0）: 髪とくつを「違いで取り出す」方式に
+
+設計と結果: `docs/superpowers/specs/2026-11-20-hair-and-shoes-by-difference-design.md`（10 章が結果）。計画: `docs/superpowers/plans/2026-11-20-hair-and-shoes-by-difference.md`。
+
+- 作業ブランチ `claude/festive-brahmagupta-vpdsx2`（v0.20.0）。**`main` には未マージ、素材は未公開**（作者の確認待ち）。
+- 髪は本物の上半身に描かせ、肩の線より上と体の上の髪が前髪。体の裏の塗りつぶしは体の内側だけ。うしろがみのサムネイル（`backThumb`）。
+- くつは 靴・肌（`under`）・隠す所。ゲームは隠す所を靴下にも効かせる。
+- 公開の手順（作者の了承後）: (1) ゲーム本体を先に `main` へ（新しい項目 `under`・`backThumb` を古いゲームは読まないので、順番が逆だと肌が出ない）。(2) 素材リポジトリをセッションに追加し、`2026-11-20-spike/content-delta.tgz` を展開、`studio/masters/2e5ca8f579d6cc54.webp` を消して、公開。
+- 画像生成は、このセッションで 21 枚（上限 25 枚）。
+
+## 0-2. 2026-11-19（v0.18.0）: 新ドールと部位の差し替え式生成
 
 設計と結果: `docs/superpowers/specs/2026-11-19-new-doll-and-part-swap-design.md`（9 章が結果）。計画: `docs/superpowers/plans/2026-11-19-new-doll-and-part-swap.md`。
 
