@@ -675,6 +675,10 @@ textarea {
 /* 一覧のドラッグ（重なりの並べ替え）。行は指に付いてきて、ほかの行は場所をあける */
 .item-adjust-picker-items button {
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .item-adjust-picker-items.sorting > * {
   transition: transform 0.12s ease-out;
@@ -694,6 +698,10 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* iPad: 長押しで絵がつかまれ（画像のドラッグ・被写体の切り抜き）、並べ替えにならないので、
+     絵は指を受けず、行（ボタン）が受ける */
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 /* 色相スライダー（右上ボタン群内） */

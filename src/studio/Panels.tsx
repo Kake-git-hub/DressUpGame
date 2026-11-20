@@ -302,7 +302,7 @@ export function Generate({ doll, status, onChanged }: Common & { status: Status 
           </button>
           <span className="hint">
             {!isBackground && status.budget.maxAttempts > 1 && `できた絵を検品し、不合格なら直し方を伝えて自動で作り直します（${status.budget.maxAttempts - 1} 回まで）。`}
-            画像の生成は最大 {maxImages} 枚（作り直し・書き直しを含む）。今日は {status.budget.usedToday} / {status.budget.perDay} 枚を使用済み。
+            画像の生成は最大 {maxImages} 枚（作り直し・書き直しを含む）。今日は {status.budget.usedToday}{status.budget.perDay !== null && ` / ${status.budget.perDay}`} 枚を使用済み。
           </span>
         </div>
       </div>
@@ -569,9 +569,9 @@ export function Library({ doll, onChanged }: Common) {
         <div className="category" data-testid="library-sets">
           <div className="row">
             <b>セット</b>
-            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。最後の 1 点が無くなるとセットも消えます。</span>
+            <span className="hint">同じテーマの服の集まり。ゲームでは、セットを選ぶと全部が一度に着きます。「重ね順」は大きいほど手前で、セットを着たときの重なりの順番になります（空にすると、カテゴリの重ね順）。服は、あとから足したり外したりできます。最後の 1 点が無くなるとセットも消えます。▲ ▼ で、ゲームのメニューでのセットの順番を変えられます。</span>
           </div>
-          {(doll.sets ?? []).map((x) => {
+          {(doll.sets ?? []).map((x, setIndex, sets) => {
             const categoryOf = (id: string) => doll.categories.find((c) => c.id === id);
             const layerOf = (i: (typeof doll.items)[number]) => i.layer ?? categoryOf(i.category)?.layer ?? 0;
             // 手前（重ね順が大きい）から
@@ -582,6 +582,11 @@ export function Library({ doll, onChanged }: Common) {
                 <div className="row">
                   <input defaultValue={x.name} aria-label="セットのなまえ" onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== x.name && void guard(() => api.renameSet(doll.id, x.id, e.target.value.trim()))} />
                   <span>{members.length} 点</span>
+                  <span className="order-buttons">
+                    <button onClick={() => void guard(() => api.reorderSets(doll.id, moveInList(sets, setIndex, setIndex - 1).map((s2) => s2.id)))} disabled={setIndex === 0} aria-label="セットを前へ" title="メニューで前へ" data-testid="set-earlier">▲</button>
+                    <span className="hint">{setIndex + 1}</span>
+                    <button onClick={() => void guard(() => api.reorderSets(doll.id, moveInList(sets, setIndex, setIndex + 1).map((s2) => s2.id)))} disabled={setIndex === sets.length - 1} aria-label="セットを後ろへ" title="メニューで後ろへ" data-testid="set-later">▼</button>
+                  </span>
                   <select
                     value=""
                     aria-label="セットに服を足す"

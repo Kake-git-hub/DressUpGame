@@ -297,4 +297,12 @@ describe('resolveContentUrl', () => {
     // 印の無い服には付かない
     expect(clothing.filter((c) => !c.setId).length).toBe(clothing.length - 2);
   });
+
+  it('セットの服には、セットの並び（sets の中の番号）が付く', async () => {
+    const m: Manifest = structuredClone(manifest);
+    m.dolls[0].sets = [{ id: 'アニメ/セット/やま', name: 'やま' }, { id: 'アニメ/セット/うみ', name: 'うみ' }];
+    m.dolls[0].items[0].set = 'アニメ/セット/うみ';
+    const { clothing } = await loadContent(BASE, okFetch(m));
+    expect(clothing.find((c) => c.id === m.dolls[0].items[0].id)).toMatchObject({ setId: 'アニメ/セット/うみ', setOrder: 1 });
+  });
 });

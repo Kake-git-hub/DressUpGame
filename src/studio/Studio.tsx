@@ -112,7 +112,7 @@ export function Studio() {
         </label>
         <span className="hint" data-testid="ai-status">
           {status.ai.text && status.ai.image
-            ? `自動生成: 今日 ${status.budget.usedToday} / ${status.budget.perDay} 枚`
+            ? `自動生成: 今日 ${status.budget.usedToday}${status.budget.perDay !== null ? ` / ${status.budget.perDay}` : ''} 枚`
             : `自動生成は使えません（${[!status.ai.text && 'Claude', !status.ai.image && 'Gemini'].filter(Boolean).join('・')} のキーが未設定）`}
         </span>
         <span className="spacer" />

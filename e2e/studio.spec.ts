@@ -476,6 +476,20 @@ test.describe('スタジオ', () => {
       const kazari = page.getByTestId('library-item').filter({ has: page.locator('input[value="うみのかざり"]') });
       await kazari.getByTestId('item-join-set').selectOption({ label: 'うみのセット' });
       await expect.poll(() => setItems().length).toBe(3);
+      // 新しいセットを作り、▲ ▼ でセットの順番（ゲームのメニューでの順番）を変える
+      const setNames = () => ((manifestNow().dolls[0] as { sets?: { name: string }[] }).sets ?? []).map((x) => x.name);
+      page.once('dialog', (dialog) => void dialog.accept('やまのセット'));
+      const free = page.getByTestId('library-item').filter({ has: page.getByTestId('item-join-set') }).first();
+      await free.getByTestId('item-join-set').selectOption({ label: '＋ 新しいセット' });
+      await expect.poll(setNames).toEqual(['うみのセット', 'やまのセット']);
+      const boxes = page.getByTestId('library-set');
+      await expect(boxes).toHaveCount(2);
+      await expect(boxes.first().getByTestId('set-earlier')).toBeDisabled();
+      await boxes.nth(1).getByTestId('set-earlier').click();
+      await expect.poll(setNames).toEqual(['やまのセット', 'うみのセット']);
+      await expect(boxes.first().locator('input[aria-label="セットのなまえ"]')).toHaveValue('やまのセット');
+      await boxes.first().getByTestId('set-later').click();
+      await expect.poll(setNames).toEqual(['うみのセット', 'やまのセット']);
     });
 
     test('ドールの範囲のタブで、ドールの名前を変え、ゲームに出さないようにできる', async ({ page }) => {

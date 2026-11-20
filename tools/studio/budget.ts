@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export interface BudgetLimits {
-  perDay: number;
+  perDay: number; // Infinity で上限なし
   perRun: number;
 }
 

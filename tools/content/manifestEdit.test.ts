@@ -348,6 +348,19 @@ describe('ContentStore', () => {
       await expect(store.addItem(doll.id, item('べつ', { set: { id: 'x'.repeat(201), name: 'x' } }))).rejects.toThrow();
     });
 
+    it('reorderSets はセットの並びを変える。全部のセットがそろっていなければ Error', async () => {
+      const doll = await dollOf();
+      const yama = { id: `${doll.id}/セット/やま`, name: 'やま' };
+      await store.addItem(doll.id, item('シャツ', { set: umi }));
+      await store.addItem(doll.id, item('ズボン', { set: yama }));
+      expect((await dollOf()).sets!.map((x) => x.id)).toEqual([umi.id, yama.id]);
+      await store.reorderSets(doll.id, [yama.id, umi.id]);
+      expect((await dollOf()).sets!.map((x) => x.id)).toEqual([yama.id, umi.id]);
+      await expect(store.reorderSets(doll.id, [yama.id])).rejects.toThrow(/セット/);
+      await expect(store.reorderSets(doll.id, [yama.id, yama.id])).rejects.toThrow(/セット/);
+      await expect(store.reorderSets(doll.id, [yama.id, '無い'])).rejects.toThrow(/セット/);
+    });
+
     it('renameSet は名前だけを変える（ID と服の印はそのまま）。無いセット・使えない名前は Error', async () => {
       const doll = await dollOf();
       const a = await store.addItem(doll.id, item('シャツ', { set: umi }));
