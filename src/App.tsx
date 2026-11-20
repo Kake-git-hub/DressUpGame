@@ -13,6 +13,7 @@ import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
 import { adjustBaseId, partnerOf } from './engine/pairs';
 import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
+import { computeLayout } from './components/layout';
 import { loadContent, resolveContentUrl } from './content/loadContent';
 import { cleanupLegacyData, deleteLegacyDatabase } from './content/legacyCleanup';
 import { resolveStartState } from './content/startState';
@@ -33,10 +34,29 @@ import { APP_VERSION } from './version';
 import './App.css';
 
 
-// メニュー幅（px）
-const MENU_WIDTH = 160;
-// 右ボタン領域幅（px）- ボタン44px + 余白16px
-const RIGHT_BUTTON_WIDTH = 60;
+// 画面の大きさと、上下のあけておく高さ（時計や電池の表示の分・ホームの線の分）
+interface Viewport {
+  width: number;
+  height: number;
+  top: number;
+  bottom: number;
+}
+
+// 上下のあきは CSS でしか分からないので、見えない目印を一瞬置いて測る
+function readViewport(): Viewport {
+  // visualViewportを優先使用（iPad Safari対応）
+  const width = window.visualViewport?.width ?? window.innerWidth;
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:fixed;top:0;left:0;width:0;box-sizing:content-box;visibility:hidden;pointer-events:none;height:var(--top-inset,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
+  document.body.appendChild(probe);
+  const style = getComputedStyle(probe);
+  const top = parseFloat(style.height) || 0;
+  const bottom = parseFloat(style.paddingBottom) || 0;
+  probe.remove();
+  return { width, height, top, bottom };
+}
 
 // 旧方式（アプリ内取り込み）のデータを、状態を読む前に片付ける
 cleanupLegacyData();
@@ -74,35 +94,38 @@ function App() {
     return allDolls.find(d => d.id === currentDollId) ?? allDolls[0];
   }, [currentDollId, allDolls]);
 
-  // キャンバスサイズ（画面いっぱい。メニューとボタンの分は描画側で差し引く）
-  const [canvasSize, setCanvasSize] = useState({ width: 600, height: 800 });
+  // 画面の大きさから、配置（横・縦）を決める。
+  // 横: キャンバスは画面いっぱい（メニューとボタンの分は描画側で差し引く）。縦: キャンバスは上の正方形、メニュー類は下
+  const [viewport, setViewport] = useState<Viewport>(readViewport);
+  const layout = useMemo(
+    () => computeLayout(viewport.width, viewport.height, { top: viewport.top, bottom: viewport.bottom }),
+    [viewport],
+  );
+  const canvasSize = layout.canvas;
 
-  // 画面サイズに応じてキャンバスサイズを計算
-  // CSS変数も同時に更新してレイアウト全体を制御
+  // 画面サイズの変化（持ち替えを含む）に合わせる。CSS変数も同時に更新してレイアウト全体を制御
   useEffect(() => {
-    const updateCanvasSize = () => {
-      // visualViewportを優先使用（iPad Safari対応）
-      const vh = window.visualViewport?.height ?? window.innerHeight;
-      const vw = window.visualViewport?.width ?? window.innerWidth;
-
+    const update = () => {
+      const next = readViewport();
       // CSS変数に実際のビューポートサイズを設定
-      document.documentElement.style.setProperty('--app-height', `${vh}px`);
-      document.documentElement.style.setProperty('--app-width', `${vw}px`);
-
-      setCanvasSize({ width: Math.floor(vw), height: Math.floor(vh) });
+      document.documentElement.style.setProperty('--app-height', `${next.height}px`);
+      document.documentElement.style.setProperty('--app-width', `${next.width}px`);
+      setViewport((prev) =>
+        prev.width === next.width && prev.height === next.height && prev.top === next.top && prev.bottom === next.bottom ? prev : next,
+      );
     };
 
-    updateCanvasSize();
-    window.addEventListener('resize', updateCanvasSize);
-    window.addEventListener('orientationchange', updateCanvasSize);
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
     // visualViewportのリサイズも監視（iPad Safariのアドレスバー表示/非表示）
-    window.visualViewport?.addEventListener('resize', updateCanvasSize);
-    window.visualViewport?.addEventListener('scroll', updateCanvasSize);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
     return () => {
-      window.removeEventListener('resize', updateCanvasSize);
-      window.removeEventListener('orientationchange', updateCanvasSize);
-      window.visualViewport?.removeEventListener('resize', updateCanvasSize);
-      window.visualViewport?.removeEventListener('scroll', updateCanvasSize);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
     };
   }, []);
 
@@ -420,14 +443,6 @@ function App() {
     saveCurrentBackgroundId(bgId);
   }, []);
 
-  // 横画面専用: 縦に持ったときの案内（表示の切り替えはCSS）
-  const rotateNotice = (
-    <div className="rotate-notice" data-testid="rotate-notice">
-      <span>📱</span>
-      <span>よこにしてね</span>
-    </div>
-  );
-
   // 版数（右上に小さく。読み込み中・失敗の画面にも出して、どの版で止まっているかが分かるようにする）
   const versionBadge = <div className="version-badge">v{APP_VERSION}</div>;
 
@@ -445,13 +460,12 @@ function App() {
             </>
           )}
         </div>
-        {rotateNotice}
       </div>
     );
   }
 
   return (
-    <div className="app">
+    <div className="app" data-orientation={layout.orientation}>
       {versionBadge}
 
       {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
@@ -492,6 +506,8 @@ function App() {
           <section
             ref={avatarSectionRef}
             className="avatar-section"
+            // 縦: キャンバスは上のあきの下に、正方形の高さで置く（横は CSS のまま）
+            style={layout.orientation === 'portrait' ? { top: layout.canvas.top, height: layout.canvas.height } : undefined}
           >
             <AvatarCanvas
               ref={avatarCanvasRef}
@@ -501,8 +517,8 @@ function App() {
               doll={currentDoll}
               backgroundImageUrl={currentBackground?.imageUrl}
               dollTransform={dollTransform}
-              menuOffset={MENU_WIDTH}
-              rightOffset={RIGHT_BUTTON_WIDTH}
+              menuOffset={layout.menuOffset}
+              rightOffset={layout.rightOffset}
               adjustingItemId={isAdjustingItem ? adjustingItemId : null}
               hidden={hiddenSheets}
             />
@@ -556,8 +572,8 @@ function App() {
           canvasHeight={canvasSize.height}
           dollTransform={dollTransform}
           onDollTransformChange={setDollTransform}
-          menuOffset={MENU_WIDTH}
-          rightOffset={RIGHT_BUTTON_WIDTH}
+          menuOffset={layout.menuOffset}
+          rightOffset={layout.rightOffset}
           doll={currentDoll}
           equippedItems={canvasItems}
           onRemove={handleAdjustRemove}
@@ -574,15 +590,13 @@ function App() {
           dollTransform={dollTransform}
           canvasWidth={canvasSize.width}
           canvasHeight={canvasSize.height}
-          menuOffset={MENU_WIDTH}
-          rightOffset={RIGHT_BUTTON_WIDTH}
+          menuOffset={layout.menuOffset}
+          rightOffset={layout.rightOffset}
         />
       )}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} />
-
-      {rotateNotice}
     </div>
   );
 }

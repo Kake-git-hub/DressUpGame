@@ -474,14 +474,19 @@ test('旧方式のデータは初回起動で消え、2 回目以降は服装を
   await expectPixel(page, DOLL_X, TOP_Y, RED);
 });
 
-test('縦長の画面では「よこにしてね」が出る', async ({ page }) => {
+test('縦長の画面では、縦の配置になる（「よこにしてね」は出ない）。横に戻すと、横の配置に戻る', async ({ page }) => {
   await openApp(page);
-  await expect(page.getByTestId('rotate-notice')).toBeHidden();
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
   await page.setViewportSize({ width: 820, height: 1180 });
-  await expect(page.getByTestId('rotate-notice')).toBeVisible();
-  await expect(page.getByTestId('rotate-notice')).toContainText('よこにしてね');
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
+  await expect(page.getByTestId('rotate-notice')).toHaveCount(0);
+  // キャンバスは、幅いっぱい × 正方形（幅と同じ）で、上に置く
+  await expect.poll(async () => page.getByTestId('avatar-canvas').boundingBox()).toEqual({ x: 0, y: 0, width: 820, height: 820 });
+  // ドールは正方形の中央（胴のあたりに肌の色）
+  await expectPixel(page, 410, 410 + (380 - IMG / 2) * ((820 * 0.9) / 1024), SKIN);
   await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
-  await expect(page.getByTestId('rotate-notice')).toBeHidden();
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
 });
 
 test('メニューの並び: カテゴリは並び順どおり、サムネイルは切り抜いた服', async ({ page }) => {

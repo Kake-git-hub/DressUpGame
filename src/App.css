@@ -1094,29 +1094,3 @@ textarea {
   border-radius: 28px;
   cursor: pointer;
 }
-
-/* 横画面専用: 縦に持ったときの案内 */
-.rotate-notice {
-  display: none;
-}
-
-@media (orientation: portrait) {
-  .rotate-notice {
-    position: fixed;
-    inset: 0;
-    z-index: 3000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    background: #fff0f6;
-    color: #7a4a6a;
-    font-size: 28px;
-    font-weight: bold;
-  }
-
-  .rotate-notice span:first-child {
-    font-size: 72px;
-  }
-}
