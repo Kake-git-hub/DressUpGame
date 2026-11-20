@@ -90,6 +90,9 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   const { text, image } = deps.ai;
   if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません（AI のキーが設定されていません）');
 
+  // 足りないと分かっているなら、企画（文章の AI）も呼ばない（チケットの無い人に、作者の費用で AI を使わせない）
+  if (!user.admin && user.tickets < wanted.length) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${wanted.length} 枚）`);
+
   // 企画（文章の AI）。ここで失敗しても、チケットは引いていない
   const style = findStyle(input.styleId);
   let items: PlannedItem[];

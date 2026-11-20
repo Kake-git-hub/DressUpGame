@@ -19,6 +19,7 @@ let files: MemoryFiles;
 let deps: CoreDeps;
 let dollId: string;
 let imageCalls: number;
+let textCalls: number;
 let failImages: boolean;
 let clock: number;
 let ids: number;
@@ -49,6 +50,7 @@ const fakeImage: ImageAi = {
 // 偽の文章の AI: 企画（1 点・セット）と、検品（いつも合格）
 const fakeText: TextAi = {
   async json<T>(input: { prompt: string; schema: Record<string, unknown> }): Promise<T> {
+    textCalls++;
     const props = (input.schema.properties ?? {}) as Record<string, unknown>;
     if ('ok' in props) return { ok: true, reason: 'よくできています' } as T;
     const wanted = [...input.prompt.matchAll(/^- (\S+)/gm)].map((m) => m[1]).filter((id) => ['トップス', 'アクセサリー', 'ボトムス', 'くつ'].includes(id));
@@ -65,6 +67,7 @@ beforeEach(async () => {
   store = new MemoryStore();
   files = new MemoryFiles();
   imageCalls = 0;
+  textCalls = 0;
   failImages = false;
   clock = 1_000_000;
   ids = 0;
@@ -123,6 +126,13 @@ describe('生成を始める', () => {
     await userWith('u1', 0);
     expect(code(await startJob(deps, 'u1', oneTop()).catch((e) => e))).toBe('no-tickets');
     expect(await listJobs(deps, 'u1')).toEqual([]);
+  });
+  it('チケットが足りないときは、文章の AI（企画）も呼ばない（作者の費用で、ただで呼ばせない）', async () => {
+    await userWith('u1', 2);
+    const before = textCalls;
+    expect(code(await startJob(deps, 'u1', { dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'set', categoryIds: ['トップス', 'ボトムス', 'アクセサリー'] } }).catch((e) => e))).toBe('no-tickets');
+    expect(textCalls).toBe(before);
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
   });
   it('セット: 企画に入った点数だけ引く（企画が落としたカテゴリの分は引かない）', async () => {
     await userWith('u1', 5);

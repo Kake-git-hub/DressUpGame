@@ -93,35 +93,35 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
       return { ...started, user: await user() };
     }
     case 'job': {
-      const job = await deps.store.getJob(uid, str(d.jobId));
+      const job = await deps.store.getJob(uid, str(d.jobId, 100));
       if (!job) throw refused('この仕事は見つかりません');
       return { job: jobView(job, deps.now()), user: await user() };
     }
     case 'jobs':
       return { jobs: (await listJobs(deps, uid)).map((job) => jobView(job, deps.now())), user: await user() };
     case 'preview': {
-      const job = await deps.store.getJob(uid, str(d.jobId));
+      const job = await deps.store.getJob(uid, str(d.jobId, 100));
       const path = job?.candidates.find((c) => c.index === index(d.index))?.preview?.path;
       const bytes = path ? await deps.files.get(path) : null;
       if (!bytes) throw refused('この絵は見つかりません');
       return { data: bytes.toString('base64'), contentType: 'image/png' };
     }
     case 'keep': {
-      const item = await keep(deps, uid, str(d.jobId), index(d.index), typeof d.name === 'string' ? d.name : '');
+      const item = await keep(deps, uid, str(d.jobId, 100), index(d.index), typeof d.name === 'string' ? d.name : '');
       return { item: itemView(item), files: await filesOf(deps, item), user: await user() };
     }
     case 'discard':
-      await discard(deps, uid, str(d.jobId), index(d.index));
+      await discard(deps, uid, str(d.jobId, 100), index(d.index));
       return { ok: true };
     case 'items':
       return { items: (await listItems(deps, uid)).map(itemView) };
     case 'itemFiles': {
-      const item = await deps.store.getItem(uid, str(d.id));
+      const item = await deps.store.getItem(uid, str(d.id, 100));
       if (!item) throw refused('この服は見つかりません');
       return { files: await filesOf(deps, item) };
     }
     case 'deleteItem':
-      await deleteItem(deps, uid, str(d.id));
+      await deleteItem(deps, uid, str(d.id, 100));
       return { ok: true };
     default:
       throw refused();

@@ -1,0 +1,10 @@
+rules_version = '2';
+// アプリからは、何も直接読み書きさせない。どの読み書きも、サーバーの関数（functions/）を通す。
+// （関数は管理者の権限で動くので、この決まりの外。Firebase の管理画面からの操作も、決まりの外）
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
