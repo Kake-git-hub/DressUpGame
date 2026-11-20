@@ -50,9 +50,8 @@ const LOBE_RIM = 3; // 房と一緒に前に入れる、まわりの線の幅
 const JOIN_LOBE_AREA = 12000;
 const LINE_COST = 3;
 const BIG_COST = 6;
-// 道のまわりを足すときの、太さの半分（つなぐかたまりの太さに合わせる）の下限と上限
-const PATH_MIN = 12;
-const PATH_MAX = 40;
+// 道のまわりを足すときの、太さの半分
+const PATH_HALF = 12;
 const DOLL_EDGE = 5; // ドールからこの範囲にある、細い外の「髪」は、ドールのふちが少しずれただけの所
 const EDGE_THIN = 2;
 const BRIDGE = 4; // 髪のかたまりを数えるとき、この幅のすき間はつながっているとみなす
@@ -327,22 +326,10 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
   // 3. 離れているかたまりを、髪の中の道でつなぐ
   const label = new Int32Array(total);
   const sizes: number[] = [0];
-  const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [{ x0: 0, y0: 0, x1: 0, y1: 0 }];
   components(mask, width, height, (pixels, count) => {
     const id = sizes.length;
-    const box = { x0: width, y0: height, x1: 0, y1: 0 };
-    for (let n = 0; n < count; n++) {
-      const p = pixels[n];
-      label[p] = id;
-      const x = p % width;
-      const y = (p - x) / width;
-      if (x < box.x0) box.x0 = x;
-      if (x > box.x1) box.x1 = x;
-      if (y < box.y0) box.y0 = y;
-      if (y > box.y1) box.y1 = y;
-    }
+    for (let n = 0; n < count; n++) label[pixels[n]] = id;
     sizes.push(count);
-    boxes.push(box);
   });
   if (sizes.length > 2) {
     let main = 1;
@@ -388,11 +375,8 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
       }
     }
     const path = new Uint8Array(total);
-    let wide = 0;
     for (let id = 1; id < sizes.length; id++) {
       if (id === main || reached[id] < 0) continue;
-      const box = boxes[id];
-      wide = Math.max(wide, Math.max(px(PATH_MIN), Math.min(px(PATH_MAX), Math.round(Math.min(box.x1 - box.x0, box.y1 - box.y0) / 2))));
       for (let p = reached[id]; label[p] !== main; p = parent[p]) {
         const id2 = lobe[p];
         if (id2 > 0 && takeLobe[id2] === 0) {
@@ -406,7 +390,7 @@ function frontOf(image: Pixels, inHair: Uint8Array, outHair: Uint8Array, width: 
     }
     addLobes();
     // 大きな房や線の上を通る所は、道のまわりだけを足す
-    const band = dilate(path, width, height, Math.max(px(PATH_MIN), wide));
+    const band = dilate(path, width, height, px(PATH_HALF));
     for (let p = 0; p < total; p++) if (band[p] && any[p] && (lobe[p] === 0 || lobeSize[lobe[p]] > smallLobe || takeLobe[lobe[p]])) mask[p] = 1;
   }
   // 足した房のふちにできた小さなかけらは、前にしない（いちばん大きいかたまりは残す）
