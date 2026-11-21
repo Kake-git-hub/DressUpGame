@@ -62,7 +62,9 @@ interface Services {
 let services: Services | null = null;
 function getServices(): Services {
   if (services) return services;
-  if (getApps().length === 0) initializeApp();
+  // 既定のアプリが無いときだけ作る。firebase-functions は、ログインの確かめのために、自分用の名前付きのアプリ
+  // （__FIREBASE_FUNCTIONS_SDK__）を先に作ることがあるので、「アプリが 1 つも無い」では判定できない
+  if (!getApps().some((app) => app.name === '[DEFAULT]')) initializeApp();
   const db = getFirestore();
   db.settings({ ignoreUndefinedProperties: true });
   let cached: { at: number; value: Config } | null = null;
