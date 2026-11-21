@@ -7,7 +7,7 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { deleteItem, discard, keep, listItems, listJobs, signIn, STALE_MS, startJob } from './studioCore.ts';
+import { deleteItem, discard, keep, listItems, listJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -73,7 +73,9 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
     case 'signIn':
       return { user: await user() };
     case 'startJob': {
-      const started = await startJob(deps, uid, { dollId: str(d.dollId), theme: typeof d.theme === 'string' ? d.theme : '', styleId: typeof d.styleId === 'string' ? d.styleId : '', target: target(d.target) });
+      // 写真（顔を似せる。base64）。無ければ null
+      const photo = d.photo === undefined || d.photo === null ? null : Buffer.from(str(d.photo, Math.ceil((PHOTO_MAX_BYTES * 4) / 3) + 4), 'base64');
+      const started = await startJob(deps, uid, { dollId: str(d.dollId), theme: typeof d.theme === 'string' ? d.theme : '', styleId: typeof d.styleId === 'string' ? d.styleId : '', target: target(d.target), photo });
       return { ...started, user: await user() };
     }
     case 'job': {

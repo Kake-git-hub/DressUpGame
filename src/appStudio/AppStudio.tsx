@@ -30,6 +30,25 @@ const COLOR_LABELS = ['メイン', 'サブ', 'アクセント'];
 // できた服を、ドールに着せて見せる枠の大きさ（px）。せまい画面では小さくする
 const stageSize = () => Math.max(110, Math.min(200, Math.floor(window.innerWidth * 0.36)));
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
+// 写真から作れる「顔」のカテゴリ（サーバーの isFaceCategory と同じ見分け方）
+const isPhotoFace = (label: string) => /かお|顔|face|メイク|おけしょう|化粧/i.test(label) && !/かみ|髪|ヘア|hair/i.test(label);
+// 送る前に、写真を小さくする（長い辺 1024px の JPEG。向きは写真の情報どおりに直す）
+const PHOTO_SIDE = 1024;
+async function shrinkPhoto(file: Blob): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, PHOTO_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * k));
+    canvas.height = Math.max(1, Math.round(bitmap.height * k));
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    return blob ?? file;
+  } catch {
+    return file; // 小さくできなければ、そのまま（大きすぎれば、サーバーが断る）
+  }
+}
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
 
 // Blob の絵（端末の控え）を表示する
@@ -83,9 +102,11 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   const [setCats, setSetCats] = useState<string[]>(() => targets.filter((c) => !isFaceLabel(c.label)).slice(0, SET_MAX).map((c) => c.id));
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
-  // 色のテーマ（3 色）と、写真（テーマの参考）。まだ AI には渡していない（画面だけ）
+  // 色のテーマ（3 色）は、まだ AI には渡していない（画面だけ）。写真は、顔を似せるために使う
   const [colors, setColors] = useState<string[]>(DEFAULT_COLORS);
-  const [photo, setPhoto] = useState<File | null>(null);
+  const [photo, setPhoto] = useState<Blob | null>(null);
+  // 写真から顔を作るカテゴリ（無いドールでは、写真は使えない）
+  const faceTarget = targets.find((c) => isPhotoFace(c.label));
   const photoUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo]);
   useEffect(() => () => void (photoUrl && URL.revokeObjectURL(photoUrl)), [photoUrl]);
   const [busy, setBusy] = useState(false);
@@ -148,7 +169,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   // 「作る」を押せない理由（押せるなら null）
   const blocked = !user
     ? '準備しています…'
-    : !text
+    : !text && !photo
       ? 'テーマを入れてください。'
       : isSet && (chosen.length < SET_MIN || chosen.length > SET_MAX)
         ? `セットに入れるものを ${SET_MIN}〜${SET_MAX} 個選んでください（いま ${chosen.length} 個）。`
@@ -161,7 +182,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     setBusy(true);
     setError(null);
     try {
-      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current });
+      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current, ...(photo ? { photo } : {}) });
       watchers.current.push(backend.watchJob(jobId, upsertJob));
     } catch (e) {
       setError(messageOf(e));
@@ -237,7 +258,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
             <section className="studio-form">
               <label className="studio-group">
                 <span className="studio-label">① 何を作る？</span>
-                <select className="studio-select" value={target} onChange={(e) => setTarget(e.target.value)} data-testid="studio-target">
+                <select className="studio-select" value={target} onChange={(e) => setTarget(e.target.value)} disabled={photo !== null} data-testid="studio-target">
                   {targets.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label}
@@ -262,29 +283,46 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
               <div className="studio-group">
                 <span className="studio-label">② テーマ</span>
                 <div className="studio-theme-row">
-                  <input value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" aria-label="テーマ" data-testid="studio-theme" />
-                  {/* 写真を撮る（スマホ・iPad ではカメラが開く。パソコンでは画像を選ぶ） */}
-                  <label className="studio-photo-button" title="写真をとる" data-testid="studio-photo-button">
+                  <input
+                    value={theme}
+                    maxLength={THEME_MAX}
+                    onChange={(e) => setTheme(e.target.value)}
+                    placeholder={photo ? 'なくても作れます（例: にっこり）' : '例: うみのおひめさま'}
+                    aria-label="テーマ"
+                    data-testid="studio-theme"
+                  />
+                  {/* 顔写真をとる（スマホ・iPad ではカメラが開く。パソコンでは画像を選ぶ）。その顔に似せた「顔」を作る */}
+                  <label className={`studio-photo-button${faceTarget ? '' : ' disabled'}`} title={faceTarget ? '顔写真をとる' : 'このドールには、顔のカテゴリがありません'} data-testid="studio-photo-button">
                     📷
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
+                      capture="user"
+                      disabled={!faceTarget}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file) setPhoto(file);
                         e.target.value = '';
+                        if (!file || !faceTarget) return;
+                        void shrinkPhoto(file).then((small) => {
+                          setPhoto(small);
+                          setTarget(faceTarget.id);
+                        });
                       }}
                       data-testid="studio-photo-input"
                     />
                   </label>
                 </div>
                 {photoUrl && (
-                  <div className="studio-photo" data-testid="studio-photo">
-                    <img src={photoUrl} alt="とった写真" />
-                    <button type="button" onClick={() => setPhoto(null)} aria-label="写真をはずす" data-testid="studio-photo-remove">
-                      ✕
-                    </button>
+                  <div className="studio-photo-box">
+                    <div className="studio-photo" data-testid="studio-photo">
+                      <img src={photoUrl} alt="とった写真" />
+                      <button type="button" onClick={() => setPhoto(null)} aria-label="写真をはずす" data-testid="studio-photo-remove">
+                        ✕
+                      </button>
+                    </div>
+                    <p className="studio-hint" data-testid="studio-photo-note">
+                      この写真の顔に似せた「{faceTarget?.label}」を作ります。写真は顔を作るためだけに使い、作り終わったらサーバーから消します。
+                    </p>
                   </div>
                 )}
               </div>

@@ -81,7 +81,8 @@ export interface StudioBackend {
   // チケットの残りなどが変わったら知らせる。返り値を呼ぶと、知らせを止める
   onUser(listener: (user: StudioUser) => void): () => void;
   // 生成を始める。チケットは、ここで引かれる（できなかった品目の分は、あとで戻る）
-  startJob(input: { dollId: string; theme: string; styleId: string; target: StudioTarget }): Promise<{ jobId: string; cost: number }>;
+  // photo: 顔を似せる人の顔写真（顔のカテゴリ 1 点のときだけ）。あればテーマは空でもよい
+  startJob(input: { dollId: string; theme: string; styleId: string; target: StudioTarget; photo?: Blob }): Promise<{ jobId: string; cost: number }>;
   // 進み具合を知らせる。返り値を呼ぶと、知らせを止める
   watchJob(jobId: string, listener: (job: StudioJob) => void): () => void;
   // まだ「使う」「捨てる」を決めていない候補のある仕事（閉じる前に作っていた分も含む）。新しい順

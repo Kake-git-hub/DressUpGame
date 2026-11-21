@@ -54,6 +54,7 @@ export interface JobDoc {
   heartbeat: number; // 最後に進めた時刻（止まっている仕事を見分ける）
   runner?: string; // いま進めている呼び出しの印（追い越された古い呼び出しが、あとから書き込まないように）
   free?: boolean; // 管理者が始めた仕事（チケットを引いていないので、できなくても戻さない）
+  photo?: string; // 顔を似せる写真の置き場のパス。仕事が終わったら消す
   candidates: CandidateDoc[];
 }
 // 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける

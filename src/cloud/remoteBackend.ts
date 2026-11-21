@@ -6,6 +6,7 @@
  *   - 生成を進める関数（時間がかかる）を呼ぶ。閉じる前に作りかけだった分・止まっている分は、呼び直す
  *   - 絵は base64 で届くので、表示用の data: の URL や、保存用の Blob に直す
  */
+import { BackendError } from './backend';
 import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
 import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 
@@ -35,6 +36,17 @@ interface Watch {
   timer: ReturnType<typeof setTimeout> | null;
   asking: boolean;
   over: boolean; // もう聞きに行かない（終わった・無くなった）
+}
+
+// Blob → base64（data: の前置きは付けない）
+// （古い Safari には blob.arrayBuffer が無いので、FileReader で読む）
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+    reader.onerror = () => reject(new BackendError('refused', '写真を読み取れませんでした'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function createRemoteBackend(transport: StudioTransport, options: RemoteOptions = {}): StudioBackend {
@@ -162,8 +174,8 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       userListeners.add(listener);
       return () => userListeners.delete(listener);
     },
-    async startJob(input) {
-      const started = took(await transport.call<{ jobId: string; cost: number; user: WireUser }>({ op: 'startJob', ...input }));
+    async startJob({ photo, ...input }) {
+      const started = took(await transport.call<{ jobId: string; cost: number; user: WireUser }>({ op: 'startJob', ...input, ...(photo ? { photo: await blobToBase64(photo) } : {}) }));
       kick(started.jobId);
       return { jobId: started.jobId, cost: started.cost };
     },

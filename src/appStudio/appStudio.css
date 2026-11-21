@@ -331,3 +331,16 @@
   border: none;
   border-radius: 50%;
 }
+.studio-photo-button.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.studio-photo-box {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.studio-photo-box .studio-hint {
+  margin: 0;
+  flex: 1;
+}

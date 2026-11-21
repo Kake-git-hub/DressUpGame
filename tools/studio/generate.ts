@@ -125,7 +125,14 @@ const HAIR_LENGTH_RULE =
 export const isLongHair = (description: string): boolean => /knee[- ]?length|to the knees|reach(es|ing)? (down )?(to )?the knees/i.test(description);
 
 // テーマから品目の一覧を作る
-export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string }): Promise<PlannedItem[]> {
+// 写真（実在の人の顔）から顔の品目を作るときの、企画への指示
+const PHOTO_PLAN_RULES = [
+  'The attached photo shows the real person whose face should become the face item. Design the face item as a cute cartoon version of this person:',
+  "describe their eye shape and eye colour, eyebrow shape and thickness, nose, mouth and lip colour, and any distinctive facial features (for example freckles, a mole, dimples) so that the doll's face looks like them.",
+  'Do not describe hair, glasses, accessories, clothing, the background, the head shape or the skin colour. Do not guess or mention their name, age, ethnicity or identity.',
+];
+
+export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string; photo?: Buffer }): Promise<PlannedItem[]> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、単独では作らない
   const categories = doll.categories.filter((c) => (!input.categories?.length || input.categories.includes(c.id)) && !isBackHairCategory(c.label));
   if (categories.length === 0) throw new AiError('カテゴリが選ばれていません', 400);
@@ -164,7 +171,9 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       'Special categories:',
       '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
       `- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. ${HAIR_LENGTH_RULE}`,
+      ...(input.photo ? ['', ...PHOTO_PLAN_RULES] : []),
     ].join('\n'),
+    ...(input.photo ? { images: [input.photo] } : {}),
     schema: PLAN_SCHEMA,
   });
   const valid = new Set(categories.map((c) => c.id));
@@ -399,10 +408,16 @@ async function fromTile(result: ProcessResult, tile: Tile, canvasW: number, canv
 }
 
 // 顔の指示文。画像は、ドールの本物の頭の拡大図（顔はまだ無い）
-function facePrompt(item: PlannedItem, categoryLabel: string, style: string, feedback: string | null): string {
+// photo = 2 枚目の画像が、似せる人の顔写真
+export function facePrompt(item: PlannedItem, categoryLabel: string, style: string, feedback: string | null, photo = false): string {
   return [
-    'The image is a close-up of the blank head of a doll (no face yet) on a flat plain background. It is the base layer of a paper-doll dress-up game.',
+    photo
+      ? 'The first image is a close-up of the blank head of a doll (no face yet) on a flat plain background. It is the base layer of a paper-doll dress-up game. The second image is a photo of a real person.'
+      : 'The image is a close-up of the blank head of a doll (no face yet) on a flat plain background. It is the base layer of a paper-doll dress-up game.',
     `Paint this face onto the head: ${item.description}`,
+    photo
+      ? "Make the face resemble the person in the photo (eye shape and colour, eyebrows, nose, mouth, distinctive facial features), but draw it in the doll's art style. Use the photo only as a likeness reference: do not copy its hair, glasses, lighting, background, head shape or skin colour, and do not paste the photo. The output is the first image with the face painted on it."
+      : '',
     `Item type: ${categoryLabel}.`,
     style ? `Art style: ${style}` : '',
     'The painted head will be cut out along the outline of the original head and laid over the doll like a mask, so:',
@@ -428,6 +443,7 @@ export interface GenerateContext {
   // ドールの高解像度の型（拡大図のもと）。scale = その大きさ ÷ template の大きさ。無ければ template から拡大する
   hi?: { template: DollTemplate; scale: number };
   maxAttempts?: number;
+  photo?: Buffer; // 顔の品目を似せる人の顔写真（PNG）。顔のカテゴリでだけ使う
 }
 
 const REWRITE_SCHEMA = {
@@ -507,7 +523,7 @@ export async function generateCandidate(ctx: GenerateContext, candidate: Candida
         const crop = faceCrop(ctx.data.parts.head, ctx.template.canvasW, ctx.template.canvasH);
         const reference = await renderHeadCloseup(ctx.template, crop, FACE_BACKGROUND);
         await ctx.budget.spend();
-        const generated = await ctx.image.generate({ prompt: facePrompt(item, label, ctx.style, feedback), images: [reference] });
+        const generated = await ctx.image.generate({ prompt: facePrompt(item, label, ctx.style, feedback, !!ctx.photo), images: ctx.photo ? [reference, ctx.photo] : [reference] });
         result = await processFace(generated, reference, ctx.template, crop, FACE_BACKGROUND, ctx.data.parts.head);
       } else if (frame === 'hair') {
         // 髪: 本物の上半身の拡大図（顔なし）に描かせて、元の図との違いを取り出す

@@ -54,7 +54,7 @@ test('右上のアカウントボタン（中身は準備中）', async ({ page 
   await expect(page.getByTestId('home-account-dialog')).toHaveCount(0);
 });
 
-test('つくる: 選択肢はプルダウン、テーマと 📷 は 1 行、色のテーマは 3 つ', async ({ page }) => {
+test('つくる: 選択肢はプルダウン、テーマと 📷 は 1 行、色のテーマは 3 つ。顔の無いドールでは 📷 は使えない', async ({ page }) => {
   await page.goto(`${APP}&home=1`);
   await page.getByTestId('home-create').click();
   await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
@@ -66,13 +66,6 @@ test('つくる: 選択肢はプルダウン、テーマと 📷 は 1 行、色
   for (const i of [0, 1, 2]) await expect(page.getByTestId(`studio-color-${i}`)).toBeVisible();
   await page.getByTestId('studio-color-1').fill('#123456');
   await expect(page.getByTestId('studio-color-1')).toHaveValue('#123456');
-  // 写真を入れると小さく出て、✕ ではずせる
-  await page.getByTestId('studio-photo-input').setInputFiles({
-    name: 'a.png',
-    mimeType: 'image/png',
-    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
-  });
-  await expect(page.getByTestId('studio-photo')).toBeVisible();
-  await page.getByTestId('studio-photo-remove').click();
-  await expect(page.getByTestId('studio-photo')).toHaveCount(0);
+  // テスト用のドールには「かお」が無いので、📷 は使えない（写真から作れるのは顔だけ）
+  await expect(page.getByTestId('studio-photo-input')).toBeDisabled();
 });
