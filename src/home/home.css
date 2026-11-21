@@ -142,3 +142,43 @@
   color: white;
   background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
 }
+
+/* 右上のアカウントボタン（版数の表示の下） */
+.home-account-button {
+  position: absolute;
+  top: calc(var(--top-inset, 0px) + 18px);
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border: 2px solid #d9c8f5;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.home-account-button svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: #9370db;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.home-account-button:active {
+  transform: scale(0.92);
+}
+.home-account-title {
+  margin: 0;
+  font-size: 20px;
+  color: #9370db;
+}
+.home-account-note {
+  margin: 0;
+  font-size: 15px;
+  color: #666;
+  text-align: center;
+}

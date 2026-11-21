@@ -3,7 +3,7 @@
  * 大人（保護者）が使う画面なので、文は漢字かな交じり。
  * チケット・生成・保存は、裏側（StudioBackend）が行う。この画面は、頼んで、進み具合を見て、結果を端末の控えに入れるだけ。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioPreview, StudioTarget, StudioUser } from '../cloud/backend';
 import type { Library } from '../cloud/library';
@@ -24,6 +24,9 @@ interface Props {
 }
 
 const SET = '__set';
+// 色のテーマ（3 色）の、最初の色
+const DEFAULT_COLORS = ['#ff8fc7', '#ffffff', '#8fc9ff'];
+const COLOR_LABELS = ['メイン', 'サブ', 'アクセント'];
 // できた服を、ドールに着せて見せる枠の大きさ（px）。せまい画面では小さくする
 const stageSize = () => Math.max(110, Math.min(200, Math.floor(window.innerWidth * 0.36)));
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
@@ -80,6 +83,11 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   const [setCats, setSetCats] = useState<string[]>(() => targets.filter((c) => !isFaceLabel(c.label)).slice(0, SET_MAX).map((c) => c.id));
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
+  // 色のテーマ（3 色）と、写真（テーマの参考）。まだ AI には渡していない（画面だけ）
+  const [colors, setColors] = useState<string[]>(DEFAULT_COLORS);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const photoUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo]);
+  useEffect(() => () => void (photoUrl && URL.revokeObjectURL(photoUrl)), [photoUrl]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({}); // 候補に付ける名前（変えたものだけ）
@@ -227,49 +235,82 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
             <p className="studio-note">「{doll.name}」の服を、AI で作ります。作った服は、この端末のメニューにだけ出ます。服 1 点につき、チケットを 1 枚使います。</p>
 
             <section className="studio-form">
-              <div className="studio-group" role="radiogroup" aria-label="何を作るか">
+              <label className="studio-group">
                 <span className="studio-label">① 何を作る？</span>
-                <div className="studio-chips">
+                <select className="studio-select" value={target} onChange={(e) => setTarget(e.target.value)} data-testid="studio-target">
                   {targets.map((c) => (
-                    <button key={c.id} type="button" role="radio" aria-checked={target === c.id} className={target === c.id ? 'on' : ''} onClick={() => setTarget(c.id)} data-testid={`studio-target-${c.id}`}>
+                    <option key={c.id} value={c.id}>
                       {c.label}
-                    </button>
+                    </option>
                   ))}
-                  {targets.length >= SET_MIN && (
-                    <button type="button" role="radio" aria-checked={isSet} className={isSet ? 'on' : ''} onClick={() => setTarget(SET)} data-testid="studio-target-set">
-                      セット
-                    </button>
-                  )}
+                  {targets.length >= SET_MIN && <option value={SET}>セット</option>}
+                </select>
+              </label>
+              {isSet && (
+                <div className="studio-set" data-testid="studio-set-categories">
+                  <span>セットに入れるもの（{SET_MIN}〜{SET_MAX} 個。選んだものごとに 1 点、色と飾りをそろえて作ります）</span>
+                  <div className="studio-checks">
+                    {targets.map((c) => (
+                      <label key={c.id}>
+                        <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => setSetCats((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} /> {c.label}
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                {isSet && (
-                  <div className="studio-set" data-testid="studio-set-categories">
-                    <span>セットに入れるもの（{SET_MIN}〜{SET_MAX} 個。選んだものごとに 1 点、色と飾りをそろえて作ります）</span>
-                    <div className="studio-checks">
-                      {targets.map((c) => (
-                        <label key={c.id}>
-                          <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => setSetCats((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} /> {c.label}
-                        </label>
-                      ))}
-                    </div>
+              )}
+
+              <div className="studio-group">
+                <span className="studio-label">② テーマ</span>
+                <div className="studio-theme-row">
+                  <input value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" aria-label="テーマ" data-testid="studio-theme" />
+                  {/* 写真を撮る（スマホ・iPad ではカメラが開く。パソコンでは画像を選ぶ） */}
+                  <label className="studio-photo-button" title="写真をとる" data-testid="studio-photo-button">
+                    📷
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) setPhoto(file);
+                        e.target.value = '';
+                      }}
+                      data-testid="studio-photo-input"
+                    />
+                  </label>
+                </div>
+                {photoUrl && (
+                  <div className="studio-photo" data-testid="studio-photo">
+                    <img src={photoUrl} alt="とった写真" />
+                    <button type="button" onClick={() => setPhoto(null)} aria-label="写真をはずす" data-testid="studio-photo-remove">
+                      ✕
+                    </button>
                   </div>
                 )}
               </div>
 
-              <label className="studio-group">
-                <span className="studio-label">② テーマ</span>
-                <input value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" data-testid="studio-theme" />
-              </label>
-
-              <div className="studio-group" role="radiogroup" aria-label="絵柄">
-                <span className="studio-label">③ 絵柄</span>
-                <div className="studio-chips">
-                  {STYLE_PRESETS.map((s) => (
-                    <button key={s.id} type="button" role="radio" aria-checked={styleId === s.id} className={styleId === s.id ? 'on' : ''} onClick={() => setStyleId(s.id)} data-testid={`studio-style-${s.id}`}>
-                      {s.label}
-                    </button>
+              <div className="studio-group">
+                <span className="studio-label">③ 色のテーマ</span>
+                <div className="studio-colors">
+                  {colors.map((color, i) => (
+                    <label key={i} className="studio-color">
+                      <input type="color" value={color} onChange={(e) => setColors((list) => list.map((c, j) => (j === i ? e.target.value : c)))} data-testid={`studio-color-${i}`} />
+                      <span>{COLOR_LABELS[i]}</span>
+                    </label>
                   ))}
                 </div>
               </div>
+
+              <label className="studio-group">
+                <span className="studio-label">④ 絵柄</span>
+                <select className="studio-select" value={styleId} onChange={(e) => setStyleId(e.target.value)} data-testid="studio-style">
+                  {STYLE_PRESETS.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <div className="studio-row">
                 <button type="button" className="primary" onClick={() => void make()} disabled={busy || blocked !== null} data-testid="studio-make">

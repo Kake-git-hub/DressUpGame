@@ -45,3 +45,34 @@ test('ともだちにおしえる: QR コードを出し、URL をコピーす�
   await page.getByTestId('home-share-close').click();
   await expect(page.getByTestId('home-share-dialog')).toHaveCount(0);
 });
+
+test('右上のアカウントボタン（中身は準備中）', async ({ page }) => {
+  await page.goto(`${APP}&home=1`);
+  await page.getByTestId('home-account').click();
+  await expect(page.getByTestId('home-account-dialog')).toContainText('じゅんびちゅう');
+  await page.getByTestId('home-account-close').click();
+  await expect(page.getByTestId('home-account-dialog')).toHaveCount(0);
+});
+
+test('つくる: 選択肢はプルダウン、テーマと 📷 は 1 行、色のテーマは 3 つ', async ({ page }) => {
+  await page.goto(`${APP}&home=1`);
+  await page.getByTestId('home-create').click();
+  await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
+  await expect(page.getByTestId('studio-set-categories')).toBeVisible();
+  const theme = await page.getByTestId('studio-theme').boundingBox();
+  const camera = await page.getByTestId('studio-photo-button').boundingBox();
+  expect(Math.abs(theme!.y + theme!.height / 2 - (camera!.y + camera!.height / 2))).toBeLessThan(4);
+  for (const i of [0, 1, 2]) await expect(page.getByTestId(`studio-color-${i}`)).toBeVisible();
+  await page.getByTestId('studio-color-1').fill('#123456');
+  await expect(page.getByTestId('studio-color-1')).toHaveValue('#123456');
+  // 写真を入れると小さく出て、✕ ではずせる
+  await page.getByTestId('studio-photo-input').setInputFiles({
+    name: 'a.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'),
+  });
+  await expect(page.getByTestId('studio-photo')).toBeVisible();
+  await page.getByTestId('studio-photo-remove').click();
+  await expect(page.getByTestId('studio-photo')).toHaveCount(0);
+});

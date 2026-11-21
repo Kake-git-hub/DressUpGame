@@ -127,7 +127,7 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     expect(fake.calls[0].auth).toMatch(/^Bearer ey/);
 
     // サーバーが理由つきで断ったら、その文章を出す
-    await page.getByTestId('studio-target-トップス').click();
+    await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
     await page.getByTestId('studio-theme').fill('だめ');
     await page.getByTestId('studio-make').click();
     await expect(page.getByTestId('studio-error')).toContainText('チケットが足りません（のこり 0 枚、必要 1 枚）');

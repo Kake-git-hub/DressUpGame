@@ -58,7 +58,7 @@
   opacity: 0.45;
   cursor: default;
 }
-.studio-panel input:not([type='checkbox']) {
+.studio-panel input:not([type='checkbox']):not([type='color']):not([type='file']) {
   min-height: 40px;
   padding: 6px 10px;
   font-size: 16px; /* iOS で、入力のときに画面が拡大されない大きさ */
@@ -235,4 +235,99 @@
   border: 1px solid #f0d070;
   border-radius: 10px;
   font-size: 13px;
+}
+
+/* 選択肢（プルダウン） */
+.studio-select {
+  min-height: 40px;
+  padding: 6px 10px;
+  font-size: 16px; /* iOS で、選ぶときに画面が拡大されない大きさ */
+  border: 1px solid #c9b8cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #333;
+  max-width: 100%;
+}
+/* テーマの文字と、写真のボタンを 1 行に */
+.studio-theme-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.studio-theme-row > input {
+  flex: 1;
+}
+.studio-photo-button {
+  flex: none;
+  width: 48px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  border: 1px solid #c9b8cf;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.studio-photo-button input {
+  display: none;
+}
+.studio-photo {
+  position: relative;
+  align-self: flex-start;
+}
+.studio-photo img {
+  display: block;
+  max-width: 120px;
+  max-height: 120px;
+  border-radius: 10px;
+  border: 1px solid #e3d8e8;
+}
+.studio-panel .studio-photo button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-height: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+}
+/* 色のテーマ: 3 色を横に並べる */
+.studio-colors {
+  display: flex;
+  gap: 16px;
+}
+.studio-color {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.studio-color input[type='color'] {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid #c9b8cf;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.studio-color input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.studio-color input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+.studio-color input[type='color']::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
 }
