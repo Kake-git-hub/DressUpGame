@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { deleteItem, discard, keep, listItems, listJobs, runJob, signIn, startJob } from './studioCore.ts';
+import { deleteItem, discard, keep, listItems, listJobs, normalizePhoto, runJob, signIn, startJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 
 let dir: string;
@@ -438,4 +438,72 @@ describe('使う・捨てる・消す', () => {
     expect(await listItems(deps, 'u1')).toEqual([]);
     expect([...files.files.keys()].some((k) => k.includes('/items/'))).toBe(false);
   }, 60_000);
+});
+
+describe('顔写真から顔を作る', () => {
+  const photoJpeg = () => sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#d0a080' } }).jpeg().toBuffer();
+  const face = (photo: Buffer | null, theme = '') => ({ dollId, theme, styleId: 'anime', target: { kind: 'category' as const, categoryId: 'かお' }, photo });
+  // 企画・絵を作る AI に渡った画像の数と、指示文を控える
+  let planImages: number[];
+  let genImages: number[];
+  let genPrompts: string[];
+  beforeEach(() => {
+    planImages = [];
+    genImages = [];
+    genPrompts = [];
+    deps.ai = {
+      text: {
+        async json<T>(input: { prompt: string; images?: Buffer[]; schema: Record<string, unknown> }): Promise<T> {
+          const props = (input.schema.properties ?? {}) as Record<string, unknown>;
+          if ('ok' in props) return { ok: true, reason: 'よい' } as T;
+          planImages.push(input.images?.length ?? 0);
+          return { items: [{ category: 'かお', name: 'わたしのかお', description: 'Big round brown eyes and a small smile.', colors: ['#663300'] }] } as T;
+        },
+      },
+      image: {
+        async generate(input) {
+          genImages.push(input.images.length);
+          genPrompts.push(input.prompt);
+          return fakeImage.generate(input);
+        },
+      },
+    };
+  });
+
+  it('写真を小さな PNG にして預かり、企画と絵を作る AI に渡す。テーマは無くてもよい。終わったら写真を消す', async () => {
+    await userWith('u1', 1);
+    const { jobId } = await startJob(deps, 'u1', face(await photoJpeg()));
+    expect(planImages).toEqual([1]);
+    const job = (await store.getJob('u1', jobId))!;
+    expect(job.theme).toBe('写真の顔');
+    expect(job.photo).toBe(`users/u1/jobs/${jobId}/photo.png`);
+    const saved = (await files.get(job.photo!))!;
+    const meta = await sharp(saved).metadata();
+    expect(meta.format).toBe('png');
+    expect(Math.max(meta.width!, meta.height!)).toBe(768);
+
+    await runJob(deps, 'u1', jobId);
+    expect(genImages[0]).toBe(2);
+    expect(genPrompts[0]).toMatch(/resemble the person in the photo/);
+    expect((await store.getJob('u1', jobId))!.done).toBe(true);
+    expect(await files.get(job.photo!)).toBeNull();
+  });
+  it('写真が無ければ、顔はいつもどおり（ドールの頭だけを渡す）', async () => {
+    await userWith('u1', 1);
+    const { jobId } = await startJob(deps, 'u1', face(null, 'にっこり'));
+    expect(planImages).toEqual([0]);
+    expect((await store.getJob('u1', jobId))!.photo).toBeUndefined();
+    await runJob(deps, 'u1', jobId);
+    expect(genImages[0]).toBe(1);
+  });
+  it('写真は顔のカテゴリ 1 点のときだけ。画像でない・大きすぎるものは断る。断ったときは、チケットを引かない', async () => {
+    await userWith('u1', 3);
+    const photo = await photoJpeg();
+    expect(code(await startJob(deps, 'u1', { ...oneTop(), photo }).catch((e) => e))).toBe('refused');
+    expect(code(await startJob(deps, 'u1', { dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'set', categoryIds: ['かお', 'トップス'] }, photo }).catch((e) => e))).toBe('refused');
+    expect(code(await startJob(deps, 'u1', face(Buffer.from('not an image'))).catch((e) => e))).toBe('refused');
+    expect(code(await normalizePhoto(Buffer.alloc(4_000_001)).catch((e) => e))).toBe('refused');
+    expect((await signIn(deps, 'u1')).tickets).toBe(3);
+    expect(planImages).toEqual([]);
+  });
 });

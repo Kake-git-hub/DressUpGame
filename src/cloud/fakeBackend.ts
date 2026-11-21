@@ -158,9 +158,10 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       userListeners.add(listener);
       return () => userListeners.delete(listener);
     },
-    async startJob({ dollId, theme, target }) {
+    async startJob({ dollId, theme, target, photo }) {
       online();
-      const text = theme.trim();
+      // 写真から顔を作るときは、テーマは無くてもよい（偽物は、写真を使わない）
+      const text = theme.trim() || (photo ? '写真の顔' : '');
       if (!text || text.length > THEME_MAX) throw new BackendError('refused', `テーマは 1〜${THEME_MAX} 文字で入力してください`);
       if (target.kind === 'set' && (target.categoryIds.length < SET_MIN || target.categoryIds.length > SET_MAX)) {
         throw new BackendError('refused', `セットに入れるものは ${SET_MIN}〜${SET_MAX} 個にしてください`);

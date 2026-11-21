@@ -3,7 +3,7 @@
  * 大人（保護者）が使う画面なので、文は漢字かな交じり。
  * チケット・生成・保存は、裏側（StudioBackend）が行う。この画面は、頼んで、進み具合を見て、結果を端末の控えに入れるだけ。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioPreview, StudioTarget, StudioUser } from '../cloud/backend';
 import type { Library } from '../cloud/library';
@@ -24,9 +24,31 @@ interface Props {
 }
 
 const SET = '__set';
+// 色のテーマ（3 色）の、最初の色
+const DEFAULT_COLORS = ['#ff8fc7', '#ffffff', '#8fc9ff'];
+const COLOR_LABELS = ['メイン', 'サブ', 'アクセント'];
 // できた服を、ドールに着せて見せる枠の大きさ（px）。せまい画面では小さくする
 const stageSize = () => Math.max(110, Math.min(200, Math.floor(window.innerWidth * 0.36)));
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
+// 写真から作れる「顔」のカテゴリ（サーバーの isFaceCategory と同じ見分け方）
+const isPhotoFace = (label: string) => /かお|顔|face|メイク|おけしょう|化粧/i.test(label) && !/かみ|髪|ヘア|hair/i.test(label);
+// 送る前に、写真を小さくする（長い辺 1024px の JPEG。向きは写真の情報どおりに直す）
+const PHOTO_SIDE = 1024;
+async function shrinkPhoto(file: Blob): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, PHOTO_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * k));
+    canvas.height = Math.max(1, Math.round(bitmap.height * k));
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    return blob ?? file;
+  } catch {
+    return file; // 小さくできなければ、そのまま（大きすぎれば、サーバーが断る）
+  }
+}
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
 
 // Blob の絵（端末の控え）を表示する
@@ -80,6 +102,13 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   const [setCats, setSetCats] = useState<string[]>(() => targets.filter((c) => !isFaceLabel(c.label)).slice(0, SET_MAX).map((c) => c.id));
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
+  // 色のテーマ（3 色）は、まだ AI には渡していない（画面だけ）。写真は、顔を似せるために使う
+  const [colors, setColors] = useState<string[]>(DEFAULT_COLORS);
+  const [photo, setPhoto] = useState<Blob | null>(null);
+  // 写真から顔を作るカテゴリ（無いドールでは、写真は使えない）
+  const faceTarget = targets.find((c) => isPhotoFace(c.label));
+  const photoUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo]);
+  useEffect(() => () => void (photoUrl && URL.revokeObjectURL(photoUrl)), [photoUrl]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [names, setNames] = useState<Record<string, string>>({}); // 候補に付ける名前（変えたものだけ）
@@ -140,7 +169,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   // 「作る」を押せない理由（押せるなら null）
   const blocked = !user
     ? '準備しています…'
-    : !text
+    : !text && !photo
       ? 'テーマを入れてください。'
       : isSet && (chosen.length < SET_MIN || chosen.length > SET_MAX)
         ? `セットに入れるものを ${SET_MIN}〜${SET_MAX} 個選んでください（いま ${chosen.length} 個）。`
@@ -153,7 +182,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     setBusy(true);
     setError(null);
     try {
-      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current });
+      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current, ...(photo ? { photo } : {}) });
       watchers.current.push(backend.watchJob(jobId, upsertJob));
     } catch (e) {
       setError(messageOf(e));
@@ -227,49 +256,99 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
             <p className="studio-note">「{doll.name}」の服を、AI で作ります。作った服は、この端末のメニューにだけ出ます。服 1 点につき、チケットを 1 枚使います。</p>
 
             <section className="studio-form">
-              <div className="studio-group" role="radiogroup" aria-label="何を作るか">
+              <label className="studio-group">
                 <span className="studio-label">① 何を作る？</span>
-                <div className="studio-chips">
+                <select className="studio-select" value={target} onChange={(e) => setTarget(e.target.value)} disabled={photo !== null} data-testid="studio-target">
                   {targets.map((c) => (
-                    <button key={c.id} type="button" role="radio" aria-checked={target === c.id} className={target === c.id ? 'on' : ''} onClick={() => setTarget(c.id)} data-testid={`studio-target-${c.id}`}>
+                    <option key={c.id} value={c.id}>
                       {c.label}
-                    </button>
+                    </option>
                   ))}
-                  {targets.length >= SET_MIN && (
-                    <button type="button" role="radio" aria-checked={isSet} className={isSet ? 'on' : ''} onClick={() => setTarget(SET)} data-testid="studio-target-set">
-                      セット
-                    </button>
-                  )}
+                  {targets.length >= SET_MIN && <option value={SET}>セット</option>}
+                </select>
+              </label>
+              {isSet && (
+                <div className="studio-set" data-testid="studio-set-categories">
+                  <span>セットに入れるもの（{SET_MIN}〜{SET_MAX} 個。選んだものごとに 1 点、色と飾りをそろえて作ります）</span>
+                  <div className="studio-checks">
+                    {targets.map((c) => (
+                      <label key={c.id}>
+                        <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => setSetCats((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} /> {c.label}
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                {isSet && (
-                  <div className="studio-set" data-testid="studio-set-categories">
-                    <span>セットに入れるもの（{SET_MIN}〜{SET_MAX} 個。選んだものごとに 1 点、色と飾りをそろえて作ります）</span>
-                    <div className="studio-checks">
-                      {targets.map((c) => (
-                        <label key={c.id}>
-                          <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => setSetCats((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} /> {c.label}
-                        </label>
-                      ))}
+              )}
+
+              <div className="studio-group">
+                <span className="studio-label">② テーマ</span>
+                <div className="studio-theme-row">
+                  <input
+                    value={theme}
+                    maxLength={THEME_MAX}
+                    onChange={(e) => setTheme(e.target.value)}
+                    placeholder={photo ? 'なくても作れます（例: にっこり）' : '例: うみのおひめさま'}
+                    aria-label="テーマ"
+                    data-testid="studio-theme"
+                  />
+                  {/* 顔写真をとる（スマホ・iPad ではカメラが開く。パソコンでは画像を選ぶ）。その顔に似せた「顔」を作る */}
+                  <label className={`studio-photo-button${faceTarget ? '' : ' disabled'}`} title={faceTarget ? '顔写真をとる' : 'このドールには、顔のカテゴリがありません'} data-testid="studio-photo-button">
+                    📷
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="user"
+                      disabled={!faceTarget}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file || !faceTarget) return;
+                        void shrinkPhoto(file).then((small) => {
+                          setPhoto(small);
+                          setTarget(faceTarget.id);
+                        });
+                      }}
+                      data-testid="studio-photo-input"
+                    />
+                  </label>
+                </div>
+                {photoUrl && (
+                  <div className="studio-photo-box">
+                    <div className="studio-photo" data-testid="studio-photo">
+                      <img src={photoUrl} alt="とった写真" />
+                      <button type="button" onClick={() => setPhoto(null)} aria-label="写真をはずす" data-testid="studio-photo-remove">
+                        ✕
+                      </button>
                     </div>
+                    <p className="studio-hint" data-testid="studio-photo-note">
+                      この写真の顔に似せた「{faceTarget?.label}」を作ります。写真は顔を作るためだけに使い、作り終わったらサーバーから消します。
+                    </p>
                   </div>
                 )}
               </div>
 
-              <label className="studio-group">
-                <span className="studio-label">② テーマ</span>
-                <input value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" data-testid="studio-theme" />
-              </label>
-
-              <div className="studio-group" role="radiogroup" aria-label="絵柄">
-                <span className="studio-label">③ 絵柄</span>
-                <div className="studio-chips">
-                  {STYLE_PRESETS.map((s) => (
-                    <button key={s.id} type="button" role="radio" aria-checked={styleId === s.id} className={styleId === s.id ? 'on' : ''} onClick={() => setStyleId(s.id)} data-testid={`studio-style-${s.id}`}>
-                      {s.label}
-                    </button>
+              <div className="studio-group">
+                <span className="studio-label">③ 色のテーマ</span>
+                <div className="studio-colors">
+                  {colors.map((color, i) => (
+                    <label key={i} className="studio-color">
+                      <input type="color" value={color} onChange={(e) => setColors((list) => list.map((c, j) => (j === i ? e.target.value : c)))} data-testid={`studio-color-${i}`} />
+                      <span>{COLOR_LABELS[i]}</span>
+                    </label>
                   ))}
                 </div>
               </div>
+
+              <label className="studio-group">
+                <span className="studio-label">④ 絵柄</span>
+                <select className="studio-select" value={styleId} onChange={(e) => setStyleId(e.target.value)} data-testid="studio-style">
+                  {STYLE_PRESETS.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <div className="studio-row">
                 <button type="button" className="primary" onClick={() => void make()} disabled={busy || blocked !== null} data-testid="studio-make">

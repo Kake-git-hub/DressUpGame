@@ -1395,3 +1395,44 @@ textarea {
   border-radius: 10px;
   background: #fff;
 }
+
+/* ゲームの画面から、ホームにもどるボタン */
+.home-back-button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex: none;
+  font-size: 22px;
+  background: white;
+  border: 2px solid #f0d6e6;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.home-back-button:active {
+  transform: scale(0.9);
+}
+/* 縦: ホームのボタンは、ボタンの行のいちばん左 */
+.portrait-tools.with-home {
+  grid-template-columns: repeat(4, 1fr);
+}
+.portrait-tools.with-home .home-back-button {
+  grid-column: 1;
+}
+.portrait-tools.with-home .tool-button {
+  grid-column: 2;
+}
+.portrait-tools.with-home .screenshot-button {
+  grid-column: 3;
+}
+.portrait-tools.with-home .reset-button-fixed {
+  grid-column: 4;
+}
+.portrait-tools.with-home.with-studio {
+  grid-template-columns: repeat(5, 1fr);
+}
+.portrait-tools.with-home.with-studio .studio-open-button {
+  grid-column: 4;
+}
+.portrait-tools.with-home.with-studio .reset-button-fixed {
+  grid-column: 5;
+}

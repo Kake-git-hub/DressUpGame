@@ -18,6 +18,7 @@ function fakeServer() {
   const items: WireItem[] = [];
   const calls: string[] = [];
   const runs: string[] = [];
+  let lastPhoto: unknown;
   const state = { fail: null as BackendError | null, runDone: null as Promise<void> | null, previewFail: null as BackendError | null };
   const item = (id: string): WireItem => ({
     id,
@@ -36,6 +37,7 @@ function fakeServer() {
           case 'signIn':
             return { user: { ...user } };
           case 'startJob': {
+            lastPhoto = data.photo;
             user.tickets -= 1;
             jobs.set('j1', { id: 'j1', dollId: String(data.dollId), done: false, tickets: 1, createdAt: 1, stalled: false, candidates: [{ index: 0, name: 'うみのふく', categoryId: 'トップス', status: 'waiting', notes: [] }] });
             return { jobId: 'j1', cost: 1, user: { ...user } };
@@ -79,7 +81,7 @@ function fakeServer() {
     job.candidates = job.candidates.map((c) => ({ ...c, status: 'done', preview: { canvasW: 1024, canvasH: 1024, box: { x: 10, y: 20, w: 30, h: 40 } } }));
     job.done = true;
   };
-  return { transport, user, jobs, items, calls, runs, state, finish };
+  return { transport, user, jobs, items, calls, runs, state, finish, photo: () => lastPhoto };
 }
 
 // jsdom の FileReader はタイマーで動くので、本物のタイマーに戻してから読む
@@ -104,6 +106,16 @@ describe('本物の裏側', () => {
     expect(await backend.signIn()).toEqual({ userCode: 'ABCD2345', tickets: 3, admin: false });
     await backend.startJob({ dollId: 'doll', theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(seen).toEqual([3, 2]);
+  });
+
+  it('顔写真は base64 にして送る。無ければ送らない', async () => {
+    vi.useRealTimers(); // 写真の読み取り（FileReader）は、本物の時計で進む
+    const server = fakeServer();
+    const backend = createRemoteBackend(server.transport);
+    await backend.startJob({ dollId: 'doll', theme: '', styleId: 'anime', target: { kind: 'category', categoryId: 'かお' }, photo: new Blob([new Uint8Array([1, 2, 3, 250])]) });
+    expect(server.photo()).toBe('AQID+g==');
+    await backend.startJob({ dollId: 'doll', theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
+    expect(server.photo()).toBeUndefined();
   });
 
   it('始めると、サーバーに「進める」を 1 回だけ頼む。進み具合は、できるまで聞きに行き、できたら絵つきで知らせて、聞くのをやめる', async () => {

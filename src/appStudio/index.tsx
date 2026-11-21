@@ -18,11 +18,12 @@ export interface StudioRootProps {
   library: Library;
   onClose: () => void;
   onLibraryChanged: () => void | Promise<void>; // 自分の服が増えた・減った（メニューに重ね直す）
+  skipGate?: boolean; // 保護者の確認をしない（ホーム画面の「つくる」から。開発中だけ）
 }
 
-export default function StudioRoot({ mode, doll, categories, library, onClose, onLibraryChanged }: StudioRootProps) {
+export default function StudioRoot({ mode, doll, categories, library, onClose, onLibraryChanged, skipGate = false }: StudioRootProps) {
   // 保護者の確認は、開くたびに毎回たずねる（覚えない）
-  const [confirmed, setConfirmed] = useState(false);
+  const [confirmed, setConfirmed] = useState(skipGate);
   // 裏側は、開いている間に 1 つだけ作る
   const backend = useMemo(() => createBackend(mode), [mode]);
   if (!confirmed) {

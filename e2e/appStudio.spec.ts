@@ -63,7 +63,7 @@ async function passGate(page: Page) {
   await expect(page.getByTestId('studio-tickets')).toContainText('枚');
 }
 async function make(page: Page, target: string, theme = 'うみ') {
-  await page.getByTestId(`studio-target-${target}`).click();
+  await page.getByTestId('studio-target').selectOption(target);
   await page.getByTestId('studio-theme').fill(theme);
   await page.getByTestId('studio-make').click();
 }
@@ -120,7 +120,7 @@ test('1 点作る: チケットが 1 枚減り、できた服を「使う」と�
   await expect(page.getByTestId('studio-user-code')).toHaveText(/[A-Z0-9]{8}/);
   // 確認用（偽物の裏側）のときは、そうと分かる知らせを出す
   await expect(page.getByTestId('studio-demo')).toContainText('確認用');
-  await page.getByTestId('studio-target-トップス').click();
+  await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
   await expect(page.getByTestId('studio-make')).toBeDisabled(); // テーマがまだ
   await page.getByTestId('studio-theme').fill('うみ');
   await expect(page.getByTestId('studio-make')).toContainText('チケット 1 枚');
@@ -176,7 +176,7 @@ test('「捨てる」と自分の服にならない。自分の服は「消す�
 test('セット: 入れるものを選ぶと、その数だけチケットを使い、全部「使う」とゲームのセットになる', async ({ page }) => {
   await open(page);
   await passGate(page);
-  await page.getByTestId('studio-target-set').click();
+  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
   const boxes = page.getByTestId('studio-set-categories');
   await expect(boxes).toBeVisible();
   for (const label of await boxes.locator('label').allTextContents()) {
@@ -213,12 +213,12 @@ test('チケットが足りないときは作れず、理由が出る。でき�
   await passGate(page);
   await expect(page.getByTestId('studio-tickets')).toContainText('1');
   // セット（2 枚）は作れない
-  await page.getByTestId('studio-target-set').click();
+  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
   await page.getByTestId('studio-theme').fill('うみ');
   await expect(page.getByTestId('studio-make')).toBeDisabled();
   await expect(page.getByTestId('studio-hint')).toContainText('チケットが足りません');
   // くつ（できない設定）を 1 点: いったん 0 枚になり、できなかったので 1 枚に戻る
-  await page.getByTestId('studio-target-くつ').click();
+  await page.getByTestId('studio-target').selectOption({ label: 'くつ' });
   await page.getByTestId('studio-make').click();
   await expect(candidates(page)).toHaveAttribute('data-status', 'failed', { timeout: 10_000 });
   await expect(candidates(page)).toContainText('チケットは戻しました');

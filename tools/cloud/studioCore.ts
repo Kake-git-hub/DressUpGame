@@ -16,6 +16,7 @@ import type { AiClients } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
 import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
+import { isFaceCategory } from '../studio/processFace.ts';
 import { pngToRgba } from '../studio/silhouette.ts';
 import { CloudError } from './store.ts';
 import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef } from './store.ts';
@@ -61,6 +62,21 @@ const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
 // 置き場のパスには、記号を使わない
 const safe = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '_');
 const jobPrefix = (uid: string, jobId: string, index: number) => `users/${uid}/jobs/${safe(jobId)}/${index}-`;
+// 顔を似せる写真（仕事が終わったら消す）
+const photoPath = (uid: string, jobId: string) => `users/${uid}/jobs/${safe(jobId)}/photo.png`;
+// 写真の大きさの上限（受け取る大きさ・AI に渡す長い辺）
+export const PHOTO_MAX_BYTES = 4_000_000;
+const PHOTO_SIDE = 768;
+// 写真を、向きを直し、小さくし、撮影の情報（位置など）を落とした PNG にする。画像でなければ CloudError
+export async function normalizePhoto(data: Buffer): Promise<Buffer> {
+  if (data.length === 0 || data.length > PHOTO_MAX_BYTES) throw new CloudError('refused', '写真が大きすぎます。撮り直してください');
+  try {
+    return await sharp(data, { limitInputPixels: 50_000_000 }).rotate().resize(PHOTO_SIDE, PHOTO_SIDE, { fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' }).png().toBuffer();
+  } catch {
+    throw new CloudError('refused', '写真を読み取れませんでした。撮り直してください');
+  }
+}
+const PHOTO_THEME = '写真の顔';
 const itemPrefix = (uid: string, itemId: string) => `users/${uid}/items/${safe(itemId)}/`;
 const plainName = (value: string, fallback: string) => value.replace(/[\\/]/g, '').trim().slice(0, NAME_MAX).trim() || fallback.slice(0, NAME_MAX);
 const undecided = (c: CandidateDoc) => c.status === 'waiting' || c.status === 'working' || c.status === 'done';
@@ -81,9 +97,11 @@ async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
 /**
  * 生成を始める: 入力を確かめ、企画を作り、チケットを引いて、順番待ちの仕事を作る。絵は、まだ作らない（runJob）。
  */
-export async function startJob(deps: CoreDeps, uid: string, input: { dollId: string; theme: string; styleId: string; target: Target }): Promise<{ jobId: string; cost: number }> {
+export async function startJob(deps: CoreDeps, uid: string, input: { dollId: string; theme: string; styleId: string; target: Target; photo?: Buffer | null }): Promise<{ jobId: string; cost: number }> {
   const user = await signIn(deps, uid);
-  const theme = typeof input.theme === 'string' ? input.theme.trim() : '';
+  const typed = typeof input.theme === 'string' ? input.theme.trim() : '';
+  // 写真から顔を作るときは、テーマは無くてもよい
+  const theme = typed || (input.photo ? PHOTO_THEME : '');
   if (!theme || theme.length > THEME_MAX) throw new CloudError('refused', `テーマは 1〜${THEME_MAX} 文字で入力してください`);
   const doll = await dollOf(deps, input.dollId);
   const target = input.target;
@@ -91,6 +109,10 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   const usable = (id: unknown) => doll.categories.some((c) => c.id === id && !isBackHairCategory(c.label));
   if (!Array.isArray(wanted) || wanted.length === 0 || !wanted.every(usable) || new Set(wanted).size !== wanted.length) throw new CloudError('refused', '作るものを選び直してください');
   if (target.kind === 'set' && (wanted.length < SET_MIN || wanted.length > SET_MAX)) throw new CloudError('refused', `セットに入れるものは ${SET_MIN}〜${SET_MAX} 個にしてください`);
+  // 写真は、顔のカテゴリ 1 点を作るときだけ
+  const faceLabel = target.kind === 'category' ? doll.categories.find((c) => c.id === target.categoryId)?.label : undefined;
+  if (input.photo && !(faceLabel && isFaceCategory(faceLabel))) throw new CloudError('refused', '写真は、顔を作るときだけ使えます');
+  const photo = input.photo ? await normalizePhoto(input.photo) : null;
   const { text, image } = deps.ai;
   if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません（AI のキーが設定されていません）');
 
@@ -107,7 +129,7 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
       items = planned.items;
       setName = planned.name;
     } else {
-      items = await planItems(text, doll, { theme, count: 1, categories: wanted, style: style.prompt });
+      items = await planItems(text, doll, { theme: photo && !typed ? 'a face that looks like the person in the photo' : theme, count: 1, categories: wanted, style: style.prompt, ...(photo ? { photo } : {}) });
     }
   } catch (error) {
     throw new CloudError('unknown', `企画を作れませんでした（${(error as Error).message}）`);
@@ -116,6 +138,8 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
 
   const jobId = deps.newId();
   const cost = items.length;
+  // 写真は、絵を作る呼び出し（runJob）で使うので、置き場に入れておく（仕事が終わったら消す）
+  if (photo) await deps.files.put(photoPath(uid, jobId), photo, 'image/png');
   const now = deps.now();
   // 管理者は引かない（台帳には残す）
   if (user.admin) await deps.store.note(uid, -cost, `admin:job:${jobId}`, now);
@@ -131,6 +155,7 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
     createdAt: now,
     heartbeat: now,
     ...(user.admin ? { free: true } : {}),
+    ...(photo ? { photo: photoPath(uid, jobId) } : {}),
     candidates: items.map((item, index): CandidateDoc => ({ index, name: item.name, categoryId: item.category, description: item.description, colors: item.colors, status: 'waiting', notes: [] })),
   };
   try {
@@ -138,6 +163,7 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   } catch (error) {
     // 仕事を作れなかったら、引いた分を戻す
     if (!user.admin) await deps.store.addTickets(uid, cost, `refund:job:${jobId}`, deps.now());
+    if (photo) await deps.files.removeAll(photoPath(uid, jobId)).catch(() => undefined);
     throw error;
   }
   return { jobId, cost };
@@ -210,8 +236,17 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
     return { applied, next };
   };
 
+  // 仕事が終わっていたら、写真を消す（顔を作るためだけに預かったもの）
+  const dropPhoto = async () => {
+    if (!first.photo) return;
+    const now = await deps.store.getJob(uid, jobId);
+    if (now && !now.done) return;
+    await deps.files.removeAll(first.photo).catch(() => undefined);
+  };
+
   let current = await take();
-  if (!current) return;
+  if (!current) return dropPhoto();
+  const photo = first.photo ? await deps.files.get(first.photo) : null;
   // 作っている間は、「動いている」の合図を書き続ける（1 点に長くかかっても、止まったとみなされて二重に作られないように）
   const beat = setInterval(() => {
     void deps.store.updateJob(uid, jobId, (job) => (job.done || job.runner !== runner ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
@@ -244,6 +279,7 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
             style: findStyle(first.styleId).prompt,
             hi: await deps.content.assets.hiTemplate(doll),
             maxAttempts: deps.limits.maxAttempts,
+            ...(photo ? { photo } : {}),
           },
           candidate,
         );
@@ -284,6 +320,7 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
   } finally {
     clearInterval(beat);
   }
+  await dropPhoto();
 }
 
 // まだ「使う」「捨てる」を決めていない候補のある仕事（新しい順）
