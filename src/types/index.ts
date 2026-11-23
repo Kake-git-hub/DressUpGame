@@ -268,6 +268,10 @@ export interface ClothingItemData {
   setLayer?: number;
   // 自分の服（アプリのスタジオで作った・届けてもらった服。その端末の利用者にだけ出る）
   mine?: boolean;
+  // 色（色スライダーの角度。-180〜180）。着る前の服では、既定の色（クローゼットで決めた色）。着たあとは、調整画面で変えた色
+  colorHue?: number;
+  // 既定の色。調整画面の「色をもどす」は、ここへ戻す（無ければ 0 = もとの色）
+  defaultHue?: number;
   // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする
   pivot?: Position;
 }
@@ -284,7 +288,7 @@ export interface EquippedItem extends ClothingItemData {
   adjustScale?: number;    // 1.0が等倍
   adjustRotation?: number; // 回転（度）
   layerAdjust?: number;    // レイヤー調整値（一時的な前後変更）
-  colorHue?: number;       // 色相調整値（-180〜180度）
+  // 色（colorHue）は ClothingItemData のもの（着たあとは、調整画面で変えた色）
 }
 
 // 背景画像の定義

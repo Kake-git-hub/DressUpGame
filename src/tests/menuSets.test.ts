@@ -41,4 +41,10 @@ describe('menuSets', () => {
     expect(yama.items.map((i) => [i.id, i.setLayer])).toEqual([['top', undefined], ['hat', undefined]]);
     expect(top).not.toHaveProperty('setLayer'); // 元の服は変えない
   });
+  it('自分のセット（order が負）は、公開のセットより前。新しいセット（より小さい値）ほど前', () => {
+    const older = { id: 'my:set-1', name: 'まえにつくった', order: -100 };
+    const newer = { id: 'my:set-2', name: 'あたらしい', order: -200 };
+    const sets = menuSets([item('a', 1, [UMI]), item('b', 1, [older]), item('c', 1, [newer]), item('d', 1, [YAMA])]);
+    expect(sets.map((s) => s.id)).toEqual(['my:set-2', 'my:set-1', 'yama', 'umi']);
+  });
 });

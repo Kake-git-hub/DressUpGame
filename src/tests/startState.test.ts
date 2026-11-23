@@ -27,6 +27,13 @@ describe('resolveStartState', () => {
   it('保存されたドールがあれば、そのドールで始める', () => {
     expect(resolveStartState(content, 'B', null, []).dollId).toBe('B');
   });
+  it('既定の色のある服: 保存に色が無ければ、既定の色で復元する。保存に色があれば、保存の色', () => {
+    const tinted: LoadedContent = { ...content, clothing: [{ ...item('A/x', 'A'), colorHue: 40, defaultHue: 40 }] };
+    const plain = resolveStartState(tinted, 'A', null, [{ id: 'A/x', equipOrder: 0 }]).outfit[0];
+    expect(plain).toMatchObject({ colorHue: 40, defaultHue: 40 });
+    const changed = resolveStartState(tinted, 'A', null, [{ id: 'A/x', equipOrder: 0, colorHue: -20 }]).outfit[0];
+    expect(changed).toMatchObject({ colorHue: -20, defaultHue: 40 });
+  });
   it('保存が無ければ先頭のドール', () => {
     expect(resolveStartState(content, null, null, []).dollId).toBe('A');
   });

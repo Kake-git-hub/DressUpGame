@@ -168,6 +168,8 @@ export function ItemAdjustPanel({
   const [rotation, setRotation] = useState(item?.adjustRotation ?? 0);
   const [layerAdjust, setLayerAdjust] = useState(item?.layerAdjust ?? 0);
   const [colorHue, setColorHue] = useState(item?.colorHue ?? 0);
+  // 「色をもどす」の戻す先: クローゼットで決めた既定の色（無ければ、もとの色）
+  const defaultHue = item?.defaultHue ?? 0;
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -247,11 +249,11 @@ export function ItemAdjustPanel({
       setScale(1.0);
       setRotation(0);
       setLayerAdjust(0);
-      setColorHue(0);
+      setColorHue(defaultHue);
       // 重なりの順番はその場でキャンバスに反映する
       onAdjustRef.current({ layerAdjust: 0 });
     }
-  }, [isDollMode]);
+  }, [isDollMode, defaultHue]);
 
   // 枠の右上: 位置・大きさ・傾きだけを元に戻す
   const handleResetPlacement = useCallback(() => {
@@ -909,8 +911,8 @@ export function ItemAdjustPanel({
             <div className="hue-value">{colorHue}°</div>
             <button
               className="hue-reset-btn"
-              onClick={() => setColorHue(0)}
-              disabled={colorHue === 0}
+              onClick={() => setColorHue(defaultHue)}
+              disabled={colorHue === defaultHue}
               title="色をもどす"
               aria-label="色をもどす"
               data-testid="hue-reset"

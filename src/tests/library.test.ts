@@ -83,11 +83,12 @@ describe('自分の服を、公開の素材に重ねる', () => {
     },
   };
 
-  it('そのドール・カテゴリの服として足す。絵は data: の URL。mine の印が付く。公開の服はそのまま', async () => {
+  it('そのドール・カテゴリの服として、公開の服の前に足す。絵は data: の URL。mine の印が付く。公開の服はそのまま', async () => {
     const merged = await mergeMyItems(content, [myItem('my:1')]);
     expect(merged.clothing).toHaveLength(2);
-    expect(merged.clothing[0]).toEqual(content.clothing[0]);
-    const mine = merged.clothing[1];
+    expect(merged.clothing[1]).toEqual(content.clothing[0]);
+    const mine = merged.clothing[0];
+    expect(mine).not.toHaveProperty('colorHue'); // 色を決めていない服は、もとの色
     expect(mine).toMatchObject({ id: 'my:1', name: '服 my:1', type: 'トップス', dollId: 'アニメ', layerOrder: 4, categoryOrder: 1, mine: true, canvasW: 1024, box: { x: 392, y: 300, w: 240, h: 200 } });
     expect(mine.imageUrl).toMatch(/^data:image\/png;base64,/);
     expect(mine.thumbnailUrl).toMatch(/^data:image\/png;base64,/);
@@ -104,11 +105,11 @@ describe('自分の服を、公開の素材に重ねる', () => {
       // 控えを読み直すと、Blob は別のものになる（中身は同じ）
       const again = await mergeMyItems(content, [myItem('my:cache-1'), myItem('my:cache-2')]);
       expect(reads).toHaveBeenCalledTimes(4); // 増えた 1 点の分だけ
-      expect(again.clothing[1].imageUrl).toBe(first.clothing[1].imageUrl);
+      expect(again.clothing.find((c) => c.id === 'my:cache-1')!.imageUrl).toBe(first.clothing[0].imageUrl);
       // 同じ ID で、絵の中身が替わった（大きさが違う）
       const changed = await mergeMyItems(content, [myItem('my:cache-1', { files: { image: blob('a-much-longer-image'), thumb: blob('thumb-my:cache-1') } })]);
       expect(reads).toHaveBeenCalledTimes(5);
-      expect(atob(changed.clothing[1].imageUrl.split(',')[1])).toBe('a-much-longer-image');
+      expect(atob(changed.clothing[0].imageUrl.split(',')[1])).toBe('a-much-longer-image');
     } finally {
       reads.mockRestore();
     }
@@ -121,7 +122,7 @@ describe('自分の服を、公開の素材に重ねる', () => {
       myItem('my:3', { files: { thumb: blob('t') } }),
       myItem('my:4'),
     ]);
-    expect(merged.clothing.map((c) => c.id)).toEqual(['アニメ/トップス/シャツ', 'my:4']);
+    expect(merged.clothing.map((c) => c.id)).toEqual(['my:4', 'アニメ/トップス/シャツ']);
   });
 
   it('髪（back つき）は、前髪とうしろがみの 2 点になる。セットの印は、セットの ID と名前になる', async () => {
@@ -142,13 +143,69 @@ describe('自分の服を、公開の素材に重ねる', () => {
   it('壊れた控え（中身が欠けている）が 1 件あっても、ほかの服は出る', async () => {
     const broken = [{ id: 'my:x', dollId: 'アニメ', createdAt: 1 } as unknown as MyItem, { id: 'my:y', dollId: 'アニメ', item: { category: 'トップス' }, files: null, createdAt: 1 } as unknown as MyItem];
     const merged = await mergeMyItems(content, [...broken, myItem('my:1')]);
-    expect(merged.clothing.map((c) => c.id)).toEqual(['アニメ/トップス/シャツ', 'my:1']);
+    expect(merged.clothing.map((c) => c.id)).toEqual(['my:1', 'アニメ/トップス/シャツ']);
   });
 
   it('種類の分からない絵（type が空）は、PNG として読めるようにする', async () => {
     const untyped = myItem('my:1', { files: { image: new Blob(['i']), thumb: new Blob(['t']) } });
     const merged = await mergeMyItems(content, [untyped]);
-    expect(merged.clothing[1].imageUrl).toMatch(/^data:image\/png;base64,/);
+    expect(merged.clothing[0].imageUrl).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('自分の服どうしは、クローゼットの順番（order の大きい順。同じなら新しい順）', async () => {
+    const merged = await mergeMyItems(content, [myItem('my:old', { createdAt: 1, order: 1 }), myItem('my:new', { createdAt: 9, order: 9 }), myItem('my:moved', { createdAt: 2, order: 50 })]);
+    expect(merged.clothing.map((c) => c.id)).toEqual(['my:moved', 'my:new', 'my:old', 'アニメ/トップス/シャツ']);
+  });
+
+  it('既定の色のある服は、着せたときの色（colorHue）と、戻す先（defaultHue）が付き、サムネイルは色を付けた絵になる', async () => {
+    const calls: { hue: number; pictures: number }[] = [];
+    const tint = async (input: { thumb: string; hue: number; pictures: string[] }) => {
+      calls.push({ hue: input.hue, pictures: input.pictures.length });
+      expect(atob(input.thumb.split(',')[1])).toBe('thumb-my:red');
+      expect(atob(input.pictures[0].split(',')[1])).toBe('image-my:red');
+      return `tinted:${input.hue}`;
+    };
+    const merged = await mergeMyItems(content, [myItem('my:red', { hue: 90 }), myItem('my:plain')], tint);
+    const red = merged.clothing.find((c) => c.id === 'my:red')!;
+    expect(red).toMatchObject({ colorHue: 90, defaultHue: 90, thumbnailUrl: 'tinted:90' });
+    expect(red.imageUrl).toMatch(/^data:image\/png;base64,/); // 着せる絵は、もとのまま（色は、描くときに付く）
+    expect(calls).toEqual([{ hue: 90, pictures: 1 }]); // 色の無い服には、呼ばない
+    // 同じ色なら、色を付けた絵を覚えている。色が変わったら、作り直す
+    await mergeMyItems(content, [myItem('my:red', { hue: 90 })], tint);
+    expect(calls).toHaveLength(1);
+    const changed = await mergeMyItems(content, [myItem('my:red', { hue: -30 })], tint);
+    expect(calls).toHaveLength(2);
+    expect(changed.clothing[0]).toMatchObject({ colorHue: -30, defaultHue: -30, thumbnailUrl: 'tinted:-30' });
+  });
+
+  it('色を付けた絵を作れなくても、服は出る（サムネイルは、もとの絵）', async () => {
+    const merged = await mergeMyItems(content, [myItem('my:red', { hue: 90 })], async () => {
+      throw new Error('no canvas');
+    });
+    expect(merged.clothing[0]).toMatchObject({ id: 'my:red', colorHue: 90, defaultHue: 90 });
+    expect(merged.clothing[0].thumbnailUrl).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('髪の既定の色は、うしろがみにも付く。色を決めるのに、前髪とうしろがみの両方の絵を見る', async () => {
+    const hair = myItem('my:h', { hue: 45, files: { image: blob('f'), thumb: blob('t'), back: blob('b') } }, { category: 'ヘア', back: image('back', { x: 350, y: 30, w: 300, h: 600 }) });
+    let pictures = 0;
+    const merged = await mergeMyItems(content, [hair], async (input) => {
+      pictures = input.pictures.length;
+      return 'tinted';
+    });
+    expect(pictures).toBe(2);
+    expect(merged.clothing.find((c) => c.id === 'my:h')).toMatchObject({ colorHue: 45, defaultHue: 45 });
+    expect(merged.clothing.find((c) => c.type === BACK_HAIR_TYPE)).toMatchObject({ colorHue: 45, defaultHue: 45 });
+  });
+
+  it('自分のセットは、公開のセットより先に並ぶ印（負の order）を持つ。新しいセットほど先', async () => {
+    const part = (id: string, setId: string, createdAt: number) => myItem(id, { createdAt, order: createdAt, set: { id: setId, name: setId } });
+    const merged = await mergeMyItems(content, [part('my:a1', 'my:set-a', 100), part('my:a2', 'my:set-a', 110), part('my:b1', 'my:set-b', 200)]);
+    const order = (id: string) => merged.clothing.find((c) => c.id === id)!.sets![0].order!;
+    expect(order('my:a1')).toBe(-100);
+    expect(order('my:a2')).toBe(-100); // 同じセットの服は、同じ値（いちばん古い服の時刻）
+    expect(order('my:b1')).toBe(-200);
+    expect(order('my:b1')).toBeLessThan(order('my:a1'));
   });
 
   it('自分の服が無ければ、同じ content を返す', async () => {
