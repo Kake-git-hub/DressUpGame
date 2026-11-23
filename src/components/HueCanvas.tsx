@@ -16,6 +16,8 @@ interface HueCanvasProps {
   // 髪は、前髪とうしろがみで同じ色変えにするために、親が決めて渡す（onDark で、この絵の判定を親に知らせる）
   dark?: boolean;
   onDark?: (dark: boolean) => void;
+  // 元の絵の画素（色を付ける前）を読めたとき・読めなかったとき（null）に呼ぶ。色のスライダーの帯の色を出すのに使う
+  onPixels?: (pixels: Uint8ClampedArray | null) => void;
   style?: CSSProperties;
   testId?: string;
 }
@@ -28,15 +30,17 @@ interface Loaded {
   dark: boolean; // この絵が黒っぽいか
 }
 
-export function HueCanvas({ src, hue, dark, onDark, style, testId }: HueCanvasProps) {
+export function HueCanvas({ src, hue, dark, onDark, onPixels, style, testId }: HueCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const loadedRef = useRef<Loaded | null>(null);
   const hueRef = useRef(hue);
   const darkRef = useRef(dark);
   const onDarkRef = useRef(onDark);
+  const onPixelsRef = useRef(onPixels);
   const frameRef = useRef<number | null>(null);
   useEffect(() => {
     onDarkRef.current = onDark;
+    onPixelsRef.current = onPixels;
   });
 
   // 最新の色相で描く
@@ -83,6 +87,7 @@ export function HueCanvas({ src, hue, dark, onDark, style, testId }: HueCanvasPr
         dark: original ? isDarkImage(original.data) : false,
       };
       onDarkRef.current?.(loadedRef.current.dark);
+      onPixelsRef.current?.(original ? original.data : null);
       paint();
     };
     image.src = src;
@@ -105,7 +110,9 @@ export function HueCanvas({ src, hue, dark, onDark, style, testId }: HueCanvasPr
 
   useEffect(() => {
     return () => {
+      // 取り消したら、「予約あり」の印も消す。残すと、開発モード（後始末と準備を 2 回呼ぶ）で、二度と描き直さなくなる
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
     };
   }, []);
 

@@ -6,13 +6,14 @@
  * - 二本指回転: 傾き
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { PlacedDoll, PlacedImage, PlacedItem } from './PlacedItem';
 import { canvasGeometry, itemOrigin, itemPivotOnCanvas, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { activeHides, hidesFor } from '../engine/hides';
+import { RAINBOW_TRACK, hueTrack, trackCss } from '../pipeline/hueTrack';
 import { drawOrder, isBehindDoll, moveLayer as nextLayerAdjust, reorderLayer, sortByLayer } from '../engine/layers';
 import type { LayerChange } from '../engine/layers';
 import { adjustBaseId, partnerOf } from '../engine/pairs';
@@ -269,6 +270,14 @@ export function ItemAdjustPanel({
   const [darkById, setDarkById] = useState<Record<string, boolean>>({});
   const reportDark = (id: string) => (dark: boolean) => setDarkById((prev) => (prev[id] === dark ? prev : { ...prev, [id]: dark }));
   const pairDark = item && partner ? !!(darkById[item.id] || darkById[partner.id]) : undefined;
+  // 色のスライダーの帯: その服が実際になる色（まん中 = 元の絵の色）。元の絵の画素は、調整中の服のプレビューが読んだもの。
+  // 黒っぽい絵かどうかは、服の表示と同じ判定。画素を読めるまで・読めないときは、決まった虹色
+  const [itemPixels, setItemPixels] = useState<Uint8ClampedArray | null>(null);
+  const trackStops = useMemo(() => {
+    if (!item || !itemPixels) return null;
+    return hueTrack(itemPixels, pairDark ?? darkById[item.id] ?? false);
+  }, [item, itemPixels, pairDark, darkById]);
+  const hueTrackStyle = { background: trackCss(trackStops ?? RAINBOW_TRACK, orientation === 'portrait' ? 'right' : 'top') };
 
   // 重なりの前後: 着ている服（調整中の服は、調整中の値）とドールを、下から並べた一覧の中で動かす。
   // ドールより下へ動かすと、ドールの後ろに回る
@@ -706,6 +715,7 @@ export function ItemAdjustPanel({
   return (
     <div
       className="item-adjust-overlay"
+      data-mode={isDollMode ? 'doll' : 'item'}
       // 一覧の行を動かしているあいだは、ほかの指（手のひら）で服を動かさない
       onTouchStart={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchStart(e))}
       onTouchMove={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchMove(e))}
@@ -798,7 +808,7 @@ export function ItemAdjustPanel({
           }
           if (sheet.item.id === item.id) {
             return (
-              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} showUnder testId="adjust-preview">
+              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} onPixels={setItemPixels} showUnder testId="adjust-preview">
                 {frame}
               </PlacedItem>
             );
@@ -906,6 +916,7 @@ export function ItemAdjustPanel({
               value={colorHue}
               onChange={(e) => setColorHue(Number(e.target.value))}
               className="hue-slider-vertical"
+              style={hueTrackStyle}
               title={`色相: ${colorHue}°`}
             />
             <div className="hue-value">{colorHue}°</div>

@@ -1183,6 +1183,21 @@ test('更新の前に保存した服装（調整値が画面の px）は、同�
   expect(saved.x).toBeCloseTo(ADJUST_DX / BASE_SCALE, 3);
 });
 
+test('横の色の帯も、その服がなる色になる（大きさは今のまま 36×280）', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  const slider = page.locator('.hue-slider-vertical');
+  const box = (await slider.boundingBox())!;
+  expect([Math.round(box.width), Math.round(box.height)]).toEqual([36, 280]);
+  await expect.poll(() => slider.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('to top');
+  const stops = await slider.evaluate((el) => getComputedStyle(el).backgroundImage.match(/rgb\([^)]+\)/g) ?? []);
+  expect(stops).toHaveLength(13);
+  expect(stops[6]).toBe('rgb(255, 0, 0)');
+  await expect(page.locator('.hue-value')).toBeVisible();
+});
+
 test('セット: ドールへドラッグすると、全部のパーツが一度に着く。パーツは、ふつうの服として 1 点ずつ着替えられる', async ({ page }) => {
   await openApp(page);
   await openCategory(page, 'セット');
@@ -1410,6 +1425,77 @@ test.describe('縦画面', () => {
       expect(b.x + b.width).toBeLessThanOrEqual(360);
     }
   });
+
+  // 縦の調整画面を開き、トップス（red）を調整中にする
+  async function openPortraitAdjust(page: Page, width: number, height: number): Promise<void> {
+    await openPortrait(page);
+    await selectCategory(page, 'トップス');
+    const box = await itemBox(page, 'red');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(P_DOLL_X, pY(380), { steps: 6 });
+    await page.mouse.up();
+    await expectPixel(page, P_DOLL_X, pY(380), RED);
+    await page.setViewportSize({ width, height });
+    await page.getByTestId('portrait-tools').locator('.tool-button').click();
+    await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  }
+  const boxOf = async (page: Page, selector: string) => (await page.locator(selector).boundingBox())!;
+  const apart = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
+    a.x + a.width <= b.x + 0.5 || b.x + b.width <= a.x + 0.5 || a.y + a.height <= b.y + 0.5 || b.y + b.height <= a.y + 0.5;
+
+  for (const [w, h] of [[390, 844], [375, 667], [820, 1180]] as const) {
+    test(`調整画面の色（${w}×${h}）: 色だけの行に、その服がなる色の太い帯。動かすと服の色が変わり、「色をもどす」で戻る`, async ({ page }) => {
+      await openPortraitAdjust(page, w, h);
+      const slider = page.locator('.hue-slider-vertical');
+      const band = (await slider.boundingBox())!;
+      expect(band.height).toBeGreaterThanOrEqual(48);
+      expect(band.width).toBeGreaterThanOrEqual(w * 0.6);
+      await expect(page.locator('.hue-value')).toBeHidden();
+      // 帯の色: 赤い服なら、まん中（13 色のうち 7 番め）が赤
+      await expect.poll(() => slider.evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
+      const stops = await slider.evaluate((el) => getComputedStyle(el).backgroundImage.match(/rgb\([^)]+\)/g) ?? []);
+      expect(stops).toHaveLength(13);
+      expect(stops[6]).toBe('rgb(255, 0, 0)');
+      expect(stops[6]).not.toBe(stops[10]);
+      // 動かすと、服の色が変わる
+      await slider.fill('120');
+      await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '120');
+      await page.getByTestId('hue-reset').click();
+      await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '0');
+      // 帯・色をもどす・一覧・↺・✓ は、画面の中で、互いに重ならない。枠のつまみとも重ならない
+      const parts = {
+        band,
+        hueReset: await boxOf(page, '[data-testid="hue-reset"]'),
+        picker: await boxOf(page, '[data-testid="adjust-picker"]'),
+        reset: await boxOf(page, '.item-adjust-reset-btn-small'),
+        done: await boxOf(page, '.item-adjust-done-btn-small'),
+      };
+      const names = Object.keys(parts) as (keyof typeof parts)[];
+      for (const name of names) {
+        const b = parts[name];
+        expect(b.x, `${name} の左`).toBeGreaterThanOrEqual(0);
+        expect(b.x + b.width, `${name} の右`).toBeLessThanOrEqual(w + 0.5);
+        expect(b.y + b.height, `${name} の下`).toBeLessThanOrEqual(h + 0.5);
+      }
+      for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) expect(apart(parts[names[i]], parts[names[j]]), `${names[i]} と ${names[j]}`).toBe(true);
+      for (const handle of ['sticker-remove', 'sticker-reset', 'sticker-rotate']) {
+        const hb = await boxOf(page, `[data-testid="${handle}"]`);
+        for (const name of names) expect(apart(hb, parts[name]), `${handle} と ${name}`).toBe(true);
+      }
+      // 色の行は、↺・✓ の行の上
+      expect(band.y + band.height).toBeLessThanOrEqual(parts.done.y + 0.5);
+      // 下の帯の高さ: 服の調整は 2 行（124px）
+      expect(Math.round((await boxOf(page, '.item-adjust-top-buttons')).height)).toBe(124);
+      // ドールの調整（何も着ていないとき）では、色だけの行が無く、下の帯は 1 行（64px）
+      await page.getByTestId('sticker-remove').click();
+      await expect(page.getByTestId('adjust-preview')).toHaveCount(0);
+      if ((await page.locator('.item-adjust-overlay').count()) === 0) await page.getByTestId('portrait-tools').locator('.tool-button').click();
+      await expect(page.locator('.item-adjust-overlay')).toHaveAttribute('data-mode', 'doll');
+      await expect(slider).toHaveCount(0);
+      expect(Math.round((await boxOf(page, '.item-adjust-top-buttons')).height)).toBe(64);
+    });
+  }
 
   test('調整画面: 一覧と色・ボタンは下にあり、一覧は左右に動かして並べ替える。持ち替えても、服はドールに対して同じ位置', async ({ page }) => {
     await openPortrait(page);

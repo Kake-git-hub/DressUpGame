@@ -13,7 +13,7 @@ import type { CanvasGeometry, ItemLook } from './placement';
 
 // 切り抜き画像を、元キャンバスの中での位置に置いて表示する。
 // 外枠が元キャンバス全体の大きさなので、外枠の中心＝元キャンバスの中心（PixiEngine の原点と同じ）。
-export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, onDark, clip, testId }: {
+export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, onDark, onPixels, clip, testId }: {
   src: string;
   alt: string;
   canvasW: number;
@@ -23,6 +23,7 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, 
   hue?: number; // 指定すると、色相を変えた状態で表示する
   dark?: boolean; // 黒っぽい絵として色を付けるか（HueCanvas と同じ）
   onDark?: (dark: boolean) => void;
+  onPixels?: (pixels: Uint8ClampedArray | null) => void; // 元の絵の画素（HueCanvas と同じ）
   clip?: Hide[]; // ほかの服が隠す所（この絵のキャンバス上の位置）。色相を変えていないときだけ効く
   testId?: string;
 }) {
@@ -41,7 +42,7 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, 
       ) : hue === undefined ? (
         <img src={src} alt={alt} draggable={false} style={placed} />
       ) : (
-        <HueCanvas src={src} hue={hue} dark={dark} onDark={onDark} style={placed} testId={testId} />
+        <HueCanvas src={src} hue={hue} dark={dark} onDark={onDark} onPixels={onPixels} style={placed} testId={testId} />
       )}
     </div>
   );
@@ -49,7 +50,7 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, 
 
 // 服 1 点を、キャンバス上と同じ所に重ねる。children は服と同じ向き・大きさで重なる（枠など）。
 // showUnder: 服の「ドールのすぐ上の分」（くつの中の肌）を、服のすぐ下に一緒に描く（調整中の服だけ。ほかの服の分はキャンバスが描く）
-export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, dark, onDark, showUnder, clip, testId, children }: {
+export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, dark, onDark, onPixels, showUnder, clip, testId, children }: {
   item: EquippedItem;
   look: ItemLook;
   geometry: CanvasGeometry;
@@ -59,6 +60,7 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
   alwaysHue?: boolean; // 色相 0 でも HueCanvas で描く（スライダーの動きに追従させるため）
   dark?: boolean;
   onDark?: (dark: boolean) => void;
+  onPixels?: (pixels: Uint8ClampedArray | null) => void;
   showUnder?: boolean;
   clip?: Hide[];
   testId?: string;
@@ -111,6 +113,7 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
           hue={alwaysHue || look.hue !== 0 ? look.hue : undefined}
           dark={dark}
           onDark={onDark}
+          onPixels={onPixels}
           clip={clip}
           canvasW={canvasW}
           canvasH={canvasH}

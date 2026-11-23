@@ -1339,7 +1339,7 @@ textarea {
 }
 
 /* 縦画面の調整画面: 一覧・色・ボタンは下（メニューがあった所）にまとめる */
-/* いちばん下の行: ↺（元に戻す）・色のスライダー・✓（おわり） */
+/* 下の 2 行: 上が色だけの行（🎨・帯・色をもどす）、下が ↺（元に戻す）と ✓（おわり）。ドールの調整では、下の行だけ */
 .app[data-orientation='portrait'] .item-adjust-top-buttons {
   top: auto;
   left: 0;
@@ -1347,39 +1347,73 @@ textarea {
   bottom: env(safe-area-inset-bottom, 0px);
   height: 64px;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  align-content: center;
+  gap: 4px 10px;
   padding: 0 max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
   background: rgba(255, 255, 255, 0.92);
   border-top: 1px solid #ffe3ef;
+}
+.app[data-orientation='portrait'] .item-adjust-overlay[data-mode='item'] .item-adjust-top-buttons {
+  height: 124px;
+}
+.app[data-orientation='portrait'] .item-adjust-hue-slider {
+  order: 0;
+  flex: 0 0 100%;
+  min-width: 0;
+  height: 56px;
+  flex-direction: row;
+  margin-top: 0;
+  padding: 0;
+  gap: 10px;
+  box-shadow: none;
+  background: transparent;
 }
 .app[data-orientation='portrait'] .item-adjust-reset-btn-small {
   order: 1;
   flex: none;
 }
-.app[data-orientation='portrait'] .item-adjust-hue-slider {
-  order: 2;
-  flex: 1;
-  min-width: 0;
-  flex-direction: row;
-  margin-top: 0;
-  padding: 4px 10px;
-  gap: 8px;
-  box-shadow: none;
-  background: transparent;
-}
 .app[data-orientation='portrait'] .item-adjust-done-btn-small {
-  order: 3;
+  order: 2;
   flex: none;
-  margin-left: auto; /* 色のスライダーが無い（ドールの調整）ときも、右に寄せる */
+  margin-left: auto;
 }
+/* 色の帯: 太く（指で動かしやすく）。色は、その服がなる色（ItemAdjustPanel が style で渡す） */
 .app[data-orientation='portrait'] .hue-slider-vertical {
   writing-mode: horizontal-tb;
   direction: ltr;
   flex: 1;
   min-width: 0;
   width: auto;
-  height: 32px;
+  height: 48px;
+  border-radius: 24px;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+}
+.app[data-orientation='portrait'] .hue-slider-vertical::-webkit-slider-thumb {
+  width: 44px;
+  height: 44px;
+  border-width: 4px;
+}
+.app[data-orientation='portrait'] .hue-slider-vertical::-moz-range-thumb {
+  width: 44px;
+  height: 44px;
+  border-width: 4px;
+  box-sizing: border-box;
+}
+.app[data-orientation='portrait'] .hue-label {
+  font-size: 1.6rem;
+}
+/* 角度の数字は、縦では出さない（帯の色で分かる） */
+.app[data-orientation='portrait'] .hue-value {
+  display: none;
+}
+.app[data-orientation='portrait'] .hue-reset-btn {
+  flex: none;
+  width: 48px;
+  height: 48px;
 }
 /* その上の行: 重なりの一覧（横並び。左が手前） */
 .app[data-orientation='portrait'] .item-adjust-picker {
@@ -1398,6 +1432,10 @@ textarea {
   flex-direction: row;
   overflow-x: auto;
   overflow-y: hidden;
+}
+/* 服の調整では、色だけの行の分、一覧を上げる */
+.app[data-orientation='portrait'] .item-adjust-overlay[data-mode='item'] .item-adjust-picker {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 124px + 8px);
 }
 /* ▲▼ は、左（まえへ）・右（うしろへ）を向ける */
 .app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn {
