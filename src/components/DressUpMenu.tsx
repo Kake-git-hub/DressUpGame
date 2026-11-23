@@ -27,12 +27,14 @@ interface DressUpMenuProps {
   // 縦画面では、画面の下に「カテゴリの行」と「服の行（itemRows 段）」を横に流して並べる
   layout?: 'landscape' | 'portrait';
   itemRows?: number;
+  itemTile?: number; // 縦画面の、服の絵の一辺（px）
   // セット（同じテーマで一度に作った服の集まり）をドールへ運んだとき。パーツを全部着せる
   onSetDrop?: (items: ClothingItemData[]) => void;
 }
 
 // メニューの「セット」。カテゴリの名前とは別物（同じ名前のカテゴリがあっても混ざらない）
 const SET_CATEGORY = '__set';
+const DEFAULT_PORTRAIT_TILE = 72; // 縦画面の絵の一辺の既定（ふつうは、配置の計算が決めた値が渡る）
 const SET_LABEL = 'セット';
 
 export function DressUpMenu({
@@ -52,6 +54,7 @@ export function DressUpMenu({
   onBackgroundDragEnd,
   layout = 'landscape',
   itemRows = 1,
+  itemTile = DEFAULT_PORTRAIT_TILE,
   onSetDrop,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
@@ -122,6 +125,7 @@ export function DressUpMenu({
         equippedIds={equippedIds}
         equippedTypes={equippedTypes}
         itemRows={itemRows}
+        itemTile={itemTile}
         onItemDrop={onItemDrop}
         dolls={dolls}
         currentDollId={currentDollId}
@@ -357,7 +361,7 @@ export function DressUpMenu({
 // ドラッグ可能なアイテムコンポーネント（メモ化で再レンダリング軽減）
 // 縦画面の、下のメニュー
 const PORTRAIT_BACKGROUND = '__background';
-const PORTRAIT_TILE = 72; // 服 1 点の大きさ（行の高さ 84px に収まる）
+
 
 interface PortraitMenuProps {
   groupedItems: Map<string, ClothingItemData[]>;
@@ -366,6 +370,7 @@ interface PortraitMenuProps {
   equippedIds: Set<string>;
   equippedTypes: Set<string>;
   itemRows: number;
+  itemTile: number;
   onItemDrop: (item: ClothingItemData) => void;
   dolls: DollData[];
   currentDollId: string;
@@ -387,6 +392,7 @@ function PortraitMenu({
   equippedIds,
   equippedTypes,
   itemRows,
+  itemTile,
   onItemDrop,
   dolls,
   currentDollId,
@@ -414,7 +420,8 @@ function PortraitMenu({
   const items = selected && selected !== PORTRAIT_BACKGROUND && selected !== SET_CATEGORY ? (groupedItems.get(selected) ?? []) : [];
   const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
   // 服は、上から下へ段を埋めてから右へ進む（横に流す）
-  const grid: CSSProperties = { gridTemplateRows: `repeat(${Math.max(1, itemRows)}, ${PORTRAIT_TILE}px)` };
+  // 絵の大きさと段の数は、配置の計算（layout.ts）が決める
+  const grid: CSSProperties = { gridTemplateRows: `repeat(${Math.max(1, itemRows)}, ${itemTile}px)`, gridAutoColumns: `${itemTile}px` };
 
   return (
     <div className="portrait-menu" data-menu="dressup-menu">
@@ -477,7 +484,7 @@ function PortraitMenu({
         {selected === PORTRAIT_BACKGROUND ? (
           <>
             {currentBackgroundId !== null && (
-              <button type="button" className="portrait-none" onClick={() => onBackgroundChange?.(null)}>
+              <button type="button" className="portrait-none" style={{ width: itemTile, height: itemTile }} onClick={() => onBackgroundChange?.(null)}>
                 ✕ なし
               </button>
             )}
@@ -490,14 +497,14 @@ function PortraitMenu({
                 dropTargetId={dropTargetId}
                 onDragMove={onBackgroundDragMove}
                 onDragEnd={onBackgroundDragEnd}
-                size={PORTRAIT_TILE}
+                size={itemTile}
                 scrollRow
               />
             ))}
           </>
         ) : selected === SET_CATEGORY ? (
           sets.map((set) => (
-            <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={onSetDrop} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} size={PORTRAIT_TILE} scrollRow />
+            <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={onSetDrop} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} size={itemTile} scrollRow />
           ))
         ) : (
           items.map((item) => (
@@ -509,7 +516,7 @@ function PortraitMenu({
               dropTargetId={dropTargetId}
               onDragMove={onDragMove}
               onDragEnd={onDragEnd}
-              size={PORTRAIT_TILE}
+              size={itemTile}
               scrollRow
             />
           ))

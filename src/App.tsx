@@ -856,7 +856,7 @@ function App() {
   );
 
   return (
-    <div className="app" data-orientation={layout.orientation}>
+    <div className="app" data-orientation={layout.orientation} data-phone={layout.phone}>
       {versionBadge}
 
       {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
@@ -919,6 +919,7 @@ function App() {
               onBackgroundDragEnd={handleDragEnd}
               layout={layout.orientation}
               itemRows={layout.itemRows}
+              itemTile={layout.itemTile}
               onSetDrop={handleSetDrop}
             />
             {portrait && (

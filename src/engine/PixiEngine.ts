@@ -293,12 +293,16 @@ export class PixiEngine {
       texture.source.scaleMode = 'linear';
       
       const bgSprite = new Sprite(texture);
-
       const area = this.getAvailableArea();
 
       // 背景は1:1正方形で画面縦幅いっぱいに表示
       const bgSize = this.app.screen.height;
-      const scale = bgSize / Math.max(texture.width, texture.height);
+      // 縦画面（メニューが下）で、キャンバスが正方形より横に広いとき（服を 2 段にして、正方形を低くしたタブレット）は、
+      // 背景を幅いっぱいに広げて描く（上下は切れる）。正方形のままだと、左右に背景の無いすきまができる。
+      // ドールの基準（backgroundArea）は正方形のまま: ドールと服の位置・写真の範囲は変わらない
+      const fill = this.menuOffset === 0 && this.rightOffset === 0 && area.width > bgSize;
+      const drawSize = fill ? area.width : bgSize;
+      const scale = drawSize / Math.max(texture.width, texture.height);
       bgSprite.scale.set(scale);
 
       // 利用可能領域の中心に配置
@@ -315,7 +319,8 @@ export class PixiEngine {
 
       // 背景領域のみ表示（メニュー・ボタン領域をマスク）
       const mask = new Graphics();
-      mask.rect(this.backgroundArea.x, this.backgroundArea.y, bgSize, bgSize);
+      if (fill) mask.rect(area.x, 0, area.width, this.app.screen.height);
+      else mask.rect(this.backgroundArea.x, this.backgroundArea.y, bgSize, bgSize);
       mask.fill(0xffffff);
       bgSprite.mask = mask;
 

@@ -481,10 +481,10 @@ test('縦長の画面では、縦の配置になる（「よこにしてね」�
   await page.setViewportSize({ width: 820, height: 1180 });
   await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
   await expect(page.getByTestId('rotate-notice')).toHaveCount(0);
-  // キャンバスは、幅いっぱい × 正方形（幅と同じ）で、上に置く
-  await expect.poll(async () => page.getByTestId('avatar-canvas').boundingBox()).toEqual({ x: 0, y: 0, width: 820, height: 820 });
+  // キャンバスは、幅いっぱい × 正方形の一辺（服を 2 段にする分、幅より少し低い 776）で、上に置く
+  await expect.poll(async () => page.getByTestId('avatar-canvas').boundingBox()).toEqual({ x: 0, y: 0, width: 820, height: 776 });
   // ドールは正方形の中央（胴のあたりに肌の色）
-  await expectPixel(page, 410, 410 + (380 - IMG / 2) * ((820 * 0.9) / 1024), SKIN);
+  await expectPixel(page, 410, 388 + (380 - IMG / 2) * ((776 * 0.9) / 1024), SKIN);
   await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
   await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
@@ -1235,9 +1235,10 @@ test('セット: ドールへドラッグすると、全部のパーツが一度
 test.describe('縦画面', () => {
   const PW = 820;
   const PH = 1180;
-  const P_UNIT = (PW * 0.9) / 1024; // 縦では、正方形の一辺 = 画面の幅
+  const PS = 776; // 縦（820×1180）の、正方形の一辺: 服を 2 段（120px）にする分、幅より少し小さい
+  const P_UNIT = (PS * 0.9) / 1024;
   const P_DOLL_X = PW / 2;
-  const pY = (y: number) => PW / 2 + (y - IMG / 2) * P_UNIT;
+  const pY = (y: number) => PS / 2 + (y - IMG / 2) * P_UNIT;
 
   async function openPortrait(page: Page, width = PW, height = PH): Promise<void> {
     await openApp(page);
@@ -1249,6 +1250,54 @@ test.describe('縦画面', () => {
   }
   const selectCategory = (page: Page, label: string) => page.getByTestId('portrait-categories').getByRole('button', { name: label }).click();
   const itemBox = async (page: Page, name: string) => (await page.getByTestId('portrait-items').locator(`img[alt="${name}"]`).boundingBox())!;
+
+  test('服の絵は大きく、2 段まで: スマホ 390×844 は 104px・2 段、375×667 は 100px・1 段、iPad 820×1180 は 120px・2 段', async ({ page }) => {
+    await openPortrait(page);
+    await selectCategory(page, 'トップス');
+    for (const [w, h, tile, rows, phone] of [[390, 844, 104, 2, 'true'], [375, 667, 100, 1, 'true'], [820, 1180, 120, 2, 'false']] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      await expect(page.locator('.app')).toHaveAttribute('data-phone', phone);
+      await expect.poll(async () => Math.round((await page.getByTestId('portrait-items').locator('> *').first().boundingBox())!.width), { message: `${w}×${h} の絵` }).toBe(tile);
+      const first = await itemBox(page, 'red');
+      const tileBox = (await page.getByTestId('portrait-items').locator('> *').first().boundingBox())!;
+      expect([Math.round(tileBox.width), Math.round(tileBox.height)], `${w}×${h} の絵`).toEqual([tile, tile]);
+      expect(first.width).toBeLessThanOrEqual(tile);
+      const tracks = await page.getByTestId('portrait-items').evaluate((el) => getComputedStyle(el).gridTemplateRows.split(' ').length);
+      expect(tracks, `${w}×${h} の段`).toBe(rows);
+      // 服の行は、ボタンの行より上に収まる
+      const items = (await page.getByTestId('portrait-items').boundingBox())!;
+      const tools = (await page.getByTestId('portrait-tools').boundingBox())!;
+      expect(items.height).toBeGreaterThanOrEqual(rows * tile);
+      expect(items.y + items.height).toBeLessThanOrEqual(tools.y + 0.5);
+      expect(tools.y + tools.height).toBeLessThanOrEqual(h + 0.5);
+    }
+  });
+
+  test('服が行に収まらないとき、右端に次の服がのぞく', async ({ page }) => {
+    await openPortrait(page, 240, 480); // 1 段・絵 84px。トップスは 3 点
+    await selectCategory(page, 'トップス');
+    const boxes = await page.getByTestId('portrait-items').locator('> *').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, right: r.right, width: r.width })));
+    expect(boxes).toHaveLength(3);
+    expect(boxes[1].right).toBeLessThanOrEqual(240); // 2 点は、まるごと見える
+    const shown = (240 - boxes[2].left) / boxes[2].width; // 3 点めの、見えている割合
+    expect(shown).toBeGreaterThanOrEqual(0.3);
+    expect(shown).toBeLessThanOrEqual(0.7);
+  });
+
+  test('セットのタイルも同じ大きさで、中の絵がはみ出さない', async ({ page }) => {
+    await openPortrait(page, 390, 844);
+    await selectCategory(page, 'セット');
+    const tile = page.getByTestId('portrait-items').getByTestId('set-tile');
+    const box = (await tile.boundingBox())!;
+    expect([Math.round(box.width), Math.round(box.height)]).toEqual([104, 104]);
+    for (const img of await tile.locator('img').all()) {
+      const b = (await img.boundingBox())!;
+      expect(b.x).toBeGreaterThanOrEqual(box.x - 0.5);
+      expect(b.y).toBeGreaterThanOrEqual(box.y - 0.5);
+      expect(b.x + b.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      expect(b.y + b.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+    }
+  });
 
   test('メニューは下にあり、服を上へドラッグして着せる。メニューの上で離すと着ない', async ({ page }) => {
     await openPortrait(page);
@@ -1318,10 +1367,22 @@ test.describe('縦画面', () => {
     await page.mouse.down();
     await page.mouse.move(P_DOLL_X, 200, { steps: 6 });
     await page.mouse.up();
-    await expectPixel(page, 20, BG_Y, BG);
+    // 縦では、背景を画面の幅いっぱいに描く（正方形 776 は幅 820 より狭いが、左右にすきまを作らない）
+    const BG_X = 5;
+    await expectPixel(page, BG_X, BG_Y, BG);
+    await expectPixel(page, PW - 5, PS - 5, BG);
+    // 古い iPad（768×1024）は、正方形がもっと狭い（620）。それでも、左右の端まで背景
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expectPixel(page, 5, BG_Y, BG);
+    await expectPixel(page, 763, 590, BG); // 正方形は 600（1024 − メニュー 424）
+    await page.setViewportSize({ width: PW, height: PH });
+    await expectPixel(page, BG_X, BG_Y, BG);
+    // 「なし」は、服の絵と同じ大きさ
+    const none = (await page.getByTestId('portrait-items').getByRole('button', { name: /なし/ }).boundingBox())!;
+    expect([Math.round(none.width), Math.round(none.height)]).toEqual([120, 120]);
     // 「なし」で外れる
     await page.getByTestId('portrait-items').getByRole('button', { name: /なし/ }).click();
-    await expect.poll(async () => near(await canvasPixel(page, 20, BG_Y), BG)).toBe(false);
+    await expect.poll(async () => near(await canvasPixel(page, BG_X, BG_Y), BG)).toBe(false);
   });
 
   test('せまくて低い画面（360×640）でも、キャンバスと 3 つの行が重ならず、画面の中に収まる', async ({ page }) => {
@@ -1370,11 +1431,11 @@ test.describe('縦画面', () => {
     const r1 = (await rows.nth(1).boundingBox())!;
     expect(Math.abs(r0.y - r1.y)).toBeLessThan(1);
     expect(r1.x).toBeGreaterThan(r0.x + r0.width - 1);
-    expect(r0.y).toBeGreaterThanOrEqual(PW); // 正方形（高さ = 幅）より下
+    expect(r0.y).toBeGreaterThanOrEqual(PS); // 正方形より下
     // 色のスライダーと ✓ ↺ も、キャンバスより下
     for (const selector of ['.item-adjust-done-btn-small', '.item-adjust-reset-btn-small', '.hue-slider-vertical']) {
       const box = (await page.locator(selector).boundingBox())!;
-      expect(box.y).toBeGreaterThanOrEqual(PW);
+      expect(box.y).toBeGreaterThanOrEqual(PS);
       expect(box.y + box.height).toBeLessThanOrEqual(PH);
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(PW);
@@ -1476,7 +1537,7 @@ test.describe('縦画面', () => {
     });
 
     test('服の行が画面に収まらないとき: 横になぞると行が流れて着ない。上へ動かせば着る', async ({ page }) => {
-      await openPortrait(page, 240, 480); // 服の行が 1 段で、3 点が幅に収まらない大きさ
+      await openPortrait(page, 240, 480); // 服の行が 1 段（絵 84px）で、3 点が幅に収まらない大きさ
       await selectCategory(page, 'トップス');
       const list = page.getByTestId('portrait-items');
       await expect.poll(() => list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeGreaterThan(4);

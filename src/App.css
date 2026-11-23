@@ -1252,7 +1252,7 @@ textarea {
   min-height: 0;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 72px;
+  /* 絵の大きさ（列の幅・段の高さ）は、配置の計算（layout.ts）が決めて、style で渡す */
   align-content: center;
   gap: 12px 8px;
   padding: 6px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px));
@@ -1261,8 +1261,7 @@ textarea {
   -webkit-overflow-scrolling: touch;
 }
 .portrait-none {
-  width: 72px;
-  height: 72px;
+  /* 大きさは、服の絵と同じ（style で渡す） */
   font-size: 12px;
   font-weight: bold;
   color: #dc3545;
