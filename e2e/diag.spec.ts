@@ -77,6 +77,24 @@ test('きろくは、開き直しても「前の回」として残る', async ({
   expect(text.indexOf('ためしの警告')).toBeLessThan(text.indexOf('今回'));
 });
 
+// ホームへ戻ると、キャンバスを片付ける。そのとき Pixi が描画の土台を手放すが、それは「落ちた」のではない。
+// 前は、これも「WebGLコンテキストがロストしました」と残って、本当に落ちたのと見分けられなかった（Issue 7 のきろく）
+test('ホームへ戻ったときの片付けは、きろくに「落ちた」と残さない（gl closed と残す）', async ({ page }) => {
+  const answers = ['log'];
+  page.on('dialog', (d) => void d.accept(answers.shift() ?? ''));
+  await page.goto(APP_URL);
+  await page.waitForSelector('#avatar-canvas');
+  await page.waitForTimeout(500);
+  await page.getByTestId('home-back-button').click();
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await page.waitForTimeout(300);
+  const badge = page.locator('.version-badge');
+  for (let i = 0; i < 5; i++) await badge.click();
+  const text = await page.getByTestId('diag-panel').locator('pre').innerText();
+  expect(text).toContain('gl closed');
+  expect(text).not.toContain('WebGLコンテキストがロストしました');
+});
+
 // iPad で、セットを着せるとドールも服も消える不具合（v0.35.0）。
 // 服を着せるたびに、服をまとめた下書き（2 のべき乗の大きさ × なめらかにする 4 倍の作業用の領域）を確保していて、
 // セット（広い範囲に服がある）を着せた瞬間に、数十〜数百 MB を一度に取っていた。描画の土台（WebGL）が落ちる原因になる

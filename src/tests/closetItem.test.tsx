@@ -48,6 +48,13 @@ function open(backend: Partial<StudioBackend>, options: { online?: boolean; grou
 }
 
 describe('クローゼットの、服 1 点の画面', () => {
+  it('検品で気づいたこと（notes）は、出さない（作者の報告、Issue 7。子どもも見る画面なので）', () => {
+    const a = { ...item('a', 2), notes: ['そでの形が、少しくずれています'] };
+    render(<ClosetItem item={a} doll={null} group={[a]} online backend={{} as StudioBackend} library={library} onChanged={async () => undefined} onGone={() => undefined} onClose={() => undefined} />);
+    expect(screen.queryByText(/そでの形/)).toBeNull();
+    expect(screen.queryByTestId('closet-item-notes')).toBeNull();
+  });
+
   it('名前: サーバーが通したら、端末の控えも変える（サーバーが整えた名前で）', async () => {
     const updateMyItem = vi.fn(async (_id: string, change: { name?: string }) => infoOf(item('a', 2), { item: { ...item('a', 2).item, name: `${change.name}!` }, updatedAt: 9 }));
     const { handlers } = open({ updateMyItem });

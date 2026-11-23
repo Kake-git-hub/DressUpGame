@@ -201,11 +201,6 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
             </div>
           </div>
           {item.set && <p className="closet-set">セット「{item.set.name}」</p>}
-          {item.notes.length > 0 && (
-            <p className="closet-note" data-testid="closet-item-notes">
-              {item.notes.join(' ')}
-            </p>
-          )}
           {error && (
             <p className="closet-error" data-testid="closet-error">
               {error}

@@ -209,6 +209,11 @@ export class PixiEngine {
     // コンテキストが失われた時
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
+      // 片付け（ホームへ戻る、など）のときも、Pixi が土台を手放すので、ここに来る。それは落ちたのではない（Issue 7 のきろく）
+      if (this.destroyed) {
+        diag.note('gl', 'closed');
+        return;
+      }
       console.warn('WebGLコンテキストがロストしました');
     });
 
