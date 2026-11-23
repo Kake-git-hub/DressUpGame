@@ -7,7 +7,7 @@
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
-import { PlacedDoll, PlacedImage, PlacedItem } from './PlacedItem';
+import { PlacedDoll, PlacedFrame, PlacedImage, PlacedItem } from './PlacedItem';
 import { canvasGeometry, itemOrigin, itemPivotOnCanvas, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
@@ -17,6 +17,11 @@ import { RAINBOW_TRACK, hueTrack, trackCss } from '../pipeline/hueTrack';
 import { drawOrder, isBehindDoll, moveLayer as nextLayerAdjust, reorderLayer, sortByLayer } from '../engine/layers';
 import type { LayerChange } from '../engine/layers';
 import { adjustBaseId, partnerOf } from '../engine/pairs';
+
+// 調整中の服の枠の層（服の重なりは 50〜、下の一覧とボタンは 300）
+const FRAME_Z = 190;
+// 角のつまみを、枠の角から外へ出す量（つまみの大きさに対する割合。縦横それぞれ）
+const HANDLE_OUT = 0.26;
 
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
@@ -741,6 +746,10 @@ export function ItemAdjustPanel({
         const centerX = origin.x + (pivot.x - canvasW / 2) * k;
         const centerY = origin.y + (pivot.y - canvasH / 2) * k;
         const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
+        // つまみは、枠の角の外側に置く（服に重ねない）: 中心を、角から縦横それぞれ「つまみの大きさの 26%」だけ外へ。
+        // 大きさは CSS の --sticker-size（スマホは 34px、ほかは 40px）。服を大きく・小さくしても、画面での大きさと離れ方は一定
+        const out = (sign: 1 | -1) => `calc(${sign * 50}% + var(--sticker-size, 40px) * ${(sign * HANDLE_OUT * counter).toFixed(4)})`;
+        const handleAt = (sx: 1 | -1, sy: 1 | -1) => `translate(${out(sx)}, ${out(sy)}) scale(${counter})`;
 
         // シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転
         const frame = (
@@ -758,7 +767,7 @@ export function ItemAdjustPanel({
             {onRemove && (
               <button
                 className="sticker-handle sticker-remove"
-                style={{ transform: `translate(-50%, -50%) scale(${counter})` }}
+                style={{ transform: handleAt(-1, -1) }}
                 {...stopGesture}
                 onClick={() => onRemove(item.id)}
                 title="ぬがせる"
@@ -770,7 +779,7 @@ export function ItemAdjustPanel({
             )}
             <button
               className="sticker-handle sticker-reset"
-              style={{ transform: `translate(50%, -50%) scale(${counter})` }}
+              style={{ transform: handleAt(1, -1) }}
               {...stopGesture}
               onClick={handleResetPlacement}
               title="位置・大きさ・向きをもどす"
@@ -781,7 +790,7 @@ export function ItemAdjustPanel({
             </button>
             <div
               className="sticker-handle sticker-rotate"
-              style={{ transform: `translate(50%, 50%) scale(${counter})` }}
+              style={{ transform: handleAt(1, 1) }}
               {...stopGesture}
               onPointerDown={(e) => startHandle(e, centerX, centerY)}
               onPointerMove={moveHandle}
@@ -802,15 +811,13 @@ export function ItemAdjustPanel({
         const sheets = order.slice(order.findIndex((s) => s.kind === 'item' && s.item.id === adjustBaseId(current, item.id)));
         // 手前の服のうち、ほかの服が隠す所を持つもの（くつの下の靴下など）。キャンバスと同じように消して描く
         const clip = hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items;
-        return sheets.map((sheet, i) => {
+        const layers = sheets.map((sheet, i) => {
           if (sheet.kind === 'doll') {
             return doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} />;
           }
           if (sheet.item.id === item.id) {
             return (
-              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} onPixels={setItemPixels} showUnder testId="adjust-preview">
-                {frame}
-              </PlacedItem>
+              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} onPixels={setItemPixels} showUnder testId="adjust-preview" />
             );
           }
           if (sheet.item.id === partner?.id) {
@@ -831,6 +838,13 @@ export function ItemAdjustPanel({
             />
           );
         });
+        // 枠とつまみは、服の重なりの順に関係なく、どの服・ドールよりも手前に出す（服の絵は、重なりの順のまま）
+        return [
+          ...layers,
+          <PlacedFrame key="frame" item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={FRAME_Z}>
+            {frame}
+          </PlacedFrame>,
+        ];
       })()}
 
       {/* ドールモード時：ドール画像のプレビュー */}

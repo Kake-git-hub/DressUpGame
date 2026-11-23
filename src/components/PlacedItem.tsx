@@ -48,27 +48,17 @@ export function PlacedImage({ src, alt, canvasW, canvasH, box, unit, hue, dark, 
   );
 }
 
-// 服 1 点を、キャンバス上と同じ所に重ねる。children は服と同じ向き・大きさで重なる（枠など）。
-// showUnder: 服の「ドールのすぐ上の分」（くつの中の肌）を、服のすぐ下に一緒に描く（調整中の服だけ。ほかの服の分はキャンバスが描く）
-export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, dark, onDark, onPixels, showUnder, clip, testId, children }: {
+// 服と同じ位置・大きさ・傾きの箱（服の絵・枠が、この中に入る）
+function PlacedBox({ item, look, geometry, dollTransform, zIndex, className, children }: {
   item: EquippedItem;
   look: ItemLook;
   geometry: CanvasGeometry;
   dollTransform: DollTransform;
   zIndex: number;
   className?: string;
-  alwaysHue?: boolean; // 色相 0 でも HueCanvas で描く（スライダーの動きに追従させるため）
-  dark?: boolean;
-  onDark?: (dark: boolean) => void;
-  onPixels?: (pixels: Uint8ClampedArray | null) => void;
-  showUnder?: boolean;
-  clip?: Hide[];
-  testId?: string;
   children?: ReactNode;
 }) {
   const origin = itemOrigin(item, look, geometry, dollTransform);
-  const { box, canvasW, canvasH } = item;
-  const unit = geometry.unit;
   const pivot = itemPivotOnCanvas(item);
   return (
     <div
@@ -87,43 +77,89 @@ export function PlacedItem({ item, look, geometry, dollTransform, zIndex, classN
         style={{
           position: 'relative',
           transform: `rotate(${look.rotation}deg) scale(${look.scale})`,
-          transformOrigin: `${pivot.x * unit}px ${pivot.y * unit}px`,
+          transformOrigin: `${pivot.x * geometry.unit}px ${pivot.y * geometry.unit}px`,
         }}
       >
-        {showUnder && item.under && (
-          <img
-            src={item.under.url}
-            alt=""
-            draggable={false}
-            data-testid="adjust-under"
-            style={{
-              position: 'absolute',
-              display: 'block',
-              // 肌の絵のキャンバスが服のキャンバスと違う大きさでも、中心をそろえる
-              left: `${(item.under.box.x + (canvasW - item.under.canvasW) / 2) * unit}px`,
-              top: `${(item.under.box.y + (canvasH - item.under.canvasH) / 2) * unit}px`,
-              width: `${item.under.box.w * unit}px`,
-              height: `${item.under.box.h * unit}px`,
-            }}
-          />
-        )}
-        <PlacedImage
-          src={item.imageUrl}
-          alt={item.name}
-          hue={alwaysHue || look.hue !== 0 ? look.hue : undefined}
-          dark={dark}
-          onDark={onDark}
-          onPixels={onPixels}
-          clip={clip}
-          canvasW={canvasW}
-          canvasH={canvasH}
-          box={box}
-          unit={unit}
-          testId={testId}
-        />
         {children}
       </div>
     </div>
+  );
+}
+
+// 服 1 点を、キャンバス上と同じ所に重ねる。children は服と同じ向き・大きさで重なる。
+// showUnder: 服の「ドールのすぐ上の分」（くつの中の肌）を、服のすぐ下に一緒に描く（調整中の服だけ。ほかの服の分はキャンバスが描く）
+export function PlacedItem({ item, look, geometry, dollTransform, zIndex, className, alwaysHue, dark, onDark, onPixels, showUnder, clip, testId, children }: {
+  item: EquippedItem;
+  look: ItemLook;
+  geometry: CanvasGeometry;
+  dollTransform: DollTransform;
+  zIndex: number;
+  className?: string;
+  alwaysHue?: boolean; // 色相 0 でも HueCanvas で描く（スライダーの動きに追従させるため）
+  dark?: boolean;
+  onDark?: (dark: boolean) => void;
+  onPixels?: (pixels: Uint8ClampedArray | null) => void;
+  showUnder?: boolean;
+  clip?: Hide[];
+  testId?: string;
+  children?: ReactNode;
+}) {
+  const { box, canvasW, canvasH } = item;
+  const unit = geometry.unit;
+  return (
+    <PlacedBox item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} className={className}>
+      {showUnder && item.under && (
+        <img
+          src={item.under.url}
+          alt=""
+          draggable={false}
+          data-testid="adjust-under"
+          style={{
+            position: 'absolute',
+            display: 'block',
+            // 肌の絵のキャンバスが服のキャンバスと違う大きさでも、中心をそろえる
+            left: `${(item.under.box.x + (canvasW - item.under.canvasW) / 2) * unit}px`,
+            top: `${(item.under.box.y + (canvasH - item.under.canvasH) / 2) * unit}px`,
+            width: `${item.under.box.w * unit}px`,
+            height: `${item.under.box.h * unit}px`,
+          }}
+        />
+      )}
+      <PlacedImage
+        src={item.imageUrl}
+        alt={item.name}
+        hue={alwaysHue || look.hue !== 0 ? look.hue : undefined}
+        dark={dark}
+        onDark={onDark}
+        onPixels={onPixels}
+        clip={clip}
+        canvasW={canvasW}
+        canvasH={canvasH}
+        box={box}
+        unit={unit}
+        testId={testId}
+      />
+      {children}
+    </PlacedBox>
+  );
+}
+
+// 服と同じ位置・大きさ・傾きの、絵の無い層。調整中の服の枠（点線の四角と、角のつまみ）を、
+// 服の重なりの順に関係なく、どの服よりも手前に出すのに使う。children は、服のキャンバスの座標で置く
+export function PlacedFrame({ item, look, geometry, dollTransform, zIndex, children }: {
+  item: EquippedItem;
+  look: ItemLook;
+  geometry: CanvasGeometry;
+  dollTransform: DollTransform;
+  zIndex: number;
+  children: ReactNode;
+}) {
+  return (
+    <PlacedBox item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} className="adjust-frame-layer">
+      {/* 服の絵と同じ大きさの、空の箱（位置合わせのため） */}
+      <div style={{ position: 'relative', width: `${item.canvasW * geometry.unit}px`, height: `${item.canvasH * geometry.unit}px` }} />
+      {children}
+    </PlacedBox>
   );
 }
 

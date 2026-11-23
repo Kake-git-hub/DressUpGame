@@ -646,10 +646,17 @@ textarea {
   border-radius: 4px;
   pointer-events: none;
 }
+/* つまみの大きさ: スマホ（縦で幅 600px 未満）は少し小さく（服が小さいので、隠さないように） */
+.app[data-phone='true'] {
+  --sticker-size: 34px;
+}
+.app[data-phone='true'] .sticker-handle {
+  font-size: 1.1rem;
+}
 .sticker-handle {
   position: absolute;
-  width: 40px;
-  height: 40px;
+  width: var(--sticker-size, 40px);
+  height: var(--sticker-size, 40px);
   padding: 0;
   border-radius: 50%;
   border: 2px solid #fff;

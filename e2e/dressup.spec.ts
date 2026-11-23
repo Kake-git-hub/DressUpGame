@@ -1183,6 +1183,116 @@ test('更新の前に保存した服装（調整値が画面の px）は、同�
   expect(saved.x).toBeCloseTo(ADJUST_DX / BASE_SCALE, 3);
 });
 
+// 枠（点線の四角と、角のつまみ）を含む層の z-index（いちばん近い、z-index を持つ先祖）
+const layerZ = (page: Page, testId: string) =>
+  page.getByTestId(testId).first().evaluate((el) => {
+    for (let node: HTMLElement | null = el as HTMLElement; node; node = node.parentElement) {
+      const z = Number(getComputedStyle(node).zIndex);
+      if (Number.isFinite(z) && getComputedStyle(node).position !== 'static') return z;
+    }
+    return 0;
+  });
+const centerOf = (box: { x: number; y: number; width: number; height: number }) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+
+test('調整中の服の枠は、手前の服より上に出る。服を動かす・回す・大きくしても、服に付いてくる', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'ボトムス', 'green');
+  await dragItemToDoll(page, 'トップス', 'red');
+  await page.locator('.tool-button').first().click();
+  // 重なりの下にあるほう（ボトムス）を調整中にする: トップスが、その手前に重なって描かれる
+  await page.getByTestId('adjust-picker-items').locator('button[title="green"]').click();
+  await expect(page.getByTestId('adjust-preview')).toBeVisible();
+  await expect(page.locator('.adjust-front-item').first()).toBeVisible();
+  const frameZ = await layerZ(page, 'sticker-frame');
+  const previewZ = await layerZ(page, 'adjust-preview');
+  const frontZ = await page.locator('.adjust-front-item').evaluateAll((els) => els.map((el) => Number(getComputedStyle(el).zIndex)));
+  expect(frontZ.length).toBeGreaterThan(0);
+  expect(Math.max(...frontZ)).toBeGreaterThan(previewZ); // 服の絵は、重なりの順のまま（手前の服が上）
+  expect(frameZ).toBeGreaterThan(Math.max(...frontZ)); // 枠は、どの服よりも上
+  // 下のボタン・一覧よりは下（ボタンを押せなくしない）
+  expect(frameZ).toBeLessThan(Number(await page.getByTestId('adjust-picker').evaluate((el) => getComputedStyle(el).zIndex)));
+  // 枠は、服の絵と同じ位置・大きさ
+  const same = async (tolerance: number) => {
+    const frame = (await page.getByTestId('sticker-frame').boundingBox())!;
+    const picture = (await page.getByTestId('adjust-preview').boundingBox())!;
+    expect(Math.abs(centerOf(frame).x - centerOf(picture).x)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(centerOf(frame).y - centerOf(picture).y)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(frame.width - picture.width)).toBeLessThanOrEqual(tolerance * 2);
+    expect(Math.abs(frame.height - picture.height)).toBeLessThanOrEqual(tolerance * 2);
+  };
+  await same(1);
+  // 服を動かす
+  const before = (await page.getByTestId('sticker-frame').boundingBox())!;
+  await page.mouse.move(DOLL_X, BOTTOM_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + 90, BOTTOM_Y + 30, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.round((await page.getByTestId('sticker-frame').boundingBox())!.x - before.x)).toBe(90);
+  await same(1);
+  // 右下のつまみで、大きく・回す
+  const handle = centerOf((await page.getByTestId('sticker-rotate').boundingBox())!);
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 60, handle.y - 20, { steps: 5 });
+  await page.mouse.up();
+  await same(2);
+  // 縦に持ち替えても、枠は服に付いている
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
+  await expect(page.getByTestId('sticker-frame')).toBeVisible();
+  await same(2);
+});
+
+test('角のつまみは、枠の外側にある（服に重ねない）。スマホは 34px、ほかは 40px', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('sticker-frame')).toBeVisible();
+  const check = async (size: number) => {
+    const frame = (await page.getByTestId('sticker-frame').boundingBox())!;
+    for (const [id, sx, sy] of [['sticker-remove', -1, -1], ['sticker-reset', 1, -1], ['sticker-rotate', 1, 1]] as const) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect([Math.round(box.width), Math.round(box.height)], `${id} の大きさ`).toEqual([size, size]);
+      const c = centerOf(box);
+      // 中心は、枠の角から外へ（縦横それぞれ、大きさの 2 割以上）
+      const cornerX = sx < 0 ? frame.x : frame.x + frame.width;
+      const cornerY = sy < 0 ? frame.y : frame.y + frame.height;
+      expect((c.x - cornerX) * sx, `${id} の横`).toBeGreaterThanOrEqual(size * 0.2);
+      expect((c.y - cornerY) * sy, `${id} の縦`).toBeGreaterThanOrEqual(size * 0.2);
+      // 外へ出すぎない（角に触れている）
+      expect((c.x - cornerX) * sx).toBeLessThanOrEqual(size * 0.5);
+      expect((c.y - cornerY) * sy).toBeLessThanOrEqual(size * 0.5);
+    }
+  };
+  await check(40); // 横 1180×820
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.locator('.app')).toHaveAttribute('data-phone', 'false');
+  await check(40);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.app')).toHaveAttribute('data-phone', 'true');
+  await check(34);
+});
+
+test('スマホで、画面の端に近い服（くつ）でも、つまみを押せる（画面の中で、下の帯に隠れない）', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'くつ', 'shoe');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
+  await page.getByTestId('portrait-tools').locator('.tool-button').click();
+  await expect(page.getByTestId('sticker-frame')).toBeVisible();
+  const picker = (await page.getByTestId('adjust-picker').boundingBox())!;
+  for (const id of ['sticker-remove', 'sticker-reset', 'sticker-rotate']) {
+    const box = (await page.getByTestId(id).boundingBox())!;
+    expect(box.x, `${id} の左`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${id} の右`).toBeLessThanOrEqual(390);
+    expect(box.y, `${id} の上`).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, `${id} の下`).toBeLessThanOrEqual(picker.y);
+    // その場所のいちばん上にあるのが、つまみ（押せる）
+    const c = centerOf(box);
+    expect(await page.evaluate(([x, y, testId]) => document.elementFromPoint(x as number, y as number)?.closest(`[data-testid="${testId}"]`) !== null, [c.x, c.y, id] as const), `${id} を押せる`).toBe(true);
+  }
+});
+
 test('横の色の帯も、その服がなる色になる（大きさは今のまま 36×280）', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
