@@ -44,6 +44,20 @@ test('版数を 5 回押して「log」: 端末と描画の状態・着せたセ
   // 行の順番: 着せた → 落ちた
   expect(text.indexOf('set parts=2')).toBeLessThan(text.indexOf('WebGLコンテキストがロストしました'));
 
+  // 「ほうこくする」: GitHub の、このリポジトリの「新しい Issue」が、きろく入りで開く（写して送らなくてよい）
+  const link = panel.getByRole('link', { name: 'GitHub に ほうこくする' });
+  await expect(link).toHaveAttribute('target', '_blank');
+  const before = new URL((await link.getAttribute('href'))!);
+  expect(`${before.origin}${before.pathname}`).toBe('https://github.com/Kake-git-hub/DressUpGame/issues/new');
+  expect(before.searchParams.get('title')).toMatch(/^\[きろく\] v\d+\.\d+\.\d+ ほうこく$/);
+  expect(before.searchParams.get('body')).toContain('set parts=2');
+  expect(before.searchParams.get('body')).toContain('WebGLコンテキストがロストしました');
+  // 何が起きたかを書くと、題と本文に入る
+  await panel.getByPlaceholder('なにが おきましたか？').fill('セットを きせたら きえた');
+  const after = new URL((await link.getAttribute('href'))!);
+  expect(after.searchParams.get('title')).toContain('セットを きせたら きえた');
+  expect(after.searchParams.get('body')!.startsWith('セットを きせたら きえた')).toBe(true);
+
   await panel.getByRole('button', { name: 'とじる' }).click();
   await expect(panel).toHaveCount(0);
 });

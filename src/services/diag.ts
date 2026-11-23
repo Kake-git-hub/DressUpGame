@@ -136,3 +136,33 @@ function safeStorage(): Store | null {
 
 // アプリ全体で 1 つ
 export const diag = createDiag({ storage: safeStorage() });
+
+// ほうこく: きろくを、このリポジトリの「新しい Issue」に入れて開く URL。
+// 作者が GitHub で「Submit new issue」を押すと、リポジトリに残り、開発の側から読める（写して送らなくてよい）。
+// きろくに入るのは、端末の種類・画面の大きさ・描画の状態・警告・着せた服のカテゴリ。名前やアカウントは入らない
+export const REPORT_REPO = 'Kake-git-hub/DressUpGame';
+const REPORT_URL_MAX = 7000; // GitHub が受け取れる URL の長さ（約 8000）より短く
+const REPORT_HEAD_LINES = 4; // 版・端末・画面・描画の状態
+const TITLE_NOTE_MAX = 40;
+
+export function reportIssueUrl(report: string, note: string, version: string, maxLength = REPORT_URL_MAX): string {
+  const said = note.trim();
+  const short = said.length > TITLE_NOTE_MAX ? `${said.slice(0, TITLE_NOTE_MAX)}…` : said;
+  const title = `[きろく] v${version} ${short || 'ほうこく'}`;
+  const lines = report.split('\n');
+  const head = lines.slice(0, REPORT_HEAD_LINES);
+  const rest = lines.slice(REPORT_HEAD_LINES);
+  const build = (dropped: number) => {
+    const kept = dropped > 0 ? [`（古い ${dropped} 行は省略）`, ...rest.slice(dropped)] : rest;
+    const body = `${said ? `${said}\n\n` : ''}\`\`\`\n${[...head, ...kept].join('\n')}\n\`\`\`\n`;
+    return `https://github.com/${REPORT_REPO}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+  };
+  // 長すぎたら、古い行から省く（最後の行は残す）
+  let dropped = 0;
+  let url = build(0);
+  while (url.length > maxLength && dropped < rest.length - 1) {
+    dropped += Math.max(1, Math.ceil((rest.length - dropped) / 8));
+    url = build(Math.min(dropped, rest.length - 1));
+  }
+  return url;
+}

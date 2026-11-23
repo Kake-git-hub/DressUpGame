@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDiag, diagReport } from '../services/diag';
+import { createDiag, diagReport, reportIssueUrl } from '../services/diag';
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -120,5 +120,44 @@ describe('きろく（端末の上で起きたことの覚え書き）', () => {
     expect(text).toContain('"lost":true');
     expect(text.indexOf('0.0 set 7')).toBeGreaterThan(text.indexOf('前の回'));
     expect(text.indexOf('0.0 start')).toBeGreaterThan(text.indexOf('今回'));
+  });
+});
+
+describe('ほうこく（GitHub の Issue に、きろくを入れて開く URL）', () => {
+  const report = ['きせかえ v0.35.1', 'iPad UA', 'standalone: true / 1024x748@2', 'gl: {"lost":false}', '--- 前の回 ---', '0.0 start v0.35.1', '--- 今回 ---', '0.0 start v0.35.1', '7.3 set parts=7 くつ,てぶくろ', '8.0 clothes n=8'].join('\n');
+  const parse = (url: string) => {
+    const u = new URL(url);
+    return { base: `${u.origin}${u.pathname}`, title: u.searchParams.get('title') ?? '', body: u.searchParams.get('body') ?? '' };
+  };
+
+  it('このリポジトリの「新しい Issue」を開く。題に版、本文に、書いた文ときろくが入る', () => {
+    const { base, title, body } = parse(reportIssueUrl(report, 'セットを きせたら きえた', '0.35.1'));
+    expect(base).toBe('https://github.com/Kake-git-hub/DressUpGame/issues/new');
+    expect(title).toBe('[きろく] v0.35.1 セットを きせたら きえた');
+    expect(body).toContain('セットを きせたら きえた');
+    expect(body).toContain('```\nきせかえ v0.35.1');
+    expect(body).toContain('7.3 set parts=7 くつ,てぶくろ');
+    expect(body.trimEnd().endsWith('```')).toBe(true);
+  });
+
+  it('何も書かなくてもよい。題は「ほうこく」。長い文は、題では 40 字で切る', () => {
+    expect(parse(reportIssueUrl(report, '  ', '0.35.1')).title).toBe('[きろく] v0.35.1 ほうこく');
+    const long = 'あ'.repeat(100);
+    const { title, body } = parse(reportIssueUrl(report, long, '0.35.1'));
+    expect(title).toBe(`[きろく] v0.35.1 ${'あ'.repeat(40)}…`);
+    expect(body).toContain(long);
+  });
+
+  it('URL が長くなりすぎないように、きろくの古い行から省く（はじめの 4 行と、最後の行は残す）', () => {
+    const many = [...report.split('\n').slice(0, 4), '--- 今回 ---', ...Array.from({ length: 300 }, (_, i) => `${i}.0 warn 服画像の読み込みに失敗 ${i}`), '999.0 gl lost'].join('\n');
+    const url = reportIssueUrl(many, '', '0.35.1');
+    expect(url.length).toBeLessThanOrEqual(7000);
+    const { body } = parse(url);
+    expect(body).toContain('きせかえ v0.35.1');
+    expect(body).toContain('gl: {"lost":false}');
+    expect(body).toContain('999.0 gl lost');
+    expect(body).toContain('299.0 warn');
+    expect(body).not.toContain('\n0.0 warn');
+    expect(body).toMatch(/（古い \d+ 行は省略）/);
   });
 });

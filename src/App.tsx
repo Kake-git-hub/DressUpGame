@@ -38,7 +38,7 @@ import { playDressUpSound } from './services/sound';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import { APP_VERSION } from './version';
-import { diag, diagReport } from './services/diag';
+import { diag, diagReport, reportIssueUrl } from './services/diag';
 import './App.css';
 
 
@@ -647,6 +647,7 @@ function App() {
     if (unlockByWord(word)) window.location.reload();
   };
   const [diagText, setDiagText] = useState<string | null>(null);
+  const [diagNote, setDiagNote] = useState('');
   const versionBadge = (
     <>
       <div className={`version-badge${onHome ? ' on-home' : ''}`} onClick={handleBadgeTap}>
@@ -654,6 +655,14 @@ function App() {
       </div>
       {diagText !== null && (
         <div className="diag-panel" data-testid="diag-panel">
+          {/* ほうこく: GitHub の「新しい Issue」が、きろく入りで開く。そこで「Submit new issue」を押すと、リポジトリに残る */}
+          <div className="diag-report">
+            <input type="text" value={diagNote} onChange={(e) => setDiagNote(e.target.value)} placeholder="なにが おきましたか？" maxLength={200} />
+            <a href={reportIssueUrl(diagText, diagNote, APP_VERSION)} target="_blank" rel="noopener noreferrer">
+              GitHub に ほうこくする
+            </a>
+          </div>
+          <p className="diag-hint">ひらいた GitHub の画面で「Submit new issue」（みどりのボタン）を おすと、ほうこくが のこります。</p>
           <div className="diag-buttons">
             <button type="button" onClick={() => void navigator.clipboard?.writeText(diagText).catch(() => undefined)}>
               コピー
