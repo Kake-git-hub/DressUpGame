@@ -72,6 +72,7 @@ cleanupLegacyData();
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
 const STUDIO_MODE = readStudioMode(window.location.search);
 const StudioRoot = lazy(() => import('./appStudio'));
+const ClosetRoot = lazy(() => import('./closet'));
 // ホーム画面（あそぶ・つくる・クローゼット・ともだちにおしえる）。だれにでも、開いたときに出る
 const START_ON_HOME = startsOnHome(window.location.search);
 const HomeScreen = lazy(() => import('./home/HomeScreen'));
@@ -158,7 +159,6 @@ function App() {
   // 服を作る画面・クローゼットを開いているか（どちらも、ホームから開き、閉じるとホームにもどる）
   const [studioOpen, setStudioOpen] = useState(false);
   const [closetOpen, setClosetOpen] = useState(false);
-  void closetOpen; // クローゼットの画面は、このあと足す
   const closeStudio = useCallback(() => {
     setStudioOpen(false);
     setOnHome(true);
@@ -589,6 +589,27 @@ function App() {
     </div>
   );
 
+  // クローゼット（ホームから開く。ホームの上に重ねる）
+  const closetLayer = closetOpen && STUDIO_MODE && (
+    <StudioBoundary onClose={() => setClosetOpen(false)}>
+      <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
+        {session ? (
+          <ClosetRoot
+            session={session}
+            library={library}
+            dolls={allDolls}
+            categoriesByDoll={categoriesByDoll}
+            currentDollId={currentDoll?.id ?? ''}
+            onClose={() => setClosetOpen(false)}
+            onLibraryChanged={refreshMyItems}
+          />
+        ) : (
+          <div className="studio-loading">よみこみちゅう…</div>
+        )}
+      </Suspense>
+    </StudioBoundary>
+  );
+
   // ホーム画面（読み込みは裏で続ける）
   if (onHome) {
     return (
@@ -610,6 +631,7 @@ function App() {
             closetDot={closetDot}
           />
         </Suspense>
+        {closetLayer}
       </div>
     );
   }

@@ -8,6 +8,7 @@ import type { CSSProperties } from 'react';
 import { HueCanvas } from '../components/HueCanvas';
 import type { Box } from '../content/manifest';
 import type { DollData } from '../types';
+import './stage.css';
 
 // 重ねる絵 1 枚。位置は、その絵のキャンバス（ドールのキャンバスと中心が同じ）の上
 export interface StageLayer {

@@ -124,6 +124,23 @@ describe('つなぎ役', () => {
     expect(JSON.parse(localStorage.getItem(NEW_KEY)!)).toEqual([]);
   });
 
+  it('一度開いた服は、つなぎ直しても NEW に戻らない（その仕事の結果を、まだ見ていなくても）', async () => {
+    const { make } = setup();
+    const session = make();
+    await session.connect();
+    const { jobId } = await session.backend.startJob(top);
+    await vi.advanceTimersByTimeAsync(200);
+    await session.refresh();
+    const itemId = session.getState().arrivals[0].candidates[0].itemId!;
+    expect(session.getState().newItemIds).toEqual([itemId]);
+    session.markSeen(itemId);
+    // アプリを開き直した（仕事 jobId は、まだ「見た」にしていない）
+    const again = make();
+    await again.connect();
+    expect(again.getState().arrivals.map((j) => j.id)).toEqual([jobId]);
+    expect(again.getState().newItemIds).toEqual([]);
+  });
+
   it('届いた順（古い順）に並ぶ', async () => {
     const { make } = setup();
     const session = make();

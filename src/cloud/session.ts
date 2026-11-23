@@ -114,6 +114,8 @@ export function createSession(deps: {
       try {
         const user = state.user;
         if (!user) return;
+        // 合わせる前から端末にあった服（NEW の印は、いま初めて届いた服にだけ付ける）
+        const before = new Set((await library.all()).map((item) => item.id));
         if (full) {
           const failed = await sync(user.userCode);
           if (failed > 0) set({ storeFailed: true });
@@ -131,7 +133,7 @@ export function createSession(deps: {
           const have = new Set((await library.all()).map((item) => item.id));
           const made = fresh.flatMap((job) => job.candidates.flatMap((c) => (c.status === 'kept' && c.itemId ? [c.itemId] : [])));
           if (made.some((id) => !have.has(id))) storeFailed = true;
-          const added = made.filter((id) => have.has(id) && !newItemIds.includes(id));
+          const added = made.filter((id) => have.has(id) && !before.has(id) && !newItemIds.includes(id));
           if (added.length > 0) {
             newItemIds = [...newItemIds, ...added];
             writeList(storage, NEW_KEY, newItemIds);

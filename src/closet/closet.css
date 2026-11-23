@@ -1,0 +1,380 @@
+/* クローゼット（自分の服の一覧と、直す画面）。子どもも使うので、大きく・やさしい見た目 */
+.closet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(var(--top-inset, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #e9fbf6 0%, #f3ecff 100%);
+  touch-action: pan-y;
+  font-family: 'Hiragino Maru Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  color: #4a4050;
+}
+.closet-panel {
+  width: 100%;
+  max-width: 860px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.closet-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.closet-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: clamp(22px, 5.4vmin, 32px);
+  color: #2f9c8b;
+  letter-spacing: 0.06em;
+}
+.closet-close {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  font-size: 22px;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #cfe9e2;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.closet-note {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 15px;
+  background: #fff8e6;
+  border: 1px solid #f2dfa8;
+  border-radius: 12px;
+}
+.closet-error {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 15px;
+  color: #b3261e;
+  background: #fff0ee;
+  border-radius: 12px;
+}
+.closet-empty {
+  margin: 24px 0;
+  font-size: 18px;
+  text-align: center;
+}
+/* 作りかけ */
+.closet-making {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 2px dashed #b8e3d8;
+  border-radius: 16px;
+}
+.closet-making-title {
+  font-weight: bold;
+  color: #2f9c8b;
+}
+.closet-making-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 14px;
+  background: #e9fbf6;
+  border-radius: 999px;
+}
+.closet-spinner {
+  width: 14px;
+  height: 14px;
+  border: 3px solid #b8e3d8;
+  border-top-color: #2f9c8b;
+  border-radius: 50%;
+  animation: closet-spin 0.9s linear infinite;
+}
+@keyframes closet-spin {
+  to { transform: rotate(360deg); }
+}
+/* ドールの切り替え */
+.closet-dolls {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.closet-dolls button {
+  flex: none;
+  min-height: 44px;
+  padding: 6px 16px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #d9c8f5;
+  border-radius: 999px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.closet-dolls button[aria-selected='true'] {
+  color: #fff;
+  background: #9370db;
+  border-color: #9370db;
+}
+.closet-dolls button.unusable {
+  border-style: dashed;
+}
+/* カテゴリごとの一覧 */
+.closet-group h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #9370db;
+}
+.closet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.closet-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px 6px;
+  background: #fff;
+  border: 2px solid #eadff7;
+  border-radius: 18px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+  color: inherit;
+}
+.closet-item:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+.closet-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.closet-thumb img,
+.closet-thumb canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.closet-name {
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.closet-new {
+  position: absolute;
+  top: -6px;
+  left: -4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #fff;
+  background: #ff4d6d;
+  border-radius: 999px;
+  transform: rotate(-8deg);
+}
+/* 服 1 点の画面 */
+.closet-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--top-inset, 0px) + 10px) 10px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  box-sizing: border-box;
+  background: rgba(60, 40, 60, 0.45);
+}
+.closet-sheet {
+  position: relative;
+  width: min(680px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 16px;
+  box-sizing: border-box;
+  background: #fff;
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.closet-sheet-stage {
+  flex: none;
+  align-self: flex-start;
+  margin: 0 auto;
+  padding: 8px;
+  background: linear-gradient(180deg, #fff5fa 0%, #f3ecff 100%);
+  border-radius: 18px;
+}
+.closet-sheet-stage .studio-stage {
+  position: relative;
+}
+.closet-sheet-form {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.closet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.closet-field > span {
+  font-size: 14px;
+  font-weight: bold;
+  color: #9370db;
+}
+.closet-field input:not([type='range']) {
+  min-height: 46px;
+  padding: 6px 12px;
+  font-size: 18px; /* iOS で、入力のときに画面が拡大されない大きさ */
+  border: 2px solid #d9c8f5;
+  border-radius: 14px;
+  min-width: 0;
+}
+.closet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.closet-hue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 色のスライダー: 太い、にじ色の帯（指で動かしやすい大きさ） */
+.closet-hue {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: none;
+}
+.closet-hue::-webkit-slider-runnable-track {
+  height: 28px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #40c0e0, #4060e0, #a040e0, #e040a0, #e04040, #e0a040, #c0e040, #40e060, #40c0e0);
+}
+.closet-hue::-moz-range-track {
+  height: 28px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #40c0e0, #4060e0, #a040e0, #e040a0, #e04040, #e0a040, #c0e040, #40e060, #40c0e0);
+}
+.closet-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 44px;
+  height: 44px;
+  margin-top: -8px;
+  background: #fff;
+  border: 4px solid #9370db;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.closet-hue::-moz-range-thumb {
+  width: 36px;
+  height: 36px;
+  background: #fff;
+  border: 4px solid #9370db;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.closet-sheet button {
+  min-height: 46px;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: bold;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #d9c8f5;
+  border-radius: 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.closet-sheet button.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #3cb8a6 0%, #7fd9c4 100%);
+  border-color: transparent;
+}
+.closet-sheet button.danger {
+  color: #b3261e;
+  border-color: #ffb4ab;
+}
+.closet-sheet button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.closet-sheet-actions {
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.closet-set {
+  margin: 0;
+  font-size: 14px;
+  color: #6d6275;
+}
+/* 「けしますか？」 */
+.closet-confirm {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 24px;
+  font-size: 18px;
+  text-align: center;
+}
+.closet-confirm p {
+  margin: 0;
+}
+.closet-confirm-thumb {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.closet-confirm-thumb img,
+.closet-confirm-thumb canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+  .closet-spinner {
+    animation: none;
+  }
+}
