@@ -18,6 +18,7 @@ import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
 import type { StudioMode } from './appStudio/unlock';
+import type { CloudSession } from './cloud/session';
 import { readHomeEnabled, unlockHomeByWord } from './home/homeMode';
 import type { LoadedContent } from './content/loadContent';
 import type { ManifestCategory } from './content/manifest';
@@ -232,6 +233,29 @@ function App() {
     if (!base) return;
     setAllClothing((await mergeMyItems(base, await library.all())).clothing);
   }, []);
+
+  // つなぎ役（サーバーとのやり取り）。「つくる」を出す端末でだけ、読み込む
+  const [session, setSession] = useState<CloudSession | null>(null);
+  useEffect(() => {
+    if (!STUDIO_MODE) return;
+    let cancelled = false;
+    void import('./cloud/boot')
+      .then((boot) => {
+        if (!cancelled) setSession(boot.bootSession(STUDIO_MODE, library, refreshMyItems));
+      })
+      .catch((error: unknown) => console.error('つなぎ役を読み込めませんでした:', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshMyItems]);
+  // 前に「つくる」「クローゼット」を使った端末では、素材が読めたあと、裏でつなぐ（服を合わせ、作りかけの仕事を見る）。
+  // ゲームの起動は待たせない。つながらなくても、何も出さない
+  useEffect(() => {
+    if (!session || loadState !== 'ready') return;
+    void import('./cloud/boot').then((boot) => {
+      if (boot.usedBefore()) void session.connect();
+    });
+  }, [session, loadState]);
 
   // 配信された素材の一覧を読み込む
   useEffect(() => {
