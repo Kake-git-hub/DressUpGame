@@ -40,6 +40,18 @@ describe('色の帯（その服が、実際になる色）', () => {
     expect(Math.max(...at90) - Math.min(...at90)).toBeGreaterThan(30);
   });
 
+  it('黒っぽい髪に、色のはっきりした飾り（青いヘアピン 5%）: 帯は、髪（黒い所）がなる色。飾りの色にしない', () => {
+    const pixels = new Uint8ClampedArray([...solid(20, 20, 22, 95), ...solid(40, 80, 220, 5)]);
+    expect(mainColor(pixels, true)).toEqual([20, 20, 22]);
+    const stops = hueTrack(pixels, true)!;
+    expect(Math.max(...rgbOf(stops[6]))).toBeLessThan(40); // まん中は黒
+    const at90 = rgbOf(stops[9]);
+    const tint = tintFor(90);
+    expect(at90.indexOf(Math.max(...at90))).toBe(tint.indexOf(Math.max(...tint))); // 髪と同じ色あい（飾りの回した色ではない）
+    // 黒っぽい絵でなければ（dark = false）、今までどおり、色のはっきりした所が代表
+    expect(mainColor(pixels, false)).toEqual([40, 80, 220]);
+  });
+
   it('色味の無い服（白・灰）: 13 個とも、ほぼ同じ灰色（動かしても変わらないことが、見て分かる）', () => {
     for (const stops of [hueTrack(solid(250, 250, 250), false)!, hueTrack(solid(128, 130, 127), false)!]) {
       for (const css of stops) {
@@ -72,6 +84,13 @@ describe('色の帯（その服が、実際になる色）', () => {
     expect(mainColor(solid(255, 0, 0, 8, 0))).toBeNull();
     expect(hueTrack(solid(255, 0, 0, 8, 0), false)).toBeNull();
     expect(hueTrack(new Uint8ClampedArray(0), false)).toBeNull();
+  });
+
+  it('trackCss: つまみの半分だけ内側に色を置く（つまみの中心は、帯の端までは行かない。つまみの下の色 = 服の色にする）', () => {
+    const css = trackCss(['rgb(1, 1, 1)', 'rgb(2, 2, 2)', 'rgb(3, 3, 3)'], 'right', 22);
+    expect(css).toBe('linear-gradient(to right, rgb(1, 1, 1) 22px, rgb(2, 2, 2) calc(22px + (100% - 44px) * 0.5), rgb(3, 3, 3) calc(100% - 22px))');
+    // 内側に寄せない（0）なら、今までどおり
+    expect(trackCss(['rgb(1, 1, 1)', 'rgb(2, 2, 2)'], 'top', 0)).toBe('linear-gradient(to top, rgb(1, 1, 1), rgb(2, 2, 2))');
   });
 
   it('trackCss: 帯の背景になる CSS。読めないときの虹も 13 色', () => {

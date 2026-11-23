@@ -30,12 +30,15 @@ function hueBin(r: number, g: number, b: number): number {
 
 /**
  * 代表の色。不透明で色味のはっきりした画素のうち、いちばん多い色あい（30° の区切り）の画素の平均。
- * 色味のはっきりした画素が少なすぎれば、不透明な画素ぜんぶの平均。不透明な画素が無ければ null
+ * 色味のはっきりした画素が少なすぎれば、不透明な画素ぜんぶの平均。不透明な画素が無ければ null。
+ * dark（黒っぽい絵として色を付ける）のときは、色味のはっきりしない画素（黒・灰・白 = 色を付ける所）の平均:
+ * 黒髪のヘアピンなど、色のはっきりした飾りを代表にしない
  */
-export function mainColor(rgba: Pixels): [number, number, number] | null {
+export function mainColor(rgba: Pixels, dark = false): [number, number, number] | null {
   let opaque = 0;
   let vivid = 0;
   const all = [0, 0, 0];
+  const plain = [0, 0, 0];
   const bins = Array.from({ length: HUE_BINS }, () => [0, 0, 0, 0]); // r, g, b の合計と、数
   for (let p = 0; p + 3 < rgba.length; p += 4) {
     if (rgba[p + 3] < 128) continue;
@@ -53,9 +56,15 @@ export function mainColor(rgba: Pixels): [number, number, number] | null {
       bin[1] += g;
       bin[2] += b;
       bin[3]++;
+    } else {
+      plain[0] += r;
+      plain[1] += g;
+      plain[2] += b;
     }
   }
   if (opaque === 0) return null;
+  const plainCount = opaque - vivid;
+  if (dark && plainCount > 0) return [Math.round(plain[0] / plainCount), Math.round(plain[1] / plainCount), Math.round(plain[2] / plainCount)];
   if (vivid < opaque * VIVID_SHARE) return [Math.round(all[0] / opaque), Math.round(all[1] / opaque), Math.round(all[2] / opaque)];
   const top = bins.reduce((best, bin) => (bin[3] > best[3] ? bin : best));
   return [Math.round(top[0] / top[3]), Math.round(top[1] / top[3]), Math.round(top[2] / top[3])];
@@ -66,7 +75,7 @@ export function mainColor(rgba: Pixels): [number, number, number] | null {
  * dark: 黒っぽい絵として色を付けるか（服の表示と同じ判定を渡す）。絵が透明・空なら null
  */
 export function hueTrack(rgba: Pixels, dark: boolean): string[] | null {
-  const main = mainColor(rgba);
+  const main = mainColor(rgba, dark);
   if (!main) return null;
   const source = new Uint8ClampedArray([main[0], main[1], main[2], 255]);
   const out = new Uint8ClampedArray(4);
@@ -79,7 +88,14 @@ export function hueTrack(rgba: Pixels, dark: boolean): string[] | null {
 // 絵の画素を読めないとき（読み込み前・失敗）の帯: 決まった虹色
 export const RAINBOW_TRACK: string[] = ['#4aa3ff', '#7d86ff', '#a26bff', '#d463d8', '#ff5fb0', '#ff5a5a', '#ff7f48', '#ffa53a', '#ffe14a', '#a8dc5a', '#63d86b', '#35c9c9', '#4aa3ff'];
 
-/** 帯の背景（CSS）。to: 値が大きくなる向き（縦画面の帯は右、横画面の縦の帯は上） */
-export function trackCss(stops: string[], to: 'right' | 'top'): string {
-  return `linear-gradient(to ${to}, ${stops.join(', ')})`;
+/**
+ * 帯の背景（CSS）。to: 値が大きくなる向き（縦画面の帯は右、横画面の縦の帯は上）。
+ * inset: つまみの半分の大きさ（px）。つまみの中心は、帯の端から、その分だけ内側までしか動かないので、
+ * 色も同じだけ内側に置く（つまみの下の色 = 服の色）。端の外側は、端の色で埋まる
+ */
+export function trackCss(stops: string[], to: 'right' | 'top', inset = 0): string {
+  if (inset <= 0 || stops.length < 2) return `linear-gradient(to ${to}, ${stops.join(', ')})`;
+  const last = stops.length - 1;
+  const at = (i: number) => (i === 0 ? `${inset}px` : i === last ? `calc(100% - ${inset}px)` : `calc(${inset}px + (100% - ${inset * 2}px) * ${i / last})`);
+  return `linear-gradient(to ${to}, ${stops.map((color, i) => `${color} ${at(i)}`).join(', ')})`;
 }

@@ -8,7 +8,7 @@
 import { Component, Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlash } from './components';
-import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
+import type { AvatarCanvasHandle, DragPreviewHandle, PendingAdjust } from './components';
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
@@ -221,6 +221,7 @@ function App() {
     setOnHome(true);
   }, []);
   const studioOpenRef = useRef(false);
+  const commitPendingAdjustRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     studioOpenRef.current = studioOpen;
     // 閉じたら、その間に変わっていた画面の大きさに合わせ直す
@@ -232,6 +233,9 @@ function App() {
     const update = () => {
       // スタジオで文字を打っている間は、キーボードで画面が縮んでも、うしろのゲームの配置を変えない
       if (studioOpenRef.current) return;
+      // 調整画面を開いたまま画面の大きさが変わる（持ち替えなど）と、調整画面は新しい縮尺で開き直る。
+      // その前に、まだ確定していない調整を覚えておく（消さない）
+      commitPendingAdjustRef.current();
       const next = readViewport();
       // CSS変数に実際のビューポートサイズを設定
       document.documentElement.style.setProperty('--app-height', `${next.height}px`);
@@ -452,6 +456,24 @@ function App() {
       updateItemAdjustment(adjustingItemId, toDollOffsets(adjustment, unit));
     }
   }, [adjustingItemId, updateItemAdjustment, unit]);
+
+  // 調整画面の、まだ確定していない調整（調整画面が、変わるたびに知らせてくる）。値は、そのときの縮尺（unit）での px
+  const pendingAdjustRef = useRef<{ id: string | null; unit: number; pending: PendingAdjust } | null>(null);
+  const handlePendingAdjust = useCallback(
+    (pending: PendingAdjust | null) => {
+      pendingAdjustRef.current = pending ? { id: adjustingItemId, unit, pending } : null;
+    },
+    [adjustingItemId, unit],
+  );
+  // 覚えておいた調整を確定する（画面の大きさが変わる直前に呼ぶ）
+  useEffect(() => {
+    commitPendingAdjustRef.current = () => {
+      const held = pendingAdjustRef.current;
+      if (!held) return;
+      if (held.pending.doll) setDollTransform(held.pending.doll);
+      else if (held.pending.item && held.id) updateItemAdjustment(held.id, toDollOffsets(held.pending.item, held.unit));
+    };
+  });
 
   // 調整モード終了
   const handleAdjustClose = useCallback(() => {
@@ -947,10 +969,12 @@ function App() {
       {isAdjustingItem && (
         <ItemAdjustPanel
           // 縮尺が変わったら（画面の大きさが変わる持ち替えなど）、新しい縮尺で開き直す。
-          // 縦と横で正方形の一辺が同じ端末（iPad・スマホのふつうの持ち替え）では、縮尺は変わらないので、開いたまま
+          // 縦と横では、正方形の一辺がたいてい違う（縦は、下のメニューの分だけ低い）。
+          // 開き直す前に、確定していない調整は覚えておく（commitPendingAdjustRef）
           key={`${adjustingItemId ?? 'doll'}@${unit}`}
           item={adjustingItem}
           onAdjust={handleItemAdjust}
+          onPending={handlePendingAdjust}
           onClose={handleAdjustClose}
           canvasWidth={canvasSize.width}
           canvasHeight={canvasSize.height}

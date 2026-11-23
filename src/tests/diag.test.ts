@@ -148,6 +148,25 @@ describe('ほうこく（GitHub の Issue に、きろくを入れて開く URL�
     expect(body).toContain(long);
   });
 
+  it('絵文字が切れ目に来ても、こわれない（半分に切れた絵文字で、URL を作れずにアプリが止まらない）', () => {
+    const note = `${'あ'.repeat(39)}😀つづき`; // 40 文字めが絵文字
+    const { title, body } = parse(reportIssueUrl(report, note, '0.35.1'));
+    expect(title).toBe(`[きろく] v0.35.1 ${'あ'.repeat(39)}😀…`);
+    expect(body).toContain(note);
+    // きろくの行が、絵文字の途中で切れていても（前の版の行・300 字で切った行）
+    const broken = `${report}\n9.9 warn こわれた\ud83d`;
+    expect(() => reportIssueUrl(broken, '', '0.35.1')).not.toThrow();
+    expect(parse(reportIssueUrl(broken, '', '0.35.1')).body).toContain('9.9 warn こわれた');
+  });
+
+  it('きろくの行は、絵文字の途中では切らない', () => {
+    const diag = createDiag({ storage: memoryStorage(), now: () => 0 });
+    diag.note('warn', `${'x'.repeat(290)}😀😀`); // 「0.0 warn 」+ 290 字 = 299 字。300 字めが、絵文字の前半
+    const line = diag.lines()[0];
+    expect(() => encodeURIComponent(line)).not.toThrow();
+    expect(line.length).toBeLessThanOrEqual(300);
+  });
+
   it('URL が長くなりすぎないように、きろくの古い行から省く（はじめの 4 行と、最後の行は残す）', () => {
     const many = [...report.split('\n').slice(0, 4), '--- 今回 ---', ...Array.from({ length: 300 }, (_, i) => `${i}.0 warn 服画像の読み込みに失敗 ${i}`), '999.0 gl lost'].join('\n');
     const url = reportIssueUrl(many, '', '0.35.1');

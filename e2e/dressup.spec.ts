@@ -1243,6 +1243,38 @@ test('調整中の服の枠は、手前の服より上に出る。服を動か�
   await same(2);
 });
 
+test('調整画面を開いたまま持ち替えても、確定していない調整（位置・大きさ・色）は消えない', async ({ page }) => {
+  // 縦と横で、ドールの場所（正方形）の大きさが違う（820×1180 は 776、1180×820 は 820）ので、調整画面は開き直る。
+  // 開き直す前に、いまの調整を覚えておく
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('sticker-frame')).toBeVisible();
+  const start = centerOf((await page.getByTestId('sticker-frame').boundingBox())!);
+  // 右へ 90px 動かし、色を 120 に（✓ は押さない）
+  await page.mouse.move(DOLL_X, TOP_Y);
+  await page.mouse.down();
+  await page.mouse.move(DOLL_X + 90, TOP_Y, { steps: 5 });
+  await page.mouse.up();
+  await page.locator('.hue-slider-vertical').fill('120');
+  await expect.poll(async () => Math.round(centerOf((await page.getByTestId('sticker-frame').boundingBox())!).x - start.x)).toBe(90);
+  // 縦に持ち替える
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
+  await expect(page.getByTestId('sticker-frame')).toBeVisible();
+  // ドールに対して同じ位置: ずれは、縮尺の比（776 ÷ 820）で縮む = 約 85px。色も残る
+  const k = 776 / 820;
+  const moved = centerOf((await page.getByTestId('sticker-frame').boundingBox())!);
+  expect(Math.abs(moved.x - (410 + 90 * k))).toBeLessThanOrEqual(2);
+  await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '120');
+  await expect(page.locator('.hue-slider-vertical')).toHaveValue('120');
+  // 横に戻しても、同じ
+  await page.setViewportSize({ width: VIEW_W, height: VIEW_H });
+  await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'landscape');
+  await expect.poll(async () => Math.round(centerOf((await page.getByTestId('sticker-frame').boundingBox())!).x - start.x)).toBe(90);
+  await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '120');
+});
+
 test('角のつまみは、枠の外側にある（服に重ねない）。スマホは 34px、ほかは 40px', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');

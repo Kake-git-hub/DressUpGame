@@ -23,6 +23,11 @@ const FRAME_Z = 190;
 // 角のつまみを、枠の角から外へ出す量（つまみの大きさに対する割合。縦横それぞれ）
 const HANDLE_OUT = 0.26;
 
+export interface PendingAdjust {
+  item?: ItemAdjustment; // 服の調整（キャンバスの px）
+  doll?: DollTransform; // ドールの調整
+}
+
 interface ItemAdjustPanelProps {
   item: EquippedItem | null;  // nullの場合はドール調整モード
   // 着ている服（重ね順に下から）。重なりの前後と、調整する服の切り替えに使う
@@ -33,6 +38,9 @@ interface ItemAdjustPanelProps {
   // 縦画面では、一覧・色・ボタンを画面の下に置き、一覧は横並び（左が手前）になる
   orientation?: 'landscape' | 'portrait';
   onAdjust: (adjustment: ItemAdjustment) => void;
+  // まだ確定していない、いまの調整（変わるたびに知らせる。閉じる・開き直すときは null）。
+  // 画面の大きさが変わって調整画面を開き直す前に、親が覚えておくのに使う
+  onPending?: (pending: PendingAdjust | null) => void;
   onClose: () => void;
   canvasWidth: number;
   canvasHeight: number;
@@ -69,6 +77,7 @@ function getAngle(touch1: TouchPoint, touch2: TouchPoint): number {
 export function ItemAdjustPanel({
   item,
   onAdjust,
+  onPending,
   onClose,
   canvasWidth,
   canvasHeight,
@@ -202,13 +211,24 @@ export function ItemAdjustPanel({
 
   // onAdjustをrefで保持（依存配列から除外するため）
   const onAdjustRef = useRef(onAdjust);
+  const onPendingRef = useRef(onPending);
   const onDollTransformChangeRef = useRef(onDollTransformChange);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onAdjustRef.current = onAdjust;
+    onPendingRef.current = onPending;
     onDollTransformChangeRef.current = onDollTransformChange;
     onCloseRef.current = onClose;
   });
+  // まだ確定していない調整を、変わるたびに親に知らせる（閉じるときは null）
+  useEffect(() => {
+    onPendingRef.current?.(
+      isDollMode
+        ? { doll: { x: dollX, y: dollY, scale: dollScale } }
+        : { item: { adjustOffsetX: offsetX, adjustOffsetY: offsetY, adjustScale: scale, adjustRotation: rotation, layerAdjust, colorHue } },
+    );
+  }, [isDollMode, dollX, dollY, dollScale, offsetX, offsetY, scale, rotation, layerAdjust, colorHue]);
+  useEffect(() => () => onPendingRef.current?.(null), []);
 
   // アイテム調整値は「完了」ボタンで親に反映（リアルタイム反映を廃止し高速化）
 
@@ -278,11 +298,10 @@ export function ItemAdjustPanel({
   // 色のスライダーの帯: その服が実際になる色（まん中 = 元の絵の色）。元の絵の画素は、調整中の服のプレビューが読んだもの。
   // 黒っぽい絵かどうかは、服の表示と同じ判定。画素を読めるまで・読めないときは、決まった虹色
   const [itemPixels, setItemPixels] = useState<Uint8ClampedArray | null>(null);
-  const trackStops = useMemo(() => {
-    if (!item || !itemPixels) return null;
-    return hueTrack(itemPixels, pairDark ?? darkById[item.id] ?? false);
-  }, [item, itemPixels, pairDark, darkById]);
-  const hueTrackStyle = { background: trackCss(trackStops ?? RAINBOW_TRACK, orientation === 'portrait' ? 'right' : 'top') };
+  const trackDark = pairDark ?? (item ? darkById[item.id] : undefined) ?? false;
+  const trackStops = useMemo(() => (itemPixels ? hueTrack(itemPixels, trackDark) : null), [itemPixels, trackDark]);
+  // つまみの半分（縦は 44px の半分、横は 32px の半分）だけ、色を内側に置く
+  const hueTrackStyle = { background: orientation === 'portrait' ? trackCss(trackStops ?? RAINBOW_TRACK, 'right', 22) : trackCss(trackStops ?? RAINBOW_TRACK, 'top', 16) };
 
   // 重なりの前後: 着ている服（調整中の服は、調整中の値）とドールを、下から並べた一覧の中で動かす。
   // ドールより下へ動かすと、ドールの後ろに回る

@@ -22,6 +22,25 @@ export interface Diag {
   install: (console: ConsoleLike, target: EventTargetLike) => void;
 }
 
+// 文字の並びとして正しくする: 片方だけ残った絵文字の半分（サロゲート）を取り除く。
+// 残っていると、URL に直すとき（encodeURIComponent）に例外になる
+function wellFormed(text: string): string {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += text[i] + text[i + 1];
+        i++;
+      }
+    } else if (code < 0xdc00 || code > 0xdfff) {
+      out += text[i];
+    }
+  }
+  return out;
+}
+
 function textOf(part: unknown): string {
   if (part instanceof Error) return `${part.name}: ${part.message}`;
   if (typeof part === 'string') return part;
@@ -70,7 +89,7 @@ export function createDiag(options: { storage?: Store | null; now?: () => number
   const note = (kind: string, ...parts: unknown[]) => {
     try {
       const seconds = ((now() - started) / 1000).toFixed(1);
-      current.push([seconds, kind, ...parts.map(textOf)].join(' ').slice(0, MAX_LENGTH));
+      current.push(wellFormed([seconds, kind, ...parts.map(textOf)].join(' ').slice(0, MAX_LENGTH)));
       if (current.length > max) current.splice(0, current.length - max);
       save();
     } catch {
@@ -146,10 +165,11 @@ const REPORT_HEAD_LINES = 4; // 版・端末・画面・描画の状態
 const TITLE_NOTE_MAX = 40;
 
 export function reportIssueUrl(report: string, note: string, version: string, maxLength = REPORT_URL_MAX): string {
-  const said = note.trim();
-  const short = said.length > TITLE_NOTE_MAX ? `${said.slice(0, TITLE_NOTE_MAX)}…` : said;
+  const said = wellFormed(note.trim());
+  const letters = Array.from(said); // 絵文字を 1 文字と数える（途中で切らない）
+  const short = letters.length > TITLE_NOTE_MAX ? `${letters.slice(0, TITLE_NOTE_MAX).join('')}…` : said;
   const title = `[きろく] v${version} ${short || 'ほうこく'}`;
-  const lines = report.split('\n');
+  const lines = wellFormed(report).split('\n');
   const head = lines.slice(0, REPORT_HEAD_LINES);
   const rest = lines.slice(REPORT_HEAD_LINES);
   const build = (dropped: number) => {
