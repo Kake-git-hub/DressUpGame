@@ -5,7 +5,7 @@
  * だから、準備（口・client_id・端末が空か）は、欄が出たときに済ませておき、onClick では、何も待たずに loginWithPopup を呼ぶ。
  * 文は、設計書 7.1・7.2・7.4 のとおり（大人向け）。メールアドレスは、きろく・console には出さない（画面にだけ出す）。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { deviceEmpty, forgetAccount, LOGIN_MESSAGES, NOTICE_KEY } from '../cloud/account';
 import type { AccountInfo, LoginResult } from '../cloud/account';
 import type { LoginIntent } from '../cloud/googleRedirect';
@@ -46,7 +46,7 @@ export function Account({ session, library, reload = () => window.location.reloa
   const { account } = session.backend;
   const [info, setInfo] = useState<AccountInfo | null>(null); // null = まだ準備中
   const [unavailable, setUnavailable] = useState(false);
-  const [empty, setEmpty] = useState<boolean | null>(null);
+  const [checked, setChecked] = useState<{ stamp: string; empty: boolean } | null>(null); // 「空か」を聞いた結果と、聞いたときの状態
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -54,13 +54,11 @@ export function Account({ session, library, reload = () => window.location.reloa
 
   useEffect(() => {
     mounted.current = true;
-    // 準備: 口（Firebase の読み込み・いまの利用者）・方法 2 の client_id・端末が空か。押す前に済ませる
+    // 準備: 口（Firebase の読み込み・いまの利用者）・方法 2 の client_id。押す前に済ませる
     void (async () => {
       try {
-        const [now, , isEmpty] = await Promise.all([account.prepare(), account.canRedirect().catch(() => false), deviceEmpty(session.backend)]);
-        if (!mounted.current) return;
-        setEmpty(isEmpty);
-        setInfo(now);
+        const [now] = await Promise.all([account.prepare(), account.canRedirect().catch(() => false)]);
+        if (mounted.current) setInfo(now);
       } catch {
         if (mounted.current) setUnavailable(true);
       }
@@ -68,7 +66,22 @@ export function Account({ session, library, reload = () => window.location.reloa
     return () => {
       mounted.current = false;
     };
-  }, [account, session]);
+  }, [account]);
+
+  // 端末が空か。欄を出している間に変わることがある（チケットが届いた・注文した）ので、つなぎ役が知らせるたびに、聞き直す。
+  // 聞き直している間は、ボタンを押せない（古い「空」のまま「入る」と、届いたチケットや服を置き去りにする）
+  const live = useSyncExternalStore(session.subscribe, session.getState);
+  const stamp = `${live.user?.userCode}|${live.user?.tickets}|${live.user?.admin}|${live.jobs.length}`;
+  useEffect(() => {
+    let alive = true;
+    void deviceEmpty(session.backend).then((isEmpty) => {
+      if (alive) setChecked({ stamp, empty: isEmpty });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [session, stamp]);
+  const empty = checked?.stamp === stamp ? checked.empty : null; // 状態が変わったあと、聞き直しが済むまでは null
 
   const ready = info !== null && empty !== null;
   const intent: LoginIntent = empty ? 'signin' : 'link';

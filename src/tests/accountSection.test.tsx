@@ -36,7 +36,9 @@ interface Setup {
 }
 
 function setup(options: Setup = {}) {
-  const user: StudioUser = { userCode: 'AAAA', tickets: options.tickets ?? 0, admin: options.admin ?? false };
+  let user: StudioUser = { userCode: 'AAAA', tickets: options.tickets ?? 0, admin: options.admin ?? false };
+  let state = { user, jobs: [] as unknown[] };
+  const listeners = new Set<() => void>();
   let info = options.info ?? GUEST;
   const account = {
     prepare: vi.fn(options.prepare ?? (async () => info)),
@@ -52,9 +54,22 @@ function setup(options: Setup = {}) {
     listMyItems: async () => Array.from({ length: options.items ?? 0 }, (_, i) => ({ id: `s${i}` })),
     openJobs: async () => Array.from({ length: options.jobs ?? 0 }, (_, i) => ({ id: `j${i}` })),
   };
-  const session = { backend, getState: () => ({ user }) } as unknown as CloudSession;
+  const session = {
+    backend,
+    getState: () => state,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as CloudSession;
   render(<Account session={session} library={library} reload={reload} />);
-  return { account, setInfo: (next: AccountInfo) => (info = next) };
+  // つなぎ役が、チケットの数が変わったと知らせる（作者がチケットを配った、など）
+  const setTickets = (tickets: number) => {
+    user = { ...user, tickets };
+    state = { ...state, user };
+    act(() => listeners.forEach((listener) => listener()));
+  };
+  return { account, setInfo: (next: AccountInfo) => (info = next), setTickets };
 }
 
 const popupButton = () => screen.getByTestId('account-login-popup') as HTMLButtonElement;
@@ -79,6 +94,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('「アカウント」の欄', () => {
+  it('欄を出したあとで、端末が空でなくなったら（チケットが届いた）、「入る」ではなく「結び付ける」にする（チケットを置き去りにしない）', async () => {
+    const { account, setTickets } = setup({ tickets: 0 });
+    await ready();
+    setTickets(3);
+    await ready();
+    fireEvent.click(popupButton());
+    expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+  });
+
   it('見出しと説明、ボタンの文、注意書き', async () => {
     setup();
     await ready();
