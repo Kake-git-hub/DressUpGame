@@ -2,20 +2,16 @@
  * E2Eテスト: クローゼット（自分の服の一覧と、名前・既定の色・並び・消す）。裏側は、端末の中だけで動く偽物
  */
 import { test, expect, type Page } from '@playwright/test';
-import { DOLL_X, FIRST, FIRST_Y, expectPixel, fakeState, near, openHome, openStudio, order, pixel, play, wear } from './helpers';
+import { DOLL_X, dismissReveal, FIRST, FIRST_Y, expectPixel, fakeState, near, openHome, openStudio, order, pixel, play, wear } from './helpers';
 
 const items = (page: Page) => page.getByTestId('closet-item');
-async function closeReveal(page: Page) {
-  const close = page.getByTestId('reveal-close');
-  if (await close.count()) await close.click();
-}
 // 「つくる」で n 点作って、できあがるまで待ち、ホームにもどる
 async function makeItems(page: Page, themes: string[]) {
   await openStudio(page);
   for (const theme of themes) {
     await order(page, { label: 'トップス' }, theme);
     await expect(page.getByTestId('studio-job')).toHaveCount(0, { timeout: 15_000 });
-    await closeReveal(page);
+    await dismissReveal(page);
   }
   await page.getByTestId('studio-close').click();
   await expect(page.getByTestId('home-screen')).toBeVisible();
@@ -39,7 +35,7 @@ const thumbColor = (page: Page, alt: string) =>
   }, alt);
 
 test('まだ服が無いとき: そう出る。作ると、読み込み直しても（閉じたつもり）、クローゼットに入っている。NEW は、押すと消える', async ({ page }) => {
-  await openHome(page, { delayMs: 1500 });
+  await openHome(page, { delayMs: 6000 });
   await openCloset(page);
   await expect(page.getByTestId('closet-empty')).toContainText('まだ ふくが ありません');
   await page.getByTestId('closet-close').click();
@@ -49,9 +45,10 @@ test('まだ服が無いとき: そう出る。作ると、読み込み直して
   await page.reload();
   await expect(page.getByTestId('home-screen')).toBeVisible();
   await openCloset(page);
-  // 作りかけが見える → できたら、一覧に入る（NEW の印つき）
-  await expect(items(page)).toHaveCount(1, { timeout: 20_000 });
-  await closeReveal(page);
+  // 作りかけが見える → できたら、届いた演出が出て、一覧に入る（NEW の印つき）
+  await expect(page.getByTestId('closet-making')).toContainText('トップス', { timeout: 20_000 });
+  await dismissReveal(page);
+  await expect(items(page)).toHaveCount(1);
   await expect(page.getByTestId('closet-making')).toHaveCount(0);
   await expect(items(page).first()).toContainText('うみのトップス');
   await expect(page.getByTestId('closet-new')).toHaveCount(1);

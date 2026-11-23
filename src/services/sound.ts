@@ -63,3 +63,22 @@ export function playDressUpSound(): void {
     // 音が出せない環境では何もしない
   }
 }
+
+// 服が届いたときの音: とびらが開いて、明るい和音が広がる
+export function playArriveSound(): void {
+  const ctx = audio();
+  if (!ctx) return;
+  try {
+    if (ctx.state === 'suspended') void ctx.resume();
+    const now = ctx.currentTime + 0.3; // とびらが開きはじめてから
+    const master = ctx.createGain();
+    master.gain.value = 0.16;
+    master.connect(ctx.destination);
+    // ソ・ド・ミ・ソ（上がっていく）のあと、高いドを長く
+    [784.0, 1046.5, 1318.5, 1568.0].forEach((f, i) => bell(ctx, master, f, now + i * 0.11, 0.7, 0.55));
+    bell(ctx, master, 2093.0, now + 0.5, 1.2, 0.5);
+    [2637.0, 3136.0, 3520.0].forEach((f, i) => bell(ctx, master, f, now + 0.62 + i * 0.07, 0.5, 0.2));
+  } catch {
+    // 音が出せない環境では何もしない
+  }
+}

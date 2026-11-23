@@ -142,8 +142,11 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await expect(page.getByTestId('studio-job')).toHaveCount(0, { timeout: 15_000 });
     // できた服は、絵ごと端末に取り込まれる
     await expect.poll(() => fake.calls.filter((c) => c.op === 'itemFiles').length).toBe(1);
-    const reveal = page.getByTestId('reveal-close');
-    if (await reveal.count()) await reveal.click();
+    // 届いた演出が出る。閉じると、サーバーに「見た」の印を付ける
+    await expect(page.getByTestId('reveal')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('reveal-name')).toHaveText('うみのトップス');
+    await page.getByTestId('reveal-close').click();
+    await expect.poll(() => fake.calls.some((c) => c.op === 'ack')).toBe(true);
 
     // 開き直す: ログインはやり直さない（同じ利用者）。服は、端末の控えから出る（絵を取り直さない）
     const before = fake.calls.length;

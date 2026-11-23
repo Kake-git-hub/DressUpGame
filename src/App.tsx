@@ -73,6 +73,8 @@ cleanupLegacyData();
 const STUDIO_MODE = readStudioMode(window.location.search);
 const StudioRoot = lazy(() => import('./appStudio'));
 const ClosetRoot = lazy(() => import('./closet'));
+// 服が届いた演出（届いたときに読み込む）
+const RevealRoot = lazy(() => import('./reveal'));
 // ホーム画面（あそぶ・つくる・クローゼット・ともだちにおしえる）。だれにでも、開いたときに出る
 const START_ON_HOME = startsOnHome(window.location.search);
 const HomeScreen = lazy(() => import('./home/HomeScreen'));
@@ -589,6 +591,83 @@ function App() {
     </div>
   );
 
+  // 服が届いた演出: 届いた仕事（結果を、まだ見ていない）が、どの画面の上にも出る。1 つずつ、古い順に。
+  // 画面に指が触れている間（服をドラッグしている・調整している）は出さず、離れた直後に出す
+  const [revealId, setRevealId] = useState<string | null>(null);
+  const touches = useRef(0);
+  useEffect(() => {
+    if (!session) return;
+    const check = () => {
+      const arrivals = session.getState().arrivals;
+      // 出している演出は、その仕事を見るまで、そのまま。出していなければ、指が離れているときに、次の 1 つを出す
+      setRevealId((current) => (current && arrivals.some((job) => job.id === current) ? current : touches.current === 0 ? (arrivals[0]?.id ?? null) : null));
+    };
+    const down = () => {
+      touches.current++;
+    };
+    const up = () => {
+      touches.current = Math.max(0, touches.current - 1);
+      // 離した操作（服を着せる、など）が済んでから
+      setTimeout(check, 0);
+    };
+    const unsubscribe = session.subscribe(check);
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    check();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    };
+  }, [session]);
+  const revealJob = revealId ? (cloud?.arrivals.find((job) => job.id === revealId) ?? null) : null;
+  // 届いた服（そのドールの、メニューに入っている服）。重なりの小さい順（着せる順）
+  const arrivedParts = useCallback(
+    (dollId: string, itemIds: string[]) =>
+      itemIds
+        .flatMap((id) => allClothing.find((item) => item.id === id && item.dollId === dollId) ?? [])
+        .sort((a, b) => (a.layerOrder ?? a.baseZIndex ?? 0) - (b.layerOrder ?? b.baseZIndex ?? 0)),
+    [allClothing],
+  );
+  const closeReveal = () => {
+    if (revealJob && session) void session.ack(revealJob.id);
+  };
+  const revealLayer = revealJob && session && (
+    <Suspense fallback={null}>
+      <RevealRoot
+        key={revealJob.id}
+        job={revealJob}
+        library={library}
+        dolls={allDolls}
+        categoriesByDoll={categoriesByDoll}
+        storeFailed={cloud?.storeFailed ?? false}
+        // 素材の読み込みが終わっていて、そのドールがゲームに出ていて、服がメニューに入っているときだけ
+        canTryOn={(dollId, itemIds) => loadState === 'ready' && allDolls.some((doll) => doll.id === dollId) && arrivedParts(dollId, itemIds).length === itemIds.length}
+        onTryOn={(dollId, itemIds) => {
+          const parts = arrivedParts(dollId, itemIds);
+          closeReveal();
+          if (parts.length === 0) return;
+          // ドールを替える（着ていた服は脱げる）→ 届いた服を着せる（セットは、全部）→ ゲームの画面へ
+          if (currentDoll?.id !== dollId) handleDollChange(dollId);
+          if (parts.length > 1) handleSetDrop(parts);
+          else handleItemDrop(parts[0]);
+          setStudioOpen(false);
+          setClosetOpen(false);
+          setOnHome(false);
+        }}
+        onOpenCloset={() => {
+          closeReveal();
+          setStudioOpen(false);
+          setOnHome(true);
+          setClosetOpen(true);
+        }}
+        onClose={closeReveal}
+      />
+    </Suspense>
+  );
+
   // クローゼット（ホームから開く。ホームの上に重ねる）
   const closetLayer = closetOpen && STUDIO_MODE && (
     <StudioBoundary onClose={() => setClosetOpen(false)}>
@@ -632,6 +711,7 @@ function App() {
           />
         </Suspense>
         {closetLayer}
+        {revealLayer}
       </div>
     );
   }
@@ -650,6 +730,7 @@ function App() {
             </>
           )}
         </div>
+        {revealLayer}
       </div>
     );
   }
@@ -829,6 +910,8 @@ function App() {
           </Suspense>
         </StudioBoundary>
       )}
+
+      {revealLayer}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />

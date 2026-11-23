@@ -1,0 +1,198 @@
+/* 服が届いた演出（画面いっぱい。つくる・クローゼットの上、注文の演出の下） */
+.reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 1150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--top-inset, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  box-sizing: border-box;
+  /* 後ろの画面の文字が透けないよう、不透明にする */
+  background: radial-gradient(circle at 50% 40%, #fffadc 0%, #ffe4f0 55%, #e2d6ff 100%);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  font-family: 'Hiragino Maru Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  animation: reveal-fade 0.25s ease-out both;
+}
+.reveal-card {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  color: #4a4050;
+}
+.reveal-title {
+  margin: 0;
+  font-size: clamp(20px, 5.2vmin, 30px);
+  color: #ff5fa2;
+  letter-spacing: 0.04em;
+  animation: reveal-pop 0.5s 0.9s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.reveal-title.sorry {
+  color: #6d6275;
+  animation: none;
+}
+/* クローゼット: 中に服、手前に左右のとびら */
+.reveal-closet {
+  position: relative;
+  padding: 16px 16px 12px;
+  box-sizing: border-box;
+  background: #fffaf2;
+  border: 6px solid #c79a6b;
+  border-radius: 20px 20px 10px 10px;
+  box-shadow: 0 8px 0 #a97d50, 0 14px 24px rgba(120, 80, 40, 0.25);
+  overflow: hidden;
+}
+.reveal-inside {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  animation: reveal-rise 0.7s 0.85s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+.reveal-inside .studio-stage {
+  background: transparent;
+}
+.reveal-light {
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, rgba(255, 236, 150, 0.55) 0 8%, transparent 8% 16%, rgba(255, 236, 150, 0.55) 16% 24%, transparent 24% 32%, rgba(255, 236, 150, 0.55) 32% 40%, transparent 40% 48%, rgba(255, 236, 150, 0.55) 48% 56%, transparent 56% 64%, rgba(255, 236, 150, 0.55) 64% 72%, transparent 72% 80%, rgba(255, 236, 150, 0.55) 80% 88%, transparent 88% 100%);
+  opacity: 0;
+  animation: reveal-shine 0.6s 0.8s ease-out forwards, reveal-turn 14s 0.8s linear infinite;
+}
+.reveal-door {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: linear-gradient(180deg, #e8c49a 0%, #d6a878 100%);
+  border: 3px solid #b98958;
+  box-sizing: border-box;
+}
+.reveal-door::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background: #fff3c4;
+  border: 2px solid #b98958;
+  border-radius: 50%;
+}
+.reveal-door.left {
+  left: 0;
+  transform-origin: left center;
+  animation: reveal-open-left 0.9s 0.25s cubic-bezier(0.6, 0, 0.3, 1) forwards;
+}
+.reveal-door.left::after {
+  right: 8px;
+}
+.reveal-door.right {
+  right: 0;
+  transform-origin: right center;
+  animation: reveal-open-right 0.9s 0.25s cubic-bezier(0.6, 0, 0.3, 1) forwards;
+}
+.reveal-door.right::after {
+  left: 8px;
+}
+.reveal-clerk {
+  position: absolute;
+  right: -6px;
+  bottom: 0;
+  height: 46%;
+  width: auto;
+  pointer-events: none;
+  animation: reveal-rise 0.6s 1.2s ease-out both;
+}
+.reveal-name {
+  margin: 0;
+  font-size: clamp(18px, 4.6vmin, 24px);
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+.reveal-failed {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 15px;
+  background: #fff8e6;
+  border: 1px solid #f2dfa8;
+  border-radius: 12px;
+}
+.reveal-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.reveal-buttons button {
+  min-height: 52px;
+  padding: 8px 20px;
+  font: inherit;
+  font-size: 18px;
+  font-weight: bold;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #d9c8f5;
+  border-radius: 999px;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.reveal-buttons button.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border-color: transparent;
+}
+.reveal-buttons button:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+@keyframes reveal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes reveal-open-left {
+  to { transform: perspective(600px) rotateY(-82deg); opacity: 0.25; }
+}
+@keyframes reveal-open-right {
+  to { transform: perspective(600px) rotateY(82deg); opacity: 0.25; }
+}
+@keyframes reveal-rise {
+  from { opacity: 0; transform: translateY(18px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes reveal-shine {
+  to { opacity: 1; }
+}
+@keyframes reveal-turn {
+  to { transform: rotate(360deg); }
+}
+@keyframes reveal-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+/* 動きを減らす設定の端末では、開いた状態から出す */
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-title,
+  .reveal-inside,
+  .reveal-clerk {
+    animation: none;
+  }
+  .reveal-door {
+    animation: none;
+    display: none;
+  }
+  .reveal-light {
+    animation: none;
+    opacity: 1;
+  }
+}

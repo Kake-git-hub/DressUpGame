@@ -91,3 +91,10 @@ export async function wear(page: Page, alt: string) {
 // 偽物の裏側の中身（端末の保存）を読む
 export const fakeState = (page: Page) =>
   page.evaluate(() => JSON.parse(localStorage.getItem('dressup_fake_backend') ?? 'null') as { user: { tickets: number }; jobs: { id: string; done: boolean }[]; items: { id: string; name: string }[]; seen: string[] } | null);
+
+// 服が届いた演出（クローゼットが開く）が出るのを待って、閉じる
+export async function dismissReveal(page: Page) {
+  await expect(page.getByTestId('reveal')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('reveal-close').click();
+  await expect(page.getByTestId('reveal')).toHaveCount(0);
+}

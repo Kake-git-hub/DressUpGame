@@ -6,15 +6,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
-import { APP, DOLL_X, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear } from './helpers';
+import { APP, DOLL_X, dismissReveal, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear } from './helpers';
 
 const jobs = (page: import('@playwright/test').Page) => page.getByTestId('studio-job');
-// 届いた知らせ（クローゼットが開く演出）が出ていたら、閉じる
-async function closeReveal(page: import('@playwright/test').Page) {
-  const close = page.getByTestId('reveal-close');
-  if (await close.count()) await close.click();
-}
-
 test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 減る）→ 作りかけ。できた服は、メニューの先頭に出て着せられる。読み込み直しても残る', async ({ page }) => {
   await openHome(page, { delayMs: 1500, planMs: 900 });
   await openStudio(page);
@@ -52,7 +46,7 @@ test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 �
 
   // できたら、作りかけから消え、自分の服になっている（「使う」は要らない）
   await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
-  await closeReveal(page);
+  await dismissReveal(page);
   await page.getByTestId('studio-close').click();
   await play(page);
   // ゲームのメニューでは、カテゴリの先頭に出る（自分の服の印つき）。ドラッグで着せられる
@@ -113,7 +107,7 @@ test('セット: 入れるものを選ぶと、その数だけチケットを使
   await page.getByTestId('order-ok').click();
   await expect(jobs(page)).toContainText('セット「うみのセット」');
   await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
-  await closeReveal(page);
+  await dismissReveal(page);
   await page.getByTestId('studio-close').click();
   await play(page);
   // メニューの「セット」の先頭に、自分のセットが出る。ドラッグすると、2 点とも着る
@@ -143,8 +137,8 @@ test('チケットが足りないときは作れず、理由が出る。でき�
   expect((await fakeState(page))!.items).toEqual([]);
 });
 
-test('作っている間に、読み込み直しても（閉じたつもり）、続きが見られる。閉じていた間に、できあがっている', async ({ page }) => {
-  await openHome(page, { delayMs: 2500 });
+test('作っている間に、読み込み直しても（閉じたつもり）、続きが見られる。閉じていた間に、できあがっていて、次に開くと届く', async ({ page }) => {
+  await openHome(page, { delayMs: 8000 });
   await openStudio(page);
   await order(page, { label: 'トップス' });
   await expect(jobs(page)).toHaveCount(1);
@@ -157,9 +151,11 @@ test('作っている間に、読み込み直しても（閉じたつもり）�
   await expect(page.getByTestId('studio-job-notice')).toContainText('作っています');
   // アプリを開かないまま、時間がたつ
   await page.goto('about:blank');
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(9000);
   await page.goto(`${APP}&home=0`);
   await gameReady(page);
+  // 次に開いたとき、届いた演出が出る。服は、もうメニューに入っている
+  await dismissReveal(page);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
   await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible({ timeout: 20_000 });
 });
@@ -214,7 +210,7 @@ test('自分の服は、オフラインで開き直しても、メニューに�
   await openStudio(page);
   await order(page, { label: 'トップス' });
   await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
-  await closeReveal(page);
+  await dismissReveal(page);
   await page.getByTestId('studio-close').click();
   await play(page);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
@@ -293,7 +289,7 @@ test('前に「つくる」を使った端末は、URL に何も付けなくて�
   // ゲームを直接開く（ホームも、つくるも開かない）: 裏でつないで、届いた服がメニューに入る
   await page.goto(`${APP}&home=0`);
   await gameReady(page);
-  await closeReveal(page);
+  await dismissReveal(page);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
   await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible({ timeout: 20_000 });
 });
