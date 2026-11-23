@@ -13,20 +13,11 @@ const FUNCTIONS = 'https://asia-northeast1-dressup-game-89f6e.cloudfunctions.net
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
 const COLOR = { r: 224, g: 64, b: 160 };
 
-const KANJI: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-function answerOf(question: string): number {
-  const m = /^(十)?([一二三四五六七八九])?\s*かける\s*([二三四五六七八九])/.exec(question.trim());
-  if (!m) throw new Error(`問いを読めません: ${question}`);
-  return ((m[1] ? 10 : 0) + (m[2] ? KANJI[m[2]] : 0)) * KANJI[m[3]];
-}
 async function openStudio(page: Page) {
   await page.goto(REAL);
-  await expect(page.getByTestId('studio-button')).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId('studio-button').click();
-  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
-  await page.getByTestId('adult-18').check();
-  await page.getByTestId('adult-open').click();
-  await expect(page.getByTestId('app-studio')).toBeVisible();
+  await expect(page.getByTestId('home-create')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('home-create').click();
+  await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
 }
 
 const b64url = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -39,33 +30,41 @@ function idToken(uid: string): string {
 interface Fake {
   calls: { op: string; auth: string | undefined }[];
   signUps: number;
-  runs: string[];
   finish(): void;
 }
 /**
- * Firebase の偽の返事を用意する。functions: 'ok' = 関数が動く、'missing' = 関数が無いと読める返事（404）、'down' = 届かない。
+ * Firebase の偽の返事を用意する。functions: 'ok' = 関数が動く、'old' = 前の版のサーバー（列で進めない）、
+ * 'missing' = 関数が無いと読める返事（404）、'down' = 届かない。
  * 本物では、関数がまだ載っていないときの返事は、ブラウザからは読めない見込み（ほかのサイトから読んでよいという印が付かない）。
  * そのときアプリからは 'down' と同じに見える（この道具では、読めない返事をまねできないので、'down' で確かめる）。
  */
-async function fakeFirebase(page: Page, functions: 'ok' | 'missing' | 'down' = 'ok'): Promise<Fake> {
-  const png = (await sharp({ create: { width: 240, height: 200, channels: 4, background: { ...COLOR, alpha: 1 } } }).png().toBuffer()).toString('base64');
+async function fakeFirebase(page: Page, functions: 'ok' | 'old' | 'missing' | 'down' = 'ok'): Promise<Fake> {
   const webp = (await sharp({ create: { width: 240, height: 200, channels: 4, background: { ...COLOR, alpha: 1 } } }).webp().toBuffer()).toString('base64');
   const user = { userCode: 'ABCD2345', tickets: 2, admin: false };
+  let started = false;
   let done = false;
+  let acked = false;
   let dollId = '';
-  let kept = false;
-  const fake: Fake = { calls: [], signUps: 0, runs: [], finish: () => (done = true) };
+  const fake: Fake = { calls: [], signUps: 0, finish: () => (done = true) };
   const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify(body) });
   const job = () => ({
     id: 'j1',
     dollId,
     done,
     tickets: 1,
-    createdAt: 1,
-    stalled: false,
-    candidates: [{ index: 0, name: 'うみのトップス', categoryId: 'トップス', status: kept ? 'kept' : done ? 'done' : 'working', notes: [], ...(done ? { preview: { canvasW: 1024, canvasH: 1024, box: { x: 392, y: 300, w: 240, h: 200 } } } : {}) }],
+    createdAt: Date.now(),
+    candidates: [{ index: 0, name: 'うみのトップス', categoryId: 'トップス', status: done ? 'kept' : 'working', notes: [], ...(done ? { itemId: 'my:j1-0-1' } : {}) }],
   });
-  const item = () => ({ id: 'my:j1-0', dollId, item: { id: 'my:j1-0', name: 'うみのふく', category: 'トップス', image: { file: 'files/a.webp', canvasW: 1024, canvasH: 1024, box: { x: 392, y: 300, w: 240, h: 200 } }, thumb: 'files/t.webp' }, createdAt: 5 });
+  const item = () => ({
+    id: 'my:j1-0-1',
+    dollId,
+    item: { id: 'my:j1-0-1', name: 'うみのトップス', category: 'トップス', image: { file: 'files/a.webp', canvasW: 1024, canvasH: 1024, box: { x: 392, y: 300, w: 240, h: 200 } }, thumb: 'files/t.webp' },
+    createdAt: 5,
+    hue: 0,
+    order: 5,
+    updatedAt: 5,
+    notes: [],
+  });
   const files = { 'files/a.webp': webp, 'files/t.webp': webp };
 
   // ここで受けていない Google 宛ての通信は、外に出さない（本物の Firebase に、テストの利用者を作らない）
@@ -77,34 +76,29 @@ async function fakeFirebase(page: Page, functions: 'ok' | 'missing' | 'down' = '
   await page.route(/identitytoolkit\.googleapis\.com\/v1\/accounts:lookup/, (route) => json(route, { kind: 'identitytoolkit#GetAccountInfoResponse', users: [{ localId: 'uid1', lastLoginAt: String(Date.now()), createdAt: String(Date.now()) }] }));
   await page.route(/securetoken\.googleapis\.com\/v1\/token/, (route) => json(route, { access_token: idToken('uid1'), id_token: idToken('uid1'), expires_in: '3600', token_type: 'Bearer', refresh_token: 'refresh-1', user_id: 'uid1', project_id: '389373249780' }));
   if (functions === 'down') return fake;
-  await page.route(`${FUNCTIONS}/studioRun`, (route) => {
-    if (functions === 'missing') return json(route, { error: { status: 'NOT_FOUND', message: 'Not Found' } }, 404);
-    fake.runs.push(String((route.request().postDataJSON() as { data: { jobId: string } }).data.jobId));
-    return json(route, { result: { ok: true } });
-  });
   await page.route(`${FUNCTIONS}/studio`, (route) => {
     if (functions === 'missing') return json(route, { error: { status: 'NOT_FOUND', message: 'Not Found' } }, 404);
     const data = (route.request().postDataJSON() as { data: Record<string, unknown> }).data;
     fake.calls.push({ op: String(data.op), auth: route.request().headers()['authorization'] });
     switch (data.op) {
       case 'signIn':
-        return json(route, { result: { user } });
+        // 前の版のサーバーは、版（api）を返さない
+        return json(route, { result: functions === 'old' ? { user } : { user, api: 2 } });
       case 'jobs':
-        return json(route, { result: { jobs: [], user } });
+        return json(route, { result: { jobs: started && !acked ? [job()] : [], user } });
+      case 'ack':
+        acked = true;
+        return json(route, { result: { ok: true } });
       case 'items':
-        return json(route, { result: { items: kept ? [item()] : [] } });
+        return json(route, { result: { items: done ? [item()] : [] } });
       case 'startJob':
         if (data.theme === 'だめ') return json(route, { error: { status: 'FAILED_PRECONDITION', message: 'チケットが足りません（のこり 0 枚、必要 1 枚）', details: { code: 'no-tickets' } } }, 400);
         dollId = String(data.dollId);
+        started = true;
         user.tickets -= 1;
         return json(route, { result: { jobId: 'j1', cost: 1, user } });
       case 'job':
         return json(route, { result: { job: job(), user } });
-      case 'preview':
-        return json(route, { result: { data: png, contentType: 'image/png' } });
-      case 'keep':
-        kept = true;
-        return json(route, { result: { item: { ...item(), item: { ...item().item, name: String(data.name) } }, files, user } });
       case 'itemFiles':
         return json(route, { result: { item: item(), files } });
       default:
@@ -115,7 +109,7 @@ async function fakeFirebase(page: Page, functions: 'ok' | 'missing' | 'down' = '
 }
 
 test.describe('アプリの中のスタジオ（本物の裏側。Firebase は偽の返事）', () => {
-  test('匿名のログインをして、関数を呼ぶ: チケットの残りと利用者コードが出る。作る → できた絵 → 使う → 自分の服に入る。開き直しても、同じ利用者', async ({ page }) => {
+  test('匿名のログインをして、関数を呼ぶ: チケットの残りと利用者コードが出る。作る → チケットの演出 → できたら、自分の服に入る。開き直しても、同じ利用者', async ({ page }) => {
     const fake = await fakeFirebase(page);
     await openStudio(page);
     await expect(page.getByTestId('studio-tickets')).toContainText('のこり 2 枚');
@@ -126,38 +120,51 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     expect(fake.calls[0]).toMatchObject({ op: 'signIn' });
     expect(fake.calls[0].auth).toMatch(/^Bearer ey/);
 
-    // サーバーが理由つきで断ったら、その文章を出す
+    // サーバーが理由つきで断ったら、注文を受けられなかったと出て、その文章を出す
     await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
     await page.getByTestId('studio-theme').fill('だめ');
     await page.getByTestId('studio-make').click();
-    await expect(page.getByTestId('studio-error')).toContainText('チケットが足りません（のこり 0 枚、必要 1 枚）');
+    await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'refused', { timeout: 10_000 });
+    await expect(page.getByTestId('order-show')).toContainText('チケットは つかっていません。');
+    await expect(page.getByTestId('order-reason')).toHaveText('チケットが足りません（のこり 0 枚、必要 1 枚）');
+    await page.getByTestId('order-back').click();
+    await expect(page.getByTestId('studio-tickets')).toContainText('のこり 2 枚');
 
     await page.getByTestId('studio-theme').fill('うみ');
     await page.getByTestId('studio-make').click();
+    await expect(page.getByTestId('order-ticket-count')).toHaveText('チケット 1 まい つかいました（のこり 1 まい）', { timeout: 10_000 });
+    await page.getByTestId('order-ok').click();
     await expect(page.getByTestId('studio-tickets')).toContainText('のこり 1 枚');
-    await expect(page.getByTestId('studio-candidate')).toHaveCount(1);
-    await expect.poll(() => fake.runs).toEqual(['j1']); // 「進める」を頼んだ
-    await expect(page.getByTestId('studio-keep')).toHaveCount(0); // まだ作成中
+    await expect(page.getByTestId('studio-job')).toHaveCount(1);
+    // アプリは、「進める」を呼ばない（サーバーの列が進める）。進み具合を聞くだけ
+    await expect.poll(() => fake.calls.some((c) => c.op === 'jobs')).toBe(true);
     fake.finish();
-    await expect(page.getByTestId('studio-keep')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-preview]')).toHaveAttribute('src', /^data:image\/png;base64,/);
-    await page.getByTestId('studio-keep').click();
-    await expect(page.getByTestId('studio-my-item')).toHaveCount(1);
-    await expect(page.getByTestId('studio-my-item')).toContainText('うみのトップス');
-    await expect(page.getByTestId('studio-candidate')).toHaveCount(0);
+    await expect(page.getByTestId('studio-job')).toHaveCount(0, { timeout: 15_000 });
+    // できた服は、絵ごと端末に取り込まれる
+    await expect.poll(() => fake.calls.filter((c) => c.op === 'itemFiles').length).toBe(1);
+    const reveal = page.getByTestId('reveal-close');
+    if (await reveal.count()) await reveal.click();
 
     // 開き直す: ログインはやり直さない（同じ利用者）。服は、端末の控えから出る（絵を取り直さない）
     const before = fake.calls.length;
     await openStudio(page);
     await expect(page.getByTestId('studio-user-code')).toHaveText('ABCD2345');
-    await expect(page.getByTestId('studio-my-item')).toHaveCount(1);
     expect(fake.signUps).toBe(1);
     await expect.poll(() => fake.calls.slice(before).map((c) => c.op)).toEqual(expect.arrayContaining(['signIn', 'jobs', 'items']));
     expect(fake.calls.slice(before).map((c) => c.op)).not.toContain('itemFiles');
     // ゲームのメニューにも入っている
     await page.getByTestId('studio-close').click();
-    await page.locator('.palette-section button', { hasText: 'トップス' }).click();
+    await page.getByTestId('home-play').click();
+    await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
     await expect(page.locator('img[alt="うみのトップス"]').first()).toBeVisible();
+  });
+
+  test('前の版のサーバー（列で進めない）につないだときは、「サーバーが古い版です」と出て、作る欄は出ない', async ({ page }) => {
+    await fakeFirebase(page, 'old');
+    await openStudio(page);
+    await expect(page.getByTestId('studio-problem')).toContainText('サーバーが古い版です');
+    await expect(page.getByTestId('studio-problem')).toContainText('作者が載せ直す必要があります');
+    await expect(page.getByTestId('studio-make')).toHaveCount(0);
   });
 
   test('サーバーの関数がまだ載っていないときは、「準備ができていません」と出る（作る欄は出ない）', async ({ page }) => {
@@ -175,6 +182,7 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await expect(page.getByTestId('studio-problem')).not.toContainText('インターネット');
     await expect(page.getByTestId('studio-make')).toHaveCount(0);
     await page.getByTestId('studio-close').click();
-    await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible();
+    await page.getByTestId('home-play').click();
+    await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
   });
 });

@@ -29,7 +29,8 @@ export function toBackendError(error: unknown, online: boolean = globalThis.navi
   const e = (typeof error === 'object' && error !== null ? error : {}) as { code?: unknown; message?: unknown; details?: unknown };
   const code = typeof e.code === 'string' ? e.code : '';
   const reason = (typeof e.details === 'object' && e.details !== null ? (e.details as { code?: unknown }).code : undefined) as BackendErrorCode | undefined;
-  if (reason && CODES.includes(reason) && typeof e.message === 'string' && e.message) return new BackendError(reason, e.message);
+  // Firebase の部品は、文章の後ろに HTTP の番号（「 [400]」など）を付けることがある。画面には出さない
+  if (reason && CODES.includes(reason) && typeof e.message === 'string' && e.message) return new BackendError(reason, e.message.replace(/\s*\[\d{3}\]$/, ''));
   if (!online) return new BackendError('offline', 'インターネットにつながっていません');
   switch (code) {
     // 届かなかった・返事が来なかった（SDK は、通信の失敗も、関数が無いときの失敗も、internal として返す）

@@ -53,6 +53,32 @@
 .home-create {
   background: linear-gradient(135deg, #9370db 0%, #b89cf0 100%);
 }
+.home-closet {
+  position: relative;
+  background: linear-gradient(135deg, #3cb8a6 0%, #7fd9c4 100%);
+  /* 「クローゼット」は 6 文字。ほかのボタンと同じ大きさに収める */
+  font-size: clamp(24px, 6vmin, 44px);
+}
+/* 新しい服がある・作っている途中の印 */
+.home-dot {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ff4d6d;
+  border: 3px solid #fff;
+}
+/* ボタンが 3 つのとき、縦では、背を低くして 1 画面に収める */
+@media (orientation: portrait) {
+  .home-screen .home-main-buttons.many .home-button {
+    height: clamp(72px, 15vmin, 150px);
+  }
+  .home-screen .home-main-buttons.many {
+    gap: clamp(10px, 3vmin, 24px);
+  }
+}
 .home-share-button {
   padding: 10px 22px;
   font-size: 18px;
@@ -141,44 +167,4 @@
   border: none;
   color: white;
   background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
-}
-
-/* 右上のアカウントボタン（版数の表示の下） */
-.home-account-button {
-  position: absolute;
-  top: calc(var(--top-inset, 0px) + 18px);
-  right: 16px;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  border: 2px solid #d9c8f5;
-  border-radius: 50%;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.home-account-button svg {
-  width: 26px;
-  height: 26px;
-  fill: none;
-  stroke: #9370db;
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-.home-account-button:active {
-  transform: scale(0.92);
-}
-.home-account-title {
-  margin: 0;
-  font-size: 20px;
-  color: #9370db;
-}
-.home-account-note {
-  margin: 0;
-  font-size: 15px;
-  color: #666;
-  text-align: center;
 }

@@ -13,6 +13,12 @@ describe('Firebase の失敗を、画面に出せる形に直す', () => {
     expect(of({ code: 'functions/failed-precondition', message: '今日は上限です', details: { code: 'limit' } }).code).toBe('limit');
     expect(of({ code: 'functions/internal', message: 'サーバーで問題が起きました', details: { code: 'unknown' } })).toEqual({ code: 'unknown', message: 'サーバーで問題が起きました' });
   });
+  it('Firebase の部品が文章の後ろに付ける番号（[400] など）は、取り除く', () => {
+    expect(of({ code: 'functions/failed-precondition', message: 'チケットが足りません（のこり 0 枚、必要 1 枚） [400]', details: { code: 'no-tickets' } })).toEqual({ code: 'no-tickets', message: 'チケットが足りません（のこり 0 枚、必要 1 枚）' });
+    expect(of({ code: 'functions/internal', message: 'サーバーで問題が起きました [500]', details: { code: 'unknown' } }).message).toBe('サーバーで問題が起きました');
+    // 文章の中の [ ] は、そのまま
+    expect(of({ code: 'functions/failed-precondition', message: '[テスト] だめです', details: { code: 'refused' } }).message).toBe('[テスト] だめです');
+  });
   it('端末がオフラインなら、どの失敗でも「つながっていません」', () => {
     expect(of({ code: 'functions/not-found' }, false)).toEqual({ code: 'offline', message: 'インターネットにつながっていません' });
     expect(of({ code: 'functions/internal', message: 'internal' }, false).code).toBe('offline');

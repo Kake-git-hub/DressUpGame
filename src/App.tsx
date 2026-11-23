@@ -5,7 +5,7 @@
  * 横でも縦でも遊べる（配置は src/components/layout.ts）。
  * ドール・服・背景の画像は、別リポジトリ（DressUpGame-content）から配信されたものを読む。
  */
-import { Component, Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { Component, Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { AvatarCanvas, DressUpMenu, ItemAdjustPanel, DragPreviewLayer, EquipFlash } from './components';
 import type { AvatarCanvasHandle, DragPreviewHandle } from './components';
@@ -17,9 +17,8 @@ import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
-import type { StudioMode } from './appStudio/unlock';
-import type { CloudSession } from './cloud/session';
-import { readHomeEnabled, unlockHomeByWord } from './home/homeMode';
+import type { CloudSession, SessionState } from './cloud/session';
+import { startsOnHome } from './home/homeMode';
 import type { LoadedContent } from './content/loadContent';
 import type { ManifestCategory } from './content/manifest';
 import { loadContent, resolveContentUrl } from './content/loadContent';
@@ -69,18 +68,18 @@ function readViewport(): Viewport {
 // 旧方式（アプリ内取り込み）のデータを、状態を読む前に片付ける
 cleanupLegacyData();
 
-// アプリの中のスタジオ（服を作る画面）。作者が教えた URL を開いた端末にだけ、ボタンを出す。
+// アプリの中のスタジオ（服を作る画面）と、クローゼット。作者が教えた URL（?studio=1）を開いた端末にだけ、ホームにボタンを出す。
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
 const STUDIO_MODE = readStudioMode(window.location.search);
 const StudioRoot = lazy(() => import('./appStudio'));
-// ホーム画面（あそぶ・つくる・ともだちにおしえる）。作っている途中なので、?home=1 を開いた端末にだけ出す
-const HOME_ENABLED = readHomeEnabled(window.location.search);
+// ホーム画面（あそぶ・つくる・クローゼット・ともだちにおしえる）。だれにでも、開いたときに出る
+const START_ON_HOME = startsOnHome(window.location.search);
 const HomeScreen = lazy(() => import('./home/HomeScreen'));
-// ホームの「つくる」で開くスタジオ。「つくる」を出す端末でなければ、端末の中だけで動く確認用（お金のかかる AI は使わない）
-const HOME_STUDIO_MODE: StudioMode = STUDIO_MODE ?? 'fake';
+// 「つくる」を開くときに、保護者（大人）の確認をするか。いまは開発中なので、しない（v0.32.0 の作者の指示）。
+// 販売を始めるときに、ここを true にするかを決める（支払いの計画書）
+const ASK_ADULT = false;
 // 端末の中の「自分の服」（スタジオで作った服の控え）
 const library = openLibrary();
-const NO_CATEGORIES: ManifestCategory[] = [];
 
 // スタジオの画面を読み込めなかった（通信が切れた、など）とき、ゲームごと消えないようにする
 class StudioBoundary extends Component<{ children: ReactNode; onClose: () => void }, { failed: boolean }> {
@@ -113,6 +112,13 @@ const PREFETCH_DELAY_MS = 3000;
 const SERVICE_WORKER_WAIT_MS = 60_000;
 
 type LoadState = 'loading' | 'ready' | 'error';
+
+// つなぎ役の、いまの状態（つなぎ役がまだ無ければ null）
+const noSubscribe = () => () => undefined;
+const noState = () => null;
+function useSessionState(session: CloudSession | null): SessionState | null {
+  return useSyncExternalStore(session ? session.subscribe : noSubscribe, session ? session.getState : noState);
+}
 
 function App() {
   // キャンバスへの参照
@@ -147,18 +153,16 @@ function App() {
   );
   const canvasSize = layout.canvas;
 
-  // 服を作る画面を開いているか
+  // ホーム画面を出している / ゲームの画面
+  const [onHome, setOnHome] = useState(START_ON_HOME);
+  // 服を作る画面・クローゼットを開いているか（どちらも、ホームから開き、閉じるとホームにもどる）
   const [studioOpen, setStudioOpen] = useState(false);
-  // ホーム画面を出している / ゲームの画面。ホームの「つくる」から開いたスタジオは、閉じるとホームにもどる
-  const [onHome, setOnHome] = useState(HOME_ENABLED);
-  const [studioFromHome, setStudioFromHome] = useState(false);
+  const [closetOpen, setClosetOpen] = useState(false);
+  void closetOpen; // クローゼットの画面は、このあと足す
   const closeStudio = useCallback(() => {
     setStudioOpen(false);
-    if (studioFromHome) {
-      setStudioFromHome(false);
-      setOnHome(true);
-    }
-  }, [studioFromHome]);
+    setOnHome(true);
+  }, []);
   const studioOpenRef = useRef(false);
   useEffect(() => {
     studioOpenRef.current = studioOpen;
@@ -256,6 +260,10 @@ function App() {
       if (boot.usedBefore()) void session.connect();
     });
   }, [session, loadState]);
+
+  const cloud = useSessionState(session);
+  // ホームの「クローゼット」の ●: 新しい服がある・作っている途中
+  const closetDot = !!cloud && (cloud.newItemIds.length > 0 || cloud.jobs.some((job) => !job.done));
 
   // 配信された素材の一覧を読み込む
   useEffect(() => {
@@ -564,7 +572,7 @@ function App() {
   }, []);
 
   // 版数（右上に小さく。読み込み中・失敗の画面にも出して、どの版で止まっているかが分かるようにする）
-  // 版数を 5 回続けて押すと、あいことばを聞く（studio / fake / off）。合っていれば、読み込み直して「つくる」を出す・消す。
+  // 版数を 5 回続けて押すと、あいことばを聞く（studio / fake / off）。合っていれば、読み込み直して、ホームの「つくる」「クローゼット」を出す・消す。
   // ホーム画面のアプリは Safari と保存が別なので、URL（?studio=…）では出せないため
   const badgeTaps = useRef<number[]>([]);
   const handleBadgeTap = () => {
@@ -573,10 +581,10 @@ function App() {
     if (badgeTaps.current.length < UNLOCK_TAPS) return;
     badgeTaps.current = [];
     const word = window.prompt('あいことばを入れてください');
-    if (unlockHomeByWord(word) || unlockByWord(word)) window.location.reload();
+    if (unlockByWord(word)) window.location.reload();
   };
   const versionBadge = (
-    <div className="version-badge" onClick={handleBadgeTap}>
+    <div className={`version-badge${onHome ? ' on-home' : ''}`} onClick={handleBadgeTap}>
       v{APP_VERSION}
     </div>
   );
@@ -589,12 +597,17 @@ function App() {
         <Suspense fallback={null}>
           <HomeScreen
             onPlay={() => setOnHome(false)}
-            onCreate={() => {
-              // 開発中なので、保護者の確認はしない
-              setOnHome(false);
-              setStudioFromHome(true);
-              setStudioOpen(true);
-            }}
+            // 「つくる」「クローゼット」は、「つくる」を教えた端末にだけ出す
+            onCreate={
+              STUDIO_MODE
+                ? () => {
+                    setOnHome(false);
+                    setStudioOpen(true);
+                  }
+                : undefined
+            }
+            onCloset={STUDIO_MODE ? () => setClosetOpen(true) : undefined}
+            closetDot={closetDot}
           />
         </Suspense>
       </div>
@@ -646,20 +659,12 @@ function App() {
       {equippedItems.length > 0 ? '👗' : '📐'}
     </button>
   );
-  // 服を作る画面（教えた URL を開いた端末にだけ出る）
-  const studioButton = STUDIO_MODE && currentDoll && (
-    <button className="studio-open-button" onClick={() => setStudioOpen(true)} title="服を作る（おとなの方へ）" data-testid="studio-button">
-      ✨
-    </button>
-  );
-
-  // ホームにもどる（ホーム画面を出す端末だけ）
-  const homeButton = HOME_ENABLED && (
+  // ホームにもどる
+  const homeButton = (
     <button className="home-back-button" onClick={() => setOnHome(true)} title="ホーム" data-testid="home-back-button">
       🏠
     </button>
   );
-  const studioMode = studioFromHome ? HOME_STUDIO_MODE : STUDIO_MODE;
 
   return (
     <div className="app" data-orientation={layout.orientation}>
@@ -701,7 +706,6 @@ function App() {
           <div className="tool-buttons">
             {homeButton}
             {adjustButton}
-            {studioButton}
           </div>
         )}
 
@@ -729,11 +733,10 @@ function App() {
               onSetDrop={handleSetDrop}
             />
             {portrait && (
-              <div className={`portrait-tools${studioButton ? ' with-studio' : ''}${homeButton ? ' with-home' : ''}`} data-testid="portrait-tools">
+              <div className="portrait-tools" data-testid="portrait-tools">
                 {homeButton}
                 {adjustButton}
                 {screenshotButton}
-                {studioButton}
                 {resetButton}
               </div>
             )}
@@ -780,18 +783,27 @@ function App() {
         ))}
 
       {/* 服を作る画面（開いたときに読み込む） */}
-      {studioOpen && studioMode && currentDoll && (
+      {studioOpen && STUDIO_MODE && currentDoll && (
         <StudioBoundary onClose={closeStudio}>
           <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
-            <StudioRoot
-              mode={studioMode}
-              skipGate={studioFromHome}
-              doll={currentDoll}
-              categories={categoriesByDoll[currentDoll.id] ?? NO_CATEGORIES}
-              library={library}
-              onClose={closeStudio}
-              onLibraryChanged={refreshMyItems}
-            />
+            {session ? (
+              <StudioRoot
+                session={session}
+                dolls={allDolls}
+                categoriesByDoll={categoriesByDoll}
+                initialDollId={currentDoll.id}
+                onClose={closeStudio}
+                onOpenCloset={() => {
+                  setStudioOpen(false);
+                  setOnHome(true);
+                  setClosetOpen(true);
+                }}
+                skipGate={!ASK_ADULT}
+                demo={STUDIO_MODE === 'fake'}
+              />
+            ) : (
+              <div className="studio-loading">よみこみちゅう…</div>
+            )}
           </Suspense>
         </StudioBoundary>
       )}

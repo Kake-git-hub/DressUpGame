@@ -29,7 +29,8 @@ const GREEN: Rgba = [0, 160, 0, 255];
 const BG: Rgba = [255, 255, 128, 255];
 
 // テスト用の素材を読む起動 URL
-const APP_URL = '/DressUpGame/?content=e2e-content/';
+// ゲームの画面を直接開く（ホームを飛ばす。?home=0 は、テストと確認用）
+const APP_URL = '/DressUpGame/?content=e2e-content/&home=0';
 
 test.beforeEach(async ({ page }) => {
   page.on('dialog', (d) => d.accept());

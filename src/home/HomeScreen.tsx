@@ -1,5 +1,6 @@
 /**
- * ホーム画面: 大きな「あそぶ」「つくる」と、小さめの「ともだちにおしえる」。
+ * ホーム画面: 大きな「あそぶ」「つくる」「クローゼット」と、小さめの「ともだちにおしえる」。
+ * 「つくる」「クローゼット」は、「つくる」を教えた端末にだけ出す（onCreate・onCloset が渡されたときだけ）。
  * ゲームの最初の読み込みには入れず、ホーム画面を出す端末でだけ読み込む（QR コードの部品も一緒）。
  */
 import { useMemo, useState } from 'react';
@@ -8,16 +9,17 @@ import './home.css';
 
 export interface HomeScreenProps {
   onPlay: () => void;
-  onCreate: () => void;
+  onCreate?: () => void; // 無ければ、「つくる」を出さない
+  onCloset?: () => void; // 無ければ、「クローゼット」を出さない
+  closetDot?: boolean; // 新しい服がある・作っている途中
 }
 
 type CopyState = 'copying' | 'copied' | 'failed';
 
-export default function HomeScreen({ onPlay, onCreate }: HomeScreenProps) {
+export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = false }: HomeScreenProps) {
   const url = useMemo(() => shareUrl(window.location.origin, import.meta.env.BASE_URL), []);
   const [shareOpen, setShareOpen] = useState(false);
   const [copy, setCopy] = useState<CopyState>('copying');
-  const [accountOpen, setAccountOpen] = useState(false);
 
   // 押したらすぐコピーする（ブラウザは、押した操作の中でないとコピーさせてくれないことがある）
   const openShare = () => {
@@ -28,39 +30,26 @@ export default function HomeScreen({ onPlay, onCreate }: HomeScreenProps) {
 
   return (
     <div className="home-screen" data-testid="home-screen">
-      {/* アカウント（あとで Google などでのログインをここに置く） */}
-      <button className="home-account-button" onClick={() => setAccountOpen(true)} aria-label="アカウント" title="アカウント" data-testid="home-account">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="8" r="4" />
-          <path d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
-        </svg>
-      </button>
       <h1 className="home-title">きせかえ</h1>
-      <div className="home-main-buttons">
+      <div className={`home-main-buttons${onCreate || onCloset ? ' many' : ''}`}>
         <button className="home-button home-play" onClick={onPlay} data-testid="home-play">
           あそぶ
         </button>
-        <button className="home-button home-create" onClick={onCreate} data-testid="home-create">
-          つくる
-        </button>
+        {onCreate && (
+          <button className="home-button home-create" onClick={onCreate} data-testid="home-create">
+            つくる
+          </button>
+        )}
+        {onCloset && (
+          <button className="home-button home-closet" onClick={onCloset} data-testid="home-closet">
+            クローゼット
+            {closetDot && <span className="home-dot" data-testid="home-closet-dot" aria-label="あたらしい ふくが あります" />}
+          </button>
+        )}
       </div>
       <button className="home-share-button" onClick={openShare} data-testid="home-share">
         ともだちにおしえる
       </button>
-
-      {accountOpen && (
-        <div className="home-share-overlay" onClick={() => setAccountOpen(false)} data-testid="home-account-dialog">
-          <div className="home-share-panel" onClick={(e) => e.stopPropagation()}>
-            <h2 className="home-account-title">アカウント</h2>
-            <p className="home-account-note">Google などでのログインは、じゅんびちゅうです。</p>
-            <div className="home-share-actions">
-              <button className="primary" onClick={() => setAccountOpen(false)} data-testid="home-account-close">
-                とじる
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {shareOpen && (
         <div className="home-share-overlay" onClick={() => setShareOpen(false)} data-testid="home-share-dialog">

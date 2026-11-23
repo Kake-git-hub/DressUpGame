@@ -1,32 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readHomeEnabled, unlockHomeByWord } from '../home/homeMode';
+import { startsOnHome } from '../home/homeMode';
 import { copyText, qrSvg, shareUrl } from '../home/share';
 
-const memory = () => {
-  const map = new Map<string, string>();
-  return { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v), removeItem: (k: string) => void map.delete(k) };
-};
-
-describe('ホーム画面を出す端末かどうか', () => {
-  it('ふつうは出さない。?home=1 を 1 回開くと覚える。?home=0 で消す', () => {
-    const storage = memory();
-    expect(readHomeEnabled('', storage)).toBe(false);
-    expect(readHomeEnabled('?home=1', storage)).toBe(true);
-    expect(readHomeEnabled('?studio=1', storage)).toBe(true);
-    expect(readHomeEnabled('?home=0', storage)).toBe(false);
-    expect(readHomeEnabled('?home=yes', storage)).toBe(false);
+describe('ホーム画面から始めるか', () => {
+  it('ふつうは、ホームから。?home=0 のときだけ、すぐゲーム（テストと確認用）', () => {
+    expect(startsOnHome('')).toBe(true);
+    expect(startsOnHome('?content=e2e-content/')).toBe(true);
+    expect(startsOnHome('?home=1')).toBe(true);
+    expect(startsOnHome('?studio=fake&home=0')).toBe(false);
+    expect(startsOnHome('?home=0')).toBe(false);
   });
-  it('保存が使えない端末では、出さない（落ちない）', () => {
-    const broken = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); }, removeItem: () => {} };
-    expect(readHomeEnabled('?home=1', broken)).toBe(false);
-  });
-  it('あいことば home で出し、nohome で消す。ほかの言葉は、何もしない', () => {
-    const storage = memory();
-    expect(unlockHomeByWord('studio', storage)).toBe(false);
-    expect(unlockHomeByWord(' Home ', storage)).toBe(true);
-    expect(readHomeEnabled('', storage)).toBe(true);
-    expect(unlockHomeByWord('nohome', storage)).toBe(true);
-    expect(readHomeEnabled('', storage)).toBe(false);
+  it('覚えない: ?home=0 で開いたあと、ふつうに開けば、またホームから', () => {
+    localStorage.clear();
+    expect(startsOnHome('?home=0')).toBe(false);
+    expect(startsOnHome('')).toBe(true);
+    expect(localStorage.length).toBe(0);
   });
 });
 

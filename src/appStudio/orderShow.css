@@ -1,0 +1,256 @@
+/* 注文の演出・チケットを切る演出（画面いっぱい。後ろは押せない） */
+.order-show {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--top-inset, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #fff3e2 0%, #ffe3ef 60%, #f3ecff 100%);
+  background-size: cover;
+  background-position: center;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.order-scene {
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 20px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 28px;
+  box-shadow: 0 10px 30px rgba(120, 70, 110, 0.25);
+  text-align: center;
+}
+.order-shop-name {
+  margin: 0;
+  font-size: clamp(20px, 5vmin, 28px);
+  color: #c2568f;
+  letter-spacing: 0.08em;
+}
+.order-counter {
+  position: relative;
+  width: 100%;
+  min-height: clamp(150px, 34vmin, 240px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+}
+.order-clerk {
+  height: clamp(150px, 34vmin, 240px);
+  width: auto;
+  flex: none;
+  object-fit: contain;
+  animation: order-bob 1.6s ease-in-out infinite;
+}
+.order-clerk-plain {
+  width: clamp(90px, 20vmin, 130px);
+  height: clamp(90px, 20vmin, 130px);
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(48px, 11vmin, 72px);
+  background: #ffe9f3;
+  border-radius: 50%;
+}
+/* 伝票: 頼んだ内容が、1 行ずつ書かれていく */
+.order-slip {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  align-self: center;
+  padding: 12px 14px 14px;
+  background: #fffdf6;
+  border: 2px dashed #e6c9a8;
+  border-radius: 10px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.06);
+  text-align: left;
+  transform: rotate(-2deg);
+}
+.order-slip-head {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  color: #b0835a;
+  border-bottom: 1px solid #ecd9c2;
+}
+.order-slip-line {
+  font-size: clamp(15px, 3.6vmin, 19px);
+  font-weight: bold;
+  color: #5a4a55;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  animation: order-write 0.5s ease-out forwards;
+}
+.order-text {
+  margin: 0;
+  font-size: clamp(16px, 4vmin, 20px);
+  color: #5a4a55;
+}
+.order-warning {
+  margin: 4px 0 0;
+  padding: 8px 16px;
+  font-size: clamp(17px, 4.2vmin, 22px);
+  font-weight: bold;
+  color: #b3261e;
+  background: #fff0ee;
+  border: 2px solid #ffb4ab;
+  border-radius: 999px;
+  animation: order-pulse 1.4s ease-in-out infinite;
+}
+.order-dots::after {
+  content: '';
+  animation: order-dots 1.2s steps(4, end) infinite;
+}
+/* チケット: 左右に分かれて、切れる */
+.order-tickets {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 10px;
+}
+.order-ticket {
+  position: relative;
+  width: 64px;
+  height: 52px;
+  font-size: 44px;
+  line-height: 52px;
+}
+.order-ticket-half {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+}
+.order-ticket-half.left {
+  clip-path: inset(0 50% 0 0);
+  animation: order-cut-left 0.7s 0.45s cubic-bezier(0.3, 1.4, 0.5, 1) forwards;
+  animation-delay: inherit;
+}
+.order-ticket-half.right {
+  clip-path: inset(0 0 0 50%);
+  animation: order-cut-right 0.7s 0.45s cubic-bezier(0.3, 1.4, 0.5, 1) forwards;
+  animation-delay: inherit;
+}
+.order-ticket {
+  animation-delay: 0s;
+}
+.order-scissors {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  font-size: 34px;
+  color: #7a6a75;
+  transform: translateX(-50%) rotate(90deg);
+  animation: order-snip 0.5s ease-in-out 2;
+}
+.order-snip {
+  margin: 0;
+  font-size: clamp(24px, 6vmin, 34px);
+  font-weight: bold;
+  color: #ff69b4;
+  animation: order-pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.order-done {
+  margin: 4px 0 0;
+  font-size: clamp(20px, 5vmin, 28px);
+  font-weight: bold;
+  color: #9370db;
+}
+.order-reason {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 15px;
+  color: #b3261e;
+  background: #fff0ee;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.order-button {
+  margin-top: 10px;
+  min-width: 160px;
+  min-height: 56px;
+  padding: 8px 28px;
+  font-size: 24px;
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.order-button:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
+}
+
+@keyframes order-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes order-write {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes order-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@keyframes order-dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+@keyframes order-cut-left {
+  to { transform: translate(-9px, 4px) rotate(-12deg); }
+}
+@keyframes order-cut-right {
+  to { transform: translate(9px, 4px) rotate(12deg); }
+}
+@keyframes order-snip {
+  0%, 100% { transform: translateX(-50%) rotate(90deg) scale(1); }
+  50% { transform: translateX(-50%) rotate(90deg) scale(1.25); }
+}
+@keyframes order-pop {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+/* 動きを減らす設定の端末では、動かさずに、同じ内容を出す */
+@media (prefers-reduced-motion: reduce) {
+  .order-clerk,
+  .order-warning,
+  .order-scissors,
+  .order-snip,
+  .order-dots::after {
+    animation: none;
+  }
+  .order-slip-line {
+    animation: none;
+    opacity: 1;
+  }
+  .order-ticket-half.left {
+    animation: none;
+    transform: translate(-9px, 4px) rotate(-12deg);
+  }
+  .order-ticket-half.right {
+    animation: none;
+    transform: translate(9px, 4px) rotate(12deg);
+  }
+}

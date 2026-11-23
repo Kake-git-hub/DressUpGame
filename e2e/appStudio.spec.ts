@@ -1,294 +1,234 @@
 /**
- * E2Eテスト: アプリの中のスタジオ（裏側は、端末の中だけで動く偽物。?studio=fake）
+ * E2Eテスト: つくる（裏側は、端末の中だけで動く偽物。?studio=fake）
+ *
+ * 入口は、ホームの「つくる」。注文の演出 → チケットを切る演出 → 作りかけ → できた服は自動で自分の服（クローゼット）になる。
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { APP, DOLL_X, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear } from './helpers';
 
-const APP = '/DressUpGame/?content=e2e-content/';
-const FAKE = `${APP}&studio=fake`;
-const VIEW_W = 1180;
-const VIEW_H = 820;
-const BASE_SCALE = (VIEW_H * 0.9) / 1024;
-const DOLL_X = 160 + (VIEW_W - 160 - 60) / 2;
-const imgY = (y: number) => VIEW_H / 2 + (y - 512) * BASE_SCALE;
-// 偽物が作る絵の色（1 点目・2 点目）と、ドールのキャンバスの上の位置（中心）
-const FIRST = [224, 64, 160];
-const SECOND = [64, 160, 224];
-const FIRST_Y = imgY(400);
-const SECOND_Y = imgY(600);
-
-async function pixel(page: Page, x: number, y: number): Promise<number[]> {
-  return page.evaluate(
-    ([px, py]) => {
-      const src = document.querySelector('#avatar-canvas') as HTMLCanvasElement | null;
-      if (!src) return [0, 0, 0]; // まだ読み込み中
-      const rect = src.getBoundingClientRect();
-      const out = document.createElement('canvas');
-      out.width = 1;
-      out.height = 1;
-      const ctx = out.getContext('2d')!;
-      ctx.drawImage(src, Math.round(((px - rect.left) / rect.width) * src.width), Math.round(((py - rect.top) / rect.height) * src.height), 1, 1, 0, 0, 1, 1);
-      return Array.from(ctx.getImageData(0, 0, 1, 1).data).slice(0, 3);
-    },
-    [x, y],
-  );
-}
-const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 10);
-const expectPixel = (page: Page, x: number, y: number, color: number[]) => expect.poll(async () => near(await pixel(page, x, y), color), { timeout: 20_000 }).toBe(true);
-
-async function open(page: Page, url = FAKE, options: { delayMs?: number; failCategories?: string[]; tickets?: number } = {}) {
-  // 偽物の速さなどは、端末の保存から読む（テスト用の入口）
-  await page.addInitScript((o) => {
-    if (!localStorage.getItem('dressup_fake_options')) localStorage.setItem('dressup_fake_options', JSON.stringify(o));
-  }, { delayMs: 300, ...options });
-  await page.goto(url);
-  await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
+const jobs = (page: import('@playwright/test').Page) => page.getByTestId('studio-job');
+// 届いた知らせ（クローゼットが開く演出）が出ていたら、閉じる
+async function closeReveal(page: import('@playwright/test').Page) {
+  const close = page.getByTestId('reveal-close');
+  if (await close.count()) await close.click();
 }
 
-// 入口の問い（「十二 かける 七 は？」）を読んで、答えを返す
-const KANJI: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-function answerOf(question: string): number {
-  const m = /^(十)?([一二三四五六七八九])?\s*かける\s*([二三四五六七八九])/.exec(question.trim());
-  if (!m) throw new Error(`問いを読めません: ${question}`);
-  return ((m[1] ? 10 : 0) + (m[2] ? KANJI[m[2]] : 0)) * KANJI[m[3]];
-}
-async function passGate(page: Page) {
-  await page.getByTestId('studio-button').click();
-  await expect(page.getByTestId('adult-gate')).toBeVisible();
-  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
-  await page.getByTestId('adult-18').check();
-  await page.getByTestId('adult-open').click();
-  await expect(page.getByTestId('app-studio')).toBeVisible();
-  await expect(page.getByTestId('studio-tickets')).toContainText('枚');
-}
-async function make(page: Page, target: string, theme = 'うみ') {
-  await page.getByTestId('studio-target').selectOption(target);
-  await page.getByTestId('studio-theme').fill(theme);
-  await page.getByTestId('studio-make').click();
-}
-const candidates = (page: Page) => page.getByTestId('studio-candidate');
-
-test('「つくる」のボタンは、教えた URL を開いた端末にだけ出る（次からも出る）。?studio=0 で消える', async ({ page }) => {
-  await open(page, APP);
-  await expect(page.getByTestId('studio-button')).toHaveCount(0);
-  await open(page, FAKE);
-  await expect(page.getByTestId('studio-button')).toBeVisible();
-  await open(page, APP);
-  await expect(page.getByTestId('studio-button')).toBeVisible();
-  await open(page, `${APP}&studio=0`);
-  await expect(page.getByTestId('studio-button')).toHaveCount(0);
-});
-
-test('入口は保護者用: 問いに正しく答えて、18 歳以上に印を付けないと開かない。開くたびに、毎回たずねる', async ({ page }) => {
-  await open(page);
-  await page.getByTestId('studio-button').click();
-  const gate = page.getByTestId('adult-gate');
-  await expect(gate).toBeVisible();
-  await expect(gate).toContainText('おとなの方へ');
-  await expect(page.getByTestId('adult-open')).toBeDisabled();
-  const question = (await page.getByTestId('adult-question').textContent()) ?? '';
-  const answer = answerOf(question);
-  // 答えだけ・印だけでは開かない
-  await page.getByTestId('adult-answer').fill(String(answer));
-  await expect(page.getByTestId('adult-open')).toBeDisabled();
-  await page.getByTestId('adult-answer').fill('');
-  await page.getByTestId('adult-18').check();
-  await expect(page.getByTestId('adult-open')).toBeDisabled();
-  // まちがえると、知らせが出て、問いが替わる
-  await page.getByTestId('adult-answer').fill(String(answer + 1));
-  await page.getByTestId('adult-open').click();
-  await expect(page.getByTestId('adult-error')).toBeVisible();
-  await expect(page.getByTestId('app-studio')).toHaveCount(0);
-  await expect(page.getByTestId('adult-answer')).toHaveValue('');
-  // やめる
-  await page.getByTestId('adult-cancel').click();
-  await expect(gate).toHaveCount(0);
-  // 正しく答えると開く。閉じて開き直すと、もう一度たずねる（大人が開いたあと、子どもがそのまま開けないように）
-  await passGate(page);
-  await page.getByTestId('studio-close').click();
-  await expect(page.getByTestId('app-studio')).toHaveCount(0);
-  await page.getByTestId('studio-button').click();
-  await expect(page.getByTestId('adult-gate')).toBeVisible();
-  await expect(page.getByTestId('app-studio')).toHaveCount(0);
-});
-
-test('1 点作る: チケットが 1 枚減り、できた服を「使う」と、自分のメニューに出て着せられる。読み込み直しても残る', async ({ page }) => {
-  await open(page);
-  await passGate(page);
-  await expect(page.getByTestId('studio-tickets')).toContainText('5');
+test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 減る）→ 作りかけ。できた服は、メニューの先頭に出て着せられる。読み込み直しても残る', async ({ page }) => {
+  await openHome(page, { delayMs: 1500, planMs: 900 });
+  await openStudio(page);
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 5 枚');
   await expect(page.getByTestId('studio-user-code')).toHaveText(/[A-Z0-9]{8}/);
   // 確認用（偽物の裏側）のときは、そうと分かる知らせを出す
   await expect(page.getByTestId('studio-demo')).toContainText('確認用');
+  // 写真のボタンと、色のテーマの欄は無い
+  await expect(page.getByTestId('studio-photo-button')).toHaveCount(0);
+  await expect(page.getByTestId('studio-color-0')).toHaveCount(0);
+  // ドールが 1 体なら、ドールを選ぶ欄は出ない
+  await expect(page.getByTestId('studio-doll')).toHaveCount(0);
   await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
   await expect(page.getByTestId('studio-make')).toBeDisabled(); // テーマがまだ
   await page.getByTestId('studio-theme').fill('うみ');
   await expect(page.getByTestId('studio-make')).toContainText('チケット 1 枚');
   await page.getByTestId('studio-make').click();
-  await expect(page.getByTestId('studio-tickets')).toContainText('4');
-  await expect(candidates(page)).toHaveCount(1);
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
-  await expect(candidates(page).locator('img[data-preview]')).toBeVisible();
-  await candidates(page).getByTestId('studio-candidate-name').fill('うみのふく');
-  await candidates(page).getByTestId('studio-keep').click();
-  await expect(candidates(page)).toHaveCount(0);
-  await expect(page.getByTestId('studio-my-item')).toHaveCount(1);
-  await expect(page.getByTestId('studio-my-item')).toContainText('うみのふく');
+
+  // 注文の演出: 伝票に頼んだ内容。閉じないように促す。まだ、チケットは減っていない
+  const show = page.getByTestId('order-show');
+  await expect(show).toHaveAttribute('data-phase', 'ordering');
+  await expect(show).toContainText('この がめんを とじないでね');
+  await expect(page.getByTestId('order-slip')).toContainText('トップス ・ アニメ');
+  await expect(page.getByTestId('order-slip')).toContainText('「うみ」');
+  expect((await fakeState(page))!.user.tickets).toBe(5);
+  // チケットを切る演出: 使った枚数と、残り
+  await expect(show).toHaveAttribute('data-phase', 'ticket', { timeout: 10_000 });
+  await expect(page.getByTestId('order-ticket-count')).toHaveText('チケット 1 まい つかいました（のこり 4 まい）');
+  await expect(show).toContainText('もう とじても だいじょうぶ。');
+  await page.getByTestId('order-ok').click();
+  await expect(show).toHaveCount(0);
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 4 枚');
+  await expect(jobs(page)).toHaveCount(1);
+  await expect(page.getByTestId('studio-making')).toContainText('この画面を閉じても、アプリを閉じても、続きます');
+
+  // できたら、作りかけから消え、自分の服になっている（「使う」は要らない）
+  await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
+  await closeReveal(page);
   await page.getByTestId('studio-close').click();
-  // ゲームのメニューに出る（自分の服の印つき）。ドラッグで着せられる
+  await play(page);
+  // ゲームのメニューでは、カテゴリの先頭に出る（自分の服の印つき）。ドラッグで着せられる
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
-  const tile = page.locator('.palette-section img[alt="うみのふく"]');
-  await expect(tile).toBeVisible();
+  await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible();
   await expect(page.locator('.palette-section [data-mine="true"]')).toHaveCount(1);
-  const box = (await tile.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(DOLL_X, VIEW_H / 2, { steps: 4 });
-  await page.mouse.up();
+  await expect(page.locator('.palette-section [data-draggable]').first()).toHaveAttribute('data-mine', 'true');
+  await wear(page, 'うみのトップス');
   await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
   // 読み込み直しても（URL に studio を付けなくても）、服もメニューも残る
-  await page.goto(APP);
+  await page.goto(`${APP}&home=0`);
+  await gameReady(page);
   await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
-  await expect(page.locator('.palette-section img[alt="うみのふく"]')).toBeVisible();
+  await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible();
 });
 
-test('「捨てる」と自分の服にならない。自分の服は「消す」で消える', async ({ page }) => {
-  page.on('dialog', (d) => void d.accept());
-  await open(page);
-  await passGate(page);
-  await make(page, 'トップス');
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
-  await candidates(page).getByTestId('studio-discard').click();
-  await expect(candidates(page)).toHaveCount(0);
-  await expect(page.getByTestId('studio-my-item')).toHaveCount(0);
-  await make(page, 'トップス', 'そら');
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
-  await candidates(page).getByTestId('studio-keep').click();
-  await expect(page.getByTestId('studio-my-item')).toHaveCount(1);
-  await page.getByTestId('studio-my-delete').click();
-  await expect(page.getByTestId('studio-my-item')).toHaveCount(0);
-  await page.getByTestId('studio-close').click();
-  await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
-  await expect(page.locator('.palette-section [data-mine="true"]')).toHaveCount(0);
-});
-
-test('セット: 入れるものを選ぶと、その数だけチケットを使い、全部「使う」とゲームのセットになる', async ({ page }) => {
-  await open(page);
-  await passGate(page);
-  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
-  const boxes = page.getByTestId('studio-set-categories');
-  await expect(boxes).toBeVisible();
-  for (const label of await boxes.locator('label').allTextContents()) {
-    const name = label.trim();
-    const box = boxes.getByLabel(name, { exact: true });
-    if ((await box.isChecked()) !== ['トップス', 'ボトムス'].includes(name)) await box.click();
-  }
+test('注文の演出の間は、後ろのボタンを押せない。連打しても、仕事は 1 つ、引かれるチケットも 1 枚', async ({ page }) => {
+  await openHome(page, { delayMs: 60_000, planMs: 1500 });
+  await openStudio(page);
+  await expect(page.getByTestId('studio-tickets')).toContainText('枚');
+  await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
   await page.getByTestId('studio-theme').fill('うみ');
+  const make = (await page.getByTestId('studio-make').boundingBox())!;
+  const close = (await page.getByTestId('studio-close').boundingBox())!;
+  await page.getByTestId('studio-make').click();
+  await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'ordering');
+  // 演出の上から、「作る」と「とじる」のあった場所を押す
+  for (let i = 0; i < 3; i++) await page.mouse.click(make.x + make.width / 2, make.y + make.height / 2);
+  await page.mouse.click(close.x + close.width / 2, close.y + close.height / 2);
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'ticket', { timeout: 10_000 });
+  await page.getByTestId('order-ok').click();
+  await expect(page.getByTestId('app-studio')).toBeVisible();
+  await expect(jobs(page)).toHaveCount(1);
+  const state = (await fakeState(page))!;
+  expect(state.jobs).toHaveLength(1);
+  expect(state.user.tickets).toBe(4);
+});
+
+test('セット: 入れるものを選ぶと、その数だけチケットを使い、全部できると、ゲームの先頭のセットになる', async ({ page }) => {
+  await openHome(page);
+  await openStudio(page);
+  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
+  const checks = page.getByTestId('studio-set-categories').locator('input[type=checkbox]');
+  // いったん全部外して、トップスとボトムスだけにする
+  for (let i = 0; i < (await checks.count()); i++) await checks.nth(i).uncheck();
+  await page.getByTestId('studio-theme').fill('うみ');
+  await expect(page.getByTestId('studio-hint')).toContainText('2〜6 個');
+  await expect(page.getByTestId('studio-make')).toBeDisabled();
+  await page.getByTestId('studio-set-categories').getByText('トップス').click();
+  await page.getByTestId('studio-set-categories').getByText('ボトムス').click();
   await expect(page.getByTestId('studio-make')).toContainText('チケット 2 枚');
   await page.getByTestId('studio-make').click();
-  await expect(page.getByTestId('studio-tickets')).toContainText('3');
-  await expect(candidates(page)).toHaveCount(2);
-  await expect(candidates(page).nth(1)).toHaveAttribute('data-status', 'done', { timeout: 15_000 });
-  await candidates(page).first().getByTestId('studio-keep').click();
-  await expect(candidates(page)).toHaveCount(1);
-  await candidates(page).first().getByTestId('studio-keep').click();
-  await expect(page.getByTestId('studio-my-item')).toHaveCount(2);
+  await expect(page.getByTestId('order-slip')).toContainText('セット（2 てん） ・ アニメ');
+  await expect(page.getByTestId('order-ticket-count')).toHaveText('チケット 2 まい つかいました（のこり 3 まい）', { timeout: 10_000 });
+  await expect(page.getByTestId('order-ticket')).toHaveCount(2);
+  await page.getByTestId('order-ok').click();
+  await expect(jobs(page)).toContainText('セット「うみのセット」');
+  await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
+  await closeReveal(page);
   await page.getByTestId('studio-close').click();
-  // メニューの「セット」に、作ったセットが出る（テスト用の素材のセットと合わせて 2 つ）
+  await play(page);
+  // メニューの「セット」の先頭に、自分のセットが出る。ドラッグすると、2 点とも着る
   await page.locator('.palette-section button', { hasText: 'セット' }).first().click();
-  const mine = page.locator('[data-testid="set-tile"][title="うみのセット"]');
-  await expect(mine).toHaveCount(1);
-  const box = (await mine.boundingBox())!;
+  const first = page.locator('.palette-section [data-draggable]').first();
+  await expect(first).toContainText('うみのセット');
+  const box = (await first.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(DOLL_X, VIEW_H / 2, { steps: 4 });
+  await page.mouse.move(DOLL_X, 400, { steps: 4 });
   await page.mouse.up();
   await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
   await expectPixel(page, DOLL_X, SECOND_Y, SECOND);
 });
 
 test('チケットが足りないときは作れず、理由が出る。できなかった品目の分は、チケットが戻る', async ({ page }) => {
-  await open(page, FAKE, { failCategories: ['くつ'], tickets: 1 });
-  await passGate(page);
-  await expect(page.getByTestId('studio-tickets')).toContainText('1');
-  // セット（2 枚）は作れない
+  await openHome(page, { tickets: 1, failCategories: ['トップス'], delayMs: 2500 });
+  await openStudio(page);
   await page.getByTestId('studio-target').selectOption({ label: 'セット' });
   await page.getByTestId('studio-theme').fill('うみ');
   await expect(page.getByTestId('studio-make')).toBeDisabled();
   await expect(page.getByTestId('studio-hint')).toContainText('チケットが足りません');
-  // くつ（できない設定）を 1 点: いったん 0 枚になり、できなかったので 1 枚に戻る
-  await page.getByTestId('studio-target').selectOption({ label: 'くつ' });
-  await page.getByTestId('studio-make').click();
-  await expect(candidates(page)).toHaveAttribute('data-status', 'failed', { timeout: 10_000 });
-  await expect(candidates(page)).toContainText('チケットは戻しました');
-  await expect(page.getByTestId('studio-tickets')).toContainText('1');
-  await expect(candidates(page).getByTestId('studio-keep')).toHaveCount(0);
+  // 1 点なら作れるが、できない品目（テスト用）なので、チケットが戻る
+  await order(page, { label: 'トップス' });
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 0 枚');
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 1 枚', { timeout: 15_000 });
+  expect((await fakeState(page))!.items).toEqual([]);
 });
 
-test('作っている間に閉じて、開き直しても、続きが見られる', async ({ page }) => {
-  await open(page, FAKE, { delayMs: 2500 });
-  await passGate(page);
-  await make(page, 'トップス');
-  await expect(candidates(page)).toHaveAttribute('data-status', 'working');
+test('作っている間に、読み込み直しても（閉じたつもり）、続きが見られる。閉じていた間に、できあがっている', async ({ page }) => {
+  await openHome(page, { delayMs: 2500 });
+  await openStudio(page);
+  await order(page, { label: 'トップス' });
+  await expect(jobs(page)).toHaveCount(1);
   await page.reload();
-  await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
-  await passGate(page);
-  await expect(candidates(page)).toHaveCount(1);
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 15_000 });
-  await expect(page.getByTestId('studio-tickets')).toContainText('4');
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  // 作りかけがあるので、ホームの「クローゼット」に ● が付く
+  await expect(page.getByTestId('home-closet-dot')).toBeVisible({ timeout: 15_000 });
+  await openStudio(page);
+  await expect(jobs(page)).toHaveCount(1);
+  await expect(page.getByTestId('studio-job-notice')).toContainText('作っています');
+  // アプリを開かないまま、時間がたつ
+  await page.goto('about:blank');
+  await page.waitForTimeout(3000);
+  await page.goto(`${APP}&home=0`);
+  await gameReady(page);
+  await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
+  await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible({ timeout: 20_000 });
 });
 
-test('縦画面でも、ボタンの行から開けて、同じように作れる', async ({ page }) => {
-  await open(page);
+test('縦画面でも、ホームから開けて、同じように作れる（演出も画面に収まる）', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByTestId('portrait-tools').getByTestId('studio-button')).toBeVisible();
-  await passGate(page);
-  await make(page, 'トップス');
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
-  // 画面の幅からはみ出さない
-  const studio = (await page.getByTestId('app-studio').boundingBox())!;
-  expect(studio.width).toBeLessThanOrEqual(390.5);
-  const keep = (await candidates(page).getByTestId('studio-keep').boundingBox())!;
-  expect(keep.x + keep.width).toBeLessThanOrEqual(390.5);
+  await openHome(page, { delayMs: 60_000, planMs: 1200 });
+  await openStudio(page);
+  await pressMake(page, { label: 'トップス' });
+  await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'ordering');
+  const warning = (await page.getByText('この がめんを とじないでね').boundingBox())!;
+  expect(warning.y + warning.height).toBeLessThanOrEqual(844);
+  await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'ticket', { timeout: 10_000 });
+  const ok = (await page.getByTestId('order-ok').boundingBox())!;
+  expect(ok.y + ok.height).toBeLessThanOrEqual(844);
+  expect(ok.x).toBeGreaterThanOrEqual(0);
+  expect(ok.x + ok.width).toBeLessThanOrEqual(390);
+  await page.getByTestId('order-ok').click();
+  await expect(jobs(page)).toHaveCount(1);
 });
 
-test('スタジオの画面は、ゲームの最初の読み込みに入っていない（開いたときにだけ読み込む）', async () => {
+test('古いサーバーでは、知らせが出て、作る欄が出ない', async ({ page }) => {
+  await openHome(page, { oldServer: true });
+  await openStudio(page);
+  await expect(page.getByTestId('studio-problem')).toContainText('サーバーが古い版です');
+  await expect(page.getByTestId('studio-make')).toHaveCount(0);
+});
+
+test('つながっていないとき、スタジオはそう知らせる。ゲームは、そのまま遊べる', async ({ page }) => {
+  await openHome(page, { offline: true });
+  await openStudio(page);
+  await expect(page.getByTestId('studio-problem')).toContainText('インターネット');
+  await expect(page.getByTestId('studio-make')).toHaveCount(0);
+  await page.getByTestId('studio-close').click();
+  await play(page);
+});
+
+test('スタジオの画面と演出は、ゲームの最初の読み込みに入っていない（開いたときにだけ読み込む）', async () => {
   const dist = path.resolve('dist');
   const html = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
   const entry = /src="([^"]*assets\/main-[^"]+\.js)"/.exec(html)?.[1] ?? /src="([^"]*assets\/index-[^"]+\.js)"/.exec(html)?.[1];
   expect(entry).toBeTruthy();
   const main = fs.readFileSync(path.join(dist, entry!.replace(/^\/DressUpGame\//, '')), 'utf8');
-  expect(main).not.toContain('studio-make');
-  expect(main).not.toContain('adult-question');
+  for (const mark of ['studio-make', 'adult-question', 'order-show', 'dressup_fake_backend', 'dressup_cloud_used']) expect(main, mark).not.toContain(mark);
   // 別のファイルに入っている
   const assets = fs.readdirSync(path.join(dist, 'assets')).filter((f) => f.endsWith('.js'));
   expect(assets.some((f) => fs.readFileSync(path.join(dist, 'assets', f), 'utf8').includes('studio-make'))).toBe(true);
 });
 
 test('自分の服は、オフラインで開き直しても、メニューに出て着たまま', async ({ page, context }) => {
-  await open(page);
-  await passGate(page);
-  await make(page, 'トップス');
-  await expect(candidates(page)).toHaveAttribute('data-status', 'done', { timeout: 10_000 });
-  await candidates(page).getByTestId('studio-candidate-name').fill('うみのふく');
-  await candidates(page).getByTestId('studio-keep').click();
+  await openHome(page);
+  await openStudio(page);
+  await order(page, { label: 'トップス' });
+  await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
+  await closeReveal(page);
   await page.getByTestId('studio-close').click();
+  await play(page);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
-  const box = (await page.locator('.palette-section img[alt="うみのふく"]').boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(DOLL_X, VIEW_H / 2, { steps: 4 });
-  await page.mouse.up();
+  await wear(page, 'うみのトップス');
   await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
   // 先読みが終わってから、オフラインにして開き直す
   await page.waitForFunction(() => document.documentElement.dataset.prefetch === 'test', null, { timeout: 60_000 });
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 60_000 });
+  await play(page);
   await expectPixel(page, DOLL_X, FIRST_Y, FIRST);
   await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
-  await expect(page.locator('.palette-section img[alt="うみのふく"]')).toBeVisible();
+  await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible();
   await context.setOffline(false);
 });
 
@@ -297,50 +237,63 @@ test('端末の保存領域（IndexedDB）が応答しなくても、ゲーム�
     // open が、いつまでも返事をしない
     Object.defineProperty(window, 'indexedDB', { value: { open: () => ({}), deleteDatabase: () => ({}) }, configurable: true });
   });
-  await page.goto(APP);
+  await page.goto(`${APP}&home=0`);
   await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 12_000 });
 });
 
-test('つながっていないとき、スタジオはそう知らせる', async ({ page }) => {
-  await open(page, FAKE, { offline: true } as never);
-  await page.getByTestId('studio-button').click();
-  await page.getByTestId('adult-answer').fill(String(answerOf((await page.getByTestId('adult-question').textContent()) ?? '')));
-  await page.getByTestId('adult-18').check();
-  await page.getByTestId('adult-open').click();
-  await expect(page.getByTestId('studio-problem')).toContainText('インターネット');
-  await expect(page.getByTestId('studio-make')).toHaveCount(0);
-  await page.getByTestId('studio-close').click();
-});
-
-test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あいことばを入れると、「つくる」のボタンが出る', async ({ page }) => {
-  await open(page, APP);
-  await expect(page.getByTestId('studio-button')).toHaveCount(0);
-  const answers = ['まちがい', 'fake'];
+test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あいことばを入れると、ホームに「つくる」「クローゼット」が出る', async ({ page }) => {
+  await page.goto(APP);
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await expect(page.getByTestId('home-create')).toHaveCount(0);
+  const answers = ['まちがい', 'home', 'fake'];
   page.on('dialog', (d) => void d.accept(answers.shift() ?? ''));
   const badge = page.locator('.version-badge');
   // 4 回では何も起きない
   for (let i = 0; i < 4; i++) await badge.click();
   await page.waitForTimeout(1600);
-  // 5 回続けて押す: あいことばが違えば、何も変わらない
+  // 5 回続けて押す: あいことばが違えば、何も変わらない（前の版の「home」も、もう効かない）
   for (let i = 0; i < 5; i++) await badge.click();
   await page.waitForTimeout(500);
-  await expect(page.getByTestId('studio-button')).toHaveCount(0);
+  for (let i = 0; i < 5; i++) await badge.click();
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId('home-create')).toHaveCount(0);
   // 正しいあいことば
   for (let i = 0; i < 5; i++) await badge.click();
-  await expect(page.getByTestId('studio-button')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('home-create')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('home-closet')).toBeVisible();
 });
 
 test.describe('スタジオの画面を読み込めないとき', () => {
   test.use({ serviceWorkers: 'block' });
-  test('ゲームは消えずに、読み込めなかったことを知らせる', async ({ page }) => {
-    await open(page);
+  test('ゲームは消えずに、読み込めなかったことを知らせる。閉じると、ホームにもどる', async ({ page }) => {
+    await openHome(page);
     // スタジオの画面のファイル（あとから読み込む分）だけ、取れないようにする
-    await page.route('**/assets/index-*.js', (route) => route.abort());
-    await page.getByTestId('studio-button').click();
-    await expect(page.getByTestId('studio-load-failed')).toBeVisible();
-    await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible();
+    const studioChunks = fs.readdirSync(path.resolve('dist/assets')).filter((f) => f.endsWith('.js') && fs.readFileSync(path.resolve('dist/assets', f), 'utf8').includes('studio-make'));
+    expect(studioChunks.length).toBeGreaterThan(0);
+    for (const chunk of studioChunks) await page.route(`**/assets/${chunk}`, (route) => route.abort());
+    await page.getByTestId('home-create').click();
+    await expect(page.getByTestId('studio-load-failed')).toBeVisible({ timeout: 60_000 });
     await page.getByTestId('studio-load-failed').getByRole('button').click();
     await expect(page.getByTestId('studio-load-failed')).toHaveCount(0);
-    await expect(page.getByTestId('studio-button')).toBeVisible();
+    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await play(page);
   });
+});
+
+test('前に「つくる」を使った端末は、URL に何も付けなくても、起動のあと、裏でつなぐ（作りかけ・届いた服が分かる）', async ({ page }) => {
+  await openHome(page, { delayMs: 800 });
+  // まだ 1 回もつないでいない: 何もしない
+  expect(await page.evaluate(() => localStorage.getItem('dressup_cloud_used'))).toBeNull();
+  await openStudio(page);
+  await expect(page.getByTestId('studio-tickets')).toContainText('枚');
+  expect(await page.evaluate(() => localStorage.getItem('dressup_cloud_used'))).toBe('1');
+  await order(page, { label: 'トップス' });
+  await page.goto('about:blank');
+  await page.waitForTimeout(1500);
+  // ゲームを直接開く（ホームも、つくるも開かない）: 裏でつないで、届いた服がメニューに入る
+  await page.goto(`${APP}&home=0`);
+  await gameReady(page);
+  await closeReveal(page);
+  await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
+  await expect(page.locator('.palette-section img[alt="うみのトップス"]')).toBeVisible({ timeout: 20_000 });
 });
