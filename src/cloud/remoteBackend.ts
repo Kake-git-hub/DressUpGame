@@ -6,6 +6,7 @@
  *   - 生成を進めるのは、サーバーの列。アプリは「進める」を呼ばない（閉じていても、最後まで進む）
  *   - 絵は base64 で届くので、保存用の Blob に直す
  */
+import { noAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
 import type { MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
 import { API_VERSION } from './wire';
@@ -116,6 +117,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   });
 
   const backend: StudioBackend = {
+    account: noAccount, // 本物の口は、次のタスクでつなぐ
     async signIn() {
       const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
       // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない

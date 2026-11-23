@@ -5,6 +5,7 @@
  * チケットの残り・生成・保存は、どれも裏側が決める（アプリの側では増減しない）。
  */
 import type { ManifestItem } from '../content/manifest';
+import type { StudioAccount } from './account';
 
 export interface StudioUser {
   userCode: string; // 作者に伝えると、チケットや服を届けてもらえる短い文字列
@@ -77,6 +78,8 @@ export class BackendError extends Error {
 export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';
 
 export interface StudioBackend {
+  // Google のアカウントでのログイン・ログアウト（段階 ③-a）
+  readonly account: StudioAccount;
   // 利用者を確かめる（初めてなら作る）。サーバーが古い版なら BackendError('old-server')
   signIn(): Promise<StudioUser>;
   // チケットの残りなどが変わったら知らせる。返り値を呼ぶと、知らせを止める

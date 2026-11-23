@@ -6,6 +6,7 @@
  * 読み込み直したとき、時刻を過ぎていた分は、できあがっている（「閉じていても、サーバーが進める」を確かめられる）。
  * `?studio=fake` で開いたときと、E2E で使う。本物（Firebase）と同じ形（StudioBackend）。
  */
+import { noAccount } from './account';
 import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import type { MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
 
@@ -189,6 +190,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   };
 
   return {
+    account: noAccount, // 偽物の口は、あとのタスクでつなぐ
     async signIn() {
       online();
       if (options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
