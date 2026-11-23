@@ -218,3 +218,50 @@
 .studio-parts li[data-status='failed'] {
   color: #b3261e;
 }
+
+/* アカウントの欄（ログイン・ログアウト）。幅 390px の縦のスマホでも、ボタンの文は折り返して、はみ出さない */
+.studio-account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #faf6fd;
+  border: 1px solid #e6dcec;
+  border-radius: 12px;
+}
+.studio-account p {
+  margin: 0;
+}
+.studio-account-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.studio-account-buttons button {
+  width: 100%;
+  max-width: 100%;
+  white-space: normal; /* 文が長いので、折り返す */
+}
+.studio-account-row {
+  justify-content: space-between;
+}
+.studio-account-email {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: bold;
+}
+.studio-account-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e6dcec;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.studio-account-message {
+  font-size: 14px;
+  font-weight: bold;
+  color: #5a3a86;
+}

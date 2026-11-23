@@ -8,17 +8,20 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { StudioTarget } from '../cloud/backend';
+import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
 import type { ManifestCategory } from '../content/manifest';
 import { isBackHairCategory } from '../pipeline/hairSplit';
 import { DEFAULT_STYLE_ID, STYLE_PRESETS } from '../studio/stylePresets';
 import type { DollData } from '../types';
+import { Account } from './Account';
 import { jobNotice } from './jobNotice';
 import { OrderShow } from './OrderShow';
 import type { OrderPhase, ShopArt } from './OrderShow';
 
 interface Props {
   session: CloudSession;
+  library: Library; // 端末の中の自分の服（ログアウトのとき、このアカウントの服を外す）
   dolls: DollData[]; // ゲームに出ているドール
   categoriesByDoll: Record<string, ManifestCategory[]>;
   initialDollId: string; // 最初に選んでおくドール（最後に遊んだドール）
@@ -40,7 +43,7 @@ const NOTICE = {
   crowded: 'こみあっています。できたら、クローゼットに入ります。',
 };
 
-export function AppStudio({ session, dolls, categoriesByDoll, initialDollId, onClose, onOpenCloset, demo = false, art }: Props) {
+export function AppStudio({ session, library, dolls, categoriesByDoll, initialDollId, onClose, onOpenCloset, demo = false, art }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { user } = state;
   const [dollId, setDollId] = useState(() => (dolls.some((d) => d.id === initialDollId) ? initialDollId : (dolls[0]?.id ?? '')));
@@ -258,6 +261,8 @@ export function AppStudio({ session, dolls, categoriesByDoll, initialDollId, onC
                 👗 クローゼットを見る
               </button>
             </div>
+
+            <Account session={session} library={library} />
 
             {user && (
               <p className="studio-hint">

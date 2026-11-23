@@ -18,7 +18,7 @@ const library = { all: async () => [], put: async () => undefined, remove: async
 
 function open(options: Parameters<typeof createFakeBackend>[0] = {}, props: Partial<Parameters<typeof AppStudio>[0]> = {}) {
   const session = createSession({ backend: createFakeBackend({ image: async () => new Blob(['x']), planMs: 0, ...options }), library, onLibraryChanged: () => undefined });
-  render(<AppStudio session={session} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} {...props} />);
+  render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} {...props} />);
   return session;
 }
 const options = (testId: string) => Array.from(screen.getByTestId(testId).querySelectorAll('option')).map((o) => o.textContent);
@@ -89,7 +89,7 @@ describe('つくる', () => {
       refreshed++;
       return realRefresh();
     };
-    render(<AppStudio session={session} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
+    render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
     fireEvent.change(screen.getByTestId('studio-theme'), { target: { value: 'うみ' } });
     fireEvent.click(screen.getByTestId('studio-make'));

@@ -79,6 +79,20 @@ const RevealRoot = lazy(() => import('./reveal'));
 // ホーム画面（あそぶ・つくる・クローゼット・ともだちにおしえる）。だれにでも、開いたときに出る
 const START_ON_HOME = startsOnHome(window.location.search);
 const HomeScreen = lazy(() => import('./home/HomeScreen'));
+// ログインの結果の知らせ（Google から戻って来たあとだけ。出すときに読み込む）
+const LoginNotice = lazy(() => import('./home/LoginNotice'));
+// 読み込み直しの前に置かれた知らせの文（キーは、cloud/account.ts の NOTICE_KEY と同じ。account.ts は、ここでは読み込まない）。
+// 1 回だけ読んで消す（開発用の設定で 2 回描かれても、消えないように、モジュールで 1 回）
+const STARTUP_NOTICE = ((): string | null => {
+  if (!STUDIO_MODE) return null;
+  try {
+    const text = sessionStorage.getItem('dressup_login_notice');
+    if (text !== null) sessionStorage.removeItem('dressup_login_notice');
+    return text;
+  } catch {
+    return null;
+  }
+})();
 // 「つくる」を開くときに、保護者（大人）の確認をするか。いまは開発中なので、しない（v0.32.0 の作者の指示）。
 // 販売を始めるときに、ここを true にするかを決める（支払いの計画書）
 const ASK_ADULT = false;
@@ -321,6 +335,25 @@ function App() {
       if (boot.usedBefore()) void session.connect();
     });
   }, [session, loadState]);
+
+  // Google から戻って来ていたら、受け取って仕上げる（入った場合は、控えを外して読み込み直す。その知らせは、読み込み直しのあとに出る）。
+  // 開発用の設定（StrictMode）で 2 回走っても、証明を使うのは 1 回（completeRedirect と finishRedirect の守り）
+  const [loginNotice, setLoginNotice] = useState<string | null>(STARTUP_NOTICE);
+  useEffect(() => {
+    if (!session) return;
+    void import('./cloud/boot')
+      .then(async (boot) => {
+        if (!boot.hasReturn(sessionStorage)) return;
+        const text = await boot.completeRedirect({ backend: session.backend, library, session: sessionStorage, local: localStorage, reload: () => window.location.reload() });
+        if (text) setLoginNotice(text);
+      })
+      .catch(() => undefined); // 中身（メールアドレスなど）が入りうるので、エラーは書き出さない
+  }, [session]);
+  const noticeLayer = loginNotice && (
+    <Suspense fallback={null}>
+      <LoginNotice message={loginNotice} onClose={() => setLoginNotice(null)} />
+    </Suspense>
+  );
 
   const cloud = useSessionState(session);
   // ホームの「クローゼット」の ●: 新しい服がある・作っている途中
@@ -829,6 +862,7 @@ function App() {
         </Suspense>
         {closetLayer}
         {revealLayer}
+        {noticeLayer}
       </div>
     );
   }
@@ -848,6 +882,7 @@ function App() {
           )}
         </div>
         {revealLayer}
+        {noticeLayer}
       </div>
     );
   }
@@ -1012,6 +1047,7 @@ function App() {
             {session ? (
               <StudioRoot
                 session={session}
+                library={library}
                 dolls={allDolls}
                 categoriesByDoll={categoriesByDoll}
                 initialDollId={currentDoll.id}
@@ -1032,6 +1068,7 @@ function App() {
       )}
 
       {revealLayer}
+      {noticeLayer}
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />

@@ -22,3 +22,7 @@ export function usedBefore(): boolean {
     return false;
   }
 }
+
+// 戻りの仕上げ（App.tsx が使う）。account.ts は、「つくる」を教えた端末の、この読み込みにだけ入れる
+export { completeRedirect } from './account';
+export { hasReturn } from './googleRedirect';
