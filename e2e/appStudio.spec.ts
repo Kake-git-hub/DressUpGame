@@ -203,6 +203,12 @@ test('スタジオの画面と演出は、ゲームの最初の読み込みに�
   // 別のファイルに入っている
   const assets = fs.readdirSync(path.join(dist, 'assets')).filter((f) => f.endsWith('.js'));
   expect(assets.some((f) => fs.readFileSync(path.join(dist, 'assets', f), 'utf8').includes('studio-make'))).toBe(true);
+  // 演出の絵（店員とお店）は、先読み（オフライン用の控え）にも入れない。使うときに読み込む
+  const pictures = fs.readdirSync(path.join(dist, 'assets')).filter((f) => /^(shop|order|ticket|deliver)-.*\.webp$/.test(f));
+  expect(pictures).toHaveLength(4);
+  const precache = fs.readFileSync(path.join(dist, 'sw.js'), 'utf8');
+  for (const picture of pictures) expect(precache, picture).not.toContain(picture);
+  expect(main).not.toMatch(/(shop|order|ticket|deliver)-[\w-]+\.webp/);
 });
 
 test('自分の服は、オフラインで開き直しても、メニューに出て着たまま', async ({ page, context }) => {

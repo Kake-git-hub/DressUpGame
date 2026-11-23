@@ -36,14 +36,17 @@ export function Reveal({ view, storeFailed, art, canTryOn, onTryOn, onOpenCloset
             <h2 className="reveal-title">
               <span aria-hidden="true">✨</span> あたらしい ふくが とどいたよ！ <span aria-hidden="true">✨</span>
             </h2>
-            <div className="reveal-closet" style={{ width: size + 32 }}>
-              <div className="reveal-light" aria-hidden="true" />
-              <div className="reveal-inside">
-                <Stage doll={view.doll} layers={layers} size={size} testId="reveal-stage" />
+            <div className="reveal-scene">
+              <div className="reveal-closet" style={{ width: size + 32 }}>
+                <div className="reveal-light" aria-hidden="true" />
+                <div className="reveal-inside">
+                  <Stage doll={view.doll} layers={layers} size={size} testId="reveal-stage" />
+                </div>
+                <div className="reveal-door left" aria-hidden="true" />
+                <div className="reveal-door right" aria-hidden="true" />
               </div>
-              <div className="reveal-door left" aria-hidden="true" />
-              <div className="reveal-door right" aria-hidden="true" />
-              {art?.deliver && <img className="reveal-clerk" src={art.deliver} alt="" draggable={false} />}
+              {/* 服を届けてくれた店員（クローゼットのとなり） */}
+              {art?.deliver && <img className="reveal-clerk" src={art.deliver} alt="" draggable={false} style={{ height: Math.round(size * 0.92) }} />}
             </div>
             <p className="reveal-name" data-testid="reveal-name">
               {view.title}

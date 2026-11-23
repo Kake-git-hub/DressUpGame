@@ -6,6 +6,7 @@ import type { MyItem, StudioJob } from '../cloud/backend';
 import type { Library } from '../cloud/library';
 import type { ManifestCategory } from '../content/manifest';
 import type { DollData } from '../types';
+import deliverArt from '../assets/shop/deliver.webp';
 import { Reveal } from './Reveal';
 import { revealView } from './revealView';
 import './reveal.css';
@@ -24,7 +25,10 @@ export interface RevealRootProps {
   onClose: () => void;
 }
 
-export default function RevealRoot({ job, library, dolls, categoriesByDoll, storeFailed, art, canTryOn, onTryOn, onOpenCloset, onClose }: RevealRootProps) {
+// 服を届ける店員の絵（この演出と一緒に読み込む）
+const ART = { deliver: deliverArt };
+
+export default function RevealRoot({ job, library, dolls, categoriesByDoll, storeFailed, art = ART, canTryOn, onTryOn, onOpenCloset, onClose }: RevealRootProps) {
   const [items, setItems] = useState<MyItem[] | null>(null);
   useEffect(() => {
     let alive = true;

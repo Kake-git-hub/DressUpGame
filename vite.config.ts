@@ -41,8 +41,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,gif,webp,woff,woff2}'],
         // 元のアイコン（大きすぎる）と、スタジオ（遊ぶ側には要らない）を除外。
-        // Firebase の部品（「つくる」を本物で開いたときだけ使う。どのみち通信が要る）も、先読みしない
-        globIgnores: ['**/app-icon.png', '**/studio*', '**/firebaseTransport*'],
+        // Firebase の部品（「つくる」を本物で開いたときだけ使う。どのみち通信が要る）も、先読みしない。
+        // 演出の絵（洋服屋の店員とお店。注文したとき・服が届いたときだけ使う）も、先読みしない
+        globIgnores: ['**/app-icon.png', '**/studio*', '**/firebaseTransport*', '**/assets/{shop,order,ticket,deliver}-*.webp'],
         // スタジオのページを開いたとき、ゲームの画面を返さない
         navigateFallbackDenylist: [/\/studio\.html/],
         runtimeCaching: [

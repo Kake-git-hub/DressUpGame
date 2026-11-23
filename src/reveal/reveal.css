@@ -101,12 +101,17 @@
 .reveal-door.right::after {
   left: 8px;
 }
+.reveal-scene {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
 .reveal-clerk {
-  position: absolute;
-  right: -6px;
-  bottom: 0;
-  height: 46%;
+  flex: none;
   width: auto;
+  margin-bottom: -4px;
   pointer-events: none;
   animation: reveal-rise 0.6s 1.2s ease-out both;
 }
