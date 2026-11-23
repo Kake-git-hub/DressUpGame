@@ -1280,7 +1280,9 @@ test('角のつまみは、枠の外側にある（服に重ねない）。ス�
   await dragItemToDoll(page, 'トップス', 'red');
   await page.locator('.tool-button').first().click();
   await expect(page.getByTestId('sticker-frame')).toBeVisible();
-  const check = async (size: number) => {
+  // 画面の大きさを変えた直後は、枠とつまみを別々の瞬間に測ると、配置し直す前後が混ざることがある（落ち着くまで、測り直す）
+  const check = (size: number) => expect(() => measure(size)).toPass({ timeout: 5000 });
+  const measure = async (size: number) => {
     const frame = (await page.getByTestId('sticker-frame').boundingBox())!;
     for (const [id, sx, sy] of [['sticker-remove', -1, -1], ['sticker-reset', 1, -1], ['sticker-rotate', 1, 1]] as const) {
       const box = (await page.getByTestId(id).boundingBox())!;
