@@ -13,7 +13,7 @@ import type { StudioTransport } from './remoteBackend';
 function fakeOptions(): FakeOptions {
   try {
     const saved = JSON.parse(localStorage.getItem('dressup_fake_options') ?? '{}') as FakeOptions;
-    return typeof saved === 'object' && saved !== null ? { delayMs: saved.delayMs, failCategories: saved.failCategories, tickets: saved.tickets, admin: saved.admin, offline: saved.offline } : {};
+    return typeof saved === 'object' && saved !== null ? { delayMs: saved.delayMs, failCategories: saved.failCategories, tickets: saved.tickets, admin: saved.admin, offline: saved.offline, planMs: saved.planMs, oldServer: saved.oldServer } : {};
   } catch {
     return {};
   }
@@ -34,7 +34,6 @@ function lazyFirebase(): StudioTransport {
   };
   return {
     call: async (data) => (await load()).call(data),
-    run: async (jobId) => (await load()).run(jobId),
   };
 }
 

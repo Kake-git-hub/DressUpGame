@@ -1,7 +1,7 @@
 /**
  * サーバーの関数を呼ぶ「運び役」の本物（Firebase）
  *
- * 匿名のログインをしてから、関数 studio・studioRun を呼ぶ。Firestore と Storage は、アプリからは使わない（決まりで断られる）。
+ * 匿名のログインをしてから、関数 studio を呼ぶ（生成を進めるのは、サーバーの列。アプリは呼ばない）。Firestore と Storage は、アプリからは使わない（決まりで断られる）。
  * Firebase の部品は大きいので、このファイルは「つくる」を開いたときに初めて読み込む（createBackend.ts）。
  */
 import { initializeApp } from 'firebase/app';
@@ -15,7 +15,7 @@ import type { BackendErrorCode } from './backend';
 import { firebaseConfig, FUNCTIONS_REGION } from './firebaseConfig';
 import type { StudioTransport } from './remoteBackend';
 
-const CODES: BackendErrorCode[] = ['offline', 'no-tickets', 'limit', 'refused', 'unknown'];
+const CODES: BackendErrorCode[] = ['offline', 'no-tickets', 'limit', 'refused', 'unknown', 'old-server'];
 // 端末はつながっているのに、返事が無い。関数がまだ載っていない・起動に失敗した、でもこうなる（ブラウザからは、通信の失敗と見分けられない）
 const NO_ANSWER = 'サーバーから返事がありません。少し待って、開き直してください（続くときは、サーバーの準備ができていないかもしれません。作者に知らせてください）';
 const NOT_READY = 'サーバーの準備ができていません（作者の設定が終わっていないか、更新の途中です）';
@@ -67,8 +67,6 @@ export function createFirebaseTransport(options: FirebaseTransportOptions = {}):
   const functions = getFunctions(app, FUNCTIONS_REGION);
   options.connect?.(auth, functions);
   const studio = httpsCallable(functions, 'studio', { timeout: 180_000 });
-  // 生成は長い（セットで数分）。返事を待つ時間も長くしておく
-  const studioRun = httpsCallable(functions, 'studioRun', { timeout: 900_000 });
 
   // 匿名のログイン（前に開いたときの利用者が残っていれば、そのまま使う）
   let signing: Promise<void> | null = null;
@@ -88,14 +86,6 @@ export function createFirebaseTransport(options: FirebaseTransportOptions = {}):
       try {
         await ready();
         return (await studio(data)).data as T;
-      } catch (error) {
-        throw toBackendError(error);
-      }
-    },
-    async run(jobId: string): Promise<void> {
-      try {
-        await ready();
-        await studioRun({ jobId });
       } catch (error) {
         throw toBackendError(error);
       }

@@ -26,6 +26,9 @@ const done = (tx: IDBTransaction) =>
     tx.onabort = () => reject(tx.error);
   });
 
+// 前の版の控え（色・並び順を持たない服）は、もとの色・作った順として読む
+const withDefaults = (item: MyItem): MyItem => ({ ...item, hue: item.hue ?? 0, order: item.order ?? item.createdAt, updatedAt: item.updatedAt ?? item.createdAt, notes: item.notes ?? [] });
+
 const UNAVAILABLE = 'この端末では、服を保存できません（端末の保存領域が使えません）';
 
 // IndexedDB が使えない端末（プライベートブラウズなど）では、読むと空（落ちない）。書くと、保存できなかったことを知らせる。
@@ -69,7 +72,7 @@ export function openLibrary(factory: IDBFactory | null = globalThis.indexedDB ??
         const tx = db.transaction(STORE, 'readonly');
         const request = tx.objectStore(STORE).getAll();
         await done(tx);
-        return (request.result as MyItem[]).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+        return (request.result as MyItem[]).map(withDefaults).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
       } catch (error) {
         console.error('自分の服を読めませんでした:', error);
         return [];

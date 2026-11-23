@@ -14,6 +14,10 @@ const myItem = (id: string, extra: Partial<MyItem> = {}, itemExtra: Partial<MyIt
   item: { id, name: `服 ${id}`, category: 'トップス', image: image('image'), thumb: 'thumb', ...itemExtra },
   files: { image: blob(`image-${id}`), thumb: blob(`thumb-${id}`) },
   createdAt: 1,
+  hue: 0,
+  order: 1,
+  updatedAt: 1,
+  notes: [],
   ...extra,
 });
 

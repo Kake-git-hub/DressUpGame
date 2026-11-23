@@ -2,24 +2,22 @@
  * 本物の裏側: サーバーの関数（functions/）を呼んで動く StudioBackend
  *
  * 通信そのものは「運び役」（StudioTransport。本物は firebaseTransport.ts）に任せ、ここは段取りだけを受け持つ:
- *   - 進み具合は、できるまで、数秒おきに聞きに行く（アプリは、サーバーの置き場を直接は読めない）
- *   - 生成を進める関数（時間がかかる）を呼ぶ。閉じる前に作りかけだった分・止まっている分は、呼び直す
- *   - 絵は base64 で届くので、表示用の data: の URL や、保存用の Blob に直す
+ *   - 進み具合は、終わるまで、数秒おきに聞きに行く（アプリは、サーバーの置き場を直接は読めない）
+ *   - 生成を進めるのは、サーバーの列。アプリは「進める」を呼ばない（閉じていても、最後まで進む）
+ *   - 絵は base64 で届くので、保存用の Blob に直す
  */
-import { BackendError } from './backend';
-import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
+import { BackendError, OLD_SERVER_MESSAGE } from './backend';
+import type { MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
+import { API_VERSION } from './wire';
 import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 
 export interface StudioTransport {
-  // 軽い呼び出し（関数 studio）。失敗は BackendError
+  // サーバーの関数 studio を呼ぶ。失敗は BackendError
   call<T>(data: Record<string, unknown>): Promise<T>;
-  // 生成を進める（関数 studioRun）。終わるまで返らない。失敗は BackendError
-  run(jobId: string): Promise<void>;
 }
 
 export interface RemoteOptions {
   pollMs?: number; // 進み具合を聞きに行く間隔
-  kickEveryMs?: number; // 止まっている仕事の「進める」を、呼び直す間隔
 }
 
 const TYPES: Record<string, string> = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
@@ -38,26 +36,11 @@ interface Watch {
   over: boolean; // もう聞きに行かない（終わった・無くなった）
 }
 
-// Blob → base64（data: の前置きは付けない）
-// （古い Safari には blob.arrayBuffer が無いので、FileReader で読む）
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
-    reader.onerror = () => reject(new BackendError('refused', '写真を読み取れませんでした'));
-    reader.readAsDataURL(blob);
-  });
-}
-
 export function createRemoteBackend(transport: StudioTransport, options: RemoteOptions = {}): StudioBackend {
   const pollMs = options.pollMs ?? 2500;
-  const kickEveryMs = options.kickEveryMs ?? 30_000;
   let user: StudioUser | null = null;
   const userListeners = new Set<(user: StudioUser) => void>();
-  const previews = new Map<string, string>(); // `${jobId}:${index}` → data: の URL
-  const missing = new Set<string>(); // 置き場から無くなっていた絵（取り直さない）
   const known = new Map<string, StudioJob>(); // 最後に分かった進み具合
-  const kicked = new Map<string, number>(); // 「進める」を最後に頼んだ時刻
   const watches = new Map<string, Watch>();
 
   // 返事に利用者が入っていたら、覚えて、変わっていれば知らせる
@@ -72,50 +55,23 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   };
   const me = async (): Promise<StudioUser> => user ?? (await backend.signIn());
 
-  // サーバーの進み具合を、画面の形に直す（できた候補の絵を、まだ持っていなければ取る）。
-  // 絵を取れなくても、失敗にはしない（その候補は絵なしで出す。1 枚の絵のせいで、スタジオが開けなくならないように）。
-  // complete: 取り直す意味のある絵が、もう残っていない
-  const toJob = async (wire: WireJob): Promise<{ job: StudioJob; complete: boolean }> => {
-    let complete = true;
-    const candidates = await Promise.all(
-      wire.candidates.map(async (c): Promise<StudioCandidate> => {
-        const base: StudioCandidate = { index: c.index, name: c.name, categoryId: c.categoryId, status: c.status, notes: c.notes };
-        const key = `${wire.id}:${c.index}`;
-        if (c.status !== 'done' || !c.preview || missing.has(key)) return base;
-        let url = previews.get(key);
-        if (!url) {
-          try {
-            const image = await transport.call<{ data: string; contentType: string }>({ op: 'preview', jobId: wire.id, index: c.index });
-            url = `data:${image.contentType};base64,${image.data}`;
-            previews.set(key, url);
-          } catch (error) {
-            // 置き場から無くなっていた: 取り直さない。通信の失敗: 次に聞くときに、取り直す
-            if ((error as { code?: unknown }).code === 'refused') missing.add(key);
-            else complete = false;
-            return base;
-          }
-        }
-        return { ...base, preview: { url, canvasW: c.preview.canvasW, canvasH: c.preview.canvasH, box: c.preview.box } };
-      }),
-    );
-    return { complete, job: { id: wire.id, dollId: wire.dollId, ...(wire.set ? { set: wire.set } : {}), done: wire.done, candidates, tickets: wire.tickets, createdAt: wire.createdAt } };
-  };
+  const toJob = (wire: WireJob): StudioJob => ({
+    id: wire.id,
+    dollId: wire.dollId,
+    ...(wire.set ? { set: wire.set } : {}),
+    done: wire.done,
+    candidates: wire.candidates.map((c) => ({ index: c.index, name: c.name, categoryId: c.categoryId, status: c.status, notes: c.notes, ...(c.itemId ? { itemId: c.itemId } : {}) })),
+    tickets: wire.tickets,
+    createdAt: wire.createdAt,
+  });
+  const copy = (job: StudioJob): StudioJob => JSON.parse(JSON.stringify(job)) as StudioJob;
   const publish = (job: StudioJob) => {
     const before = known.get(job.id);
     known.set(job.id, job);
     if (before && JSON.stringify(before) === JSON.stringify(job)) return;
-    watches.get(job.id)?.listeners.forEach((listener) => listener(structuredCopy(job)));
+    watches.get(job.id)?.listeners.forEach((listener) => listener(copy(job)));
   };
-  const structuredCopy = (job: StudioJob): StudioJob => JSON.parse(JSON.stringify(job)) as StudioJob;
 
-  // サーバーに「進める」を頼む（返事は待たない。終わったら、すぐ進み具合を聞く）
-  const kick = (jobId: string) => {
-    kicked.set(jobId, Date.now());
-    void transport.run(jobId).then(
-      () => void ask(jobId),
-      () => undefined,
-    );
-  };
   const schedule = (jobId: string) => {
     const watch = watches.get(jobId);
     if (!watch || watch.over || watch.listeners.size === 0 || watch.timer) return;
@@ -125,22 +81,15 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     }, pollMs);
   };
   // 進み具合を 1 回聞く。終わっていなければ、次を予約する
+  // （聞かれたサーバーは、止まっている仕事を、自分で列に入れ直す）
   const ask = async (jobId: string): Promise<void> => {
     const watch = watches.get(jobId);
     if (!watch || watch.over || watch.asking || watch.listeners.size === 0) return;
     watch.asking = true;
     try {
       const { job } = took(await transport.call<{ job: WireJob; user: WireUser }>({ op: 'job', jobId }));
-      const converted = await toJob(job);
-      publish(converted.job);
-      if (job.done) {
-        // 終わった。取れなかった絵が残っている間だけ、また聞く
-        if (converted.complete) watch.over = true;
-      } else {
-        // まだ頼んでいない（閉じる前に作りかけだった）か、止まっているなら、「進める」を頼む
-        const last = kicked.get(jobId);
-        if (last === undefined || (job.stalled && Date.now() - last >= kickEveryMs)) kick(jobId);
-      }
+      publish(toJob(job));
+      if (job.done) watch.over = true;
     } catch (error) {
       // 仕事が無くなっていたら、やめる。つながらないだけなら、また聞く
       if ((error as { code?: unknown }).code === 'refused') watch.over = true;
@@ -149,34 +98,36 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     }
     schedule(jobId);
   };
-  // 「使う」「捨てる」のあと: 手元の進み具合を書き換えて、見ている画面に知らせる
-  const decided = (jobId: string, index: number, status: StudioCandidate['status']) => {
-    const job = known.get(jobId);
-    if (!job) return;
-    publish({ ...job, candidates: job.candidates.map((c) => (c.index === index ? { index: c.index, name: c.name, categoryId: c.categoryId, status, notes: c.notes } : c)) });
-  };
-  const toMyItem = (item: WireItem, files: WireFiles, owner: string): MyItem => ({
+  const toInfo = (item: WireItem): MyItemInfo => ({
     id: item.id,
     dollId: item.dollId,
     item: item.item,
-    files: Object.fromEntries(Object.entries(files).map(([name, data]) => [name, toBlob(data, typeOf(name))])),
     ...(item.set ? { set: item.set } : {}),
     createdAt: item.createdAt,
+    hue: item.hue ?? 0,
+    order: item.order ?? item.createdAt,
+    updatedAt: item.updatedAt ?? item.createdAt,
+    notes: item.notes ?? [],
+  });
+  const toMyItem = (item: WireItem, files: WireFiles, owner: string): MyItem => ({
+    ...toInfo(item),
+    files: Object.fromEntries(Object.entries(files).map(([name, data]) => [name, toBlob(data, typeOf(name))])),
     owner,
   });
 
   const backend: StudioBackend = {
     async signIn() {
-      took(await transport.call<{ user: WireUser }>({ op: 'signIn' }));
+      const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
+      // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない
+      if (typeof answer.api !== 'number' || answer.api < API_VERSION) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       return { ...user! };
     },
     onUser(listener) {
       userListeners.add(listener);
       return () => userListeners.delete(listener);
     },
-    async startJob({ photo, ...input }) {
-      const started = took(await transport.call<{ jobId: string; cost: number; user: WireUser }>({ op: 'startJob', ...input, ...(photo ? { photo: await blobToBase64(photo) } : {}) }));
-      kick(started.jobId);
+    async startJob(input) {
+      const started = took(await transport.call<{ jobId: string; cost: number; user: WireUser }>({ op: 'startJob', dollId: input.dollId, theme: input.theme, styleId: input.styleId, target: input.target }));
       return { jobId: started.jobId, cost: started.cost };
     },
     watchJob(jobId, listener) {
@@ -184,7 +135,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       watches.set(jobId, watch);
       watch.listeners.add(listener);
       const job = known.get(jobId);
-      if (job) listener(structuredCopy(job));
+      if (job) listener(copy(job));
       // まだ分かっていない仕事は、すぐ聞く。分かっている仕事は、次の間隔から
       if (job) schedule(jobId);
       else void ask(jobId);
@@ -196,27 +147,28 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
         }
       };
     },
-    async pendingJobs() {
+    async openJobs() {
       const { jobs } = took(await transport.call<{ jobs: WireJob[]; user: WireUser }>({ op: 'jobs' }));
-      const converted = (await Promise.all(jobs.map(toJob))).map((c) => c.job);
+      const converted = jobs.map(toJob);
       for (const job of converted) known.set(job.id, job);
-      return converted.map(structuredCopy);
+      return converted.map(copy);
     },
-    async keep(jobId, index, name) {
-      const kept = took(await transport.call<{ item: WireItem; files: WireFiles; user: WireUser }>({ op: 'keep', jobId, index, name }));
-      decided(jobId, index, 'kept');
-      return toMyItem(kept.item, kept.files, (await me()).userCode);
-    },
-    async discard(jobId, index) {
-      await transport.call({ op: 'discard', jobId, index });
-      decided(jobId, index, 'discarded');
+    async ackJob(jobId) {
+      await transport.call({ op: 'ack', jobId });
     },
     async listMyItems() {
-      return (await transport.call<{ items: WireItem[] }>({ op: 'items' })).items;
+      return (await transport.call<{ items: WireItem[] }>({ op: 'items' })).items.map(toInfo);
     },
     async fetchMyItem(id) {
       const { item, files } = await transport.call<{ item: WireItem; files: WireFiles }>({ op: 'itemFiles', id });
       return toMyItem(item, files, (await me()).userCode);
+    },
+    async updateMyItem(id, change) {
+      const { item } = await transport.call<{ item: WireItem }>({ op: 'updateItem', id, ...(change.name !== undefined ? { name: change.name } : {}), ...(change.hue !== undefined ? { hue: change.hue } : {}) });
+      return toInfo(item);
+    },
+    async orderMyItems(ids) {
+      return (await transport.call<{ items: WireItem[] }>({ op: 'orderItems', ids })).items.map(toInfo);
     },
     async deleteMyItem(id) {
       await transport.call({ op: 'deleteItem', id });

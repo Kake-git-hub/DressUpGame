@@ -3,6 +3,7 @@
  *
  * 丸ごと入れ替えはしない（一覧が空で返った・途中で失敗した・利用者が替わった、で控えが全部消えないように）:
  *   - 端末に無い服だけ、絵ごと取って足す
+ *   - 端末にある服は、名前・色・並び順がサーバーと違えば（updatedAt が違えば）、そこだけ直す（絵は取り直さない）
  *   - 消すのは、「いまの利用者の服」で、サーバーから無くなったものだけ
  *     （ほかの利用者だったころの服は、サーバーに無くても、端末で着られるまま残す）
  */
@@ -13,6 +14,7 @@ export interface SyncResult {
   added: number;
   removed: number;
   failed: number; // 取れなかった・保存できなかった数（次に開いたとき、もう一度ためす）
+  updated: number; // 名前・色・並び順を、サーバーに合わせて直した数
 }
 
 export interface SyncSource {
@@ -25,7 +27,7 @@ export async function syncLibrary(backend: SyncSource, library: Library, userCod
   const local = await library.all();
   const have = new Set(local.map((item) => item.id));
   const wanted = new Set(onServer.map((item) => item.id));
-  const result: SyncResult = { added: 0, removed: 0, failed: 0 };
+  const result: SyncResult = { added: 0, removed: 0, failed: 0, updated: 0 };
 
   const missing = onServer.filter((item) => !have.has(item.id));
   for (const [i, info] of missing.entries()) {
@@ -43,6 +45,18 @@ export async function syncLibrary(backend: SyncSource, library: Library, userCod
       // 端末に保存できない: 残りを取りに行っても同じなので、やめる
       result.failed += missing.length - i;
       break;
+    }
+  }
+  // 名前・色・並び順（ほかの端末で変えた分）
+  const byId = new Map(onServer.map((info) => [info.id, info]));
+  for (const item of local) {
+    const info = byId.get(item.id);
+    if (!info || info.updatedAt === item.updatedAt) continue;
+    try {
+      await library.put({ ...item, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes });
+      result.updated++;
+    } catch {
+      result.failed++;
     }
   }
   for (const item of local) {

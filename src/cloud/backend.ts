@@ -4,7 +4,7 @@
  * アプリは、裏側をこの形としてだけ知る。本物は Firebase（段階 E3）、テストと開発は端末の中だけで動く偽物（fakeBackend.ts）。
  * チケットの残り・生成・保存は、どれも裏側が決める（アプリの側では増減しない）。
  */
-import type { Box, ManifestItem } from '../content/manifest';
+import type { ManifestItem } from '../content/manifest';
 
 export interface StudioUser {
   userCode: string; // 作者に伝えると、チケットや服を届けてもらえる短い文字列
@@ -20,30 +20,21 @@ export interface SetRef {
   name: string;
 }
 
-// できた服の絵（切り抜き済み）と、ドールのキャンバスの上での位置
-export interface StudioPreview {
-  url: string;
-  canvasW: number;
-  canvasH: number;
-  box: Box;
-}
-
 export interface StudioCandidate {
   index: number;
   name: string;
   categoryId: string;
-  // waiting = 順番待ち、working = 作成中、done = できた、failed = できなかった（チケットは戻る）、
-  // kept = 「使う」で自分の服にした、discarded = 「捨てる」で消した
-  status: 'waiting' | 'working' | 'done' | 'failed' | 'kept' | 'discarded';
+  // waiting = 順番待ち、working = 作成中、kept = 自分の服になった（itemId）、failed = できなかった（チケットは戻る）
+  status: 'waiting' | 'working' | 'kept' | 'failed';
   notes: string[]; // 検品で気づいたこと・失敗の理由（日本語）
-  preview?: StudioPreview;
+  itemId?: string; // できた服（自分の服）の ID
 }
 
 export interface StudioJob {
   id: string;
   dollId: string;
   set?: SetRef;
-  done: boolean; // 全部の候補が、できた・できなかった、のどちらかになった
+  done: boolean; // 全部の候補が、服になった・できなかった、のどちらかになった
   candidates: StudioCandidate[];
   tickets: number; // 使った枚数（戻した分を引いたあと）
   createdAt: number;
@@ -62,11 +53,16 @@ export interface MyItem {
   createdAt: number;
   // どの利用者の服か（利用者コード）。端末の控えをサーバーに合わせるとき、ほかの利用者だったころの服を消さないために持つ
   owner?: string;
+  hue: number; // 既定の色（色スライダーの角度。-180〜180。0 = もとの色）
+  order: number; // 並び順（大きいほど先。作ったときは createdAt）
+  updatedAt: number; // 名前・色・並び順を最後に変えた時刻
+  notes: string[]; // 検品で気づいたこと（注意あり）
 }
 // 一覧に載る中身（絵は含まない）
 export type MyItemInfo = Omit<MyItem, 'files' | 'owner'>;
 
-export type BackendErrorCode = 'offline' | 'no-tickets' | 'limit' | 'refused' | 'unknown';
+// old-server = サーバーが古い版（生成を、サーバーの列で進めない版）。作者が載せ直すまで、作れない
+export type BackendErrorCode = 'offline' | 'no-tickets' | 'limit' | 'refused' | 'unknown' | 'old-server';
 export class BackendError extends Error {
   readonly code: BackendErrorCode;
   constructor(code: BackendErrorCode, message: string) {
@@ -74,28 +70,36 @@ export class BackendError extends Error {
     this.code = code;
   }
 }
+export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';
 
 export interface StudioBackend {
-  // 利用者を確かめる（初めてなら作る）
+  // 利用者を確かめる（初めてなら作る）。サーバーが古い版なら BackendError('old-server')
   signIn(): Promise<StudioUser>;
   // チケットの残りなどが変わったら知らせる。返り値を呼ぶと、知らせを止める
   onUser(listener: (user: StudioUser) => void): () => void;
-  // 生成を始める。チケットは、ここで引かれる（できなかった品目の分は、あとで戻る）
-  // photo: 顔を似せる人の顔写真（顔のカテゴリ 1 点のときだけ）。あればテーマは空でもよい
-  startJob(input: { dollId: string; theme: string; styleId: string; target: StudioTarget; photo?: Blob }): Promise<{ jobId: string; cost: number }>;
+  // 生成を始める。チケットは、ここで引かれる（できなかった品目の分は、あとで戻る）。
+  // 返ってきたあとは、アプリを閉じても、サーバーが最後まで進める。できた服は、自動で自分の服になる
+  startJob(input: { dollId: string; theme: string; styleId: string; target: StudioTarget }): Promise<{ jobId: string; cost: number }>;
   // 進み具合を知らせる。返り値を呼ぶと、知らせを止める
   watchJob(jobId: string, listener: (job: StudioJob) => void): () => void;
-  // まだ「使う」「捨てる」を決めていない候補のある仕事（閉じる前に作っていた分も含む）。新しい順
-  pendingJobs(): Promise<StudioJob[]>;
-  // 「使う」: 自分の服にする
-  keep(jobId: string, index: number, name: string): Promise<MyItem>;
-  // 「捨てる」
-  discard(jobId: string, index: number): Promise<void>;
+  // まだ見ていない仕事（作りかけ + 終わって、結果をまだ見ていないもの）。新しい順
+  openJobs(): Promise<StudioJob[]>;
+  // 結果（できた・できなかった）を見た、の印を付ける（次からは openJobs に出ない）
+  ackJob(jobId: string): Promise<void>;
   // 自分の服の一覧（サーバーにあるもの全部。絵は含まない）
   listMyItems(): Promise<MyItemInfo[]>;
   // 自分の服 1 点を、絵ごと取る
   fetchMyItem(id: string): Promise<MyItem>;
+  // 名前・既定の色を変える
+  updateMyItem(id: string, change: { name?: string; hue?: number }): Promise<MyItemInfo>;
+  // 並び順を変える（ids の先頭ほど、先に並ぶ）。返り値は、変えた服
+  orderMyItems(ids: string[]): Promise<MyItemInfo[]>;
   deleteMyItem(id: string): Promise<void>;
+}
+
+// 自分の服の並び順: order の大きい順（同じなら、新しい順 → ID）
+export function byClosetOrder(a: { order: number; createdAt: number; id: string }, b: { order: number; createdAt: number; id: string }): number {
+  return b.order - a.order || b.createdAt - a.createdAt || a.id.localeCompare(b.id);
 }
 
 // 何枚のチケットを使うか（1 点 = 1 枚。セットは、パーツの数だけ）
@@ -103,3 +107,6 @@ export const ticketCost = (target: StudioTarget): number => (target.kind === 'se
 export const THEME_MAX = 60;
 export const SET_MIN = 2;
 export const SET_MAX = 6;
+export const NAME_MAX = 20;
+export const HUE_MIN = -180;
+export const HUE_MAX = 180;

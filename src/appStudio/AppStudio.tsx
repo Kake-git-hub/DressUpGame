@@ -5,7 +5,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
-import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioPreview, StudioTarget, StudioUser } from '../cloud/backend';
+import type { MyItem, StudioBackend, StudioCandidate, StudioJob, StudioTarget, StudioUser } from '../cloud/backend';
+import type { Box } from '../content/manifest';
 import type { Library } from '../cloud/library';
 import { syncLibrary } from '../cloud/sync';
 import type { ManifestCategory } from '../content/manifest';
@@ -50,6 +51,13 @@ async function shrinkPhoto(file: Blob): Promise<Blob> {
   }
 }
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
+
+interface StudioPreview {
+  url: string;
+  canvasW: number;
+  canvasH: number;
+  box: Box;
+}
 
 // Blob の絵（端末の控え）を表示する
 function BlobImage({ blob, alt }: { blob: Blob | undefined; alt: string }) {
@@ -111,7 +119,6 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   useEffect(() => () => void (photoUrl && URL.revokeObjectURL(photoUrl)), [photoUrl]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [names, setNames] = useState<Record<string, string>>({}); // 候補に付ける名前（変えたものだけ）
   const [closed, setClosed] = useState<string[]>([]); // 閉じた「できなかった」の知らせ
   const [working, setWorking] = useState<string | null>(null); // 「使う」「捨てる」「消す」の途中
   const watchers = useRef<(() => void)[]>([]);
@@ -136,7 +143,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
         signedIn = await backend.signIn();
         if (stopped) return;
         setUser(signedIn);
-        for (const job of await backend.pendingJobs()) {
+        for (const job of await backend.openJobs()) {
           if (stopped) return;
           stops.push(backend.watchJob(job.id, upsertJob));
         }
@@ -182,7 +189,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     setBusy(true);
     setError(null);
     try {
-      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current, ...(photo ? { photo } : {}) });
+      const { jobId } = await backend.startJob({ dollId: doll.id, theme: text, styleId, target: current });
       watchers.current.push(backend.watchJob(jobId, upsertJob));
     } catch (e) {
       setError(messageOf(e));
@@ -200,13 +207,6 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
     setWorking(null);
   };
   const keyOf = (job: StudioJob, c: StudioCandidate) => `${job.id}:${c.index}`;
-  const keep = (job: StudioJob, c: StudioCandidate) =>
-    act(keyOf(job, c), async () => {
-      const item = await backend!.keep(job.id, c.index, (names[keyOf(job, c)] ?? c.name).trim() || c.name);
-      await library.put(item);
-      await refreshLibrary();
-    });
-  const discard = (job: StudioJob, c: StudioCandidate) => act(keyOf(job, c), () => backend!.discard(job.id, c.index));
   const remove = (item: MyItem) =>
     act(item.id, async () => {
       await backend!.deleteMyItem(item.id);
@@ -218,7 +218,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
   // 出す候補: 作りかけ・できた・できなかった（閉じたものと、もう決めたものは出さない）
   const cards = jobs
     .filter((job) => job.dollId === doll.id)
-    .flatMap((job) => job.candidates.filter((c) => c.status !== 'kept' && c.status !== 'discarded' && !closed.includes(keyOf(job, c))).map((c) => ({ job, c })));
+    .flatMap((job) => job.candidates.filter((c) => c.status !== 'kept' && !closed.includes(keyOf(job, c))).map((c) => ({ job, c })));
   const mine = myItems.filter((i) => i.dollId === doll.id);
   // ほかのドールの服（公開をやめたドールの服も、ここで見て消せる）
   const others = myItems.filter((i) => i.dollId !== doll.id);
@@ -375,7 +375,7 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
                     const key = keyOf(job, c);
                     return (
                       <div key={key} className="studio-candidate" data-testid="studio-candidate" data-status={c.status}>
-                        <Stage doll={doll} preview={c.status === 'done' ? c.preview : undefined} />
+                        <Stage doll={doll} />
                         <div className="studio-candidate-side">
                           <span className="studio-hint">
                             {labelOf(c.categoryId)}
@@ -389,21 +389,6 @@ export function AppStudio({ backend, doll, categories, library, onClose, onLibra
                               <button type="button" onClick={() => setClosed((list) => [...list, key])} data-testid="studio-dismiss">
                                 とじる
                               </button>
-                            </>
-                          )}
-                          {c.status === 'done' && (
-                            <>
-                              <input value={names[key] ?? c.name} onChange={(e) => setNames((n) => ({ ...n, [key]: e.target.value }))} maxLength={20} aria-label="名前" data-testid="studio-candidate-name" />
-                              {c.notes.length > 0 && <p className="studio-hint">{c.notes.join(' ')}</p>}
-                              {!c.preview && <p className="studio-hint">絵を読み込めませんでした。開き直すと、もう一度ためします（だめなら「捨てる」で消せます）。</p>}
-                              <div className="studio-row">
-                                <button type="button" className="primary" disabled={working !== null} onClick={() => void keep(job, c)} data-testid="studio-keep">
-                                  使う
-                                </button>
-                                <button type="button" disabled={working !== null} onClick={() => void discard(job, c)} data-testid="studio-discard">
-                                  捨てる
-                                </button>
-                              </div>
                             </>
                           )}
                         </div>
