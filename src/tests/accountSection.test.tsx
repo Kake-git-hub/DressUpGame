@@ -33,6 +33,7 @@ interface Setup {
   popup?: (intent: 'link' | 'signin') => Promise<LoginResult>;
   redirect?: (intent: 'link' | 'signin') => Promise<LoginResult>;
   logout?: () => Promise<void>;
+  logoutSwapsUserTo?: string; // logout() の中で、つなぎ役のいまの利用者が、別の利用者（空の利用者）に替わる（偽物の裏側と同じ）
 }
 
 function setup(options: Setup = {}) {
@@ -46,7 +47,15 @@ function setup(options: Setup = {}) {
     loginWithPopup: vi.fn(options.popup ?? (async () => ({ outcome: 'linked' }) as LoginResult)),
     startRedirect: vi.fn(options.redirect ?? (async () => ({ outcome: 'not-ready' }) as LoginResult)),
     finishRedirect: vi.fn(async () => null),
-    logout: vi.fn(options.logout ?? (async () => undefined)),
+    logout: vi.fn(
+      options.logout ??
+        (async () => {
+          if (options.logoutSwapsUserTo) {
+            user = { ...user, userCode: options.logoutSwapsUserTo };
+            state = { ...state, user };
+          }
+        }),
+    ),
   };
   const backend = {
     account: account as unknown as StudioAccount,
@@ -252,6 +261,15 @@ describe('「アカウント」の欄', () => {
     fireEvent.click(screen.getByTestId('account-logout-yes'));
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(account.logout).toHaveBeenCalledTimes(1);
+    expect(await ids()).toEqual(['b1', 'c1']);
+  });
+
+  it('ログアウトで、つなぎ役のいまの利用者が空の利用者に替わっても、外すのは、ログアウト前の利用者の服（替わったあとの利用者の服ではない）', async () => {
+    setup({ info: GOOGLE, logoutSwapsUserTo: 'ZZZZ' });
+    await waitFor(() => expect(screen.getByTestId('account-logout')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('account-logout'));
+    fireEvent.click(screen.getByTestId('account-logout-yes'));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(await ids()).toEqual(['b1', 'c1']);
   });
 

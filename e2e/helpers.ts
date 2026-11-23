@@ -24,6 +24,8 @@ export interface FakeOptions {
   offline?: boolean;
   oldServer?: boolean;
   admin?: boolean;
+  loginFail?: string;
+  googleTaken?: boolean;
 }
 
 export async function pixel(page: Page, x: number, y: number): Promise<number[]> {

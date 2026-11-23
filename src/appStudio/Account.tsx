@@ -137,6 +137,8 @@ export function Account({ session, library, reload = () => window.location.reloa
   const logout = async () => {
     setBusy(true);
     setMessage(null);
+    // ログアウト前の利用者コード（ログアウトで、つなぎ役のいまの利用者が、空の利用者に替わることがある）
+    const userCode = session.getState().user?.userCode;
     try {
       await account.logout();
     } catch {
@@ -149,7 +151,6 @@ export function Account({ session, library, reload = () => window.location.reloa
       return;
     }
     // うまくいったときだけ、端末の控えから、このアカウントの服を外す
-    const userCode = session.getState().user?.userCode;
     if (userCode) await forgetAccount(library, userCode, safeStorage(() => window.localStorage));
     reload();
   };

@@ -73,6 +73,8 @@ async function fakeFirebase(page: Page, functions: 'ok' | 'old' | 'missing' | 'd
     fake.signUps++;
     return json(route, { kind: 'identitytoolkit#SignupNewUserResponse', idToken: idToken('uid1'), refreshToken: 'refresh-1', expiresIn: '3600', localId: 'uid1' });
   });
+  // 方法 2 の client_id を聞く受け口（偽の返事）
+  await page.route(/identitytoolkit\.googleapis\.com\/v1\/accounts:createAuthUri/, (route) => json(route, { authUri: 'https://accounts.google.com/o/oauth2/auth?client_id=test-client.apps.googleusercontent.com' }));
   await page.route(/identitytoolkit\.googleapis\.com\/v1\/accounts:lookup/, (route) => json(route, { kind: 'identitytoolkit#GetAccountInfoResponse', users: [{ localId: 'uid1', lastLoginAt: String(Date.now()), createdAt: String(Date.now()) }] }));
   await page.route(/securetoken\.googleapis\.com\/v1\/token/, (route) => json(route, { access_token: idToken('uid1'), id_token: idToken('uid1'), expires_in: '3600', token_type: 'Bearer', refresh_token: 'refresh-1', user_id: 'uid1', project_id: '389373249780' }));
   if (functions === 'down') return fake;
@@ -187,5 +189,31 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await page.getByTestId('studio-close').click();
     await page.getByTestId('home-play').click();
     await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
+  });
+
+  test('「アカウント」の欄: 準備が済むと 2 つのボタンが押せる（ログイン前）。方法 2 は、client_id を付けて accounts.google.com へ移る（Google へは、通信を出さない）', async ({ page }) => {
+    await fakeFirebase(page);
+    // Google の画面への移動は、ここで受け止めて、空のページを返す
+    const moved: string[] = [];
+    await page.route(/^https:\/\/accounts\.google\.com\//, (route) => {
+      moved.push(route.request().url());
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>google</title>' });
+    });
+    await openStudio(page);
+    await expect(page.getByTestId('account-section')).toBeVisible();
+    await expect(page.getByTestId('account-login-popup')).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByTestId('account-login-redirect')).toBeEnabled();
+    await expect(page.getByTestId('account-email')).toHaveCount(0);
+    await expect(page.getByTestId('account-message')).toHaveCount(0);
+
+    await page.getByTestId('account-login-redirect').click();
+    await expect.poll(() => moved.length, { timeout: 15_000 }).toBe(1);
+    const url = new URL(moved[0]);
+    expect(`${url.origin}${url.pathname}`).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(url.searchParams.get('client_id')).toBe('test-client.apps.googleusercontent.com');
+    expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:4173/DressUpGame/');
+    expect(url.searchParams.get('response_type')).toBe('id_token');
+    expect(url.searchParams.get('nonce')).toBeTruthy();
+    expect(url.searchParams.get('state')).toBeTruthy();
   });
 });
