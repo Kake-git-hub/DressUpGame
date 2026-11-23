@@ -17,7 +17,7 @@
  * 1 日の区切りは、世界標準時の 0 時（日本の朝 9 時）。
  */
 import { randomUUID } from 'node:crypto';
-import { getApps, initializeApp } from 'firebase-admin/app';
+import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getFunctions } from 'firebase-admin/functions';
 import { getStorage } from 'firebase-admin/storage';
@@ -102,6 +102,31 @@ function getServices(): Services {
   return services;
 }
 
+// 列が呼ぶ先（関数 studioWork の URL）。2 世代の関数は、URL を調べて、列に渡す（Firebase の手引きのやり方）。
+// 調べられなければ、渡さない（部品が、既定の URL を使う）。本物のプロジェクトでは、まだ動かしていない（docs/firebase-setup.md の 2-9）
+let workUri: Promise<string | undefined> | null = null;
+function workFunctionUri(): Promise<string | undefined> {
+  workUri ??= (async () => {
+    try {
+      const project = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || firebaseConfig.projectId;
+      const token = await applicationDefault().getAccessToken();
+      const response = await fetch(`https://cloudfunctions.googleapis.com/v2/projects/${project}/locations/${REGION}/functions/studioWork`, {
+        headers: { Authorization: `Bearer ${token.access_token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const uri = ((await response.json()) as { serviceConfig?: { uri?: unknown } }).serviceConfig?.uri;
+      if (typeof uri !== 'string' || !uri.startsWith('https://')) throw new Error('返事に URL がありません');
+      return uri;
+    } catch (error) {
+      logger.warn('関数 studioWork の URL を調べられませんでした（既定の URL で、列に入れます）', { error: String(error) });
+      workUri = null; // 次に列に入れるとき、もう一度ためす
+      return undefined;
+    }
+  })();
+  return workUri;
+}
+
 // 列の関数の中身
 async function work(uid: string, jobId: string): Promise<void> {
   await workJob(await coreDeps(WORK_BUDGET_MS), uid, jobId);
@@ -118,7 +143,10 @@ async function enqueue(uid: string, jobId: string, delaySeconds = 0): Promise<vo
     return;
   }
   try {
-    await getFunctions().taskQueue(WORK_QUEUE).enqueue({ uid, jobId }, { scheduleDelaySeconds: Math.max(0, Math.round(delaySeconds)), dispatchDeadlineSeconds: WORK_TIMEOUT_SECONDS });
+    const uri = await workFunctionUri();
+    await getFunctions()
+      .taskQueue(WORK_QUEUE)
+      .enqueue({ uid, jobId }, { scheduleDelaySeconds: Math.max(0, Math.round(delaySeconds)), dispatchDeadlineSeconds: WORK_TIMEOUT_SECONDS, ...(uri ? { uri } : {}) });
   } catch (error) {
     // 権限が足りない・API が有効でない、などは、ここに出る（npm run firebase:logs で見える）
     logger.error('仕事を列に入れられませんでした', { jobId, error: String(error) });

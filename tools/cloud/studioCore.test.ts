@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { ackJob, deleteItem, EXPIRE_MS, listItems, normalizePhoto, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
+import { ackJob, deleteItem, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 import type { CandidateDoc, JobDoc } from './store.ts';
 
@@ -514,6 +514,126 @@ describe('生成を進める', () => {
   }, 60_000);
 });
 
+describe('取り引きのやり直し・途中の失敗（服と払い戻しの、どちらか 1 つで終わる）', () => {
+  // Firestore は、確定の返事が届かなかったとき（時間切れなど）、取り引きの中身をもう一度呼ぶ。そのとき、前の回は確定していることがある。
+  // そのまね: どの書き換えも、確定したあとに、もう一度呼ぶ
+  function replayTransactions() {
+    const real = store.updateJob.bind(store);
+    store.updateJob = async (uid, jobId, change) => {
+      await real(uid, jobId, change);
+      return real(uid, jobId, change);
+    };
+  }
+  it('確定したあとに、もう一度呼ばれても、できた服は消えない（服 1 点・絵 1 回・チケット 1 枚）', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    replayTransactions();
+    expect(await runJob(deps, 'u1', jobId)).toBe('done');
+    expect(await candidateOf('u1', jobId)).toMatchObject({ status: 'kept', itemId: `my:${jobId}-0-1`, tries: 1 });
+    expect((await listItems(deps, 'u1')).map((i) => i.id)).toEqual([`my:${jobId}-0-1`]);
+    expect(imageCalls).toBe(1);
+    expect((await signIn(deps, 'u1')).tickets).toBe(1);
+    expect(refunds()).toEqual([]);
+  }, 60_000);
+  it('セットでも: どの品目も 1 回ずつ作り、全部が服になる', async () => {
+    await userWith('u1', 5);
+    const { jobId } = await startJob(deps, 'u1', twoParts());
+    replayTransactions();
+    enqueued.length = 0;
+    await workJob(deps, 'u1', jobId);
+    const job = (await store.getJob('u1', jobId))!;
+    expect(job.done).toBe(true);
+    expect(job.candidates.map((c) => [c.status, c.tries])).toEqual([['kept', 1], ['kept', 1]]);
+    expect(await listItems(deps, 'u1')).toHaveLength(2);
+    expect(imageCalls).toBe(2);
+    expect(enqueued).toEqual([]);
+  }, 60_000);
+  it('できなかったときも: 払い戻しは 1 回', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    replayTransactions();
+    failImages = true;
+    expect(await runJob(deps, 'u1', jobId)).toBe('done');
+    expect(await candidateOf('u1', jobId)).toMatchObject({ status: 'failed', refunded: true });
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
+    expect(refunds()).toHaveLength(1);
+  }, 60_000);
+  it('止まった仕事の入れ直しも: 列に入れるのは 1 回', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    clock += QUEUE_WAIT_MS + 1000;
+    enqueued.length = 0;
+    replayTransactions();
+    await tendJob(deps, 'u1', (await store.getJob('u1', jobId))!);
+    expect(enqueued).toEqual([['u1', jobId, undefined]]);
+  });
+  it('服を保存したあと、結果を書く所で失敗したら、保存した服は残さない。やり直しで、服は 1 点だけになる', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    const realPut = store.putItem.bind(store);
+    const realUpdate = store.updateJob.bind(store);
+    let failNext = false;
+    let first = true;
+    store.putItem = async (uid, item) => {
+      await realPut(uid, item);
+      // 1 回目だけ: このすぐあとの「結果を書く」が、失敗する
+      if (first) failNext = true;
+      first = false;
+    };
+    store.updateJob = async (uid, id, change) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error('store is down');
+      }
+      return realUpdate(uid, id, change);
+    };
+    await expect(runJob(deps, 'u1', jobId)).rejects.toThrow('store is down'); // 列が、間をあけて呼び直す
+    expect(await listItems(deps, 'u1')).toEqual([]);
+    expect([...files.files.keys()].filter((k) => k.includes('/items/'))).toEqual([]);
+    clock += 200_000; // 受け持ちの合図がとぎれたあと
+    expect(await runJob(deps, 'u1', jobId)).toBe('done');
+    expect((await listItems(deps, 'u1')).map((i) => i.id)).toEqual([`my:${jobId}-0-2`]);
+    expect((await signIn(deps, 'u1')).tickets).toBe(1);
+    expect(refunds()).toEqual([]);
+  }, 60_000);
+  it('前の回が、服を保存したまま止まっていたら（落ちた、など）、取りかかり直すときに、その服を片付ける', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    // 1 回目: 服を保存した直後に落ちた、という状態を作る
+    await store.putItem('u1', { id: `my:${jobId}-0-1`, dollId, item: { id: `my:${jobId}-0-1`, name: 'のこりもの', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/t.webp' }, paths: {}, createdAt: clock });
+    await files.put(`users/u1/items/my_${jobId}-0-1/a.webp`, Buffer.from('x'), 'image/webp');
+    await setJob('u1', jobId, (job) => ({ ...job, heartbeat: clock, runner: 'dead', candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const, tries: 1 })) }));
+    clock += 200_000;
+    expect(await runJob(deps, 'u1', jobId)).toBe('done');
+    expect((await listItems(deps, 'u1')).map((i) => i.id)).toEqual([`my:${jobId}-0-2`]);
+    expect([...files.files.keys()].filter((k) => k.includes(`my_${jobId}-0-1`))).toEqual([]);
+  }, 60_000);
+  it('できなかった品目でも、前の回が残した服は片付ける（服と払い戻しの両方にならない）', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    await store.putItem('u1', { id: `my:${jobId}-0-1`, dollId, item: { id: `my:${jobId}-0-1`, name: 'のこりもの', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/t.webp' }, paths: {}, createdAt: clock });
+    await setJob('u1', jobId, (job) => ({ ...job, heartbeat: clock, runner: 'dead', candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const, tries: 3 })) }));
+    clock += 200_000;
+    expect(await runJob(deps, 'u1', jobId)).toBe('done'); // 3 回止まったので、打ち切り
+    expect(await candidateOf('u1', jobId)).toMatchObject({ status: 'failed', refunded: true });
+    expect(await listItems(deps, 'u1')).toEqual([]);
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
+  }, 60_000);
+  it('「作る」が、確定したあとにもう一度呼ばれても、チケットは 1 回しか引かない（仕事も 1 つ）', async () => {
+    await userWith('u1', 2);
+    const real = store.chargeAndCreateJob.bind(store);
+    store.chargeAndCreateJob = async (uid, job, cost, reason, now) => {
+      await real(uid, job, cost, reason, now);
+      return real(uid, job, cost, reason, now);
+    };
+    const { jobId, cost } = await startJob(deps, 'u1', oneTop());
+    expect(cost).toBe(1);
+    expect((await signIn(deps, 'u1')).tickets).toBe(1);
+    expect(await store.listJobs('u1')).toHaveLength(1);
+    expect(store.ledger.filter((l) => l.reason === `job:${jobId}`)).toHaveLength(1);
+  });
+});
+
 describe('前の版の「できた」候補', () => {
   // 前の版は、できた絵を置き場に入れ、「使う」を待っていた。その絵から、服にする
   async function legacyDone(withPicture: boolean): Promise<string> {
@@ -611,28 +731,29 @@ describe('自分の服を消す', () => {
 
 describe('止まった仕事の手当て（tendJob）', () => {
   const jobOf = async (uid: string, jobId: string) => (await store.getJob(uid, jobId))!;
-  it('止まっていれば列に入れ直す。30 秒以内には、もう入れない', async () => {
+  it('列に入れてあるはずの仕事（まだ始まっていないだけかもしれない）は、5 分たってから、念のため入れ直す', async () => {
     await userWith('u1', 2);
     const { jobId } = await startJob(deps, 'u1', oneTop());
     enqueued.length = 0;
-    // 始めた直後（列に入れたばかり）は、入れ直さない
-    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect([REQUEUE_MS, QUEUE_WAIT_MS]).toEqual([30_000, 300_000]);
+    // 列がこみあっていて、まだ呼ばれていないだけ、のことがある。何度も聞かれても、列に同じ仕事を積み上げない
+    for (let i = 0; i < 20; i++) {
+      clock += 14_000;
+      await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    }
     expect(enqueued).toEqual([]);
-    clock += 31_000;
+    clock += 30_000; // 始めてから 5 分をこえた
     const tended = await tendJob(deps, 'u1', await jobOf('u1', jobId));
     expect(enqueued).toEqual([['u1', jobId, undefined]]);
     expect(tended.queuedAt).toBe(clock);
-    clock += 10_000;
+    clock += 60_000;
     await tendJob(deps, 'u1', await jobOf('u1', jobId));
     expect(enqueued).toHaveLength(1);
-    clock += 30_000;
-    await tendJob(deps, 'u1', await jobOf('u1', jobId));
-    expect(enqueued).toHaveLength(2);
   });
   it('進んでいる最中の仕事・終わった仕事は、入れ直さない', async () => {
     await userWith('u1', 2);
     const { jobId } = await startJob(deps, 'u1', oneTop());
-    clock += 100_000;
+    clock += QUEUE_WAIT_MS + 1000;
     await setJob('u1', jobId, (job) => ({ ...job, heartbeat: clock, runner: 'r', candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const, tries: 1 })) }));
     enqueued.length = 0;
     await tendJob(deps, 'u1', await jobOf('u1', jobId));
@@ -642,21 +763,29 @@ describe('止まった仕事の手当て（tendJob）', () => {
     await tendJob(deps, 'u1', await jobOf('u1', jobId));
     expect(enqueued).toHaveLength(1);
     await setJob('u1', jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'kept' as const })) }));
-    clock += 100_000;
+    clock += QUEUE_WAIT_MS + 1000;
     await tendJob(deps, 'u1', await jobOf('u1', jobId));
     expect(enqueued).toHaveLength(1);
   });
-  it('列に入れられなくても、落ちない（次に聞かれたとき、また試す）', async () => {
+  it('列に入れられなかったと分かっている仕事は、30 秒おきに入れ直す（「作る」のとき・入れ直しのとき、どちらの失敗でも）', async () => {
     await userWith('u1', 2);
-    const { jobId } = await startJob(deps, 'u1', oneTop());
-    clock += 31_000;
     enqueueFails = true;
-    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    expect((await jobOf('u1', jobId)).queueFailed).toBe(true);
+    clock += 10_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId)); // まだ 30 秒たっていない
+    clock += 21_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId)); // 入れ直そうとして、また失敗（落ちない）
+    expect((await jobOf('u1', jobId)).queueFailed).toBe(true);
     enqueueFails = false;
     enqueued.length = 0;
-    clock += 31_000;
+    clock += 10_000;
     await tendJob(deps, 'u1', await jobOf('u1', jobId));
-    expect(enqueued).toHaveLength(1);
+    expect(enqueued).toEqual([]);
+    clock += 21_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toEqual([['u1', jobId, undefined]]);
+    expect((await jobOf('u1', jobId)).queueFailed).toBeUndefined();
   });
   it('24 時間たった仕事は、残りを failed にして払い戻し、終わりにする（できた服は、そのまま）', async () => {
     await userWith('u1', 5);
@@ -709,7 +838,7 @@ describe('見回り（sweep）', () => {
     const a = await startJob(deps, 'u1', oneTop());
     const b = await startJob(deps, 'u2', oneTop());
     await setJob('u2', b.jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'kept' as const })) }));
-    clock += 31_000;
+    clock += QUEUE_WAIT_MS + 1000;
     enqueued.length = 0;
     expect(await sweep(deps)).toBe(1);
     expect(enqueued).toEqual([['u1', a.jobId, undefined]]);
@@ -736,7 +865,7 @@ describe('見ていない仕事（openJobs・ackJob）', () => {
   it('聞かれたとき、止まっている仕事は列に入れ直す', async () => {
     await userWith('u1', 2);
     const { jobId } = await startJob(deps, 'u1', oneTop());
-    clock += 31_000;
+    clock += QUEUE_WAIT_MS + 1000;
     enqueued.length = 0;
     await openJobs(deps, 'u1');
     expect(enqueued).toEqual([['u1', jobId, undefined]]);

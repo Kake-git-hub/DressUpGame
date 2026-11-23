@@ -69,8 +69,9 @@ export class MemoryStore implements CloudStore {
     // 間に待ちを入れない（引くのと作るのが、片方だけにならない）
     const user = this.users.get(uid);
     if (!user) throw new CloudError('refused', '利用者が見つかりません');
+    // やり直し: 前の回で、もう引いて、作ってある
+    if (this.jobs.has(`${uid}/${job.id}`)) return have(user);
     if (have(user) < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${have(user)} 枚、必要 ${cost} 枚）`);
-    if (this.jobs.has(`${uid}/${job.id}`)) throw new Error('同じ仕事が、もうあります');
     user.tickets = have(user) - cost;
     this.ledger.push({ uid, count: -cost, reason, at: now });
     this.jobs.set(`${uid}/${job.id}`, clone(job));

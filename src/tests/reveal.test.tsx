@@ -21,10 +21,10 @@ const item = (id: string): MyItem => ({
   updatedAt: 1,
   notes: [],
 });
-const view = (change: Partial<RevealView> = {}): RevealView => ({ kind: 'arrived', items: [item('my:a')], failed: [], doll, title: 'なみのふく', ...change });
-function open(v: RevealView, props: { storeFailed?: boolean; canTryOn?: boolean } = {}) {
+const view = (change: Partial<RevealView> = {}): RevealView => ({ kind: 'arrived', items: [item('my:a')], failed: [], warnings: [], missing: 0, doll, title: 'なみのふく', ...change });
+function open(v: RevealView, props: { canTryOn?: boolean } = {}) {
   const handlers = { onTryOn: vi.fn(), onOpenCloset: vi.fn(), onClose: vi.fn() };
-  render(<Reveal view={v} storeFailed={props.storeFailed ?? false} canTryOn={props.canTryOn ?? true} {...handlers} />);
+  render(<Reveal view={v} canTryOn={props.canTryOn ?? true} {...handlers} />);
   return handlers;
 }
 
@@ -50,19 +50,28 @@ describe('服が届いた演出', () => {
     expect(screen.getByTestId('reveal-stage').querySelector('img[src="girl.webp"]')).toBeNull();
   });
 
-  it('端末に保存できなかったとき: そう添える（演出は出す）', () => {
-    open(view({ items: [] }), { storeFailed: true, canTryOn: false });
+  it('届いた服が、この端末に無い（保存できなかった）とき: そう添える（演出は出す）。全部あれば、添えない', () => {
+    open(view());
+    expect(screen.queryByTestId('reveal-store-failed')).toBeNull();
+    cleanup();
+    open(view({ items: [], missing: 1 }), { canTryOn: false });
     expect(screen.getByTestId('reveal-store-failed').textContent).toBe('この たんまつに ほぞんできませんでした（あきが たりないかもしれません）');
     expect(screen.getByTestId('reveal').dataset.kind).toBe('arrived');
   });
 
-  it('一部できなかった: 品目ごとに知らせる', () => {
-    open(view({ failed: ['ぼうし', 'くつ'] }));
+  it('一部できなかった: 品目ごとに知らせる。理由（サーバーの知らせ）があれば、小さく添える', () => {
+    open(view({ failed: [{ label: 'ぼうし', note: '今日は、作れる枚数の上限に達しました' }, { label: 'くつ', note: '' }] }));
     expect(screen.getAllByTestId('reveal-failed').map((p) => p.textContent)).toEqual(['ぼうしは つくれませんでした。チケットは もどしました', 'くつは つくれませんでした。チケットは もどしました']);
+    expect(screen.getAllByTestId('reveal-reason').map((p) => p.textContent)).toEqual(['今日は、作れる枚数の上限に達しました']);
+  });
+
+  it('できた服に、検品の注意があれば、小さく出す', () => {
+    open(view({ warnings: ['そでが みじかいかもしれません'] }));
+    expect(screen.getByTestId('reveal-warning').textContent).toContain('そでが みじかいかもしれません');
   });
 
   it('全部できなかった: とびらも「きせてみる」「クローゼットをみる」も出さず、知らせと「とじる」だけ', () => {
-    const handlers = open(view({ kind: 'failed-only', items: [], failed: ['トップス'], title: '' }), { storeFailed: true });
+    const handlers = open(view({ kind: 'failed-only', items: [], failed: [{ label: 'トップス', note: '' }], title: '' }));
     const reveal = screen.getByTestId('reveal');
     expect(reveal.dataset.kind).toBe('failed-only');
     expect(reveal.textContent).toContain('つくれませんでした');

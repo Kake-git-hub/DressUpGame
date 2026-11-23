@@ -62,7 +62,8 @@ export interface JobDoc {
   photo?: string; // 顔を似せる写真の置き場のパス。仕事が終わったら消す
   v?: 2; // 列で進める版の仕事（できた服は、自動で自分の服になる）
   seen?: boolean; // 利用者が、結果（できた・できなかった）を見た
-  queuedAt?: number; // 最後に列に入れた時刻（入れ直しすぎないため）
+  queuedAt?: number; // 最後に列に入れた（入れようとした）時刻（入れ直しすぎないため）
+  queueFailed?: boolean; // 列に入れられなかった、と分かっている（早めに入れ直す）
   candidates: CandidateDoc[];
 }
 // 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける
@@ -95,7 +96,8 @@ export interface CloudStore {
   // 画像を 1 枚作る前に呼ぶ。その日の上限に達していたら CloudError('limit')（数は増えない）
   spendImage(day: string, perDay: number): Promise<void>;
   createJob(uid: string, job: JobDoc): Promise<void>;
-  // チケットを引くことと、仕事を作ることを、1 つの取り引きで行う。足りなければ CloudError('no-tickets')（どちらも起きない）。返り値は残り
+  // チケットを引くことと、仕事を作ることを、1 つの取り引きで行う。足りなければ CloudError('no-tickets')（どちらも起きない）。返り値は残り。
+  // 同じ仕事が、もうあれば（確定の返事が届かなかったときのやり直し）、何もせずに、いまの残りを返す
   chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number>;
   getJob(uid: string, jobId: string): Promise<JobDoc | null>;
   // 進み具合を、読んで書き換える（割り込まれない）。change が null を返したら、何も書かない。返り値は、書いたあとの内容。

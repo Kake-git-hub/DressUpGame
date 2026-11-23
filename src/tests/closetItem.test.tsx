@@ -117,4 +117,64 @@ describe('クローゼットの、服 1 点の画面', () => {
     expect(screen.getByTestId('closet-offline-note').textContent).toContain('いまは なおせません');
     for (const id of ['closet-name', 'closet-hue', 'closet-move-back', 'closet-delete']) expect((screen.getByTestId(id) as HTMLButtonElement).disabled, id).toBe(true);
   });
+
+  it('色: 動かし終えて 0.4 秒たつと保存する。保存の返事が来ても、そのあいだに動かしたスライダーは、もどらない', async () => {
+    vi.useFakeTimers();
+    try {
+      let answer: (info: MyItemInfo) => void = () => undefined;
+      const updateMyItem = vi.fn((_id: string, change: { hue?: number }) => new Promise<MyItemInfo>((resolve) => (answer = () => resolve(infoOf(item('a', 2), { hue: change.hue ?? 0, updatedAt: 9 })))));
+      open({ updateMyItem });
+      const slider = screen.getByTestId('closet-hue') as HTMLInputElement;
+      fireEvent.change(slider, { target: { value: '50' } });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(updateMyItem).not.toHaveBeenCalled(); // まだ動かしている途中かもしれない
+      await vi.advanceTimersByTimeAsync(150);
+      expect(updateMyItem).toHaveBeenCalledWith('a', { hue: 50 });
+      // 返事を待っている間に、さらに動かす
+      fireEvent.change(slider, { target: { value: '80' } });
+      answer(infoOf(item('a', 2)));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(slider.value).toBe('80');
+      expect(puts.at(-1)).toMatchObject({ id: 'a', hue: 50 });
+      await vi.advanceTimersByTimeAsync(450);
+      expect(updateMyItem).toHaveBeenLastCalledWith('a', { hue: 80 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('色: 動かしてすぐ閉じても（0.4 秒たつ前）、保存する', async () => {
+    const updateMyItem = vi.fn(async (_id: string, change: { hue?: number }) => infoOf(item('a', 2), { hue: change.hue ?? 0, updatedAt: 9 }));
+    const { handlers } = open({ updateMyItem });
+    fireEvent.change(screen.getByTestId('closet-hue'), { target: { value: '-40' } });
+    cleanup(); // 「できた」を押して、画面が閉じた
+    await waitFor(() => expect(updateMyItem).toHaveBeenCalledWith('a', { hue: -40 }));
+    await waitFor(() => expect(puts.at(-1)).toMatchObject({ id: 'a', hue: -40 }));
+    await waitFor(() => expect(handlers.onChanged).toHaveBeenCalled());
+  });
+
+  it('色: 保存できなかったら、理由を出す。同じ色をもう一度えらぶと、保存し直す', async () => {
+    vi.useFakeTimers();
+    try {
+      let fail = true;
+      const updateMyItem = vi.fn(async (_id: string, change: { hue?: number }) => {
+        if (fail) throw new BackendError('offline', 'インターネットにつながっていません');
+        return infoOf(item('a', 2), { hue: change.hue ?? 0, updatedAt: 9 });
+      });
+      open({ updateMyItem });
+      const slider = screen.getByTestId('closet-hue');
+      fireEvent.change(slider, { target: { value: '60' } });
+      await vi.advanceTimersByTimeAsync(450);
+      expect(screen.getByTestId('closet-error').textContent).toBe('インターネットにつながっていません');
+      expect(puts).toEqual([]);
+      fail = false;
+      fireEvent.change(slider, { target: { value: '61' } });
+      fireEvent.change(slider, { target: { value: '60' } });
+      await vi.advanceTimersByTimeAsync(450);
+      expect(updateMyItem).toHaveBeenCalledTimes(2);
+      expect(puts.at(-1)).toMatchObject({ hue: 60 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

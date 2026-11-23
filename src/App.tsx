@@ -594,32 +594,42 @@ function App() {
   // 服が届いた演出: 届いた仕事（結果を、まだ見ていない）が、どの画面の上にも出る。1 つずつ、古い順に。
   // 画面に指が触れている間（服をドラッグしている・調整している）は出さず、離れた直後に出す
   const [revealId, setRevealId] = useState<string | null>(null);
-  const touches = useRef(0);
+  const touches = useRef(new Set<number>()); // いま画面に触れている指（ポインターの ID）
   useEffect(() => {
     if (!session) return;
     const check = () => {
       const arrivals = session.getState().arrivals;
       // 出している演出は、その仕事を見るまで、そのまま。出していなければ、指が離れているときに、次の 1 つを出す
-      setRevealId((current) => (current && arrivals.some((job) => job.id === current) ? current : touches.current === 0 ? (arrivals[0]?.id ?? null) : null));
+      setRevealId((current) => (current && arrivals.some((job) => job.id === current) ? current : touches.current.size === 0 ? (arrivals[0]?.id ?? null) : null));
     };
-    const down = () => {
-      touches.current++;
+    const down = (e: PointerEvent) => {
+      touches.current.add(e.pointerId);
     };
-    const up = () => {
-      touches.current = Math.max(0, touches.current - 1);
+    const up = (e: PointerEvent) => {
+      touches.current.delete(e.pointerId);
       // 離した操作（服を着せる、など）が済んでから
+      setTimeout(check, 0);
+    };
+    // 「離した」の知らせが来ないことがある（右クリックのメニュー、ほかのアプリへの切り替え）。
+    // 触れたままの扱いが残ると、演出がずっと出なくなるので、画面を離れたら、触れていないことにする
+    const reset = () => {
+      touches.current.clear();
       setTimeout(check, 0);
     };
     const unsubscribe = session.subscribe(check);
     window.addEventListener('pointerdown', down, true);
     window.addEventListener('pointerup', up, true);
     window.addEventListener('pointercancel', up, true);
+    window.addEventListener('blur', reset);
+    document.addEventListener('visibilitychange', reset);
     check();
     return () => {
       unsubscribe();
       window.removeEventListener('pointerdown', down, true);
       window.removeEventListener('pointerup', up, true);
       window.removeEventListener('pointercancel', up, true);
+      window.removeEventListener('blur', reset);
+      document.removeEventListener('visibilitychange', reset);
     };
   }, [session]);
   const revealJob = revealId ? (cloud?.arrivals.find((job) => job.id === revealId) ?? null) : null;
@@ -642,7 +652,6 @@ function App() {
         library={library}
         dolls={allDolls}
         categoriesByDoll={categoriesByDoll}
-        storeFailed={cloud?.storeFailed ?? false}
         // 素材の読み込みが終わっていて、そのドールがゲームに出ていて、服がメニューに入っているときだけ
         canTryOn={(dollId, itemIds) => loadState === 'ready' && allDolls.some((doll) => doll.id === dollId) && arrivedParts(dollId, itemIds).length === itemIds.length}
         onTryOn={(dollId, itemIds) => {

@@ -10,7 +10,6 @@ import type { RevealView } from './revealView';
 
 export interface RevealProps {
   view: RevealView;
-  storeFailed: boolean; // 端末に保存できなかった服がある
   art?: { deliver?: string }; // 服を届ける店員の絵（無ければ、出さない）
   canTryOn: boolean;
   onTryOn: () => void;
@@ -20,7 +19,7 @@ export interface RevealProps {
 
 const stageSize = () => Math.max(150, Math.min(300, Math.floor(Math.min(window.innerWidth * 0.56, window.innerHeight * 0.4))));
 
-export function Reveal({ view, storeFailed, art, canTryOn, onTryOn, onOpenCloset, onClose }: RevealProps) {
+export function Reveal({ view, art, canTryOn, onTryOn, onOpenCloset, onClose }: RevealProps) {
   const layers = useItemLayers(view.items);
   const arrived = view.kind === 'arrived';
   useEffect(() => {
@@ -56,12 +55,26 @@ export function Reveal({ view, storeFailed, art, canTryOn, onTryOn, onOpenCloset
           <h2 className="reveal-title sorry">つくれませんでした</h2>
         )}
 
-        {view.failed.map((label, i) => (
-          <p key={i} className="reveal-failed" data-testid="reveal-failed">
-            {arrived ? `${label}は つくれませんでした。` : `${label}: `}チケットは もどしました
-          </p>
+        {arrived &&
+          view.warnings.map((note, i) => (
+            <p key={`w${i}`} className="reveal-reason" data-testid="reveal-warning">
+              ちゅうい: {note}
+            </p>
+          ))}
+        {view.failed.map((failed, i) => (
+          <div key={i} className="reveal-failed-box">
+            <p className="reveal-failed" data-testid="reveal-failed">
+              {arrived ? `${failed.label}は つくれませんでした。` : `${failed.label}: `}チケットは もどしました
+            </p>
+            {/* 理由（サーバーの知らせ。大人向けの文のまま、小さく） */}
+            {failed.note && (
+              <p className="reveal-reason" data-testid="reveal-reason">
+                {failed.note}
+              </p>
+            )}
+          </div>
         ))}
-        {storeFailed && arrived && (
+        {view.missing > 0 && arrived && (
           <p className="reveal-failed" data-testid="reveal-store-failed">
             この たんまつに ほぞんできませんでした（あきが たりないかもしれません）
           </p>

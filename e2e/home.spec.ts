@@ -1,6 +1,8 @@
 /**
  * E2Eテスト: ホーム画面（だれにでも出る。「つくる」「クローゼット」は、教えた端末にだけ）
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 
 const APP = '/DressUpGame/?content=e2e-content/';
@@ -36,7 +38,15 @@ test('教えていない端末には、つくる・クローゼット・アカ�
   // ゲームの画面にも、「つくる」の入口は無い
   await expect(page.getByTestId('studio-button')).toHaveCount(0);
   await page.waitForTimeout(1500);
-  expect(scripts.filter((url) => /firebase|boot-|appStudio|session/i.test(url))).toEqual([]);
+  // 「つくる」まわりのファイル（中身に、その印があるもの）を、1 つも読み込んでいない。
+  // （あとから読み込むファイルの名前は index-….js などで、名前では見分けられない）
+  const assets = path.resolve('dist/assets');
+  const marks = ['dressup_cloud_used', 'dressup_fake_backend', 'studio-make', 'closet-item', 'reveal-close', 'identitytoolkit'];
+  const forbidden = fs.readdirSync(assets).filter((file) => file.endsWith('.js') && marks.some((mark) => fs.readFileSync(path.join(assets, file), 'utf8').includes(mark)));
+  expect(forbidden.length).toBeGreaterThanOrEqual(5); // つなぎ役・つくる・クローゼット・届いた演出・Firebase
+  const loaded = scripts.map((url) => url.split('/').pop()!.split('?')[0]);
+  expect(loaded.filter((file) => forbidden.includes(file))).toEqual([]);
+  expect(loaded.length).toBeGreaterThan(0);
 });
 
 test('「つくる」を教えた端末（?studio=fake）には、つくる・クローゼットがある。ゲームの画面に ✨ は無い', async ({ page }) => {

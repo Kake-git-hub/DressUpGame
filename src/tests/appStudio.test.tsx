@@ -4,6 +4,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppStudio } from '../appStudio/AppStudio';
+import { BackendError } from '../cloud/backend';
 import { createFakeBackend } from '../cloud/fakeBackend';
 import { createSession } from '../cloud/session';
 import type { ManifestCategory } from '../content/manifest';
@@ -75,5 +76,40 @@ describe('つくる', () => {
     open({ offline: true });
     await waitFor(() => expect(screen.getByTestId('studio-problem').textContent).toContain('インターネットにつながっていません'));
     expect(screen.getByTestId('studio-problem').textContent).toContain('開き直してください');
+  });
+
+  // 「作る」の返事が失敗したとき
+  async function orderWith(error: unknown) {
+    const backend = createFakeBackend({ image: async () => new Blob(['x']), planMs: 0 });
+    backend.startJob = async () => Promise.reject(error);
+    const session = createSession({ backend, library, onLibraryChanged: () => undefined });
+    let refreshed = 0;
+    const realRefresh = session.refresh.bind(session);
+    session.refresh = async () => {
+      refreshed++;
+      return realRefresh();
+    };
+    render(<AppStudio session={session} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('studio-theme'), { target: { value: 'うみ' } });
+    fireEvent.click(screen.getByTestId('studio-make'));
+    await waitFor(() => expect(screen.getByTestId('order-show').dataset.phase).not.toBe('ordering'), { timeout: 4000 });
+    return { phase: screen.getByTestId('order-show').dataset.phase, text: screen.getByTestId('order-show').textContent ?? '', refreshed: () => refreshed };
+  }
+  it('サーバーが理由つきで断ったら、「チケットは つかっていません」と伝える', async () => {
+    const result = await orderWith(new BackendError('no-tickets', 'チケットが足りません（のこり 0 枚、必要 1 枚）'));
+    expect(result.phase).toBe('refused');
+    expect(result.text).toContain('チケットは つかっていません。');
+    expect(result.refreshed()).toBe(0);
+  });
+  it('返事が届かなかった（サーバーでは、もう注文できているかもしれない）ときは、そう伝えて、仕事とチケットを聞き直す', async () => {
+    const result = await orderWith(new BackendError('unknown', 'サーバーから返事がありません', { uncertain: true }));
+    expect(result.phase).toBe('unsure');
+    expect(result.text).not.toContain('チケットは つかっていません');
+    expect(result.text).toContain('たしかめてね');
+    expect(result.refreshed()).toBe(1);
+  });
+  it('思いがけない失敗（BackendError でない）も、結果が分からないものとして扱う', async () => {
+    expect((await orderWith(new Error('boom'))).phase).toBe('unsure');
   });
 });

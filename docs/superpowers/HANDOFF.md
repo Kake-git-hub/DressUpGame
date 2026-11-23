@@ -36,7 +36,8 @@
 ### 0-2. 段階 ① の作り（次に触る人へ）
 
 - **生成の流れ**: アプリ →（関数 `studio` の `startJob`）→ チケットを引くのと仕事を作るのを 1 つの取り引きで → 列（Cloud Tasks）に入れる → 列が関数 `studioWork` を呼ぶ → `tools/cloud/studioCore.ts` の `workJob` → `runJob` が 1 点ずつ作り、**できたらその場で自分の服として保存**（候補は `kept`、服の ID は `my:{仕事}-{番号}-{取りかかった回数}`）。アプリは「進める」を呼ばない（聞くだけ）。
-- **必ず「服か払い戻し」で終わる守り**: 失敗は「`failed`・`refunded: false` と書く → 払い戻す（`refundOnce`）→ `refunded: true`」の順（`settleRefunds` が、何度でも安全にやり直せる）。1 品目に取りかかれるのは 3 回まで。ほかの呼び出しが進めていたら `'busy'` を返して 60 秒あとに列へ。聞かれたとき（`job`・`jobs`）と、1 時間に 1 回の見回り（関数 `studioSweep`）が `tendJob` を呼び、止まった仕事を列に入れ直す（30 秒に 1 回まで）・24 時間たった仕事を打ち切る。
+- **必ず「服か払い戻し」で終わる守り**: 失敗は「`failed`・`refunded: false` と書く → 払い戻す（`refundOnce`）→ `refunded: true`」の順（`settleRefunds` が、何度でも安全にやり直せる）。1 品目に取りかかれるのは 3 回まで。ほかの呼び出しが進めていたら `'busy'` を返して 60 秒あとに列へ。聞かれたとき（`job`・`jobs`）と、1 時間に 1 回の見回り（関数 `studioSweep`）が `tendJob` を呼び、止まった仕事を列に入れ直す（列に入れられなかったと分かっている仕事 = `queueFailed` は 30 秒おき、列に入れてあるはずの仕事は 5 分たってから）・24 時間たった仕事を打ち切る。
+- **取り引きの中身は、何度呼ばれてもよいように書く**: Firestore は、確定の返事が届かなかった取り引きを、もう一度呼ぶ（前の回が確定していることがある）。`runJob` の受け持つ・結果を書く、`tendJob` の入れ直し、`chargeAndCreateJob` は、「もう書いてある」を見分ける。`studioCore.test.ts` の `replayTransactions`（どの書き換えも、確定のあとにもう一度呼ぶ）で確かめている。ここを直すときは、このテストを足すこと。
 - **アプリの側**: `src/cloud/session.ts`（つなぎ役。ページに 1 つ。`src/cloud/boot.ts` が作る）が、つなぐ・服を端末に合わせる・作りかけを聞く（つくる・クローゼットを開いている間は 3 秒おき、ほかは 30 秒おき、見えていない間は聞かない）・届いた仕事（`arrivals`）・NEW の印を持つ。画面は `useSyncExternalStore` で見る。「つくる」を教えていない端末（`readStudioMode()` が null）は、`boot` も Firebase も読み込まない。
 - **画面**: ホーム `src/home/`、つくる `src/appStudio/`（`OrderShow.tsx` = 注文とチケットの演出）、クローゼット `src/closet/`、届いた演出 `src/reveal/`。ドールに服を着せた見本は `src/cloud/Stage.tsx`（CSS で重ねるだけ。色は `HueCanvas`）。どれも、押したとき・届いたときに読み込む。
 - **既定の色**: 服ごとの角度（`hue`）をサーバーに持つ。`mergeMyItems` が、着せたときの色（`colorHue`）・戻す先（`defaultHue`）・色を付けたサムネイルを付ける。
@@ -46,7 +47,7 @@
 
 ### 0-3. 作者に確かめてもらうこと（こちらでは確かめられない）
 
-1. **サーバーの載せ直し**（`docs/firebase-setup.md` の 2-9）。本物の列（Cloud Tasks）は、こちらでは 1 回も動かしていない: 列の名前（東京）・列に入れる権限・やり直しの間隔・持ち時間 30 分。届かなければ、`npm run firebase:logs` の文字をもらう。
+1. **サーバーの載せ直し**（`docs/firebase-setup.md` の 2-9）。本物の列（Cloud Tasks）は、こちらでは 1 回も動かしていない: 列の名前（東京）・列が呼ぶ先の URL（`functions/src/index.ts` の `workFunctionUri` が調べて渡す）・列に入れる権限と関数を呼ぶ権限・やり直しの間隔・持ち時間 30 分。届かなければ、`npm run firebase:logs` の文字と、Cloud Tasks の画面の写真をもらう。
 2. 本物で: 「作る」→「OK」のあとすぐ閉じる → 1〜2 分後に開いて、届く演出が出て、クローゼットに入っているか。セットでも。
 3. iPad・スマホの実機で: ホーム、注文とチケットの演出、届く演出、クローゼット（色のスライダーの手ざわり）。音が鳴るか。
 4. **演出の絵**（店員の見た目）を、使ってよいか（一覧: `specs/2026-11-23-shop-art/sheet.jpg`。もう 1 人の候補 B も載せてある）。

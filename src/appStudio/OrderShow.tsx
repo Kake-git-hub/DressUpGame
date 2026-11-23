@@ -3,7 +3,8 @@
  *
  *   ordering = 「作る」を押してから、サーバーが仕事を作る（チケットを引く）まで。洋服屋さんに注文を伝えている。閉じないように促す
  *   ticket   = サーバーが「引いた」と返したあと。チケットが切れて、もう閉じてもよいことを伝える
- *   refused  = 注文を受けられなかった（チケットは使っていない）
+ *   refused  = 注文を受けられなかった（サーバーが断った。チケットは使っていない）
+ *   unsure   = 返事が届かなかった（サーバーでは、もう注文できているかもしれない。「使っていない」とは言わない）
  *
  * 子どもが横で見ていても分かるように、やさしい言葉で書く。絵（店員とお店）は、あれば重ねる（無ければ、図形と絵文字）。
  */
@@ -12,7 +13,8 @@ import './orderShow.css';
 export type OrderPhase =
   | { kind: 'ordering' } // サーバーの返事を待っている
   | { kind: 'ticket'; cost: number; left: number; admin: boolean } // 引いた、と返ってきた
-  | { kind: 'refused'; message: string }; // 受けられなかった
+  | { kind: 'refused'; message: string } // 受けられなかった（サーバーが断った。チケットは使っていない）
+  | { kind: 'unsure'; message: string }; // 返事が届かなかった（注文できたかどうか、分からない）
 
 // 絵の URL（無ければ、図形と絵文字で出す）
 export interface ShopArt {
@@ -92,6 +94,19 @@ export function OrderShow({ phase, lines, art, onDone }: Props) {
             <p className="order-text">できたら クローゼットに とどきます。</p>
             <button type="button" className="order-button" onClick={onDone} data-testid="order-ok">
               OK
+            </button>
+          </>
+        )}
+
+        {phase.kind === 'unsure' && (
+          <>
+            <p className="order-done">ごちゅうもんが とどいたか わかりません。</p>
+            <p className="order-text">チケットの のこりと クローゼットを たしかめてね。</p>
+            <p className="order-reason" data-testid="order-reason">
+              {phase.message}
+            </p>
+            <button type="button" className="order-button" onClick={onDone} data-testid="order-back">
+              もどる
             </button>
           </>
         )}

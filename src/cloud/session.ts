@@ -140,6 +140,17 @@ export function createSession(deps: {
           }
           for (const job of fresh) arrived.add(job.id);
         }
+        // 無くなった服（ほかの端末で消した、など）の NEW の印は、消す（ホームの ● が残らないように）
+        if (newItemIds.length > 0 && (full || fresh.length > 0)) {
+          const have = new Set((await library.all()).map((item) => item.id));
+          if (have.size > 0 || full) {
+            const kept = newItemIds.filter((id) => have.has(id));
+            if (kept.length !== newItemIds.length) {
+              newItemIds = kept;
+              writeList(storage, NEW_KEY, newItemIds);
+            }
+          }
+        }
         const arrivals = jobs.filter((job) => job.done && arrived.has(job.id)).sort((a, b) => a.createdAt - b.createdAt);
         set({ status: 'ready', problem: null, problemCode: null, jobs, arrivals, newItemIds, storeFailed });
       } catch (error) {
@@ -180,11 +191,18 @@ export function createSession(deps: {
   backend.onUser((user) => {
     if (state.user && (state.user.tickets !== user.tickets || state.user.admin !== user.admin || state.user.userCode !== user.userCode)) set({ user });
   });
+  // つなごうとして、つながらなかった（起動のときにオフラインだった、など）ら、つながったとき・画面にもどってきたときに、つなぎ直す
+  const reconnect = () => {
+    if (state.status === 'problem') void connect();
+  };
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (visible() && state.status === 'ready' && state.jobs.some((job) => !job.done)) void poll();
+      if (!visible()) return;
+      if (state.status === 'ready' && state.jobs.some((job) => !job.done)) void poll();
+      else reconnect();
     });
   }
+  if (typeof window !== 'undefined') window.addEventListener('online', reconnect);
 
   return {
     backend,

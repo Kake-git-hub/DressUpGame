@@ -69,6 +69,21 @@ describe('注文の演出', () => {
   });
 });
 
+describe('注文の演出（結果が分からないとき）', () => {
+  it('unsure: 「チケットは つかっていません」とは言わない。たしかめ方を伝える', () => {
+    const onDone = vi.fn();
+    render(<OrderShow phase={{ kind: 'unsure', message: 'サーバーから返事がありません' }} lines={lines} onDone={onDone} />);
+    const show = screen.getByTestId('order-show');
+    expect(show.dataset.phase).toBe('unsure');
+    expect(show.textContent).toContain('ごちゅうもんが とどいたか わかりません。');
+    expect(show.textContent).toContain('チケットの のこりと クローゼットを たしかめてね。');
+    expect(show.textContent).not.toContain('チケットは つかっていません');
+    expect(screen.getByTestId('order-reason').textContent).toBe('サーバーから返事がありません');
+    fireEvent.click(screen.getByRole('button', { name: 'もどる' }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('作りかけの知らせ', () => {
   const job = (statuses: StudioJob['candidates'][number]['status'][], createdAt = 1000): StudioJob => ({
     id: 'j',

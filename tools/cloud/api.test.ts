@@ -151,7 +151,7 @@ describe('アプリからの呼び出し', () => {
     }
   });
 
-  it('進み具合を聞かれたとき、止まっている仕事は、列に入れ直す（30 秒に 1 回まで）', async () => {
+  it('進み具合を聞かれたとき、止まっている仕事は、列に入れ直す（列で待っているはずなら、5 分たってから）', async () => {
     await call('u1', { op: 'signIn' });
     await store.addTickets('u1', 1, 'test', clock);
     const started = await call<{ jobId: string }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
@@ -159,6 +159,9 @@ describe('アプリからの呼び出し', () => {
     await call('u1', { op: 'job', jobId: started.jobId });
     expect(enqueued).toHaveLength(1); // 列に入れたばかり
     clock += 31_000;
+    await call('u1', { op: 'job', jobId: started.jobId });
+    expect(enqueued).toHaveLength(1); // 列で待っているだけかもしれないので、まだ入れ直さない
+    clock += 300_000;
     await call('u1', { op: 'job', jobId: started.jobId });
     expect(enqueued).toHaveLength(2);
     await call('u1', { op: 'jobs' });

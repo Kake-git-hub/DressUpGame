@@ -141,6 +141,56 @@ describe('つなぎ役', () => {
     expect(again.getState().newItemIds).toEqual([]);
   });
 
+  it('起動のときにつながらなかった端末は、つながったら（online）・画面にもどってきたら、自分でつなぎ直す', async () => {
+    const { make, state } = setup();
+    state.offline = true;
+    const session = make();
+    await session.connect();
+    expect(session.getState().status).toBe('problem');
+    // まだつながらない: 知らせが来ても、problem のまま（落ちない）
+    window.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(session.getState().status).toBe('problem');
+    state.offline = false;
+    window.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(session.getState().status).toBe('ready');
+
+    // 画面にもどってきたとき
+    const other = setup();
+    other.state.offline = true;
+    const second = other.make();
+    await second.connect();
+    other.state.offline = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(second.getState().status).toBe('ready');
+  });
+
+  it('まだ 1 回もつないでいない（idle）なら、online の知らせでは、つながない', async () => {
+    const { make, state } = setup();
+    make();
+    window.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(state.calls.signIn).toBe(0);
+  });
+
+  it('NEW の印の服が、消されていたら（ほかの端末で消した、など）、印も消える', async () => {
+    const { make, library, backend } = setup();
+    const session = make();
+    await session.connect();
+    await session.backend.startJob(top);
+    await vi.advanceTimersByTimeAsync(200);
+    await session.refresh();
+    const [itemId] = session.getState().newItemIds;
+    expect(itemId).toBeTruthy();
+    await backend.deleteMyItem(itemId);
+    await session.refresh();
+    expect([...library.items.keys()]).toEqual([]);
+    expect(session.getState().newItemIds).toEqual([]);
+    expect(JSON.parse(localStorage.getItem(NEW_KEY)!)).toEqual([]);
+  });
+
   it('届いた順（古い順）に並ぶ', async () => {
     const { make } = setup();
     const session = make();

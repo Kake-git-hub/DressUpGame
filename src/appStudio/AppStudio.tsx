@@ -116,8 +116,12 @@ export function AppStudio({ session, dolls, categoriesByDoll, initialDollId, onC
       const after = session.getState().user;
       setPhase({ kind: 'ticket', cost: used, left: after?.tickets ?? 0, admin: after?.admin ?? false });
     } catch (e) {
+      // サーバーが理由つきで断ったときだけ、「チケットは使っていない」と言い切れる。
+      // 返事が届かなかったときは、サーバーでは注文できているかもしれない: そう伝えて、仕事とチケットを聞き直す
+      const unsure = !(e instanceof BackendError) || e.uncertain;
+      if (unsure) void session.refresh();
       await shown();
-      setPhase({ kind: 'refused', message: messageOf(e) });
+      setPhase({ kind: unsure ? 'unsure' : 'refused', message: messageOf(e) });
     }
   };
 
@@ -238,7 +242,7 @@ export function AppStudio({ session, dolls, categoriesByDoll, initialDollId, onC
                         <ul className="studio-parts">
                           {job.candidates.map((c) => (
                             <li key={c.index} data-status={c.status}>
-                              {labelOf(job.dollId, c.categoryId)}「{c.name}」: {c.status === 'kept' ? 'できました' : c.status === 'failed' ? 'できませんでした（チケットは戻しました）' : c.status === 'working' ? '作っています' : '順番待ち'}
+                              {labelOf(job.dollId, c.categoryId)}「{c.name}」: {c.status === 'kept' ? 'できました' : c.status === 'failed' ? (c.notes.join(' ') || 'できませんでした（チケットは戻しました）') : c.status === 'working' ? '作っています' : '順番待ち'}
                             </li>
                           ))}
                         </ul>

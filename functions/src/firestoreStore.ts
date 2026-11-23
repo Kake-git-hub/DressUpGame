@@ -117,10 +117,13 @@ export class FirestoreStore implements CloudStore {
       const snap = await tx.get(ref);
       if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
       const tickets = have(snap.data() as UserDoc);
+      // 取り引きは、確定の返事が届かなかったとき、もう一度呼ばれる。前の回が確定していたら（仕事が、もうある）、二重に引かない
+      const jobRef = this.job(uid, job.id);
+      if ((await tx.get(jobRef)).exists) return tickets;
       if (tickets < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${tickets} 枚、必要 ${cost} 枚）`);
       tx.update(ref, { tickets: tickets - cost });
       tx.create(ref.collection('ledger').doc(), { count: -cost, reason, at: now });
-      tx.create(this.job(uid, job.id), job);
+      tx.create(jobRef, job);
       return tickets - cost;
     });
   }

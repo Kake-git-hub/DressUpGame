@@ -40,55 +40,83 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
   const layers = useItemLayers(one, hues);
   const [size] = useState(stageSize);
 
-  // サーバーを変える → 通ったら、端末の控えを変える。服がもう無ければ、知らせて閉じる
+  // 失敗の扱い: 服がもう無ければ、知らせて閉じる。ほかは、理由を出す
+  const failed = (e: unknown): boolean => {
+    if (e instanceof BackendError && e.code === 'refused') {
+      window.alert('この ふくは、もう ありません（ほかの たんまつで けされたかもしれません）');
+      onGone();
+      return true;
+    }
+    setError(e instanceof Error ? e.message : String(e));
+    return false;
+  };
+  // サーバーを変える → 通ったら、端末の控えを変える
   const apply = async (work: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
       await work();
     } catch (e) {
-      if (e instanceof BackendError && e.code === 'refused') {
-        window.alert('この ふくは、もう ありません（ほかの たんまつで けされたかもしれません）');
-        onGone();
-        return;
-      }
-      setError(e instanceof Error ? e.message : String(e));
+      if (failed(e)) return;
     }
     setBusy(false);
   };
-  const update = (change: { name?: string; hue?: number }) =>
-    apply(async () => {
-      const info = await backend.updateMyItem(item.id, change);
-      await library.put(mergeInfo(item, info));
-      setName(info.item.name);
-      setHue(info.hue);
-      await onChanged();
-    });
   const saveName = () => {
     const next = name.trim().slice(0, NAME_MAX).trim();
     if (!next || next === item.item.name) return setName(item.item.name);
-    void update({ name: next });
+    void apply(async () => {
+      const info = await backend.updateMyItem(item.id, { name: next });
+      await library.put(mergeInfo(latest.current, info));
+      setName(info.item.name);
+      await onChanged();
+    });
   };
 
-  // 色: 動かしている間は、絵だけ変える。動かし終えたら、保存する
+  // 色: 動かしている間は、絵だけ変える。動かし終えたら（0.4 秒）、保存する。
+  // 保存の返事では、スライダーを動かさない（待っている間に、さらに動かしていることがある）。
+  // 画面を閉じるときは、待たずに保存する（動かしてすぐ「できた」を押しても、色が残る）
+  const latest = useRef(item); // いちばん新しい服（名前を変えたあとの控えに、色を書くため）
+  useEffect(() => {
+    latest.current = item;
+  }, [item]);
   const hueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedHue = useRef(item.hue);
+  const pendingHue = useRef<number | null>(null); // まだ保存していない色
+  const savedHue = useRef(item.hue); // サーバーが通した色
+  const alive = useRef(true);
+  const saveHue = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    saveHue.current = () => {
+      const next = pendingHue.current;
+      pendingHue.current = null;
+      if (hueTimer.current) clearTimeout(hueTimer.current);
+      hueTimer.current = null;
+      if (next === null || next === savedHue.current) return;
+      if (alive.current) setError(null);
+      void (async () => {
+        try {
+          const info = await backend.updateMyItem(item.id, { hue: next });
+          savedHue.current = info.hue;
+          await library.put(mergeInfo(latest.current, info));
+          await onChanged();
+        } catch (e) {
+          if (alive.current) failed(e);
+        }
+      })();
+    };
+  });
   const changeHue = (next: number) => {
     setHue(next);
+    pendingHue.current = next;
     if (hueTimer.current) clearTimeout(hueTimer.current);
-    hueTimer.current = setTimeout(() => {
-      hueTimer.current = null;
-      if (next === savedHue.current) return;
-      savedHue.current = next;
-      void update({ hue: next });
-    }, HUE_SAVE_MS);
+    hueTimer.current = setTimeout(() => saveHue.current(), HUE_SAVE_MS);
   };
-  useEffect(
-    () => () => {
-      if (hueTimer.current) clearTimeout(hueTimer.current);
-    },
-    [],
-  );
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      saveHue.current(); // 閉じるとき: まだ保存していない色を、保存する
+    };
+  }, []);
 
   const move = (direction: -1 | 1) => {
     const ids = movedOrder(group, item.id, direction);

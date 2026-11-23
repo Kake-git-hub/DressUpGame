@@ -58,8 +58,11 @@ export const MAX_TRIES = 3;
 // ほかの呼び出しが進めている最中に呼ばれたとき、これだけあとに、もう一度呼ばれるようにする
 export const BUSY_RETRY_SECONDS = 60;
 const GAVE_UP = '作れませんでした（何度か試しましたが、途中で止まりました）。チケットは戻しました';
-// 止まっている仕事を列に入れ直すのは、仕事ごとに、この間隔に 1 回まで
+// 列に入れられなかった、と分かっている仕事を、入れ直す間隔
 export const REQUEUE_MS = 30_000;
+// 列に入れてあるはずの仕事（列がこみあっていて、まだ呼ばれていないだけかもしれない）を、念のため入れ直すまでの時間。
+// 短くすると、こみあっているときに、同じ仕事が列に積み上がって、かえって遅くなる
+export const QUEUE_WAIT_MS = 300_000;
 // 作ってから、これだけたっても終わらない仕事は、残りを打ち切って払い戻す
 export const EXPIRE_MS = 24 * 3_600_000;
 const EXPIRED = '時間内に作れませんでした。チケットは戻しました';
@@ -184,8 +187,8 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
     if (photo) await deps.files.removeAll(photoPath(uid, jobId)).catch(() => undefined);
     throw error;
   }
-  // 列に入れる。入れられなくても、仕事はできている（進み具合を聞かれたとき・見回りが、入れ直す）
-  await deps.enqueue(uid, jobId).catch(() => undefined);
+  // 列に入れる。入れられなくても、仕事はできている（進み具合を聞かれたとき・見回りが、入れ直す。入れられなかった印を付けて、早めに）
+  await deps.enqueue(uid, jobId).catch(() => deps.store.updateJob(uid, jobId, (current) => (current.queueFailed ? null : { ...current, queueFailed: true })).catch(() => undefined));
   return { jobId, cost };
 }
 
@@ -333,6 +336,12 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       taken = { kind: 'none' };
       if (job.done) return null;
       const now = deps.now();
+      // 取り引きのやり直し（確定の返事が届かなかった）: 前の回で、もう受け持っている
+      const already = job.runner === runner ? job.candidates.find((c) => c.status === 'working') : undefined;
+      if (already) {
+        taken = { kind: 'item', candidate: { ...already } };
+        return null;
+      }
       // ほかの呼び出しが進めている最中なら、手を出さない
       if (job.candidates.some((c) => c.status === 'working') && now - job.heartbeat <= STALE_MS) {
         taken = { kind: 'busy' };
@@ -366,7 +375,19 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       applied = false;
       next = null;
       left = false;
-      if (!mine(job, index)) return null;
+      if (!mine(job, index)) {
+        // 取り引きのやり直し（確定の返事が届かなかった）: 前の回で、もう書いてあるなら、書けたものとして続ける。
+        // 服になった品目は、服の ID（受け持ちごとに別）で、自分の結果かどうかが分かる
+        const written = job.candidates.find((c) => c.index === index);
+        const same = !!written && written.status === change.status && (change.itemId === undefined ? job.runner === runner || job.runner === undefined : written.itemId === change.itemId);
+        if (same) {
+          applied = true;
+          const working = job.runner === runner ? job.candidates.find((c) => c.status === 'working') : undefined;
+          next = working ? { ...working } : null;
+          left = !job.done && !next && job.runner === undefined && job.candidates.some((c) => c.status === 'waiting');
+        }
+        return null;
+      }
       job.candidates = job.candidates.map((c) => (c.index === index ? { ...c, ...change } : { ...c }));
       if (refund) job.tickets = Math.max(0, job.tickets - 1);
       applied = true;
@@ -385,6 +406,17 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       return job;
     });
     return { applied, next, left };
+  };
+
+  // その品目の、前の回（1〜upTo 回目）が残した服を消す。品目が「できた」になっていれば、その服は残す
+  const reap = async (index: number, upTo: number) => {
+    if (upTo <= 0) return;
+    const now = await deps.store.getJob(uid, jobId);
+    const kept = now?.candidates.find((c) => c.index === index)?.itemId;
+    for (let t = 1; t <= upTo; t++) {
+      const id = `my:${jobId}-${index}-${t}`;
+      if (id !== kept) await deleteItem(deps, uid, id, true).catch(() => undefined);
+    }
   };
 
   // 仕事が終わっていたら、写真を消す（顔を作るためだけに預かったもの）
@@ -419,6 +451,8 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
         let change: Partial<CandidateDoc>;
         let ok = false;
         let savedId: string | null = null;
+        // 前の回が、服を保存したまま止まっていたら（落ちた・結果を書けなかった）、その服を片付ける
+        await reap(c.index, (c.tries ?? 1) - 1);
         try {
           if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
           if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
@@ -456,10 +490,22 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
           if (savedId) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
           change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`], refunded: false };
         }
-        const done = await finish(c.index, change, !ok, Date.now() - started < budget);
+        // 保存した服が、仕事に「できた服」として書かれているか（書かれていなければ、残さない）
+        const unclaimed = async (): Promise<boolean> => {
+          const now = await deps.store.getJob(uid, jobId);
+          return !!now && now.candidates.find((x) => x.index === c.index)?.itemId !== savedId;
+        };
+        let done: { applied: boolean; next: CandidateDoc | null; left: boolean };
+        try {
+          done = await finish(c.index, change, !ok, Date.now() - started < budget);
+        } catch (error) {
+          // 結果を書けなかった: 保存した服は残さない（やり直しで、作り直す）。仕事を読めないときは、消さない（書けているかもしれない）
+          if (ok && savedId && (await unclaimed().catch(() => false))) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
+          throw error;
+        }
         if (!done.applied) {
           // 追い越されていた: 自分が保存した服は消す。払い戻しもしない
-          if (ok && savedId) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
+          if (ok && savedId && (await unclaimed().catch(() => false))) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
           result = 'busy';
           break;
         }
@@ -472,7 +518,9 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       clearInterval(beat);
     }
   }
-  // 取りかかった回数の上限で打ち切った品目の分
+  // 取りかかった回数の上限で打ち切った品目の分（前の回が残した服があれば、片付ける）
+  const after = await deps.store.getJob(uid, jobId);
+  for (const c of after?.candidates ?? []) if (c.status === 'failed' && (c.tries ?? 0) > 0 && c.refunded !== true) await reap(c.index, c.tries ?? 0);
   await settleRefunds(deps, uid, jobId);
   await dropPhoto();
   return result;
@@ -519,15 +567,35 @@ export async function tendJob(deps: CoreDeps, uid: string, job: JobDoc): Promise
   }
   // 前の版の「できた」が残っている仕事も、列に入れる（runJob が、服にする）
   const needsWork = stalled(current, now) || current.candidates.some((c) => c.status === 'done');
-  if (needsWork && now - (current.queuedAt ?? 0) >= REQUEUE_MS) {
+  // 列に入れられなかったと分かっていれば、早めに。入れてあるはずなら、長めに待ってから（こみあっているだけかもしれない）
+  const wait = current.queueFailed ? REQUEUE_MS : QUEUE_WAIT_MS;
+  if (needsWork && now - (current.queuedAt ?? 0) >= wait) {
     let queue = false;
     current = await deps.store.updateJob(uid, job.id, (j) => {
       queue = false;
-      if (now - (j.queuedAt ?? 0) < REQUEUE_MS) return null;
+      // 取り引きのやり直し: 前の回で、もう書いてある
+      if (j.queuedAt === now) {
+        queue = true;
+        return null;
+      }
+      if (now - (j.queuedAt ?? 0) < (j.queueFailed ? REQUEUE_MS : QUEUE_WAIT_MS)) return null;
       queue = true;
       return { ...j, queuedAt: now };
     });
-    if (queue) await deps.enqueue(uid, job.id).catch(() => undefined);
+    if (queue) {
+      const failed = await deps.enqueue(uid, job.id).then(
+        () => false,
+        () => true,
+      );
+      if (failed !== (current.queueFailed ?? false)) {
+        current = await deps.store.updateJob(uid, job.id, (j) => {
+          const next = { ...j };
+          if (failed) next.queueFailed = true;
+          else delete next.queueFailed;
+          return next;
+        });
+      }
+    }
   }
   return current;
 }

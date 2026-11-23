@@ -129,6 +129,21 @@
   border: 1px solid #f2dfa8;
   border-radius: 12px;
 }
+.reveal-failed-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+.reveal-reason {
+  margin: 0;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #7a6f80;
+  overflow-wrap: anywhere;
+}
 .reveal-buttons {
   display: flex;
   flex-wrap: wrap;

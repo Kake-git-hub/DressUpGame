@@ -19,6 +19,16 @@ describe('Firebase の失敗を、画面に出せる形に直す', () => {
     // 文章の中の [ ] は、そのまま
     expect(of({ code: 'functions/failed-precondition', message: '[テスト] だめです', details: { code: 'refused' } }).message).toBe('[テスト] だめです');
   });
+  it('サーバーが理由つきで断ったときは「確かな失敗」。返事が無い・つながらないときは「結果が分からない」（uncertain）', () => {
+    // サーバーが断った: 何も起きていない（チケットは引かれていない）と言い切れる
+    expect(toBackendError({ code: 'functions/failed-precondition', message: 'チケットが足りません', details: { code: 'no-tickets' } }).uncertain).toBe(false);
+    // 返事が届かなかった: サーバーの側では、もう済んでいるかもしれない
+    expect(toBackendError({ code: 'functions/deadline-exceeded', message: 'deadline' }).uncertain).toBe(true);
+    expect(toBackendError({ code: 'functions/internal', message: 'internal' }).uncertain).toBe(true);
+    expect(toBackendError(new TypeError('Failed to fetch'), false).uncertain).toBe(true);
+    // 自分で作った BackendError は、そのまま
+    expect(toBackendError(new BackendError('refused', 'だめ')).uncertain).toBe(false);
+  });
   it('端末がオフラインなら、どの失敗でも「つながっていません」', () => {
     expect(of({ code: 'functions/not-found' }, false)).toEqual({ code: 'offline', message: 'インターネットにつながっていません' });
     expect(of({ code: 'functions/internal', message: 'internal' }, false).code).toBe('offline');

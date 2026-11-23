@@ -36,6 +36,15 @@ describe('chargeAndCreateJob', () => {
   });
 });
 
+describe('chargeAndCreateJob（やり直し）', () => {
+  it('同じ仕事で、もう一度呼ばれても（確定の返事が届かなかったときのやり直し）、引くのは 1 回', async () => {
+    expect(await store.chargeAndCreateJob('u1', job('j1', 5), 1, 'job:j1', 5)).toBe(1);
+    expect(await store.chargeAndCreateJob('u1', job('j1', 5), 1, 'job:j1', 5)).toBe(1);
+    expect((await store.getUser('u1'))?.tickets).toBe(1);
+    expect(store.ledger.filter((l) => l.reason === 'job:j1')).toHaveLength(1);
+  });
+});
+
 describe('updateItem', () => {
   it('無い服は refused', async () => {
     const error = await store.updateItem('u1', 'my:none', (i) => i).catch((e: unknown) => e);

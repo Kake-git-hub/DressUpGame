@@ -65,9 +65,13 @@ export type MyItemInfo = Omit<MyItem, 'files' | 'owner'>;
 export type BackendErrorCode = 'offline' | 'no-tickets' | 'limit' | 'refused' | 'unknown' | 'old-server';
 export class BackendError extends Error {
   readonly code: BackendErrorCode;
-  constructor(code: BackendErrorCode, message: string) {
+  // 結果が分からない失敗（返事が届かなかった、など。サーバーの側では、もう済んでいるかもしれない）。
+  // false なら、サーバーが理由つきで断った = 何も起きていない、と言い切れる
+  readonly uncertain: boolean;
+  constructor(code: BackendErrorCode, message: string, options: { uncertain?: boolean } = {}) {
     super(message);
     this.code = code;
+    this.uncertain = options.uncertain ?? false;
   }
 }
 export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';

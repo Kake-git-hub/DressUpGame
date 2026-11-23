@@ -16,7 +16,6 @@ export interface RevealRootProps {
   library: Library;
   dolls: DollData[];
   categoriesByDoll: Record<string, ManifestCategory[]>;
-  storeFailed: boolean;
   art?: { deliver?: string };
   // 届いた服を着せられるか（そのドールがゲームに出ていて、服がメニューに入っている）
   canTryOn: (dollId: string, itemIds: string[]) => boolean;
@@ -28,7 +27,7 @@ export interface RevealRootProps {
 // 服を届ける店員の絵（この演出と一緒に読み込む）
 const ART = { deliver: deliverArt };
 
-export default function RevealRoot({ job, library, dolls, categoriesByDoll, storeFailed, art = ART, canTryOn, onTryOn, onOpenCloset, onClose }: RevealRootProps) {
+export default function RevealRoot({ job, library, dolls, categoriesByDoll, art = ART, canTryOn, onTryOn, onOpenCloset, onClose }: RevealRootProps) {
   const [items, setItems] = useState<MyItem[] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -46,7 +45,6 @@ export default function RevealRoot({ job, library, dolls, categoriesByDoll, stor
   return (
     <Reveal
       view={view}
-      storeFailed={storeFailed}
       art={art}
       canTryOn={ids.length > 0 && canTryOn(job.dollId, ids)}
       onTryOn={() => onTryOn(job.dollId, ids)}

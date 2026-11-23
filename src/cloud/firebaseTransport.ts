@@ -31,27 +31,29 @@ export function toBackendError(error: unknown, online: boolean = globalThis.navi
   const reason = (typeof e.details === 'object' && e.details !== null ? (e.details as { code?: unknown }).code : undefined) as BackendErrorCode | undefined;
   // Firebase の部品は、文章の後ろに HTTP の番号（「 [400]」など）を付けることがある。画面には出さない
   if (reason && CODES.includes(reason) && typeof e.message === 'string' && e.message) return new BackendError(reason, e.message.replace(/\s*\[\d{3}\]$/, ''));
-  if (!online) return new BackendError('offline', 'インターネットにつながっていません');
+  // ここから下は、サーバーの理由つきの返事が無い失敗: 呼び出しが届いて、もう済んでいるかもしれない（結果が分からない）
+  const unsure = { uncertain: true };
+  if (!online) return new BackendError('offline', 'インターネットにつながっていません', unsure);
   switch (code) {
     // 届かなかった・返事が来なかった（SDK は、通信の失敗も、関数が無いときの失敗も、internal として返す）
     case 'functions/internal':
     case 'functions/unavailable':
     case 'functions/deadline-exceeded':
     case 'functions/cancelled':
-      return new BackendError('unknown', NO_ANSWER);
+      return new BackendError('unknown', NO_ANSWER, unsure);
     case 'auth/network-request-failed':
-      return new BackendError('offline', 'インターネットにつながっていません');
+      return new BackendError('offline', 'インターネットにつながっていません', unsure);
     case 'functions/resource-exhausted':
-      return new BackendError('limit', 'いま、こみあっています。少し待ってから、もう一度ためしてください');
+      return new BackendError('limit', 'いま、こみあっています。少し待ってから、もう一度ためしてください', unsure);
     case 'functions/not-found':
     case 'auth/operation-not-allowed':
     case 'auth/admin-restricted-operation':
     case 'auth/configuration-not-found':
-      return new BackendError('unknown', NOT_READY);
+      return new BackendError('unknown', NOT_READY, unsure);
     case 'functions/unauthenticated':
-      return new BackendError('unknown', 'ログインできませんでした。アプリを開き直してください');
+      return new BackendError('unknown', 'ログインできませんでした。アプリを開き直してください', unsure);
     default:
-      return new BackendError('unknown', 'うまくいきませんでした。少し待ってから、もう一度ためしてください');
+      return new BackendError('unknown', 'うまくいきませんでした。少し待ってから、もう一度ためしてください', unsure);
   }
 }
 
