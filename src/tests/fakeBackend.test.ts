@@ -195,4 +195,97 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(codeOf(await work().catch((e) => e))).toBe('offline');
     }
   });
+
+  describe('ログイン（利用者の入れ替え）', () => {
+    const readyBackend = async (options: Parameters<typeof make>[0] = {}) => {
+      const backend = make(options);
+      await backend.account.prepare();
+      return backend;
+    };
+    // 服を 1 点持っている利用者にする
+    const withItem = async (backend: ReturnType<typeof make>) => {
+      await backend.startJob(top);
+      await vi.advanceTimersByTimeAsync(150);
+    };
+
+    it('結び付ける: Google になり、チケットも服も利用者コードも、そのまま', async () => {
+      const backend = await readyBackend({ tickets: 5 });
+      await withItem(backend);
+      const before = await backend.signIn();
+      expect(await backend.account.prepare()).toEqual({ kind: 'guest' });
+      expect(await backend.account.loginWithPopup('link')).toEqual({ outcome: 'linked' });
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      expect(await backend.signIn()).toEqual(before);
+      expect(await backend.listMyItems()).toHaveLength(1);
+    });
+
+    it('ログアウト → 空の別の利用者。入り直す → 元の利用者コード・チケット・服が戻る（すぐ、メモリにも）', async () => {
+      const backend = await readyBackend({ tickets: 5 });
+      await withItem(backend);
+      const before = await backend.signIn();
+      await backend.account.loginWithPopup('link');
+      await backend.account.logout();
+      const empty = await backend.signIn();
+      expect(empty.tickets).toBe(0);
+      expect(empty.admin).toBe(false);
+      expect(empty.userCode).not.toBe(before.userCode);
+      expect(await backend.listMyItems()).toEqual([]);
+      expect(await backend.openJobs()).toEqual([]);
+      expect(await backend.account.prepare()).toEqual({ kind: 'guest' });
+      expect(await backend.account.loginWithPopup('signin')).toEqual({ outcome: 'switched' });
+      expect(await backend.signIn()).toEqual(before);
+      expect(await backend.listMyItems()).toHaveLength(1);
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      // 次に開いても（読み込み直しても）同じ
+      const reopened = await make().signIn();
+      expect(reopened).toEqual(before);
+    });
+
+    it('置いてある Google の世界があるとき、結び付ける → もう使われている。いまの世界は、そのまま', async () => {
+      const backend = await readyBackend({ tickets: 5 });
+      await backend.account.loginWithPopup('link');
+      await backend.account.logout();
+      const empty = await backend.signIn();
+      expect(await backend.account.loginWithPopup('link')).toMatchObject({ outcome: 'taken', code: 'auth/credential-already-in-use' });
+      expect(await backend.signIn()).toEqual(empty);
+      expect(await backend.account.prepare()).toEqual({ kind: 'guest' });
+    });
+
+    it('置いてある世界が無いとき、入る → いまの世界のまま Google になる', async () => {
+      const backend = await readyBackend({ tickets: 4 });
+      const before = await backend.signIn();
+      expect(await backend.account.loginWithPopup('signin')).toEqual({ outcome: 'switched' });
+      expect(await backend.signIn()).toEqual(before);
+      expect(await backend.account.prepare()).toMatchObject({ kind: 'google' });
+    });
+
+    it('入れ替えは、利用者の変化を知らせる', async () => {
+      const backend = await readyBackend({ tickets: 5 });
+      const seen: number[] = [];
+      backend.onUser((u) => seen.push(u.tickets));
+      await backend.account.loginWithPopup('link');
+      await backend.account.logout();
+      expect(seen.at(-1)).toBe(0);
+    });
+
+    it('googleTaken・loginFail', async () => {
+      const taken = await readyBackend({ googleTaken: true });
+      expect(await taken.account.loginWithPopup('link')).toMatchObject({ outcome: 'taken' });
+      expect(await taken.account.prepare()).toEqual({ kind: 'guest' });
+      localStorage.clear();
+      const failing = await readyBackend({ loginFail: 'auth/popup-closed-by-user' });
+      expect(await failing.account.loginWithPopup('link')).toMatchObject({ outcome: 'cancelled' });
+    });
+
+    it('ログアウトで置いた世界の、作りかけの仕事は、入り直したとき、続きから進む', async () => {
+      const backend = await readyBackend({ tickets: 5 });
+      await backend.account.loginWithPopup('link');
+      const { jobId } = await backend.startJob(top);
+      await backend.account.logout();
+      await vi.advanceTimersByTimeAsync(500);
+      await backend.account.loginWithPopup('signin');
+      expect((await backend.openJobs()).find((j) => j.id === jobId)?.done).toBe(true);
+      expect(await backend.listMyItems()).toHaveLength(1);
+    });
+  });
 });

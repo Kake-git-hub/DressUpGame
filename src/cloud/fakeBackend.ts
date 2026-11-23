@@ -6,8 +6,10 @@
  * 読み込み直したとき、時刻を過ぎていた分は、できあがっている（「閉じていても、サーバーが進める」を確かめられる）。
  * `?studio=fake` で開いたときと、E2E で使う。本物（Firebase）と同じ形（StudioBackend）。
  */
-import { noAccount } from './account';
+import { browserAccountEnv, createAccount } from './account';
 import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
+import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
+import type { FakeWorld } from './fakeAuth';
 import type { MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
 
 export interface FakeOptions {
@@ -18,11 +20,15 @@ export interface FakeOptions {
   admin?: boolean;
   offline?: boolean; // つながっていないときの動き
   oldServer?: boolean; // サーバーが古い版のときの動き
+  loginFail?: string; // ログインを、この auth/… の語で失敗させる（方法 2 では、access_denied が Google の「キャンセル」のまね）
+  googleTaken?: boolean; // 「結び付ける」を、いつも「もう使われている」にする
   // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角）。テストでは差し替える
   image?: (color: string) => Promise<Blob>;
 }
 
 const KEY = 'dressup_fake_backend';
+const ACCOUNT_KEY = 'dressup_fake_account'; // { google: boolean } いまの利用者が、Google に結び付いているか
+const GOOGLE_KEY = 'dressup_fake_google'; // ログアウトして置いてある、Google のアカウントの世界（State）
 const CANVAS = 1024;
 const SIZE = { w: 240, h: 200 };
 const COLORS = ['#e040a0', '#40a0e0', '#40c080', '#e0a040', '#8060e0', '#e06040'];
@@ -79,15 +85,17 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   const userListeners = new Set<(user: StudioUser) => void>();
   const jobListeners = new Map<string, Set<(job: StudioJob) => void>>();
 
-  const load = (): State => {
+  const parseState = (raw: string | null): State | null => {
     try {
-      const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null') as State | null;
+      const saved = JSON.parse(raw ?? 'null') as State | null;
       if (saved && saved.user && Array.isArray(saved.jobs) && Array.isArray(saved.items)) return { ...saved, seen: Array.isArray(saved.seen) ? saved.seen : [] };
     } catch {
       // 読めなければ、最初から
     }
-    return { user: { userCode: newCode(), tickets: options.tickets ?? 5, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+    return null;
   };
+  const load = (): State =>
+    parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
   let state = load();
   const save = () => {
     try {
@@ -168,6 +176,67 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   save();
   for (const job of state.jobs) schedule(job.id);
 
+  // ---- 利用者の入れ替え（ログイン）。いまの保存 = いまの利用者の世界 ----
+  let google = ((): boolean => {
+    try {
+      return (JSON.parse(localStorage.getItem(ACCOUNT_KEY) ?? 'null') as { google?: unknown } | null)?.google === true;
+    } catch {
+      return false;
+    }
+  })();
+  const setGoogle = (value: boolean) => {
+    google = value;
+    try {
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify({ google }));
+    } catch {
+      // 保存できなくても動く
+    }
+  };
+  // 世界を入れ替える。メモリの state も、すぐ読み直す（ページの読み込み直しは、呼ぶ側がする）
+  const adopt = (next: State) => {
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
+    state = next;
+    for (const job of state.jobs) advance(job, Date.now());
+    save();
+    for (const job of state.jobs) schedule(job.id);
+    notifyUser();
+  };
+  const world: FakeWorld = {
+    link() {
+      // 置いてある Google の世界がある = その Google は、もう使われている
+      if (localStorage.getItem(GOOGLE_KEY) !== null) throw { code: 'auth/credential-already-in-use' };
+      setGoogle(true);
+    },
+    signin() {
+      const parked = parseState(localStorage.getItem(GOOGLE_KEY));
+      if (parked) {
+        try {
+          localStorage.removeItem(GOOGLE_KEY);
+        } catch {
+          // 消せなくても進む
+        }
+        adopt(parked);
+      }
+      setGoogle(true);
+    },
+    signOut() {
+      try {
+        localStorage.setItem(GOOGLE_KEY, JSON.stringify(state));
+      } catch {
+        // 置けなければ、ここで失敗にする（置かずに入れ替えると、世界が無くなる）
+        throw { code: 'auth/network-request-failed' };
+      }
+      adopt({ user: { userCode: newCode(), tickets: 0, admin: false }, jobs: [], items: [], seen: [], counter: 0 });
+      setGoogle(false);
+    },
+    isGoogle: () => google,
+  };
+  const account = createAccount(
+    async () => createFakeAuthPort(world, { loginFail: options.loginFail, googleTaken: options.googleTaken }),
+    browserAccountEnv((url) => fakeGoTo(url, window, { loginFail: options.loginFail })),
+  );
+
   const toInfo = (saved: SavedItem): MyItemInfo => ({
     id: saved.id,
     dollId: saved.dollId,
@@ -190,7 +259,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   };
 
   return {
-    account: noAccount, // 偽物の口は、あとのタスクでつなぐ
+    account,
     async signIn() {
       online();
       if (options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
