@@ -150,7 +150,7 @@ iPad・iPhone のホーム画面アプリでどうなるかは、**どの方法�
 
 メールアドレス・証明（トークン）・`state`・`nonce` は、**残さない**。
 
-- `login start popup` / `login start redirect`（方法 2 は、`client=config` か `client=lookup` も）
+- `login start popup` / `login start redirect`
 - `login back ok` / `login back none`（覚えが無い）/ `login back mismatch` / `login back expired` / `login back error=<Google の理由の語>`
 - `login result linked` / `switched` / `taken` / `cancelled` / `not-ready` / `no-popup` / `failed code=<Firebase の理由の語>`
 - `login out`
