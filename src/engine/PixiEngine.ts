@@ -4,6 +4,7 @@
  * フィルターなし版（パフォーマンス最優先）
  */
 import { Application, Container, Graphics, Sprite, Assets, ColorMatrixFilter, Texture } from 'pixi.js';
+import { diag } from '../services/diag';
 import { isBehindDoll } from './layers';
 import { eraseHides } from './hides';
 import type { Hide } from './hides';
@@ -101,7 +102,6 @@ export class PixiEngine {
   private contextLostCallback: (() => void) | null = null; // コンテキストロスト時のコールバック
   private backgroundArea: { x: number; y: number; size: number } | null = null; // 背景領域（1:1正方形）
   private tickerRunning = true; // Tickerが動作中かどうか
-  private clothingCached = false; // 服コンテナがキャッシュ済みか
   // 描画の通し番号。画像の読み込み中に次の描画が始まったら、古いほうは捨てる
   private dollDrawId = 0;
   private clothingDrawId = 0;
@@ -215,6 +215,7 @@ export class PixiEngine {
     // コンテキストが復元された時
     canvas.addEventListener('webglcontextrestored', () => {
       console.log('WebGLコンテキストが復元されました');
+      diag.note('gl', 'restored');
       // コールバックがあれば呼び出し
       if (this.contextLostCallback) {
         this.contextLostCallback();
@@ -416,6 +417,7 @@ export class PixiEngine {
         // フィルターなし（画像は透過PNG前提）
 
         this.dollContainer.addChild(dollSprite);
+        diag.note('doll', `hides=${hides.length}`, `erased=${!!hidden}`, `${texture.width}x${texture.height}`);
         return;
       } catch (error) {
         console.warn('ドール画像の読み込みに失敗、プレースホルダーを表示:', error);
@@ -543,6 +545,7 @@ export class PixiEngine {
       return;
     }
 
+    const startedAt = performance.now();
     // 背景領域の中心を基準に服の位置を計算
     const bgCenter = this.getBackgroundCenter();
     const centerX = bgCenter.centerX + ((this.dollTransform.x - 50) / 100) * bgCenter.size;
@@ -742,8 +745,21 @@ export class PixiEngine {
     for (const texture of this.clippedTextures) texture.destroy(true);
     this.clippedTextures = madeTextures;
 
-    // 描画後に服コンテナをテクスチャにキャッシュ（大幅な軽量化）
-    this.cacheClothingContainer();
+    // 服は、スプライトのまま描く。前は、服をまとめて 1 枚のテクスチャに写していた（cacheAsTexture）が、
+    // その作業用の領域が大きく（2 のべき乗の大きさ × なめらかにする 4 倍）、セットを着せた瞬間に数十〜数百 MB を取って、
+    // iPad で描画の土台（WebGL）が落ちた（v0.35.1）。描き直すのは着せ替えのあとの 1 秒だけなので、写す得は無い
+    const bounds = this.clothingContainer.getLocalBounds();
+    diag.note(
+      'clothes',
+      `n=${items.length}`,
+      `hidden=${hidden?.size ?? 0}`,
+      `front=${this.clothingContainer.children.length}`,
+      `behind=${behindSprites.length}`,
+      `made=${madeTextures.length}`,
+      `bounds=${Math.round(bounds.width)}x${Math.round(bounds.height)}`,
+      `screen=${Math.round(this.app.screen.width)}x${Math.round(this.app.screen.height)}@${this.app.renderer.resolution}`,
+      `ms=${Math.round(performance.now() - startedAt)}`,
+    );
   }
 
   // 黒っぽい絵か。髪は、前髪と対のうしろがみのどちらかが黒っぽければ、両方とも同じ色変えにする
@@ -765,26 +781,6 @@ export class PixiEngine {
     }
     this.darkImages.set(url, dark);
     return dark;
-  }
-
-  // 服コンテナをテクスチャにキャッシュ（パフォーマンス大幅改善）
-  private cacheClothingContainer(): void {
-    if (!this.clothingContainer || !this.app) return;
-    
-    // 一旦キャッシュを解除（変更を反映するため）
-    if (this.clothingCached) {
-      this.clothingContainer.cacheAsTexture(false);
-      this.clothingCached = false;
-    }
-    
-    // 服が1枚以上ある場合のみキャッシュ
-    if (this.clothingContainer.children.length > 0) {
-      // 1フレーム描画してからキャッシュ（フィルター適用後の状態を焼き込む）
-      this.app.render();
-      this.clothingContainer.cacheAsTexture(true);
-      this.clothingCached = true;
-      console.log('服コンテナをキャッシュしました（フィルター処理軽減）');
-    }
   }
 
   // レンダリングループを停止（パフォーマンス最適化）

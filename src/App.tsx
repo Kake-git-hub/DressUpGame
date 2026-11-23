@@ -38,6 +38,7 @@ import { playDressUpSound } from './services/sound';
 import type { ClothingItemData, DollData, BackgroundData, DollTransform, Position } from './types';
 import { DEFAULT_DOLL_TRANSFORM } from './types';
 import { APP_VERSION } from './version';
+import { diag, diagReport } from './services/diag';
 import './App.css';
 
 
@@ -117,6 +118,60 @@ const SERVICE_WORKER_WAIT_MS = 60_000;
 type LoadState = 'loading' | 'ready' | 'error';
 
 // つなぎ役の、いまの状態（つなぎ役がまだ無ければ null）
+// きろく（あいことば「log」）に添える、端末と描画の状態
+function isStandalone(): boolean {
+  try {
+    return window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+  } catch {
+    return false;
+  }
+}
+function viewportText(): string {
+  return `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio}`;
+}
+// キャンバスに、絵が実際に描かれているか: 9×9 の点のうち、透明でない点の数（「0/81」なら、何も描かれていない）
+function paintedShare(canvas: HTMLCanvasElement): string {
+  try {
+    const probe = document.createElement('canvas');
+    probe.width = 9;
+    probe.height = 9;
+    const ctx = probe.getContext('2d');
+    if (!ctx) return 'no 2d';
+    ctx.drawImage(canvas, 0, 0, 9, 9);
+    const data = ctx.getImageData(0, 0, 9, 9).data;
+    let painted = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++;
+    return `${painted}/81`;
+  } catch (error) {
+    return String(error);
+  }
+}
+function readGl(): unknown {
+  try {
+    const canvas = document.querySelector<HTMLCanvasElement>('#avatar-canvas');
+    if (!canvas) return 'no canvas';
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (!gl) return { canvas: `${canvas.width}x${canvas.height}`, gl: 'none' };
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const rect = canvas.getBoundingClientRect();
+    const style = getComputedStyle(canvas);
+    return {
+      canvas: `${canvas.width}x${canvas.height}`,
+      rect: [rect.left, rect.top, rect.width, rect.height].map(Math.round).join(','),
+      style: `${style.display}/${style.visibility}/${style.opacity}`,
+      painted: paintedShare(canvas),
+      webgl2: typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext,
+      lost: gl.isContextLost(),
+      error: gl.getError(),
+      maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+      maxRenderbuffer: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+      renderer: info ? (gl.getParameter(info.UNMASKED_RENDERER_WEBGL) as string) : '',
+    };
+  } catch (error) {
+    return String(error);
+  }
+}
+
 const noSubscribe = () => () => undefined;
 const noState = () => null;
 function useSessionState(session: CloudSession | null): SessionState | null {
@@ -495,6 +550,7 @@ function App() {
     (parts: ClothingItemData[]) => {
       if (parts.length === 0) return;
       // セットは、それまで着ていた服を全部脱がせてから着せる（前の服と重ねない）
+      diag.note('set', `parts=${parts.length}`, parts.map((item) => item.type).join(','));
       resetAll();
       for (const item of parts) equipItem(item, item.backItemId ? allClothing.find((c) => c.id === item.backItemId) : undefined);
       dragPreviewRef.current?.hide();
@@ -583,12 +639,33 @@ function App() {
     if (badgeTaps.current.length < UNLOCK_TAPS) return;
     badgeTaps.current = [];
     const word = window.prompt('あいことばを入れてください');
+    // 「log」: 端末の上で起きたことの覚え書きを出す（作者の端末でしか起きない不具合を調べるため）
+    if ((word ?? '').trim().toLowerCase() === 'log') {
+      setDiagText(diagReport(diag, { version: APP_VERSION, userAgent: navigator.userAgent, standalone: isStandalone(), viewport: viewportText(), gl: readGl() }));
+      return;
+    }
     if (unlockByWord(word)) window.location.reload();
   };
+  const [diagText, setDiagText] = useState<string | null>(null);
   const versionBadge = (
-    <div className={`version-badge${onHome ? ' on-home' : ''}`} onClick={handleBadgeTap}>
-      v{APP_VERSION}
-    </div>
+    <>
+      <div className={`version-badge${onHome ? ' on-home' : ''}`} onClick={handleBadgeTap}>
+        v{APP_VERSION}
+      </div>
+      {diagText !== null && (
+        <div className="diag-panel" data-testid="diag-panel">
+          <div className="diag-buttons">
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(diagText).catch(() => undefined)}>
+              コピー
+            </button>
+            <button type="button" onClick={() => setDiagText(null)}>
+              とじる
+            </button>
+          </div>
+          <pre>{diagText}</pre>
+        </div>
+      )}
+    </>
   );
 
   // 服が届いた演出: 届いた仕事（結果を、まだ見ていない）が、どの画面の上にも出る。1 つずつ、古い順に。

@@ -249,6 +249,45 @@ textarea {
   z-index: 910;
 }
 
+/* きろく（あいことば「log」）。写真に撮りやすいように、小さい字で、画面いっぱいに */
+.diag-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--top-inset, 0px) + 8px) 8px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  background: #fff;
+  color: #222;
+}
+.diag-buttons {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-bottom: 6px;
+}
+.diag-buttons button {
+  min-width: 88px;
+  height: 40px;
+  font-size: 15px;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+  background: #f6f6f6;
+}
+.diag-panel pre {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* 設定ボタン - 右下に配置 */
 .settings-button {
   width: 48px;
