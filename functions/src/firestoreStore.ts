@@ -111,6 +111,19 @@ export class FirestoreStore implements CloudStore {
   async createJob(uid: string, job: JobDoc): Promise<void> {
     await this.job(uid, job.id).create(job);
   }
+  async chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      const tickets = have(snap.data() as UserDoc);
+      if (tickets < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${tickets} 枚、必要 ${cost} 枚）`);
+      tx.update(ref, { tickets: tickets - cost });
+      tx.create(ref.collection('ledger').doc(), { count: -cost, reason, at: now });
+      tx.create(this.job(uid, job.id), job);
+      return tickets - cost;
+    });
+  }
   async getJob(uid: string, jobId: string): Promise<JobDoc | null> {
     const snap = await this.job(uid, jobId).get();
     return snap.exists ? (snap.data() as JobDoc) : null;
@@ -131,6 +144,26 @@ export class FirestoreStore implements CloudStore {
   async listJobs(uid: string): Promise<JobDoc[]> {
     const snap = await this.user(uid).collection('jobs').orderBy('createdAt', 'desc').limit(JOBS_MAX).get();
     return snap.docs.map((doc) => doc.data() as JobDoc);
+  }
+  async listOpenJobs(limit: number): Promise<{ uid: string; job: JobDoc }[]> {
+    // 全部の利用者の仕事をまたいで探す（索引は firestore.indexes.json）
+    const snap = await this.db.collectionGroup('jobs').where('done', '==', false).orderBy('createdAt', 'asc').limit(limit).get();
+    return snap.docs.flatMap((doc) => {
+      const owner = doc.ref.parent.parent;
+      return owner ? [{ uid: decodeURIComponent(owner.id), job: doc.data() as JobDoc }] : [];
+    });
+  }
+  async updateItem(uid: string, itemId: string, change: (item: ItemDoc) => ItemDoc | null): Promise<ItemDoc> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.item(uid, itemId);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', 'この服は見つかりません');
+      const current = snap.data() as ItemDoc;
+      const next = change(structuredClone(current));
+      if (!next) return current;
+      tx.set(ref, next);
+      return next;
+    });
   }
   async putItem(uid: string, item: ItemDoc): Promise<void> {
     await this.item(uid, item.id).set(item);

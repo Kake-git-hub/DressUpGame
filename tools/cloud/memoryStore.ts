@@ -65,6 +65,17 @@ export class MemoryStore implements CloudStore {
   async createJob(uid: string, job: JobDoc): Promise<void> {
     this.jobs.set(`${uid}/${job.id}`, clone(job));
   }
+  async chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number> {
+    // 間に待ちを入れない（引くのと作るのが、片方だけにならない）
+    const user = this.users.get(uid);
+    if (!user) throw new CloudError('refused', '利用者が見つかりません');
+    if (have(user) < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${have(user)} 枚、必要 ${cost} 枚）`);
+    if (this.jobs.has(`${uid}/${job.id}`)) throw new Error('同じ仕事が、もうあります');
+    user.tickets = have(user) - cost;
+    this.ledger.push({ uid, count: -cost, reason, at: now });
+    this.jobs.set(`${uid}/${job.id}`, clone(job));
+    return user.tickets;
+  }
   async getJob(uid: string, jobId: string): Promise<JobDoc | null> {
     const job = this.jobs.get(`${uid}/${jobId}`);
     return job ? clone(job) : null;
@@ -88,6 +99,29 @@ export class MemoryStore implements CloudStore {
       .filter(([key]) => key.startsWith(`${uid}/`))
       .map(([, job]) => clone(job))
       .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  async listOpenJobs(limit: number): Promise<{ uid: string; job: JobDoc }[]> {
+    return [...this.jobs.entries()]
+      .filter(([, job]) => !job.done)
+      .map(([key, job]) => ({ uid: key.slice(0, key.indexOf('/')), job: clone(job) }))
+      .sort((a, b) => a.job.createdAt - b.job.createdAt)
+      .slice(0, limit);
+  }
+  // updateJob と同じく、割り込まれたら、やり直す
+  async updateItem(uid: string, itemId: string, change: (item: ItemDoc) => ItemDoc | null): Promise<ItemDoc> {
+    const key = `${uid}/${itemId}`;
+    for (;;) {
+      const current = this.items.get(key);
+      if (!current) throw new CloudError('refused', 'この服は見つかりません');
+      const before = JSON.stringify(current);
+      const next = change(clone(current));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const now = this.items.get(key);
+      if (!now) throw new CloudError('refused', 'この服は見つかりません');
+      if (JSON.stringify(now) !== before) continue;
+      if (next) this.items.set(key, clone(next));
+      return clone(next ?? current);
+    }
   }
   async putItem(uid: string, item: ItemDoc): Promise<void> {
     this.items.set(`${uid}/${item.id}`, clone(item));

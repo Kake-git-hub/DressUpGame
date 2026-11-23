@@ -167,6 +167,52 @@ describe('Firestore の置き場', () => {
   });
 });
 
+describe('Firestore の置き場（v0.35.0 で足した操作）', () => {
+  it('chargeAndCreateJob: 足りないと、引かず、仕事も作らない。足りれば、引いて、仕事ができ、台帳に残る', async () => {
+    const u = uid();
+    await store.createUser(u, () => `C${u}`.toUpperCase(), 1);
+    await store.addTickets(u, 2, 'grant', 2);
+    expect(code(await store.chargeAndCreateJob(u, job('big', 5), 3, 'job:big', 5).catch((e) => e))).toBe('no-tickets');
+    expect((await store.getUser(u))!.tickets).toBe(2);
+    expect(await store.getJob(u, 'big')).toBeNull();
+    expect(await store.chargeAndCreateJob(u, job('ok', 6), 2, 'job:ok', 6)).toBe(0);
+    expect((await store.getJob(u, 'ok'))!.id).toBe('ok');
+    const ledger = await getFirestore(app).collection(`users/${u}/ledger`).get();
+    expect(ledger.docs.map((d) => d.data().count as number).sort()).toEqual([-2, 2]);
+    expect(code(await store.chargeAndCreateJob('nobody', job('x', 1), 1, 'x', 1).catch((e) => e))).toBe('refused');
+  });
+
+  it('chargeAndCreateJob: 3 枚しか無いのに同時に 8 回 → 通るのは 3 回、仕事も 3 つ', async () => {
+    const u = uid();
+    await store.createUser(u, () => `D${u}`.toUpperCase(), 1);
+    await store.addTickets(u, 3, 'grant', 2);
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => store.chargeAndCreateJob(u, job(`j${i}`, 10 + i), 1, `job:j${i}`, 3).then(() => 'ok', code)));
+    expect(results.filter((r) => r === 'ok')).toHaveLength(3);
+    expect(results.filter((r) => r === 'no-tickets')).toHaveLength(5);
+    expect((await store.getUser(u))!.tickets).toBe(0);
+    expect(await store.listJobs(u)).toHaveLength(3);
+  });
+
+  it('updateItem: 無い服は refused。同時の書き換えが、どれも消えない。null なら書かない', async () => {
+    const u = uid();
+    const item: ItemDoc = {
+      id: 'my:a',
+      dollId: 'doll',
+      item: { id: 'my:a', name: 'ふく', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 20, box: { x: 1, y: 2, w: 3, h: 4 } }, thumb: 'files/t.webp' },
+      paths: {},
+      createdAt: 1,
+      hue: 0,
+    };
+    expect(code(await store.updateItem(u, 'my:a', (i) => i).catch((e) => e))).toBe('refused');
+    await store.putItem(u, item);
+    await Promise.all(Array.from({ length: 6 }, () => store.updateItem(u, 'my:a', (current) => ({ ...current, hue: (current.hue ?? 0) + 10 }))));
+    expect((await store.getItem(u, 'my:a'))!.hue).toBe(60);
+    expect((await store.updateItem(u, 'my:a', () => null)).hue).toBe(60);
+  });
+
+  it.todo('listOpenJobs: done の仕事は入らない・古い順・limit で切る（索引は Task 4）');
+});
+
 describe('Storage の置き場', () => {
   it('置く・読む（無ければ null）・prefix でまとめて消す（ほかは残る）', async () => {
     const base = `users/${uid()}`;
