@@ -58,6 +58,16 @@ export const MAX_TRIES = 3;
 // ほかの呼び出しが進めている最中に呼ばれたとき、これだけあとに、もう一度呼ばれるようにする
 export const BUSY_RETRY_SECONDS = 60;
 const GAVE_UP = '作れませんでした（何度か試しましたが、途中で止まりました）。チケットは戻しました';
+// 止まっている仕事を列に入れ直すのは、仕事ごとに、この間隔に 1 回まで
+export const REQUEUE_MS = 30_000;
+// 作ってから、これだけたっても終わらない仕事は、残りを打ち切って払い戻す
+export const EXPIRE_MS = 24 * 3_600_000;
+const EXPIRED = '時間内に作れませんでした。チケットは戻しました';
+// 既定の色（色スライダーの角度）の範囲
+export const HUE_MIN = -180;
+export const HUE_MAX = 180;
+const ORDER_MAX = 500;
+const SWEEP_MAX = 200;
 
 // 利用者コード: まぎらわしい文字（I・O・0・1）を除いた 8 文字
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -331,6 +341,7 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       // 止まっていた分は、順番待ちに戻す
       job.candidates = job.candidates.map((c) => (c.status === 'working' ? { ...c, status: 'waiting' as const } : { ...c }));
       const next = pick(job);
+      job.v = 2; // ここからは、できた服が自動で自分の服になる仕事
       if (next) {
         taken = { kind: 'item', candidate: next };
         job.runner = runner;
@@ -475,9 +486,94 @@ export async function workJob(deps: CoreDeps, uid: string, jobId: string): Promi
   else if (result === 'more') await deps.enqueue(uid, jobId, 0);
 }
 
-// まだ決まっていない候補のある仕事（新しい順）
-export async function listJobs(deps: CoreDeps, uid: string): Promise<JobDoc[]> {
-  return (await deps.store.listJobs(uid)).filter((job) => job.candidates.some(undecided));
+// 終わっていないのに、だれも作っていない（まだ呼ばれていない・時間切れでやめた・落ちた）か、作成中のまま合図がとぎれている
+const stalled = (job: JobDoc, now: number) => !job.done && (!job.candidates.some((c) => c.status === 'working') || now - job.heartbeat > STALE_MS);
+
+/**
+ * 仕事 1 つの手当て: 打ち切り（24 時間）→ 払い戻しの残り → 止まっていれば列に入れ直す。返り値は、手当てのあとの仕事。
+ * アプリが進み具合を聞いたときと、見回りが呼ぶ（列のやり直しが尽きても・列に入れるのに失敗しても、ここで続きが進む）。
+ */
+export async function tendJob(deps: CoreDeps, uid: string, job: JobDoc): Promise<JobDoc> {
+  const now = deps.now();
+  let current = job;
+  if (!current.done && now - current.createdAt > EXPIRE_MS) {
+    // 残りの品目を、できなかった扱いにして終わる。進めていた呼び出しがあっても、受け持ちの印を消すので、あとから服は残らない
+    current = await deps.store.updateJob(uid, job.id, (j) => {
+      if (j.done) return null;
+      let dropped = 0;
+      j.candidates = j.candidates.map((c) => {
+        if (c.status !== 'waiting' && c.status !== 'working') return c;
+        dropped++;
+        return { ...c, status: 'failed' as const, notes: [EXPIRED], refunded: false };
+      });
+      j.tickets = Math.max(0, j.tickets - dropped);
+      j.done = true;
+      delete j.runner;
+      j.heartbeat = deps.now();
+      return j;
+    });
+  }
+  if (current.candidates.some((c) => c.status === 'failed' && c.refunded !== true)) {
+    await settleRefunds(deps, uid, job.id);
+    current = (await deps.store.getJob(uid, job.id)) ?? current;
+  }
+  // 前の版の「できた」が残っている仕事も、列に入れる（runJob が、服にする）
+  const needsWork = stalled(current, now) || current.candidates.some((c) => c.status === 'done');
+  if (needsWork && now - (current.queuedAt ?? 0) >= REQUEUE_MS) {
+    let queue = false;
+    current = await deps.store.updateJob(uid, job.id, (j) => {
+      queue = false;
+      if (now - (j.queuedAt ?? 0) < REQUEUE_MS) return null;
+      queue = true;
+      return { ...j, queuedAt: now };
+    });
+    if (queue) await deps.enqueue(uid, job.id).catch(() => undefined);
+  }
+  return current;
+}
+
+// 見回り: 終わっていない仕事（どの利用者の分も）を手当てする。返り値は、見た数
+export async function sweep(deps: CoreDeps): Promise<number> {
+  const open = await deps.store.listOpenJobs(SWEEP_MAX);
+  for (const { uid, job } of open) await tendJob(deps, uid, job).catch(() => undefined);
+  return open.length;
+}
+
+// まだ見ていない仕事（作りかけ + 終わって、結果をまだ見ていないもの）。新しい順。それぞれ、手当て済み。
+// 前の版の仕事（v なし）は、決まっていない候補が残っているものだけ
+export async function openJobs(deps: CoreDeps, uid: string): Promise<JobDoc[]> {
+  const jobs = (await deps.store.listJobs(uid)).filter((job) => (job.v === 2 ? !job.seen : job.candidates.some(undecided)));
+  const tended: JobDoc[] = [];
+  for (const job of jobs) tended.push(await tendJob(deps, uid, job));
+  return tended;
+}
+
+// 結果（できた・できなかった）を見た、の印を付ける。終わっていない仕事には付けない
+export async function ackJob(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
+  await deps.store.updateJob(uid, jobId, (job) => (!job.done || job.seen ? null : { ...job, seen: true }));
+}
+
+// 自分の服の、名前・既定の色を変える
+export async function updateItem(deps: CoreDeps, uid: string, itemId: string, change: { name?: string; hue?: number }): Promise<ItemDoc> {
+  return deps.store.updateItem(uid, itemId, (item) => {
+    const next: ItemDoc = { ...item, item: { ...item.item } };
+    if (typeof change.name === 'string') next.item.name = plainName(change.name, item.item.name);
+    if (typeof change.hue === 'number' && Number.isFinite(change.hue)) next.hue = Math.max(HUE_MIN, Math.min(HUE_MAX, Math.round(change.hue)));
+    if (next.item.name === item.item.name && (next.hue ?? 0) === (item.hue ?? 0)) return null;
+    next.updatedAt = deps.now();
+    return next;
+  });
+}
+
+// 自分の服の並び順を変える: ids の順に、order を now, now-1, now-2 … にする（大きいほど先。あとから作った服は、その前に来る）
+export async function orderItems(deps: CoreDeps, uid: string, ids: string[]): Promise<ItemDoc[]> {
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > ORDER_MAX || new Set(ids).size !== ids.length) throw new CloudError('refused', '並び順を読み取れませんでした');
+  // 先に、全部が自分の服かを確かめる（途中まで変えて止まらないように）
+  for (const id of ids) if (!(await deps.store.getItem(uid, id))) throw new CloudError('refused', 'この服は見つかりません');
+  const now = deps.now();
+  const result: ItemDoc[] = [];
+  for (const [i, id] of ids.entries()) result.push(await deps.store.updateItem(uid, id, (item) => ({ ...item, order: now - i, updatedAt: now })));
+  return result;
 }
 
 export function listItems(deps: CoreDeps, uid: string): Promise<ItemDoc[]> {

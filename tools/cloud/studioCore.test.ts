@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { deleteItem, listItems, normalizePhoto, runJob, settleRefunds, signIn, startJob, workJob } from './studioCore.ts';
+import { ackJob, deleteItem, EXPIRE_MS, listItems, normalizePhoto, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 import type { CandidateDoc, JobDoc } from './store.ts';
 
@@ -607,6 +607,216 @@ describe('自分の服を消す', () => {
     expect(await listItems(deps, 'u1')).toEqual([]);
     expect([...files.files.keys()].some((k) => k.includes('/items/'))).toBe(false);
   }, 60_000);
+});
+
+describe('止まった仕事の手当て（tendJob）', () => {
+  const jobOf = async (uid: string, jobId: string) => (await store.getJob(uid, jobId))!;
+  it('止まっていれば列に入れ直す。30 秒以内には、もう入れない', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    enqueued.length = 0;
+    // 始めた直後（列に入れたばかり）は、入れ直さない
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toEqual([]);
+    clock += 31_000;
+    const tended = await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toEqual([['u1', jobId, undefined]]);
+    expect(tended.queuedAt).toBe(clock);
+    clock += 10_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toHaveLength(1);
+    clock += 30_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toHaveLength(2);
+  });
+  it('進んでいる最中の仕事・終わった仕事は、入れ直さない', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    clock += 100_000;
+    await setJob('u1', jobId, (job) => ({ ...job, heartbeat: clock, runner: 'r', candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const, tries: 1 })) }));
+    enqueued.length = 0;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toEqual([]);
+    // 合図がとぎれたら（150 秒より古い）、止まっている
+    clock += 151_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toHaveLength(1);
+    await setJob('u1', jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'kept' as const })) }));
+    clock += 100_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toHaveLength(1);
+  });
+  it('列に入れられなくても、落ちない（次に聞かれたとき、また試す）', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    clock += 31_000;
+    enqueueFails = true;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    enqueueFails = false;
+    enqueued.length = 0;
+    clock += 31_000;
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(enqueued).toHaveLength(1);
+  });
+  it('24 時間たった仕事は、残りを failed にして払い戻し、終わりにする（できた服は、そのまま）', async () => {
+    await userWith('u1', 5);
+    const { jobId } = await startJob(deps, 'u1', twoParts());
+    deps.runBudgetMs = 0;
+    expect(await runJob(deps, 'u1', jobId)).toBe('more');
+    expect((await signIn(deps, 'u1')).tickets).toBe(3);
+    clock += EXPIRE_MS - 1000;
+    expect((await tendJob(deps, 'u1', await jobOf('u1', jobId))).done).toBe(false);
+    clock += 2000;
+    enqueued.length = 0;
+    const job = await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(job.done).toBe(true);
+    expect(job.runner).toBeUndefined();
+    expect(job.tickets).toBe(1);
+    expect(job.candidates.map((c) => c.status)).toEqual(['kept', 'failed']);
+    expect(job.candidates[1]).toMatchObject({ refunded: true, notes: ['時間内に作れませんでした。チケットは戻しました'] });
+    expect((await signIn(deps, 'u1')).tickets).toBe(4);
+    expect(await listItems(deps, 'u1')).toHaveLength(1);
+    expect(enqueued).toEqual([]); // 終わったので、もう列には入れない
+    // もう一度手当てしても、二重に戻さない
+    await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect((await signIn(deps, 'u1')).tickets).toBe(4);
+  }, 60_000);
+  it('打ち切ったあとに、古い呼び出しができあがっても、服は残らない（払い戻しと服の両方は起きない）', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    let release = () => {};
+    imageGate = new Promise((resolve) => (release = resolve));
+    deps.heartbeatMs = 3_600_000;
+    const old = runJob(deps, 'u1', jobId);
+    while (imageCalls === 0) await wait(10);
+    clock += EXPIRE_MS + 1;
+    const job = await tendJob(deps, 'u1', await jobOf('u1', jobId));
+    expect(job.candidates[0]).toMatchObject({ status: 'failed', refunded: true });
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
+    release();
+    expect(await old).toBe('busy');
+    expect(await listItems(deps, 'u1')).toEqual([]);
+    expect([...files.files.keys()].filter((k) => k.includes('/items/'))).toEqual([]);
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
+    expect(refunds()).toHaveLength(1);
+  }, 60_000);
+});
+
+describe('見回り（sweep）', () => {
+  it('終わっていない仕事だけを手当てする（どの利用者の分も）', async () => {
+    await userWith('u1', 2);
+    await userWith('u2', 2);
+    const a = await startJob(deps, 'u1', oneTop());
+    const b = await startJob(deps, 'u2', oneTop());
+    await setJob('u2', b.jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'kept' as const })) }));
+    clock += 31_000;
+    enqueued.length = 0;
+    expect(await sweep(deps)).toBe(1);
+    expect(enqueued).toEqual([['u1', a.jobId, undefined]]);
+  });
+});
+
+describe('見ていない仕事（openJobs・ackJob）', () => {
+  it('見た仕事は出ない。終わっていない仕事は、見た印を付けられない（出続ける）', async () => {
+    await userWith('u1', 5);
+    const first = await startJob(deps, 'u1', oneTop());
+    await runJob(deps, 'u1', first.jobId);
+    clock += 1000;
+    const second = await startJob(deps, 'u1', oneTop());
+    expect((await openJobs(deps, 'u1')).map((j) => j.id)).toEqual([second.jobId, first.jobId]);
+    await ackJob(deps, 'u1', second.jobId); // まだ終わっていない
+    await ackJob(deps, 'u1', first.jobId);
+    expect((await openJobs(deps, 'u1')).map((j) => j.id)).toEqual([second.jobId]);
+    expect((await store.getJob('u1', second.jobId))!.seen).toBeUndefined();
+    // ほかの利用者には見えない・付けられない
+    await signIn(deps, 'u2');
+    expect(await openJobs(deps, 'u2')).toEqual([]);
+    expect(code(await ackJob(deps, 'u2', first.jobId).catch((e) => e))).toBe('refused');
+  }, 60_000);
+  it('聞かれたとき、止まっている仕事は列に入れ直す', async () => {
+    await userWith('u1', 2);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    clock += 31_000;
+    enqueued.length = 0;
+    await openJobs(deps, 'u1');
+    expect(enqueued).toEqual([['u1', jobId, undefined]]);
+  });
+  it('前の版の、全部決まった仕事（v なし）は出ない。「できた」の残っている仕事は出て、列に入る', async () => {
+    await userWith('u1', 2);
+    const old = (status: 'kept' | 'done', id: string): JobDoc => ({
+      id,
+      dollId,
+      theme: 'うみ',
+      styleId: 'anime',
+      done: true,
+      tickets: 1,
+      createdAt: clock - 100_000,
+      heartbeat: clock - 100_000,
+      candidates: [{ index: 0, name: 'ふく', categoryId: 'トップス', description: 'A top.', colors: [], status, notes: [] }],
+    });
+    await store.createJob('u1', old('kept', 'decided'));
+    await store.createJob('u1', old('done', 'pending'));
+    expect((await openJobs(deps, 'u1')).map((j) => j.id)).toEqual(['pending']);
+    expect(enqueued).toEqual([['u1', 'pending', undefined]]);
+  });
+});
+
+describe('自分の服を直す', () => {
+  const put = (uid: string, id: string, createdAt: number) =>
+    store.putItem(uid, {
+      id,
+      dollId,
+      item: { id, name: 'もとのなまえ', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/t.webp' },
+      paths: {},
+      createdAt,
+      hue: 0,
+      order: createdAt,
+      updatedAt: createdAt,
+    });
+  it('名前は 20 文字まで（空なら変えない）。色は -180〜180 の整数に収める。変えたら updatedAt が進む', async () => {
+    await put('u1', 'my:a', 100);
+    clock += 5;
+    const renamed = await updateItem(deps, 'u1', 'my:a', { name: `  ${'あ'.repeat(30)}  ` });
+    expect(renamed.item.name).toBe('あ'.repeat(20));
+    expect(renamed.updatedAt).toBe(clock);
+    expect((await updateItem(deps, 'u1', 'my:a', { name: '   ' })).item.name).toBe('あ'.repeat(20));
+    expect((await updateItem(deps, 'u1', 'my:a', { hue: 45.6 })).hue).toBe(46);
+    expect((await updateItem(deps, 'u1', 'my:a', { hue: 999 })).hue).toBe(180);
+    expect((await updateItem(deps, 'u1', 'my:a', { hue: -999 })).hue).toBe(-180);
+    expect((await updateItem(deps, 'u1', 'my:a', { hue: Number.NaN })).hue).toBe(-180);
+    // 何も変わらなければ、updatedAt は進まない
+    const before = (await store.getItem('u1', 'my:a'))!.updatedAt;
+    clock += 5;
+    expect((await updateItem(deps, 'u1', 'my:a', { hue: -180 })).updatedAt).toBe(before);
+  });
+  it('ほかの利用者の服・無い服は refused', async () => {
+    await put('u1', 'my:a', 100);
+    expect(code(await updateItem(deps, 'u2', 'my:a', { name: 'x' }).catch((e) => e))).toBe('refused');
+    expect(code(await updateItem(deps, 'u1', 'my:none', { hue: 1 }).catch((e) => e))).toBe('refused');
+    expect((await store.getItem('u1', 'my:a'))!.item.name).toBe('もとのなまえ');
+  });
+  it('並び順: 先頭ほど order が大きい。あとから作った服は、その前に来る', async () => {
+    await put('u1', 'my:a', 100);
+    await put('u1', 'my:b', 200);
+    await put('u1', 'my:c', 300);
+    clock += 10;
+    const ordered = await orderItems(deps, 'u1', ['my:a', 'my:c', 'my:b']);
+    expect(ordered.map((i) => i.id)).toEqual(['my:a', 'my:c', 'my:b']);
+    expect(ordered.map((i) => i.order)).toEqual([clock, clock - 1, clock - 2]);
+    expect(ordered.every((i) => i.updatedAt === clock)).toBe(true);
+    clock += 10;
+    await put('u1', 'my:d', clock);
+    const sorted = (await listItems(deps, 'u1')).sort((x, y) => (y.order ?? 0) - (x.order ?? 0)).map((i) => i.id);
+    expect(sorted).toEqual(['my:d', 'my:a', 'my:c', 'my:b']);
+  });
+  it('並び順: 自分の服でない ID・同じ ID の重なり・空・多すぎは refused（何も変えない）', async () => {
+    await put('u1', 'my:a', 100);
+    await put('u1', 'my:b', 200);
+    for (const ids of [['my:a', 'my:none'], ['my:a', 'my:a'], [], Array.from({ length: 501 }, (_, i) => `my:${i}`)]) {
+      expect(code(await orderItems(deps, 'u1', ids).catch((e) => e))).toBe('refused');
+    }
+    expect((await store.getItem('u1', 'my:a'))!.order).toBe(100);
+  });
 });
 
 describe('顔写真から顔を作る', () => {

@@ -7,7 +7,7 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { deleteItem, listItems, listJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
+import { deleteItem, listItems, openJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -84,7 +84,7 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
       return { job: jobView(job, deps.now()), user: await user() };
     }
     case 'jobs':
-      return { jobs: (await listJobs(deps, uid)).map((job) => jobView(job, deps.now())), user: await user() };
+      return { jobs: (await openJobs(deps, uid)).map((job) => jobView(job, deps.now())), user: await user() };
     case 'preview': {
       const job = await deps.store.getJob(uid, str(d.jobId, 100));
       const path = job?.candidates.find((c) => c.index === index(d.index))?.preview?.path;
