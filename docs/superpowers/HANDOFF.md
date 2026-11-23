@@ -1,4 +1,6 @@
-# 引き継ぎ（2026-11-20 時点、v0.28.0）
+# 引き継ぎ（2026-11-23 時点、v0.35.0）
+
+**0 章が、いまの状態。** 1 章から下は、v0.28.0（2026-11-20）までの記録で、0 章と食い違う所は 0 章が正しい。
 
 次のセッションは、まずこの文書を読む。必要になったら、下の文書を読む。
 
@@ -7,7 +9,58 @@
 - 版ごとの設計と結果: `docs/superpowers/specs/`、計画: `docs/superpowers/plans/`
 - 使い方と更新履歴: `README.md`
 
-## 1. いまの状態
+## 0. いまの状態（2026-11-23、v0.35.0）
+
+| 項目 | 状態 |
+|---|---|
+| ゲームの版 | v0.35.0。**作業ブランチ `ccr-199c91d7-fwiyfg` にあり、`main` には入れていない**（公開は、作者に確かめてから。公開されているのは v0.34.0） |
+| 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `2b876a5`）。ゲームに出るドールは「おんなのこ」（ID は `アニメ　その２`。147 点）と「おとこのこ」（20 点）。「アニメ」「リアル」は非表示 |
+| サーバー | 作者の Firebase に載っているのは、**前の版**（v0.34.0 まで。`studio`・`studioRun`）。v0.35.0 のアプリは、載せ直すまで「つくる」に「サーバーが古い版です」と出す。載せ直しの手順は `docs/firebase-setup.md` の 2-9 |
+| テスト | 0-4 を見る |
+
+### 0-1. 進めている計画（作者と 2026-11-23 に決めた。6 段階）
+
+設計書: `specs/2026-11-23-closet-and-unstoppable-generation-design.md`（段階 ① の設計と、②〜⑥ で決まったこと = 9 章）。支払いの計画: `plans/2026-11-23-payment-plan.md`。段階 ① の実装の計画: `plans/2026-11-23-stage1-closet-queue.md`。
+
+| 段階 | 内容 | 状態 |
+|---|---|---|
+| ① つくるまわり（v0.35.0） | ホームを全員に／つくるはテーマだけ・演出／閉じても生成が進む（サーバーの列）／クローゼット／自分の服を先に | **実装済み（作業ブランチ）。作者の載せ直しと、実機の確認待ち** |
+| ② 縦画面 | アイテムは 2 段まで・絵を大きく、色スライダーを独立した操作しやすい帯に、スマホ縦用の配置 | 未着手。見た目は、画面の写真を見てもらって決める |
+| ③ ログイン | Google のアカウントと結び付け（Apple は、Apple Developer の登録が済んでから）。複数の端末で同じアカウント | 未着手 |
+| ④ 並び順 | 管理者だけが、カテゴリとアイテムの既定の並び順を変える | 未着手 |
+| ⑤ 交換 | 端末を持ち寄ったときだけできる、1 対 1 の入れ替え（互いの画面の QR コードを読み合う方式を軸に） | 未着手 |
+| ⑥ 支払い | Web アプリのまま、Stripe でチケットを売る。期限は 6 か月（作者の決定） | 計画書の下書きだけ |
+
+作者への質問は、**カード形式（選択肢つき）で出す**（作者の指示、2026-11-23）。
+
+### 0-2. 段階 ① の作り（次に触る人へ）
+
+- **生成の流れ**: アプリ →（関数 `studio` の `startJob`）→ チケットを引くのと仕事を作るのを 1 つの取り引きで → 列（Cloud Tasks）に入れる → 列が関数 `studioWork` を呼ぶ → `tools/cloud/studioCore.ts` の `workJob` → `runJob` が 1 点ずつ作り、**できたらその場で自分の服として保存**（候補は `kept`、服の ID は `my:{仕事}-{番号}-{取りかかった回数}`）。アプリは「進める」を呼ばない（聞くだけ）。
+- **必ず「服か払い戻し」で終わる守り**: 失敗は「`failed`・`refunded: false` と書く → 払い戻す（`refundOnce`）→ `refunded: true`」の順（`settleRefunds` が、何度でも安全にやり直せる）。1 品目に取りかかれるのは 3 回まで。ほかの呼び出しが進めていたら `'busy'` を返して 60 秒あとに列へ。聞かれたとき（`job`・`jobs`）と、1 時間に 1 回の見回り（関数 `studioSweep`）が `tendJob` を呼び、止まった仕事を列に入れ直す（30 秒に 1 回まで）・24 時間たった仕事を打ち切る。
+- **アプリの側**: `src/cloud/session.ts`（つなぎ役。ページに 1 つ。`src/cloud/boot.ts` が作る）が、つなぐ・服を端末に合わせる・作りかけを聞く（つくる・クローゼットを開いている間は 3 秒おき、ほかは 30 秒おき、見えていない間は聞かない）・届いた仕事（`arrivals`）・NEW の印を持つ。画面は `useSyncExternalStore` で見る。「つくる」を教えていない端末（`readStudioMode()` が null）は、`boot` も Firebase も読み込まない。
+- **画面**: ホーム `src/home/`、つくる `src/appStudio/`（`OrderShow.tsx` = 注文とチケットの演出）、クローゼット `src/closet/`、届いた演出 `src/reveal/`。ドールに服を着せた見本は `src/cloud/Stage.tsx`（CSS で重ねるだけ。色は `HueCanvas`）。どれも、押したとき・届いたときに読み込む。
+- **既定の色**: 服ごとの角度（`hue`）をサーバーに持つ。`mergeMyItems` が、着せたときの色（`colorHue`）・戻す先（`defaultHue`）・色を付けたサムネイルを付ける。
+- **偽物の裏側**（`?studio=fake`、E2E）: `src/cloud/fakeBackend.ts`。品目ごとに「できあがる時刻」を持ち、読み込み直すと、過ぎていた分はできあがっている。速さなどは `localStorage` の `dressup_fake_options`（`delayMs`・`planMs`・`failCategories`・`tickets`・`offline`・`oldServer`）。
+- **演出の絵**（洋服屋の店員とお店）: `src/assets/shop/`。作った道具と記録は `tools/art/shopArt.ts`・`specs/2026-11-23-shop-art/`（画像生成 5 枚）。
+- **テスト用の開け方**: `?home=0` で、その読み込みだけホームを飛ばす（覚えない）。E2E の共通の道具は `e2e/helpers.ts`。
+
+### 0-3. 作者に確かめてもらうこと（こちらでは確かめられない）
+
+1. **サーバーの載せ直し**（`docs/firebase-setup.md` の 2-9）。本物の列（Cloud Tasks）は、こちらでは 1 回も動かしていない: 列の名前（東京）・列に入れる権限・やり直しの間隔・持ち時間 30 分。届かなければ、`npm run firebase:logs` の文字をもらう。
+2. 本物で: 「作る」→「OK」のあとすぐ閉じる → 1〜2 分後に開いて、届く演出が出て、クローゼットに入っているか。セットでも。
+3. iPad・スマホの実機で: ホーム、注文とチケットの演出、届く演出、クローゼット（色のスライダーの手ざわり）。音が鳴るか。
+4. **演出の絵**（店員の見た目）を、使ってよいか（一覧: `specs/2026-11-23-shop-art/sheet.jpg`。もう 1 人の候補 B も載せてある）。
+5. `main` へのマージ（= 公開）の了承。載せ直しより先に公開しても、ゲームは変わらず遊べる（「つくる」は、教えた端末にしか出ない）。
+
+### 0-4. テストと、この作業環境の注意
+
+- ユニット: `npx vitest run`。`tools/studio/processSwap.test.ts` の 1 件（「AI が絵を 12px ずらして…」）は、この作業環境では 5 秒の時間切れで落ちることがある（前からある。処理が遅い環境のせい。このブランチの変更とは関係ない）。
+- エミュレーター: `npm run firebase:test`。**列（Cloud Tasks）のエミュレーターは、この作業環境では使えない**（エミュレーターの道具が、手元の通信まで中継に通してしまい、列に関数を登録できない）。そのため、エミュレーターのときだけ、`functions/src/index.ts` の `enqueue` が、列を通さずに同じ中身（`work`）を直接呼ぶ。
+- E2E: `npm run build` のあと `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --trace off`。ホームやゲームの画面で届く演出を待つテストは、30 秒おきの聞き直しを待つので長い（45 秒まで待つ）。
+- 画面の写真を撮るときは、`chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })`。
+- 隣の素材リポジトリは古いことがある。最初に `git -C ../DressUpGame-content pull --ff-only`（今回も古かった）。
+
+## 1. v0.28.0 までの状態（2026-11-20 の記録）
 
 | 項目 | 状態 |
 |---|---|
@@ -123,7 +176,7 @@
 | v0.10.0〜v0.10.1 | 素材を別リポジトリから配信、オフライン対応、色スライダーの即時表示 | `plans/2026-11-16-stage1-hosted-content.md` |
 | v0.9.7 | ドラッグの軽量化、服装の保存を ID と調整値だけに | `plans/2026-11-16-stage0-quick-fixes.md` |
 
-## 4. 次にやること
+## 4. 次にやること（v0.28.0 のときの記録。いまは 0-1・0-3 を見る）
 
 0. 1-3 章の続き: 作者がサーバーを載せたら、本物で確かめて報告する。そのあと E4（作者の画面: チケットを配る・服を届ける・取り消す、PC のスタジオからの「利用者に届ける」= `STUDIO_ADMIN_KEY`）。E4 の前に計画を書く。
 1. 作者の PC のスタジオの件と、「アニメ」をまとめる件（2 章）。「アニメ」を消すのは、段階 E を開ける前に済ませる。
@@ -159,9 +212,10 @@
 | `src/components/` | `layout.ts`（横・縦の配置の計算）、`AvatarCanvas.tsx`（キャンバス）、`DressUpMenu.tsx`（メニュー。縦は `PortraitMenu`）、`ItemAdjustPanel.tsx`（調整画面。プレビューは CSS で重ねる）、`PlacedItem.tsx`・`placement.ts`（キャンバスと同じ位置に重ねる計算）、`HueCanvas.tsx`（色変えのプレビュー） |
 | `src/pipeline/` | 画像処理の純粋関数。切り抜き（`cutout.ts`）、位置合わせ（`align.ts`・`partAlign.ts`）、体の部位（`bodyParts.ts`）、違いで取り出す（`diffMatte.ts`）、髪（`hairLayers.ts`・`hairSplit.ts`・`skinShadow.ts`）、くつ（`shoeLayers.ts`）、色変え（`hue.ts`・`recolor.ts`） |
 | `src/services/` | 端末に保存する小さな状態（服装・ドールの位置など） |
-| `src/appStudio/`、`src/cloud/` | アプリの中のスタジオ（保護者の確認・作る画面）と、その裏側: 形（`backend.ts`）、偽物（`fakeBackend.ts`）、本物（`remoteBackend.ts` = 段取り、`firebaseTransport.ts` = 匿名のログインと関数の呼び出し、`firebaseConfig.ts`）、サーバーとやり取りする形（`wire.ts`）、端末の中の自分の服（`library.ts`）と、サーバーとの合わせ方（`sync.ts`） |
+| `src/home/`、`src/appStudio/`、`src/closet/`、`src/reveal/` | ホーム、つくる（注文とチケットの演出）、クローゼット、届いた演出（0-2 を見る） |
+| `src/cloud/` | サーバーとのやり取り: 形（`backend.ts`）、偽物（`fakeBackend.ts`）、本物（`remoteBackend.ts`、`firebaseTransport.ts` = 匿名のログインと関数の呼び出し、`firebaseConfig.ts`）、サーバーとやり取りする形（`wire.ts`）、つなぎ役（`session.ts`・`boot.ts`）、端末の中の自分の服（`library.ts`）と、サーバーとの合わせ方（`sync.ts`）、ドールに着せた見本（`Stage.tsx`・`itemLayers.ts`） |
 | `tools/cloud/` | サーバーの本体（Firebase に依らない）: `studioCore.ts`（利用者・チケット・生成の進行・保存）、`api.ts`（アプリからの呼び出しの受け口）、`store.ts`（置き場の形）と `memoryStore.ts`（テスト用）、`publicContent.ts`（公開の素材を読む） |
-| `functions/` | Firebase につなぐ層: `src/index.ts`（関数 `studio`・`studioRun`）、`src/firestoreStore.ts`・`src/storageFiles.ts`（置き場の本物）、`build.mjs`（1 つにまとめる）、`test/*.emu.ts`（エミュレーターのテスト）。決まりは、リポジトリの直下の `firestore.rules`・`storage.rules`（全部断る）、設定は `firebase.json`・`.firebaserc` |
+| `functions/` | Firebase につなぐ層: `src/index.ts`（関数 `studio`・`studioWork`・`studioSweep`）、`src/firestoreStore.ts`・`src/storageFiles.ts`（置き場の本物）、`build.mjs`（1 つにまとめる）、`test/*.emu.ts`（エミュレーターのテスト）。決まりは、リポジトリの直下の `firestore.rules`・`storage.rules`（全部断る）、設定は `firebase.json`・`.firebaserc` |
 | `studio.html`、`src/studio/` | スタジオの画面（別ページ）。`Studio.tsx`（枠・取り込み・公開）、`Panels.tsx`（各タブ）、`ItemCard.tsx`（候補 1 点の編集と保存）、`api.ts`（API の呼び出し） |
 | `tools/studio/` | スタジオの API（`api.ts`）、開発サーバーへの組み込み（`vitePlugin.ts`）、自動生成（`generate.ts`）、品目ごとの処理（`processGenerated.ts`・`processHair.ts`・`processShoe.ts`・`processSwap.ts`・`processFace.ts`）、AI の呼び出し（`ai.ts`）、枚数の上限（`budget.ts`）、ドールづくり（`makeDoll.ts`・`dollPrompt.ts`）、キー無しで生成を回す（`tryItems.ts`） |
 | `tools/content/` | 画像の書き出し（`encode.ts`）、素材フォルダの編集（`manifestEdit.ts`）、1 回きりの手直し（`fixContent.ts`）、プリセットからの変換（`buildContent.ts`） |
