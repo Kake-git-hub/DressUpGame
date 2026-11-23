@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendError } from '../cloud/backend';
 import type { StudioJob, StudioUser } from '../cloud/backend';
+import { noAccount } from '../cloud/account';
 import { createRemoteBackend } from '../cloud/remoteBackend';
 import type { StudioTransport } from '../cloud/remoteBackend';
 import type { WireFiles, WireItem, WireJob } from '../cloud/wire';
@@ -32,6 +33,9 @@ function fakeServer(api: number | null = 2) {
   const items: WireItem[] = [];
   const files: WireFiles = { 'files/a.webp': WEBP, 'files/t.png': PNG };
   const transport: StudioTransport = {
+    auth: async () => {
+      throw new Error('auth は、このテストでは使わない');
+    },
     async call<T>(data: Record<string, unknown>): Promise<T> {
       calls.push(data);
       if (state.fail) throw state.fail;
@@ -94,6 +98,11 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('本物の裏側', () => {
+  it('ログインの段取りは、渡されたものを使う（無ければ運び役の口で作る）', () => {
+    const server = fakeServer();
+    expect(createRemoteBackend(server.transport, { account: noAccount }).account).toBe(noAccount);
+    expect(createRemoteBackend(server.transport).account).not.toBe(noAccount);
+  });
   it('利用者を確かめる。チケットの残りが変わったら、知らせる', async () => {
     const server = fakeServer();
     const backend = createRemoteBackend(server.transport);

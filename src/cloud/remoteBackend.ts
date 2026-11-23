@@ -6,7 +6,8 @@
  *   - 生成を進めるのは、サーバーの列。アプリは「進める」を呼ばない（閉じていても、最後まで進む）
  *   - 絵は base64 で届くので、保存用の Blob に直す
  */
-import { noAccount } from './account';
+import { browserAccountEnv, createAccount } from './account';
+import type { AuthPort, StudioAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
 import type { MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
 import { API_VERSION } from './wire';
@@ -15,10 +16,13 @@ import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 export interface StudioTransport {
   // サーバーの関数 studio を呼ぶ。失敗は BackendError
   call<T>(data: Record<string, unknown>): Promise<T>;
+  // ログインの口（Firebase の読み込みと匿名のログインが済んでから返る）。失敗は BackendError
+  auth(): Promise<AuthPort>;
 }
 
 export interface RemoteOptions {
   pollMs?: number; // 進み具合を聞きに行く間隔
+  account?: StudioAccount; // ログインの段取り（テストで差し替える。既定は、運び役の口を使う本物）
 }
 
 const TYPES: Record<string, string> = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
@@ -39,6 +43,7 @@ interface Watch {
 
 export function createRemoteBackend(transport: StudioTransport, options: RemoteOptions = {}): StudioBackend {
   const pollMs = options.pollMs ?? 2500;
+  const account = options.account ?? createAccount(() => transport.auth(), browserAccountEnv());
   let user: StudioUser | null = null;
   const userListeners = new Set<(user: StudioUser) => void>();
   const known = new Map<string, StudioJob>(); // 最後に分かった進み具合
@@ -117,7 +122,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   });
 
   const backend: StudioBackend = {
-    account: noAccount, // 本物の口は、次のタスクでつなぐ
+    account,
     async signIn() {
       const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
       // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない

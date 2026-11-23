@@ -6,13 +6,16 @@
  */
 import { initializeApp } from 'firebase/app';
 import type { FirebaseOptions } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, linkWithCredential, linkWithPopup, OAuthProvider, signInAnonymously, signInWithCredential, signInWithPopup, signOut } from 'firebase/auth';
 import type { Auth } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import type { Functions } from 'firebase/functions';
+import type { AccountInfo, AuthPort } from './account';
 import { BackendError } from './backend';
 import type { BackendErrorCode } from './backend';
-import { firebaseConfig, FUNCTIONS_REGION } from './firebaseConfig';
+import { firebaseConfig, FUNCTIONS_REGION, GOOGLE_CLIENT_ID } from './firebaseConfig';
+import { redirectUriOf } from './googleRedirect';
+import type { LoginIntent } from './googleRedirect';
 import type { StudioTransport } from './remoteBackend';
 
 const CODES: BackendErrorCode[] = ['offline', 'no-tickets', 'limit', 'refused', 'unknown', 'old-server'];
@@ -57,6 +60,67 @@ export function toBackendError(error: unknown, online: boolean = globalThis.navi
   }
 }
 
+// 方法 2 の client_id を、Firebase の公開の受け口（accounts:createAuthUri）に聞く。分からなければ null
+export async function lookupClientId(fetchImpl: typeof fetch, apiKey: string, continueUri: string): Promise<string | null> {
+  try {
+    const response = await fetchImpl(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerId: 'google.com', continueUri }),
+    });
+    if (response.status !== 200) return null;
+    const body = (await response.json()) as { authUri?: unknown };
+    if (typeof body.authUri !== 'string') return null;
+    return new URL(body.authUri).searchParams.get('client_id') || null;
+  } catch {
+    return null;
+  }
+}
+
+export interface AuthPortDeps {
+  auth: Auth;
+  resetSignIn: () => void; // ログアウトのあと、次の匿名のログインをやり直せるようにする
+  fetchImpl: typeof fetch;
+  apiKey: string;
+  clientId: string; // 設定にある client_id（空なら調べる）
+  continueUri: string;
+}
+
+// AuthPort の本物。呼ぶ前に、匿名のログインは済んでいる（transport.auth() が待つ）
+export function createAuthPort(deps: AuthPortDeps): AuthPort {
+  const { auth } = deps;
+  let lookedUp: Promise<string | null> | null = null;
+  return {
+    current(): AccountInfo {
+      const google = auth.currentUser?.providerData.find((p) => p.providerId === 'google.com');
+      return google ? { kind: 'google', email: google.email ?? '' } : { kind: 'guest' };
+    },
+    // async にしない: ボタンの押下の中で、その場で窓を開く（何かを待ってからだと、ブラウザが窓を止める）
+    popup(intent: LoginIntent): Promise<void> {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const user = auth.currentUser;
+      const opened = intent === 'link' && user ? linkWithPopup(user, provider) : signInWithPopup(auth, provider);
+      return opened.then(() => undefined);
+    },
+    async withToken(intent: LoginIntent, idToken: string, rawNonce: string): Promise<void> {
+      const credential = new OAuthProvider('google.com').credential({ idToken, rawNonce });
+      const user = auth.currentUser;
+      if (intent === 'link' && user) await linkWithCredential(user, credential);
+      else await signInWithCredential(auth, credential);
+    },
+    async signOut(): Promise<void> {
+      await signOut(auth);
+      deps.resetSignIn();
+    },
+    clientId(): Promise<string | null> {
+      if (deps.clientId) return Promise.resolve(deps.clientId);
+      lookedUp ??= lookupClientId(deps.fetchImpl, deps.apiKey, deps.continueUri);
+      return lookedUp;
+    },
+  };
+}
+
 export interface FirebaseTransportOptions {
   config?: FirebaseOptions;
   // エミュレーターにつなぐとき（テスト）
@@ -84,6 +148,7 @@ export function createFirebaseTransport(options: FirebaseTransportOptions = {}):
     return signing;
   };
 
+  let port: AuthPort | null = null;
   return {
     async call<T>(data: Record<string, unknown>): Promise<T> {
       try {
@@ -92,6 +157,25 @@ export function createFirebaseTransport(options: FirebaseTransportOptions = {}):
       } catch (error) {
         throw toBackendError(error);
       }
+    },
+    // ログインの口。匿名のログインが済んでから渡す（currentUser があるように）
+    async auth(): Promise<AuthPort> {
+      try {
+        await ready();
+      } catch (error) {
+        throw toBackendError(error);
+      }
+      port ??= createAuthPort({
+        auth,
+        resetSignIn: () => {
+          signing = null;
+        },
+        fetchImpl: (...args) => fetch(...args),
+        apiKey: (options.config ?? firebaseConfig).apiKey ?? '',
+        clientId: GOOGLE_CLIENT_ID,
+        continueUri: redirectUriOf(window.location.origin, import.meta.env.BASE_URL),
+      });
+      return port;
     },
   };
 }

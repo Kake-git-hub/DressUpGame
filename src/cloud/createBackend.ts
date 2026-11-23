@@ -34,6 +34,7 @@ function lazyFirebase(): StudioTransport {
   };
   return {
     call: async (data) => (await load()).call(data),
+    auth: async () => (await load()).auth(),
   };
 }
 
