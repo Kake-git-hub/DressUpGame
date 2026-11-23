@@ -7,7 +7,7 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { deleteItem, discard, keep, listItems, listJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
+import { deleteItem, listItems, listJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -92,13 +92,6 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
       if (!bytes) throw refused('この絵は見つかりません');
       return { data: bytes.toString('base64'), contentType: 'image/png' };
     }
-    case 'keep': {
-      const item = await keep(deps, uid, str(d.jobId, 100), index(d.index), typeof d.name === 'string' ? d.name : '');
-      return { item: itemView(item), files: await filesOf(deps, item), user: await user() };
-    }
-    case 'discard':
-      await discard(deps, uid, str(d.jobId, 100), index(d.index));
-      return { ok: true };
     case 'items':
       return { items: (await listItems(deps, uid)).map(itemView) };
     case 'itemFiles': {

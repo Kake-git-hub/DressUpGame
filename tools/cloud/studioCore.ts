@@ -7,17 +7,15 @@
  */
 import sharp from 'sharp';
 import type { Manifest, ManifestDoll, ManifestItem } from '../../src/content/manifest.ts';
-import { alphaBBox } from '../../src/pipeline/alpha.ts';
 import { isBackHairCategory } from '../../src/pipeline/hairSplit.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 import { MemoryWriter } from '../content/encode.ts';
-import { ContentError, encodeItemImages } from '../content/manifestEdit.ts';
+import { encodeItemImages } from '../content/manifestEdit.ts';
 import type { AiClients } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
 import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
-import { pngToRgba } from '../studio/silhouette.ts';
 import { CloudError } from './store.ts';
 import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef } from './store.ts';
 
@@ -36,6 +34,9 @@ export interface CoreDeps {
   limits: { perDay: number; perUserDay?: number; maxAttempts: number }; // 1 日の画像の上限（サーバー全体・利用者ごと）、1 品目あたりの生成回数
   now: () => number;
   newId: () => string;
+  // 仕事を、列に入れる（列が、生成を進める関数を呼ぶ）。delaySeconds: 何秒あとに呼ばれるか（既定 0）
+  enqueue: (uid: string, jobId: string, delaySeconds?: number) => Promise<void>;
+  maxTries?: number; // 1 つの品目に取りかかれる回数（既定 3。超えたら、打ち切って払い戻す）
   heartbeatMs?: number; // 作っている間、この間隔で「動いている」の合図を書く（既定 30 秒）
   runBudgetMs?: number; // 1 回の呼び出しで、新しい品目に取りかかるのは、始めてからこの時間まで（既定 8 分。関数の時間切れの前に、自分でやめる）
 }
@@ -53,7 +54,10 @@ export const SET_MAX = 6;
 const NAME_MAX = 20;
 // 作成中のまま、これだけ進んでいない仕事は「止まっている」とみなして、呼び直しで続きを進める
 export const STALE_MS = 150_000;
-const LAYERS: LayerKind[] = ['png', 'hide', 'shape', 'front', 'under'];
+export const MAX_TRIES = 3;
+// ほかの呼び出しが進めている最中に呼ばれたとき、これだけあとに、もう一度呼ばれるようにする
+export const BUSY_RETRY_SECONDS = 60;
+const GAVE_UP = '作れませんでした（何度か試しましたが、途中で止まりました）。チケットは戻しました';
 
 // 利用者コード: まぎらわしい文字（I・O・0・1）を除いた 8 文字
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -141,9 +145,6 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   // 写真は、絵を作る呼び出し（runJob）で使うので、置き場に入れておく（仕事が終わったら消す）
   if (photo) await deps.files.put(photoPath(uid, jobId), photo, 'image/png');
   const now = deps.now();
-  // 管理者は引かない（台帳には残す）
-  if (user.admin) await deps.store.note(uid, -cost, `admin:job:${jobId}`, now);
-  else await deps.store.charge(uid, cost, `job:${jobId}`, now);
   const job: JobDoc = {
     id: jobId,
     dollId: doll.id,
@@ -154,48 +155,184 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
     tickets: cost,
     createdAt: now,
     heartbeat: now,
+    v: 2,
+    queuedAt: now,
     ...(user.admin ? { free: true } : {}),
     ...(photo ? { photo: photoPath(uid, jobId) } : {}),
     candidates: items.map((item, index): CandidateDoc => ({ index, name: item.name, categoryId: item.category, description: item.description, colors: item.colors, status: 'waiting', notes: [] })),
   };
   try {
-    await deps.store.createJob(uid, job);
+    if (user.admin) {
+      // 管理者は引かない（台帳には残す）
+      await deps.store.note(uid, -cost, `admin:job:${jobId}`, now);
+      await deps.store.createJob(uid, job);
+    } else {
+      // チケットを引くことと、仕事を作ることは、1 つの取り引き（片方だけ、が起きない）
+      await deps.store.chargeAndCreateJob(uid, job, cost, `job:${jobId}`, now);
+    }
   } catch (error) {
-    // 仕事を作れなかったら、引いた分を戻す
-    if (!user.admin) await deps.store.addTickets(uid, cost, `refund:job:${jobId}`, deps.now());
     if (photo) await deps.files.removeAll(photoPath(uid, jobId)).catch(() => undefined);
     throw error;
   }
+  // 列に入れる。入れられなくても、仕事はできている（進み具合を聞かれたとき・見回りが、入れ直す）
+  await deps.enqueue(uid, jobId).catch(() => undefined);
   return { jobId, cost };
 }
 
+// できた絵を、自分の服として保存する（髪の前後の分け方・くつの中の肌・サムネイルは、PC のスタジオと同じ処理）
+async function saveItem(
+  deps: CoreDeps,
+  uid: string,
+  job: JobDoc,
+  doll: ManifestDoll,
+  itemId: string,
+  source: { category: string; name: string; png: Buffer; hide?: Buffer | null; shape?: Buffer | null; front?: Buffer | null; under?: Buffer | null },
+  notes: string[],
+): Promise<ItemDoc> {
+  const input = await deps.content.assets.itemInput(doll, {
+    category: source.category,
+    name: plainName(source.name, source.name),
+    png: source.png,
+    hide: source.hide ?? null,
+    shape: source.shape ?? null,
+    front: source.front ?? null,
+    under: source.under ?? null,
+  });
+  const writer = new MemoryWriter();
+  const encoded = await encodeItemImages(doll, input, writer);
+  const item: ManifestItem = {
+    id: itemId,
+    name: input.name,
+    category: input.category,
+    image: encoded.image,
+    thumb: encoded.thumb,
+    ...(encoded.hide ? { hide: encoded.hide } : {}),
+    ...(encoded.back ? { back: encoded.back } : {}),
+    ...(encoded.backThumb ? { backThumb: encoded.backThumb } : {}),
+    ...(encoded.under ? { under: encoded.under } : {}),
+  };
+  const paths: Record<string, string> = {};
+  for (const [file, data] of writer.files) {
+    paths[file] = `${itemPrefix(uid, itemId)}${file.split('/').pop()}`;
+    await deps.files.put(paths[file], data, file.endsWith('.webp') ? 'image/webp' : 'image/png');
+  }
+  const now = deps.now();
+  const doc: ItemDoc = { id: itemId, dollId: doll.id, item, paths, ...(job.set ? { set: job.set as SetRef } : {}), createdAt: now, hue: 0, order: now, updatedAt: now, ...(notes.length > 0 ? { notes } : {}) };
+  await deps.store.putItem(uid, doc);
+  return doc;
+}
+
 /**
- * 生成を進める: 順番待ちの品目を 1 点ずつ作る。時間がかかる（1 点で 30 秒〜1 分）。
- * 同時に 2 回呼ばれても、絵は 1 回しか作らない。途中で止まった仕事は、呼び直すと続きから進む。
+ * できなかった（failed）のに、まだ戻していない（refunded !== true）品目を、払い戻して印を付ける。
+ * 失敗は、必ず「failed・refunded: false と書く → 払い戻す → refunded: true と書く」の順（先に払い戻すと、そのあと止まって作り直しになり、
+ * できた服と払い戻しの両方が起きうる）。払い戻しは、品目ごとに 1 回だけ（refundOnce）なので、何度呼んでもよい。
  */
-export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
+export async function settleRefunds(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
+  const job = await deps.store.getJob(uid, jobId);
+  if (!job) return;
+  const owed = job.candidates.filter((c) => c.status === 'failed' && c.refunded !== true);
+  if (owed.length === 0) return;
+  for (const c of owed) {
+    // 管理者が始めた仕事は、もともと引いていない（台帳に残すだけ）
+    if (job.free) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
+    else await deps.store.refundOnce(uid, `${jobId}:${c.index}`, `refund:${jobId}:${c.index}`, deps.now());
+  }
+  const settled = new Set(owed.map((c) => c.index));
+  await deps.store.updateJob(uid, jobId, (current) => {
+    let changed = false;
+    current.candidates = current.candidates.map((c) => {
+      if (!settled.has(c.index) || c.status !== 'failed' || c.refunded === true) return c;
+      changed = true;
+      return { ...c, refunded: true };
+    });
+    return changed ? current : null;
+  });
+}
+
+// 前の版で「できた」のまま残っている候補（「使う」を待っていた）を、置き場の絵から、自分の服にする
+async function adoptLegacy(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
+  const job = await deps.store.getJob(uid, jobId);
+  const waiting = job?.candidates.filter((c) => c.status === 'done') ?? [];
+  if (!job || waiting.length === 0) return;
+  const doll = await dollOf(deps, job.dollId).catch(() => null);
+  for (const c of waiting) {
+    const itemId = `my:${jobId}-${c.index}`; // 前の版の「使う」と同じ ID
+    const layer = async (kind: LayerKind) => (c.layers?.[kind] ? await deps.files.get(c.layers[kind]!) : null);
+    const png = await layer('png');
+    // 絵・ドールが無くなっていれば、できなかった扱い（チケットは、前の版で使った扱いのまま）。ほかの失敗は、やり直せるように投げる
+    const ok = !!doll && !!png;
+    if (doll && png) await saveItem(deps, uid, job, doll, itemId, { category: c.categoryId, name: c.name, png, hide: await layer('hide'), shape: await layer('shape'), front: await layer('front'), under: await layer('under') }, c.notes);
+    await deps.store.updateJob(uid, jobId, (current) => {
+      const target = current.candidates.find((x) => x.index === c.index);
+      if (!target || target.status !== 'done') return null;
+      if (ok) {
+        target.status = 'kept';
+        target.itemId = itemId;
+      } else {
+        target.status = 'failed';
+        target.refunded = true;
+        target.notes = [...target.notes, 'この服の絵が見つかりませんでした'];
+      }
+      current.v = 2;
+      return current;
+    });
+    await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
+  }
+}
+
+/**
+ * 生成を進める: 順番待ちの品目を 1 点ずつ作り、できたら、その場で自分の服として保存する。時間がかかる（1 点で 30 秒〜1 分）。
+ * 同時に 2 回呼ばれても、絵は 1 回しか作らない。途中で止まった仕事は、呼び直すと続きから進む。
+ * 返り値: 'done' = 終わった、'busy' = ほかの呼び出しが進めている、'more' = 持ち時間切れで、残りがある
+ */
+export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promise<'done' | 'busy' | 'more'> {
   const first = await deps.store.getJob(uid, jobId);
   if (!first) throw new CloudError('refused', 'この仕事は見つかりません');
   const runner = deps.newId(); // この呼び出しの印
   const started = Date.now();
   const budget = deps.runBudgetMs ?? 480_000;
+  const maxTries = deps.maxTries ?? MAX_TRIES;
 
-  // 次の 1 点を「作成中」にして受け持つ（割り込まれない）。受け持てなければ null。
+  // 前の呼び出しが、払い戻しの前に止まっていたら、ここで戻す。前の版の「できた」は、服にする
+  await settleRefunds(deps, uid, jobId);
+  await adoptLegacy(deps, uid, jobId);
+
+  // 順番待ちの品目を 1 つ選んで「作成中」にする（job を書き換える）。取りかかった回数が上限の品目は、できなかった扱いにして飛ばす
+  const pick = (job: JobDoc): CandidateDoc | null => {
+    for (const c of job.candidates) {
+      if (c.status !== 'waiting') continue;
+      if ((c.tries ?? 0) >= maxTries) {
+        c.status = 'failed';
+        c.notes = [GAVE_UP];
+        c.refunded = false;
+        job.tickets = Math.max(0, job.tickets - 1);
+        continue;
+      }
+      c.status = 'working';
+      c.tries = (c.tries ?? 0) + 1;
+      return { ...c };
+    }
+    return null;
+  };
+  type Taken = { kind: 'item'; candidate: CandidateDoc } | { kind: 'busy' } | { kind: 'none' };
+  // 次の 1 点を受け持つ（割り込まれない）。
   // updateJob の change は呼び直されることがあるので、外の変数は、毎回はじめに元へ戻す
-  const take = async (): Promise<CandidateDoc | null> => {
-    let claimed: CandidateDoc | null = null;
+  const take = async (): Promise<Taken> => {
+    let taken: Taken = { kind: 'none' };
     await deps.store.updateJob(uid, jobId, (job) => {
-      claimed = null;
+      taken = { kind: 'none' };
       if (job.done) return null;
       const now = deps.now();
       // ほかの呼び出しが進めている最中なら、手を出さない
-      if (job.candidates.some((c) => c.status === 'working') && now - job.heartbeat <= STALE_MS) return null;
+      if (job.candidates.some((c) => c.status === 'working') && now - job.heartbeat <= STALE_MS) {
+        taken = { kind: 'busy' };
+        return null;
+      }
       // 止まっていた分は、順番待ちに戻す
-      job.candidates = job.candidates.map((c) => (c.status === 'working' ? { ...c, status: 'waiting' as const } : c));
-      const next = job.candidates.find((c) => c.status === 'waiting');
+      job.candidates = job.candidates.map((c) => (c.status === 'working' ? { ...c, status: 'waiting' as const } : { ...c }));
+      const next = pick(job);
       if (next) {
-        next.status = 'working';
-        claimed = { ...next };
+        taken = { kind: 'item', candidate: next };
         job.runner = runner;
       } else {
         job.done = true;
@@ -204,36 +341,39 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
       job.heartbeat = now;
       return job;
     });
-    return claimed;
+    return taken;
   };
   // いまも、この呼び出しが、その品目を受け持っているか（止まったとみなされて、ほかの呼び出しに追い越されていないか）
   const mine = (job: JobDoc, index: number) => job.runner === runner && job.candidates.some((c) => c.index === index && c.status === 'working');
-  // 受け持った 1 点の結果を書いて、続けるなら次の 1 点を受け持つ。追い越されていたら、何も書かない（applied = false）
-  const finish = async (index: number, change: Partial<CandidateDoc>, refund: boolean, more: boolean): Promise<{ applied: boolean; next: CandidateDoc | null }> => {
+  // 受け持った 1 点の結果を書いて、続けるなら次の 1 点を受け持つ。追い越されていたら、何も書かない（applied = false）。
+  // left: 時間切れで、順番待ちが残った
+  const finish = async (index: number, change: Partial<CandidateDoc>, refund: boolean, more: boolean): Promise<{ applied: boolean; next: CandidateDoc | null; left: boolean }> => {
     let applied = false;
     let next: CandidateDoc | null = null;
+    let left = false;
     await deps.store.updateJob(uid, jobId, (job) => {
       applied = false;
       next = null;
+      left = false;
       if (!mine(job, index)) return null;
-      job.candidates = job.candidates.map((c) => (c.index === index ? { ...c, ...change } : c));
+      job.candidates = job.candidates.map((c) => (c.index === index ? { ...c, ...change } : { ...c }));
       if (refund) job.tickets = Math.max(0, job.tickets - 1);
       applied = true;
-      const waiting = job.candidates.find((c) => c.status === 'waiting');
-      if (!waiting) {
-        job.done = true;
+      if (more) next = pick(job);
+      if (next) {
+        // 続けて受け持つ（runner はそのまま）
+      } else if (job.candidates.some((c) => c.status === 'waiting')) {
+        // 時間切れ: 残りは、列に入れ直して進める
+        left = true;
         delete job.runner;
-      } else if (more) {
-        waiting.status = 'working';
-        next = { ...waiting };
       } else {
-        // 時間切れ: 残りは、アプリからの呼び直しに任せる
+        job.done = true;
         delete job.runner;
       }
       job.heartbeat = deps.now();
       return job;
     });
-    return { applied, next };
+    return { applied, next, left };
   };
 
   // 仕事が終わっていたら、写真を消す（顔を作るためだけに預かったもの）
@@ -244,168 +384,109 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
     await deps.files.removeAll(first.photo).catch(() => undefined);
   };
 
-  let current = await take();
-  if (!current) return dropPhoto();
-  const photo = first.photo ? await deps.files.get(first.photo) : null;
-  // 作っている間は、「動いている」の合図を書き続ける（1 点に長くかかっても、止まったとみなされて二重に作られないように）
-  const beat = setInterval(() => {
-    void deps.store.updateJob(uid, jobId, (job) => (job.done || job.runner !== runner ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
-  }, deps.heartbeatMs ?? 30_000);
-  try {
-    const doll = await dollOf(deps, first.dollId).catch(() => null);
-    const { text, image } = deps.ai;
-    // 画像を 1 枚作る前: 利用者ごとの上限（1 人が、みんなの分を使い切らないように。管理者にはかけない）と、サーバー全体の上限
-    const spend = async () => {
-      const day = dayOf(deps.now());
-      if (!first.free && deps.limits.perUserDay !== undefined) await deps.store.spendImage(`${day}:${uid}`, deps.limits.perUserDay);
-      await deps.store.spendImage(day, deps.limits.perDay);
-    };
-    while (current) {
-      const c: CandidateDoc = current;
-      let change: Partial<CandidateDoc>;
-      let ok = false;
-      try {
-        if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
-        if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
-        const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
-        await generateCandidate(
-          {
-            text,
-            image,
-            budget: { spend },
-            doll,
-            template: await deps.content.assets.workTemplate(doll),
-            data: await deps.content.assets.workData(doll),
-            style: findStyle(first.styleId).prompt,
-            hi: await deps.content.assets.hiTemplate(doll),
-            maxAttempts: deps.limits.maxAttempts,
-            ...(photo ? { photo } : {}),
-          },
-          candidate,
-        );
-        if (!candidate.png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
-        // 保存用の絵と、見せる絵（切り抜き）を置き場に入れる
-        const prefix = jobPrefix(uid, jobId, c.index);
-        const layers: Partial<Record<LayerKind, string>> = {};
-        for (const kind of LAYERS) {
-          const data = candidate[kind];
-          if (!data) continue;
-          layers[kind] = `${prefix}${kind}.png`;
-          await deps.files.put(layers[kind]!, data, 'image/png');
+  const got = await take();
+  if (got.kind === 'busy') return 'busy';
+  let result: 'done' | 'busy' | 'more' = 'done';
+  if (got.kind === 'item') {
+    let current: CandidateDoc | null = got.candidate;
+    const photo = first.photo ? await deps.files.get(first.photo) : null;
+    // 作っている間は、「動いている」の合図を書き続ける（1 点に長くかかっても、止まったとみなされて二重に作られないように）
+    const beat = setInterval(() => {
+      void deps.store.updateJob(uid, jobId, (job) => (job.done || job.runner !== runner ? null : { ...job, heartbeat: deps.now() })).catch(() => undefined);
+    }, deps.heartbeatMs ?? 30_000);
+    try {
+      const doll = await dollOf(deps, first.dollId).catch(() => null);
+      const { text, image } = deps.ai;
+      // 画像を 1 枚作る前: 利用者ごとの上限（1 人が、みんなの分を使い切らないように。管理者にはかけない）と、サーバー全体の上限
+      const spend = async () => {
+        const day = dayOf(deps.now());
+        if (!first.free && deps.limits.perUserDay !== undefined) await deps.store.spendImage(`${day}:${uid}`, deps.limits.perUserDay);
+        await deps.store.spendImage(day, deps.limits.perDay);
+      };
+      while (current) {
+        const c: CandidateDoc = current;
+        let change: Partial<CandidateDoc>;
+        let ok = false;
+        let savedId: string | null = null;
+        try {
+          if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
+          if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
+          const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+          await generateCandidate(
+            {
+              text,
+              image,
+              budget: { spend },
+              doll,
+              template: await deps.content.assets.workTemplate(doll),
+              data: await deps.content.assets.workData(doll),
+              style: findStyle(first.styleId).prompt,
+              hi: await deps.content.assets.hiTemplate(doll),
+              maxAttempts: deps.limits.maxAttempts,
+              ...(photo ? { photo } : {}),
+            },
+            candidate,
+          );
+          if (!candidate.png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
+          // 追い越されていたら、服にしない（引き継いだ呼び出しが、同じ品目を作っている・作り終えている）
+          const now = await deps.store.getJob(uid, jobId);
+          if (!now || !mine(now, c.index)) {
+            result = 'busy';
+            break;
+          }
+          // 受け持ちごとに別の名前にする（追い越された呼び出しが、引き継いだ呼び出しの服を消さないように）
+          const itemId = `my:${jobId}-${c.index}-${c.tries ?? 1}`;
+          savedId = itemId;
+          await saveItem(deps, uid, first, doll, itemId, { category: c.categoryId, name: c.name, png: candidate.png, hide: candidate.hide, shape: candidate.shape, front: candidate.front, under: candidate.under }, candidate.notes);
+          change = { status: 'kept', notes: candidate.notes, itemId };
+          ok = true;
+        } catch (error) {
+          // 保存の途中で失敗したら、書きかけを消す
+          if (savedId) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
+          change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`], refunded: false };
         }
-        const full = await pngToRgba(candidate.png);
-        const box = alphaBBox(full.rgba, full.width, full.height);
-        if (!box) throw new Error('絵が空でした');
-        const preview = { path: `${prefix}preview.png`, canvasW: full.width, canvasH: full.height, box };
-        await deps.files.put(preview.path, await sharp(candidate.png).extract({ left: box.x, top: box.y, width: box.w, height: box.h }).png().toBuffer(), 'image/png');
-        change = { status: 'done', notes: candidate.notes, preview, layers };
-        ok = true;
-      } catch (error) {
-        change = { status: 'failed', notes: [`作れませんでした（${(error as Error).message}）。チケットは戻しました`] };
+        const done = await finish(c.index, change, !ok, Date.now() - started < budget);
+        if (!done.applied) {
+          // 追い越されていた: 自分が保存した服は消す。払い戻しもしない
+          if (ok && savedId) await deleteItem(deps, uid, savedId, true).catch(() => undefined);
+          result = 'busy';
+          break;
+        }
+        // できなかった分は、チケットを戻す（failed と書いたあと）
+        if (!ok) await settleRefunds(deps, uid, jobId);
+        if (done.left) result = 'more';
+        current = done.next;
       }
-      if (!ok) {
-        // 追い越されていたら、戻さない・消さない（引き継いだ呼び出しが、同じ品目を作っている・作り終えている）
-        const now = await deps.store.getJob(uid, jobId);
-        if (!now || !mine(now, c.index)) return;
-        // できなかった分は、チケットを戻す。同じ品目では 1 回だけ（このあと止まって作り直しになり、また失敗しても、二重に戻らない）。
-        // 管理者が始めた仕事は、もともと引いていない
-        if (first.free) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
-        else await deps.store.refundOnce(uid, `${jobId}:${c.index}`, `refund:${jobId}:${c.index}`, deps.now());
-      }
-      const result = await finish(c.index, change, !ok, Date.now() - started < budget);
-      if (!result.applied) return;
-      if (!ok) await deps.files.removeAll(jobPrefix(uid, jobId, c.index)).catch(() => undefined);
-      current = result.next;
+    } finally {
+      clearInterval(beat);
     }
-  } finally {
-    clearInterval(beat);
   }
+  // 取りかかった回数の上限で打ち切った品目の分
+  await settleRefunds(deps, uid, jobId);
   await dropPhoto();
+  return result;
 }
 
-// まだ「使う」「捨てる」を決めていない候補のある仕事（新しい順）
+// 列の関数の中身: 生成を進め、終わっていなければ、列に入れ直す
+export async function workJob(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
+  const result = await runJob(deps, uid, jobId);
+  // ほかの呼び出しが進めている最中: そのまま終わると、落ちた直後のやり直しが空振りになり、だれも続きを進めなくなる
+  if (result === 'busy') await deps.enqueue(uid, jobId, BUSY_RETRY_SECONDS);
+  else if (result === 'more') await deps.enqueue(uid, jobId, 0);
+}
+
+// まだ決まっていない候補のある仕事（新しい順）
 export async function listJobs(deps: CoreDeps, uid: string): Promise<JobDoc[]> {
   return (await deps.store.listJobs(uid)).filter((job) => job.candidates.some(undecided));
-}
-
-// 候補を「できた」から別の状態へ移す（割り込まれない）。できていない・もう決めた候補なら CloudError
-async function decide(deps: CoreDeps, uid: string, jobId: string, index: number, from: CandidateDoc['status'], to: CandidateDoc['status']): Promise<{ job: JobDoc; candidate: CandidateDoc }> {
-  let found: CandidateDoc | null = null;
-  const job = await deps.store.updateJob(uid, jobId, (current) => {
-    found = null; // 呼び直されることがあるので、毎回はじめに戻す
-    const candidate = current.candidates.find((c) => c.index === index);
-    if (!candidate || candidate.status !== from) return null;
-    found = { ...candidate };
-    candidate.status = to;
-    return current;
-  });
-  if (!found) throw new CloudError('refused', 'この候補は、もう決まっています');
-  return { job, candidate: found };
-}
-
-/**
- * 「使う」: 候補を、自分の服として保存する（髪の前後の分け方・くつの中の肌・サムネイルは、PC のスタジオと同じ処理）。
- */
-export async function keep(deps: CoreDeps, uid: string, jobId: string, index: number, name: string): Promise<ItemDoc> {
-  // 先に「使った」にする（同じ候補を、2 回は使えない）。保存に失敗したら、「できた」に戻す
-  const { job, candidate } = await decide(deps, uid, jobId, index, 'done', 'kept');
-  try {
-    const doll = await dollOf(deps, job.dollId);
-    const layer = async (kind: LayerKind) => (candidate.layers?.[kind] ? await deps.files.get(candidate.layers[kind]!) : null);
-    const png = await layer('png');
-    if (!png) throw new CloudError('refused', 'この候補の絵が見つかりません');
-    const id = `my:${jobId}-${index}`;
-    const input = await deps.content.assets.itemInput(doll, {
-      category: candidate.categoryId,
-      name: plainName(typeof name === 'string' ? name : '', candidate.name),
-      png,
-      hide: await layer('hide'),
-      shape: await layer('shape'),
-      front: await layer('front'),
-      under: await layer('under'),
-    });
-    const writer = new MemoryWriter();
-    const encoded = await encodeItemImages(doll, input, writer);
-    const item: ManifestItem = {
-      id,
-      name: input.name,
-      category: input.category,
-      image: encoded.image,
-      thumb: encoded.thumb,
-      ...(encoded.hide ? { hide: encoded.hide } : {}),
-      ...(encoded.back ? { back: encoded.back } : {}),
-      ...(encoded.backThumb ? { backThumb: encoded.backThumb } : {}),
-      ...(encoded.under ? { under: encoded.under } : {}),
-    };
-    const paths: Record<string, string> = {};
-    for (const [file, data] of writer.files) {
-      paths[file] = `${itemPrefix(uid, id)}${file.split('/').pop()}`;
-      await deps.files.put(paths[file], data, file.endsWith('.webp') ? 'image/webp' : 'image/png');
-    }
-    const doc: ItemDoc = { id, dollId: doll.id, item, paths, ...(job.set ? { set: job.set as SetRef } : {}), createdAt: deps.now() };
-    await deps.store.putItem(uid, doc);
-    await deps.files.removeAll(jobPrefix(uid, jobId, index)).catch(() => undefined);
-    return doc;
-  } catch (error) {
-    await decide(deps, uid, jobId, index, 'kept', 'done').catch(() => undefined);
-    if (error instanceof CloudError) throw error;
-    if (error instanceof ContentError) throw new CloudError('refused', error.message);
-    throw error;
-  }
-}
-
-// 「捨てる」
-export async function discard(deps: CoreDeps, uid: string, jobId: string, index: number): Promise<void> {
-  await decide(deps, uid, jobId, index, 'done', 'discarded');
-  await deps.files.removeAll(jobPrefix(uid, jobId, index)).catch(() => undefined);
 }
 
 export function listItems(deps: CoreDeps, uid: string): Promise<ItemDoc[]> {
   return deps.store.listItems(uid);
 }
 
-export async function deleteItem(deps: CoreDeps, uid: string, itemId: string): Promise<void> {
-  if (!(await deps.store.getItem(uid, itemId))) return;
+// force: 一覧に無くても、置き場の絵を消す（保存の途中で止まった書きかけの片付け）
+export async function deleteItem(deps: CoreDeps, uid: string, itemId: string, force = false): Promise<void> {
+  if (!force && !(await deps.store.getItem(uid, itemId))) return;
   await deps.store.deleteItem(uid, itemId);
   await deps.files.removeAll(itemPrefix(uid, itemId));
 }

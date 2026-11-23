@@ -76,6 +76,7 @@ beforeEach(async () => {
     limits: { perDay: 20, maxAttempts: 1 },
     now: () => clock,
     newId: () => `job${++ids}`,
+    enqueue: async () => undefined,
   };
 });
 afterEach(() => fs.rm(dir, { recursive: true, force: true }));
@@ -84,7 +85,7 @@ const call = <T>(uid: string, data: unknown) => handleCall(deps, uid, data) as P
 const codeOf = (e: unknown) => (e instanceof CloudError ? e.code : `not a CloudError: ${String(e)}`);
 
 describe('アプリからの呼び出し', () => {
-  it('ひととおり: 利用者 → 始める → 進める → 進み具合と絵 → 使う（絵つきで返る）→ 自分の服 → 消す', async () => {
+  it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user } = await call<{ user: UserView }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
     await store.addTickets('u1', 3, 'test', clock);
@@ -95,20 +96,16 @@ describe('アプリからの呼び出し', () => {
     await runJob(deps, 'u1', started.jobId);
     const { job } = await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId });
     expect(job).toMatchObject({ id: started.jobId, done: true, stalled: false });
-    expect(job.candidates[0]).toMatchObject({ status: 'done', name: 'うみのシャツ' });
-    expect(job.candidates[0].preview!.box.w).toBeGreaterThan(50);
+    expect(job.candidates[0]).toMatchObject({ status: 'kept', name: 'うみのシャツ' });
     // アプリには、AI への指示や置き場のパスは渡さない
     expect(JSON.stringify(job)).not.toMatch(/red shirt|users\/u1/);
-    const preview = await call<{ data: string; contentType: string }>('u1', { op: 'preview', jobId: started.jobId, index: 0 });
-    expect((await sharp(Buffer.from(preview.data, 'base64')).metadata()).format).toBe('png');
-    expect((await call<{ jobs: JobView[] }>('u1', { op: 'jobs' })).jobs).toHaveLength(1);
-    const kept = await call<{ item: ItemView; files: Record<string, string>; user: UserView }>('u1', { op: 'keep', jobId: started.jobId, index: 0, name: 'ふく' });
-    expect(kept.item).toMatchObject({ id: `my:${started.jobId}-0`, dollId, item: { name: 'ふく', category: 'トップス' } });
+    const { items } = await call<{ items: ItemView[] }>('u1', { op: 'items' });
+    expect(items).toHaveLength(1);
+    const kept = await call<{ item: ItemView; files: Record<string, string> }>('u1', { op: 'itemFiles', id: items[0].id });
+    expect(kept.item).toMatchObject({ id: `my:${started.jobId}-0-1`, dollId, item: { name: 'うみのシャツ', category: 'トップス' } });
     expect(Object.keys(kept.files).sort()).toEqual([kept.item.item.image.file, kept.item.item.thumb].sort());
     expect((await sharp(Buffer.from(kept.files[kept.item.item.image.file], 'base64')).metadata()).format).toBe('webp');
     expect(JSON.stringify(kept.item)).not.toMatch(/users\/u1/);
-    expect((await call<{ jobs: JobView[] }>('u1', { op: 'jobs' })).jobs).toEqual([]);
-    expect((await call<{ items: ItemView[] }>('u1', { op: 'items' })).items.map((i) => i.id)).toEqual([kept.item.id]);
     const again = await call<{ item: ItemView; files: Record<string, string> }>('u1', { op: 'itemFiles', id: kept.item.id });
     expect(again).toEqual({ item: kept.item, files: kept.files });
     await call('u1', { op: 'deleteItem', id: kept.item.id });
@@ -120,9 +117,9 @@ describe('アプリからの呼び出し', () => {
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     await runJob(deps, 'u1', started.jobId);
-    const kept = await call<{ item: ItemView }>('u1', { op: 'keep', jobId: started.jobId, index: 0, name: 'ふく' });
+    const [mine] = (await call<{ items: ItemView[] }>('u1', { op: 'items' })).items;
     await call('u2', { op: 'signIn' });
-    for (const data of [{ op: 'job', jobId: started.jobId }, { op: 'preview', jobId: started.jobId, index: 0 }, { op: 'itemFiles', id: kept.item.id }, { op: 'discard', jobId: started.jobId, index: 0 }]) {
+    for (const data of [{ op: 'job', jobId: started.jobId }, { op: 'itemFiles', id: mine.id }]) {
       expect(codeOf(await call('u2', data).catch((e) => e))).toBe('refused');
     }
     expect((await call<{ items: ItemView[] }>('u2', { op: 'items' })).items).toEqual([]);
@@ -130,7 +127,7 @@ describe('アプリからの呼び出し', () => {
   }, 60_000);
 
   it('形の違う呼び出しは断る（落ちない）', async () => {
-    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: -1 }, { op: 'keep', jobId: 'a', index: 1.5 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }]) {
+    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'discard', jobId: 'a', index: 0 }, { op: 'preview', jobId: 'a', index: 0 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }]) {
       expect(codeOf(await call('u1', data).catch((e) => e))).toBe('refused');
     }
   });

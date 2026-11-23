@@ -101,6 +101,7 @@ async function coreDeps(): Promise<CoreDeps> {
     limits: { perDay, perUserDay, maxAttempts: MAX_ATTEMPTS },
     now: () => Date.now(),
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
+    enqueue: async () => undefined, // Task 4 で、列（Cloud Tasks）につなぐ
   };
 }
 
