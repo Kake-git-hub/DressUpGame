@@ -28,7 +28,8 @@ interface Client {
   app: FirebaseApp;
   uid: string;
   call<T>(data: unknown): Promise<T>;
-  run(jobId: string): Promise<unknown>;
+  // 仕事が終わるまで待つ（アプリは「進める」を呼ばない。サーバーの列が進める）
+  finished(jobId: string): Promise<JobView>;
 }
 // アプリ 1 つ分（利用者 1 人分）。login: false なら、ログインしないまま
 async function client(login = true): Promise<Client> {
@@ -40,12 +41,19 @@ async function client(login = true): Promise<Client> {
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   const uid = login ? (await signInAnonymously(auth)).user.uid : '';
   const studio = httpsCallable(functions, 'studio');
-  const studioRun = httpsCallable(functions, 'studioRun', { timeout: 300_000 });
+  const call = async <T>(data: unknown) => (await studio(data)).data as T;
   return {
     app,
     uid,
-    call: async <T>(data: unknown) => (await studio(data)).data as T,
-    run: async (jobId) => (await studioRun({ jobId })).data,
+    call,
+    finished: async (jobId) => {
+      for (let i = 0; i < 45; i++) {
+        const { job } = await call<{ job: JobView }>({ op: 'job', jobId });
+        if (job.done) return job;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+      throw new Error('90 秒待っても、仕事が終わりませんでした（列が、生成を進める関数を呼んでいない？）');
+    },
   };
 }
 // 失敗の形: 関数の決まった印（functions/…）と、利用者に伝える理由の印（details.code）
@@ -67,17 +75,21 @@ afterAll(async () => {
 });
 
 describe('サーバーの関数（エミュレーター）', () => {
-  it('ログインしていない呼び出しは断る', async () => {
+  it('ログインしていない呼び出しは断る。アプリからは、生成を進める関数を呼べない', async () => {
     const anonymous = await client(false);
     expect(failure(await anonymous.call({ op: 'signIn' }).catch((e) => e)).code).toBe('functions/unauthenticated');
-    expect(failure(await anonymous.run('x').catch((e) => e)).code).toBe('functions/unauthenticated');
+    // 前の版の「進める」（studioRun）は、もう無い
+    const me = await client();
+    const old = httpsCallable(getFunctions(me.app, REGION), 'studioRun');
+    expect(failure(await old({ jobId: 'x' }).catch((e) => e)).code).toMatch(/not-found|internal/);
   });
 
-  it('ひととおり: 利用者 → チケット不足で断られる → 始める → 進める → 絵 → 使う → 捨てる → 自分の服 → 消す', async () => {
+  it('ひととおり: 利用者 → チケット不足で断られる → 作る → 何も呼ばなくても服になる → 見た印 → 名前・色・順番 → 消す', async () => {
     const me = await client();
-    const { user } = await me.call<{ user: UserView }>({ op: 'signIn' });
+    const { user, api } = await me.call<{ user: UserView; api: number }>({ op: 'signIn' });
     expect(user).toMatchObject({ tickets: 0, admin: false });
     expect(user.userCode).toMatch(/^[A-Z2-9]{8}$/);
+    expect(api).toBe(2);
 
     // チケットが無い: 断られ、文章の AI も呼ばれない
     const textBefore = fakes.gemini.text;
@@ -85,41 +97,39 @@ describe('サーバーの関数（エミュレーター）', () => {
     expect(fakes.gemini.text).toBe(textBefore);
 
     await grant(me.uid, 3);
+    const imagesBefore = fakes.gemini.image;
     const started = await me.call<{ jobId: string; cost: number; user: UserView }>({ op: 'startJob', dollId: fakes.dollId, theme: 'うみ', styleId: 'manga', target: { kind: 'set', categoryIds: ['トップス', 'アクセサリー'] } });
     expect(started).toMatchObject({ cost: 2, user: { tickets: 1 } });
-    expect((await me.call<{ job: JobView }>({ op: 'job', jobId: started.jobId })).job).toMatchObject({ done: false, set: { name: 'うみのセット' } });
 
-    const imagesBefore = fakes.gemini.image;
-    expect(await me.run(started.jobId)).toEqual({ ok: true });
+    // セット 2 点: 列が進めて、どちらも自分の服になる
+    const job = await me.finished(started.jobId);
+    expect(job.set).toMatchObject({ name: 'うみのセット' });
     expect(fakes.gemini.image - imagesBefore).toBe(2);
-    const { job } = await me.call<{ job: JobView }>({ op: 'job', jobId: started.jobId });
-    expect(job.done).toBe(true);
-    expect(job.candidates.map((c) => c.status)).toEqual(['done', 'done']);
-    expect(job.candidates[0].preview!.box.w).toBeGreaterThan(50);
+    expect(job.candidates.map((c) => c.status)).toEqual(['kept', 'kept']);
 
-    const preview = await me.call<{ data: string; contentType: string }>({ op: 'preview', jobId: started.jobId, index: 0 });
-    expect((await sharp(Buffer.from(preview.data, 'base64')).metadata()).format).toBe('png');
+    const { items } = await me.call<{ items: ItemView[] }>({ op: 'items' });
+    expect(items.map((i) => i.id).sort()).toEqual(job.candidates.map((c) => c.itemId).sort());
+    for (const item of items) expect(item).toMatchObject({ dollId: fakes.dollId, set: { name: 'うみのセット' }, hue: 0, notes: [] });
+    const first = await me.call<{ item: ItemView; files: Record<string, string> }>({ op: 'itemFiles', id: items[0].id });
+    expect((await sharp(Buffer.from(first.files[first.item.item.image.file], 'base64')).metadata()).format).toBe('webp');
 
-    const kept = await me.call<{ item: ItemView; files: Record<string, string>; user: UserView }>({ op: 'keep', jobId: started.jobId, index: 0, name: 'うみのふく' });
-    expect(kept.item).toMatchObject({ id: `my:${started.jobId}-0`, dollId: fakes.dollId, item: { name: 'うみのふく', category: 'トップス' }, set: { name: 'うみのセット' } });
-    expect((await sharp(Buffer.from(kept.files[kept.item.item.image.file], 'base64')).metadata()).format).toBe('webp');
-    // 同じ候補を、もう一度は使えない
-    expect(failure(await me.call({ op: 'keep', jobId: started.jobId, index: 0, name: 'x' }).catch((e) => e)).reason).toBe('refused');
-
+    // 見た印を付けるまでは、開くたびに出る
     expect((await me.call<{ jobs: JobView[] }>({ op: 'jobs' })).jobs.map((j) => j.id)).toEqual([started.jobId]);
-    await me.call({ op: 'discard', jobId: started.jobId, index: 1 });
+    await me.call({ op: 'ack', jobId: started.jobId });
     expect((await me.call<{ jobs: JobView[] }>({ op: 'jobs' })).jobs).toEqual([]);
 
-    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items.map((i) => i.id)).toEqual([kept.item.id]);
-    const again = await me.call<{ item: ItemView; files: Record<string, string> }>({ op: 'itemFiles', id: kept.item.id });
-    expect(again).toEqual({ item: kept.item, files: kept.files });
+    // 名前・色・順番
+    const changed = await me.call<{ item: ItemView }>({ op: 'updateItem', id: items[0].id, name: 'うみのふく', hue: 500 });
+    expect(changed.item).toMatchObject({ item: { name: 'うみのふく' }, hue: 180 });
+    const ordered = await me.call<{ items: ItemView[] }>({ op: 'orderItems', ids: [items[1].id, items[0].id] });
+    expect(ordered.items[0].order).toBeGreaterThan(ordered.items[1].order);
 
-    // ほかの利用者からは、仕事も服も見えない
+    // ほかの利用者からは、仕事も服も見えない・直せない
     const other = await client();
     await other.call({ op: 'signIn' });
-    expect(failure(await other.call({ op: 'job', jobId: started.jobId }).catch((e) => e)).reason).toBe('refused');
-    expect(failure(await other.call({ op: 'itemFiles', id: kept.item.id }).catch((e) => e)).reason).toBe('refused');
-    expect(failure(await other.run(started.jobId).catch((e) => e)).reason).toBe('refused');
+    for (const data of [{ op: 'job', jobId: started.jobId }, { op: 'ack', jobId: started.jobId }, { op: 'itemFiles', id: items[0].id }, { op: 'updateItem', id: items[0].id, name: 'x' }, { op: 'orderItems', ids: [items[0].id] }]) {
+      expect(failure(await other.call(data).catch((e) => e)).reason).toBe('refused');
+    }
     expect((await other.call<{ items: ItemView[] }>({ op: 'items' })).items).toEqual([]);
 
     // アプリからは、自分のデータでも、Firestore と Storage を直接は読み書きできない（決まりで断る）
@@ -130,62 +140,44 @@ describe('サーバーの関数（エミュレーター）', () => {
     expect(failure(await getDoc(doc(db, 'system/config')).catch((e) => e)).code).toBe('permission-denied');
     const storage = getStorage(me.app);
     connectStorageEmulator(storage, '127.0.0.1', 9199);
-    expect(failure(await getBytes(ref(storage, `users/${me.uid}/jobs/${started.jobId}/0-png.png`)).catch((e) => e)).code).toBe('storage/unauthorized');
+    expect(failure(await getBytes(ref(storage, `users/${me.uid}/items/x/a.webp`)).catch((e) => e)).code).toBe('storage/unauthorized');
     expect(failure(await uploadBytes(ref(storage, `users/${me.uid}/x.png`), new Uint8Array([1, 2, 3])).catch((e) => e)).code).toBe('storage/unauthorized');
     expect((await me.call<{ user: UserView }>({ op: 'signIn' })).user.tickets).toBe(1);
 
-    await me.call({ op: 'deleteItem', id: kept.item.id });
-    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items).toEqual([]);
+    await me.call({ op: 'deleteItem', id: items[0].id });
+    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items.map((i) => i.id)).toEqual([items[1].id]);
   });
 
   it('絵ができなかったら「できなかった」になり、チケットが戻る', async () => {
     const me = await client();
     await me.call({ op: 'signIn' });
     await grant(me.uid, 1);
-    const started = await me.call<{ jobId: string; user: UserView }>(top(fakes.dollId));
-    expect(started.user.tickets).toBe(0);
     fakes.gemini.failImages = true;
     try {
-      await me.run(started.jobId);
+      const started = await me.call<{ jobId: string; user: UserView }>(top(fakes.dollId));
+      expect(started.user.tickets).toBe(0);
+      const job = await me.finished(started.jobId);
+      expect(job).toMatchObject({ done: true, tickets: 0 });
+      expect(job.candidates[0].status).toBe('failed');
+      expect(job.candidates[0].notes.join('')).not.toBe('');
     } finally {
       fakes.gemini.failImages = false;
     }
-    const { job, user } = await me.call<{ job: JobView; user: UserView }>({ op: 'job', jobId: started.jobId });
-    expect(job).toMatchObject({ done: true, tickets: 0 });
-    expect(job.candidates[0].status).toBe('failed');
-    expect(job.candidates[0].notes.join('')).not.toBe('');
-    expect(user.tickets).toBe(1);
+    // 払い戻しは、「できなかった」と書いたすぐあと
+    await expect.poll(async () => (await me.call<{ user: UserView }>({ op: 'signIn' })).user.tickets, { timeout: 20_000 }).toBe(1);
+    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items).toEqual([]);
   });
 
-  it('「進める」を同時に 3 回呼んでも、絵は 1 回しか作らない。失敗しても、チケットは 1 回しか戻らない', async () => {
+  it('2 つの仕事を続けて始めても、どちらも服になる（絵は 1 回ずつ）', async () => {
     const me = await client();
     await me.call({ op: 'signIn' });
     await grant(me.uid, 2);
-    const first = await me.call<{ jobId: string }>(top(fakes.dollId));
     const before = fakes.gemini.image;
-    await Promise.all([me.run(first.jobId), me.run(first.jobId), me.run(first.jobId)]);
-    expect(fakes.gemini.image - before).toBe(1);
-    expect((await me.call<{ job: JobView }>({ op: 'job', jobId: first.jobId })).job.candidates[0].status).toBe('done');
-    // 失敗するほう
-    const second = await me.call<{ jobId: string; user: UserView }>(top(fakes.dollId));
-    expect(second.user.tickets).toBe(0);
-    fakes.gemini.failImages = true;
-    try {
-      await Promise.all([me.run(second.jobId), me.run(second.jobId), me.run(second.jobId)]);
-    } finally {
-      fakes.gemini.failImages = false;
-    }
-    const { job, user } = await me.call<{ job: JobView; user: UserView }>({ op: 'job', jobId: second.jobId });
-    expect(job.candidates[0].status).toBe('failed');
-    expect(user.tickets).toBe(1);
-    // 同じ候補を、同時に「使う」「捨てる」しても、通るのは 1 回
-    const results = await Promise.all([
-      me.call({ op: 'keep', jobId: first.jobId, index: 0, name: 'a' }).then(() => 'ok', (e) => failure(e).reason),
-      me.call({ op: 'keep', jobId: first.jobId, index: 0, name: 'b' }).then(() => 'ok', (e) => failure(e).reason),
-      me.call({ op: 'discard', jobId: first.jobId, index: 0 }).then(() => 'ok', (e) => failure(e).reason),
-    ]);
-    expect(results.filter((r) => r === 'ok')).toHaveLength(1);
-    expect(results.filter((r) => r === 'refused')).toHaveLength(2);
+    const [a, b] = await Promise.all([me.call<{ jobId: string }>(top(fakes.dollId)), me.call<{ jobId: string }>(top(fakes.dollId))]);
+    const jobs = await Promise.all([me.finished(a.jobId), me.finished(b.jobId)]);
+    expect(jobs.map((j) => j.candidates[0].status)).toEqual(['kept', 'kept']);
+    expect(fakes.gemini.image - before).toBe(2);
+    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items).toHaveLength(2);
   });
 
   it('管理者（system/config の利用者コード）は、チケットが無くても作れる', async () => {
@@ -197,13 +189,13 @@ describe('サーバーの関数（エミュレーター）', () => {
     expect((await boss.call<{ user: UserView }>({ op: 'signIn' })).user).toEqual({ userCode: ADMIN_CODE, tickets: 0, admin: true });
     const started = await boss.call<{ jobId: string; cost: number; user: UserView }>(top(fakes.dollId));
     expect(started).toMatchObject({ cost: 1, user: { tickets: 0 } });
+    expect((await boss.finished(started.jobId)).candidates[0].status).toBe('kept');
   });
 
   it('形の違う呼び出しは、理由つきで断る（落ちない）', async () => {
     const me = await client();
-    for (const data of [null, {}, { op: 'nope' }, { op: 'job', jobId: 5 }, { op: 'job', jobId: 'a/b' }, { op: 'itemFiles', id: '__x__' }]) {
+    for (const data of [null, {}, { op: 'nope' }, { op: 'job', jobId: 5 }, { op: 'job', jobId: 'a/b' }, { op: 'itemFiles', id: '__x__' }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'orderItems', ids: 'x' }]) {
       expect(failure(await me.call(data).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });
     }
-    expect(failure(await me.run('nothing').catch((e) => e)).reason).toBe('refused');
   });
 });

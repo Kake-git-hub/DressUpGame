@@ -7,7 +7,8 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { deleteItem, listItems, openJobs, PHOTO_MAX_BYTES, signIn, STALE_MS, startJob } from './studioCore.ts';
+import { API_VERSION } from '../../src/cloud/wire.ts';
+import { ackJob, deleteItem, listItems, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -15,33 +16,43 @@ export type CandidateView = WireCandidate;
 export type JobView = WireJob;
 export type ItemView = WireItem;
 
-const jobView = (job: JobDoc, now: number): JobView => ({
-  id: job.id,
-  dollId: job.dollId,
-  ...(job.set ? { set: job.set } : {}),
-  done: job.done,
-  tickets: job.tickets,
-  createdAt: job.createdAt,
-  candidates: job.candidates.map((c) => ({
-    index: c.index,
-    name: c.name,
-    categoryId: c.categoryId,
-    status: c.status,
-    notes: c.notes,
-    ...(c.preview ? { preview: { canvasW: c.preview.canvasW, canvasH: c.preview.canvasH, box: c.preview.box } } : {}),
-  })),
-  // 終わっていないのに、だれも作っていない（まだ頼まれていない・時間切れでやめた）か、作成中のまま合図がとぎれている
-  stalled: !job.done && (!job.candidates.some((c) => c.status === 'working') || now - job.heartbeat > STALE_MS),
+const jobView = (job: JobDoc): JobView => {
+  // 前の版の「できた」（まだ服にしていない）は、作成中として見せる。「捨てた」は、見せない
+  const pending = job.candidates.some((c) => c.status === 'done');
+  return {
+    id: job.id,
+    dollId: job.dollId,
+    ...(job.set ? { set: job.set } : {}),
+    done: job.done && !pending,
+    tickets: job.tickets,
+    createdAt: job.createdAt,
+    candidates: job.candidates
+      .filter((c) => c.status !== 'discarded')
+      .map((c) => ({
+        index: c.index,
+        name: c.name,
+        categoryId: c.categoryId,
+        status: c.status === 'done' ? ('working' as const) : (c.status as CandidateView['status']),
+        notes: c.notes,
+        ...(c.itemId ? { itemId: c.itemId } : {}),
+      })),
+  };
+};
+const itemView = (item: ItemDoc): ItemView => ({
+  id: item.id,
+  dollId: item.dollId,
+  item: item.item,
+  ...(item.set ? { set: item.set } : {}),
+  createdAt: item.createdAt,
+  hue: item.hue ?? 0,
+  order: item.order ?? item.createdAt,
+  updatedAt: item.updatedAt ?? item.createdAt,
+  notes: item.notes ?? [],
 });
-const itemView = (item: ItemDoc): ItemView => ({ id: item.id, dollId: item.dollId, item: item.item, ...(item.set ? { set: item.set } : {}), createdAt: item.createdAt });
 
 const refused = (message = '呼び出しの形が正しくありません') => new CloudError('refused', message);
 const str = (value: unknown, max = 200): string => {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) throw refused();
-  return value;
-};
-const index = (value: unknown): number => {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100) throw refused();
   return value;
 };
 function target(value: unknown): Target {
@@ -63,15 +74,15 @@ async function filesOf(deps: CoreDeps, item: ItemDoc): Promise<Record<string, st
 }
 
 /**
- * 軽い呼び出し（利用者・始める・進み具合・使う・捨てる・自分の服）。data.op で振り分ける。
- * 時間のかかる「進める」（runJob）は、別の関数にする。
+ * アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服）。data.op で振り分ける。
+ * 時間のかかる「進める」（runJob）は、列が呼ぶ別の関数（アプリからは呼べない）。
  */
 export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Promise<unknown> {
   const d = (typeof data === 'object' && data !== null ? data : {}) as Record<string, unknown>;
   const user = (): Promise<UserView> => signIn(deps, uid);
   switch (d.op) {
     case 'signIn':
-      return { user: await user() };
+      return { user: await user(), api: API_VERSION };
     case 'startJob': {
       // 写真（顔を似せる。base64）。無ければ null
       const photo = d.photo === undefined || d.photo === null ? null : Buffer.from(str(d.photo, Math.ceil((PHOTO_MAX_BYTES * 4) / 3) + 4), 'base64');
@@ -81,23 +92,31 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
     case 'job': {
       const job = await deps.store.getJob(uid, str(d.jobId, 100));
       if (!job) throw refused('この仕事は見つかりません');
-      return { job: jobView(job, deps.now()), user: await user() };
+      // 止まっていれば、列に入れ直す（列のやり直しが尽きた・列に入れるのに失敗した仕事を、ここで拾う）
+      return { job: jobView(await tendJob(deps, uid, job)), user: await user() };
     }
     case 'jobs':
-      return { jobs: (await openJobs(deps, uid)).map((job) => jobView(job, deps.now())), user: await user() };
-    case 'preview': {
-      const job = await deps.store.getJob(uid, str(d.jobId, 100));
-      const path = job?.candidates.find((c) => c.index === index(d.index))?.preview?.path;
-      const bytes = path ? await deps.files.get(path) : null;
-      if (!bytes) throw refused('この絵は見つかりません');
-      return { data: bytes.toString('base64'), contentType: 'image/png' };
-    }
+      return { jobs: (await openJobs(deps, uid)).map(jobView), user: await user() };
+    case 'ack':
+      await ackJob(deps, uid, str(d.jobId, 100));
+      return { ok: true };
     case 'items':
       return { items: (await listItems(deps, uid)).map(itemView) };
     case 'itemFiles': {
       const item = await deps.store.getItem(uid, str(d.id, 100));
       if (!item) throw refused('この服は見つかりません');
       return { item: itemView(item), files: await filesOf(deps, item) };
+    }
+    case 'updateItem': {
+      if (d.name !== undefined && typeof d.name !== 'string') throw refused();
+      if (d.hue !== undefined && (typeof d.hue !== 'number' || !Number.isFinite(d.hue))) throw refused();
+      if (d.name === undefined && d.hue === undefined) throw refused();
+      const change = { ...(typeof d.name === 'string' ? { name: d.name.slice(0, 200) } : {}), ...(typeof d.hue === 'number' ? { hue: d.hue } : {}) };
+      return { item: itemView(await updateItem(deps, uid, str(d.id, 100), change)) };
+    }
+    case 'orderItems': {
+      if (!Array.isArray(d.ids) || d.ids.length > 500) throw refused();
+      return { items: (await orderItems(deps, uid, d.ids.map((id) => str(id, 100)))).map(itemView) };
     }
     case 'deleteItem':
       await deleteItem(deps, uid, str(d.id, 100));

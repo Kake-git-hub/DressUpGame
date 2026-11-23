@@ -210,7 +210,17 @@ describe('Firestore の置き場（v0.35.0 で足した操作）', () => {
     expect((await store.updateItem(u, 'my:a', () => null)).hue).toBe(60);
   });
 
-  it.todo('listOpenJobs: done の仕事は入らない・古い順・limit で切る（索引は Task 4）');
+  it('listOpenJobs: done の仕事は入らない・古い順・limit で切る（どの利用者の分も）', async () => {
+    const a = uid();
+    const b = uid();
+    // ほかのテストの仕事より古い時刻にして、先頭に来るようにする
+    await store.createJob(a, job('open-new', -10));
+    await store.createJob(b, job('open-old', -30));
+    await store.createJob(a, { ...job('finished', -40), done: true });
+    const found = (await store.listOpenJobs(500)).filter((r) => r.uid === a || r.uid === b).map((r) => `${r.uid === a ? 'a' : 'b'}/${r.job.id}`);
+    expect(found).toEqual(['b/open-old', 'a/open-new']);
+    expect((await store.listOpenJobs(1)).map((r) => r.job.id)).toEqual(['open-old']);
+  });
 });
 
 describe('Storage の置き場', () => {

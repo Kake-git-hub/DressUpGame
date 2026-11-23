@@ -66,6 +66,7 @@ beforeEach(async () => {
   store = new MemoryStore();
   clock = 2_000_000;
   fetched = [];
+  enqueued = [];
   let ids = 0;
   deps = {
     store,
@@ -76,18 +77,22 @@ beforeEach(async () => {
     limits: { perDay: 20, maxAttempts: 1 },
     now: () => clock,
     newId: () => `job${++ids}`,
-    enqueue: async () => undefined,
+    enqueue: async (uid, jobId) => {
+      enqueued.push(`${uid}/${jobId}`);
+    },
   };
 });
 afterEach(() => fs.rm(dir, { recursive: true, force: true }));
 
+let enqueued: string[] = [];
 const call = <T>(uid: string, data: unknown) => handleCall(deps, uid, data) as Promise<T>;
 const codeOf = (e: unknown) => (e instanceof CloudError ? e.code : `not a CloudError: ${String(e)}`);
 
 describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
-    const { user } = await call<{ user: UserView }>('u1', { op: 'signIn' });
+    const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
+    expect(api).toBe(2); // 列で生成を進めるサーバー
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -95,7 +100,8 @@ describe('アプリからの呼び出し', () => {
     expect(fetched).toContain('manifest.json');
     await runJob(deps, 'u1', started.jobId);
     const { job } = await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId });
-    expect(job).toMatchObject({ id: started.jobId, done: true, stalled: false });
+    expect(job).toMatchObject({ id: started.jobId, done: true });
+    expect(job.candidates[0].itemId).toBe(`my:${started.jobId}-0-1`);
     expect(job.candidates[0]).toMatchObject({ status: 'kept', name: 'うみのシャツ' });
     // アプリには、AI への指示や置き場のパスは渡さない
     expect(JSON.stringify(job)).not.toMatch(/red shirt|users\/u1/);
@@ -106,6 +112,19 @@ describe('アプリからの呼び出し', () => {
     expect(Object.keys(kept.files).sort()).toEqual([kept.item.item.image.file, kept.item.item.thumb].sort());
     expect((await sharp(Buffer.from(kept.files[kept.item.item.image.file], 'base64')).metadata()).format).toBe('webp');
     expect(JSON.stringify(kept.item)).not.toMatch(/users\/u1/);
+    expect(kept.item).toMatchObject({ hue: 0, order: clock, updatedAt: clock, notes: [] });
+    // 終わった仕事は、見た印を付けるまで出る
+    expect((await call<{ jobs: JobView[] }>('u1', { op: 'jobs' })).jobs.map((j) => j.id)).toEqual([started.jobId]);
+    expect(await call('u1', { op: 'ack', jobId: started.jobId })).toEqual({ ok: true });
+    expect((await call<{ jobs: JobView[] }>('u1', { op: 'jobs' })).jobs).toEqual([]);
+    // 名前と色を変える
+    clock += 10;
+    const changed = await call<{ item: ItemView }>('u1', { op: 'updateItem', id: kept.item.id, name: 'ふく', hue: 90 });
+    expect(changed.item).toMatchObject({ item: { name: 'ふく' }, hue: 90, updatedAt: clock });
+    kept.item = changed.item;
+    const ordered = await call<{ items: ItemView[] }>('u1', { op: 'orderItems', ids: [kept.item.id] });
+    expect(ordered.items.map((i) => i.id)).toEqual([kept.item.id]);
+    kept.item = ordered.items[0];
     const again = await call<{ item: ItemView; files: Record<string, string> }>('u1', { op: 'itemFiles', id: kept.item.id });
     expect(again).toEqual({ item: kept.item, files: kept.files });
     await call('u1', { op: 'deleteItem', id: kept.item.id });
@@ -119,7 +138,7 @@ describe('アプリからの呼び出し', () => {
     await runJob(deps, 'u1', started.jobId);
     const [mine] = (await call<{ items: ItemView[] }>('u1', { op: 'items' })).items;
     await call('u2', { op: 'signIn' });
-    for (const data of [{ op: 'job', jobId: started.jobId }, { op: 'itemFiles', id: mine.id }]) {
+    for (const data of [{ op: 'job', jobId: started.jobId }, { op: 'ack', jobId: started.jobId }, { op: 'itemFiles', id: mine.id }, { op: 'updateItem', id: mine.id, name: 'x' }, { op: 'orderItems', ids: [mine.id] }, ]) {
       expect(codeOf(await call('u2', data).catch((e) => e))).toBe('refused');
     }
     expect((await call<{ items: ItemView[] }>('u2', { op: 'items' })).items).toEqual([]);
@@ -127,23 +146,32 @@ describe('アプリからの呼び出し', () => {
   }, 60_000);
 
   it('形の違う呼び出しは断る（落ちない）', async () => {
-    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'discard', jobId: 'a', index: 0 }, { op: 'preview', jobId: 'a', index: 0 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }]) {
+    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'discard', jobId: 'a', index: 0 }, { op: 'preview', jobId: 'a', index: 0 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }, { op: 'ack' }, { op: 'updateItem', id: 'my:a', hue: '90' }, { op: 'updateItem', id: 'my:a', name: 5 }, { op: 'updateItem', id: 'my:a' }, { op: 'orderItems', ids: 'my:a' }, { op: 'orderItems', ids: [1, 2] }, { op: 'orderItems', ids: Array.from({ length: 501 }, (_, i) => `my:${i}`) }]) {
       expect(codeOf(await call('u1', data).catch((e) => e))).toBe('refused');
     }
   });
 
-  it('だれも作っていない仕事（まだ頼まれていない・時間切れでやめた）と、作成中のまま合図がとぎれた仕事は、stalled で知らせる', async () => {
+  it('進み具合を聞かれたとき、止まっている仕事は、列に入れ直す（30 秒に 1 回まで）', async () => {
     await call('u1', { op: 'signIn' });
     await store.addTickets('u1', 1, 'test', clock);
     const started = await call<{ jobId: string }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
-    const stalled = async () => (await call<{ job: JobView }>('u1', { op: 'job', jobId: started.jobId })).job.stalled;
-    expect(await stalled()).toBe(true); // まだ、だれも作っていない
-    await store.updateJob('u1', started.jobId, (job) => ({ ...job, heartbeat: clock, candidates: job.candidates.map((c) => ({ ...c, status: 'working' as const })) }));
-    expect(await stalled()).toBe(false); // 作っている最中
-    clock += 200_000;
-    expect(await stalled()).toBe(true); // 合図がとぎれた
-    await store.updateJob('u1', started.jobId, (job) => ({ ...job, done: true, candidates: job.candidates.map((c) => ({ ...c, status: 'failed' as const })) }));
-    expect(await stalled()).toBe(false); // 終わった
+    expect(enqueued).toEqual([`u1/${started.jobId}`]);
+    await call('u1', { op: 'job', jobId: started.jobId });
+    expect(enqueued).toHaveLength(1); // 列に入れたばかり
+    clock += 31_000;
+    await call('u1', { op: 'job', jobId: started.jobId });
+    expect(enqueued).toHaveLength(2);
+    await call('u1', { op: 'jobs' });
+    expect(enqueued).toHaveLength(2);
+  });
+
+  it('前の版の候補: 「できた」は作成中として、「捨てた」は除いて返す', async () => {
+    await call('u1', { op: 'signIn' });
+    const candidate = (index: number, status: 'done' | 'discarded' | 'kept') => ({ index, name: `ふく${index}`, categoryId: 'トップス', description: 'A top.', colors: [], status, notes: [] });
+    await store.createJob('u1', { id: 'old', dollId, theme: 'うみ', styleId: 'anime', done: true, tickets: 3, createdAt: clock, heartbeat: clock, candidates: [candidate(0, 'done'), candidate(1, 'discarded'), candidate(2, 'kept')] });
+    const { job } = await call<{ job: JobView }>('u1', { op: 'job', jobId: 'old' });
+    expect(job.candidates.map((c) => [c.index, c.status])).toEqual([[0, 'working'], [2, 'kept']]);
+    expect(job.done).toBe(false); // まだ服にしていない候補がある
   });
 });
 

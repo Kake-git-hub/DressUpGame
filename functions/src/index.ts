@@ -1,10 +1,13 @@
 /**
  * アプリの中のスタジオの、サーバーの関数（Cloud Functions 第 2 世代、東京）
  *
- *   studio     軽い呼び出し（利用者・始める・進み具合・使う・捨てる・自分の服）。中身は tools/cloud/api.ts
- *   studioRun  生成を進める（時間がかかる。1 点で 30 秒〜1 分）。中身は tools/cloud/studioCore.ts の runJob
+ *   studio       アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服）。中身は tools/cloud/api.ts
+ *   studioWork   生成を進める（時間がかかる。1 点で 30 秒〜1 分）。サーバーの列（Cloud Tasks）が呼ぶ。アプリからは呼べない。
+ *                中身は tools/cloud/studioCore.ts の workJob。失敗したら、列が間をあけて呼び直す
+ *   studioSweep  見回り（1 時間に 1 回）。止まった仕事を列に入れ直し、24 時間たっても終わらない仕事は払い戻す
  *
- * アプリは、匿名のログインをしてから、この 2 つだけを呼ぶ。Firestore と Storage は、アプリからは読めない。
+ * アプリは、匿名のログインをしてから、studio だけを呼ぶ。Firestore と Storage は、アプリからは読めない。
+ * 「作る」を受けた studio が、仕事を列に入れる。アプリを閉じても、列が studioWork を呼んで、最後まで進む。
  * Gemini のキーは、サーバーの「秘密の値」（GEMINI_API_KEY）にだけ置く。アプリには渡さない。
  *
  * 作者が変えられる設定は、Firestore の system/config（管理画面で作る。無ければ既定）:
@@ -16,15 +19,18 @@
 import { randomUUID } from 'node:crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getFunctions } from 'firebase-admin/functions';
 import { getStorage } from 'firebase-admin/storage';
 import * as logger from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { handleCall } from '../../tools/cloud/api.ts';
 import { createPublicContent } from '../../tools/cloud/publicContent.ts';
 import { CloudError } from '../../tools/cloud/store.ts';
 import type { CloudFiles, CloudStore } from '../../tools/cloud/store.ts';
-import { runJob } from '../../tools/cloud/studioCore.ts';
+import { sweep, workJob } from '../../tools/cloud/studioCore.ts';
 import type { CoreDeps, PublicContent } from '../../tools/cloud/studioCore.ts';
 import { firebaseConfig } from '../../src/cloud/firebaseConfig.ts';
 import { createGemini, createGeminiText, GEMINI_IMAGE_MODEL, GEMINI_TEXT_MODEL } from '../../tools/studio/ai.ts';
@@ -37,6 +43,14 @@ const CONTENT_URL = 'https://kake-git-hub.github.io/DressUpGame-content/';
 const IMAGES_PER_DAY = 100;
 const IMAGES_PER_USER_PER_DAY = 30;
 const MAX_ATTEMPTS = 2; // 1 品目あたりの生成回数（作り直しを含む）
+// 同時に進める仕事の数。利用者が増えて待ち時間が長くなったら、ここを大きくして載せ直す
+// （本当の上限は、Gemini の 1 分あたりの枚数の制限と、1 日の上限 imagesPerDay）
+const WORKERS = 3;
+// 列の関数の持ち時間（30 分が上限）と、その中で新しい品目に取りかかる時間（25 分。残りは、列に入れ直して続ける）
+const WORK_TIMEOUT_SECONDS = 1800;
+const WORK_BUDGET_MS = 1_500_000;
+// 列の名前（東京の関数は、場所まで含めた名前で指定する。関数の名前だけだと、us-central1 を探してしまう）
+const WORK_QUEUE = `locations/${REGION}/functions/studioWork`;
 const CONFIG_TTL_MS = 60_000;
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
@@ -88,7 +102,31 @@ function getServices(): Services {
   return services;
 }
 
-async function coreDeps(): Promise<CoreDeps> {
+// 列の関数の中身
+async function work(uid: string, jobId: string): Promise<void> {
+  await workJob(await coreDeps(WORK_BUDGET_MS), uid, jobId);
+}
+
+// 仕事を、列に入れる（列が studioWork を呼ぶ）
+async function enqueue(uid: string, jobId: string, delaySeconds = 0): Promise<void> {
+  getServices(); // 既定のアプリを用意する
+  if (emulated) {
+    // 手元のエミュレーターでのテストでは、列（Cloud Tasks）を通さずに、少しあとで同じ中身を直接呼ぶ。
+    // （クラウドの作業環境では、エミュレーターの道具が、手元の通信も中継に通してしまい、列のエミュレーターに関数を登録できない。
+    //   列そのもの（権限・やり直しの間隔・持ち時間）は、本物のプロジェクトで確かめる）
+    setTimeout(() => void work(uid, jobId).catch((error: unknown) => logger.error('（エミュレーター）仕事を進められませんでした', { jobId, error: String(error) })), Math.max(0, delaySeconds) * 1000 + 50);
+    return;
+  }
+  try {
+    await getFunctions().taskQueue(WORK_QUEUE).enqueue({ uid, jobId }, { scheduleDelaySeconds: Math.max(0, Math.round(delaySeconds)), dispatchDeadlineSeconds: WORK_TIMEOUT_SECONDS });
+  } catch (error) {
+    // 権限が足りない・API が有効でない、などは、ここに出る（npm run firebase:logs で見える）
+    logger.error('仕事を列に入れられませんでした', { jobId, error: String(error) });
+    throw error;
+  }
+}
+
+async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
   const { store, files, content, config } = getServices();
   const { adminCodes, perDay, perUserDay } = await config();
   const key = GEMINI_API_KEY.value();
@@ -101,7 +139,8 @@ async function coreDeps(): Promise<CoreDeps> {
     limits: { perDay, perUserDay, maxAttempts: MAX_ATTEMPTS },
     now: () => Date.now(),
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
-    enqueue: async () => undefined, // Task 4 で、列（Cloud Tasks）につなぐ
+    enqueue,
+    ...(runBudgetMs !== undefined ? { runBudgetMs } : {}),
   };
 }
 
@@ -126,12 +165,36 @@ export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY], memory
   answer('studio', async () => handleCall(await coreDeps(), uidOf(request), request.data)),
 );
 
-export const studioRun = onCall({ region: REGION, secrets: [GEMINI_API_KEY], memory: '2GiB', timeoutSeconds: 900, concurrency: 1, maxInstances: 3 }, (request) =>
-  answer('studioRun', async () => {
-    const uid = uidOf(request);
-    const jobId = (request.data as { jobId?: unknown } | null)?.jobId;
-    if (typeof jobId !== 'string' || !jobId || jobId.length > 100) throw new CloudError('refused', '呼び出しの形が正しくありません');
-    await runJob(await coreDeps(), uid, jobId);
-    return { ok: true };
-  }),
+export const studioWork = onTaskDispatched(
+  {
+    region: REGION,
+    secrets: [GEMINI_API_KEY],
+    memory: '2GiB',
+    timeoutSeconds: WORK_TIMEOUT_SECONDS,
+    concurrency: 1,
+    maxInstances: WORKERS,
+    // 失敗したら、30 秒〜5 分の間をあけて、5 回まで呼び直す（それでも進まなければ、聞かれたとき・見回りが入れ直す）
+    retryConfig: { maxAttempts: 5, minBackoffSeconds: 30, maxBackoffSeconds: 300 },
+    rateLimits: { maxConcurrentDispatches: WORKERS },
+  },
+  async (request) => {
+    const { uid, jobId } = (request.data ?? {}) as { uid?: unknown; jobId?: unknown };
+    if (typeof uid !== 'string' || !uid || typeof jobId !== 'string' || !jobId || jobId.length > 100) {
+      logger.error('列から、形の違う呼び出しが来ました', { data: request.data });
+      return; // 呼び直しても同じなので、やり直させない
+    }
+    try {
+      await work(uid, jobId);
+    } catch (error) {
+      // 無くなった仕事は、やり直させない。ほかは投げて、列にやり直させる
+      if (error instanceof CloudError && error.code === 'refused') return;
+      logger.error('studioWork で失敗しました', { jobId, error: String(error) });
+      throw error;
+    }
+  },
 );
+
+export const studioSweep = onSchedule({ schedule: 'every 60 minutes', region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' }, async () => {
+  const seen = await sweep(await coreDeps());
+  if (seen > 0) logger.info(`見回り: 終わっていない仕事 ${seen} 件を手当てしました`);
+});

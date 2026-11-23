@@ -16,7 +16,7 @@
     "firebase:test": "npm run functions:build && node functions/test/prepare.mjs && npx -y firebase-tools@15.37.0 emulators:exec --project demo-dressup --only auth,firestore,storage,functions \"vitest run --config vitest.emulator.config.ts\"",
     "firebase:login": "npx -y firebase-tools@15.37.0 login",
     "firebase:key": "npx -y firebase-tools@15.37.0 functions:secrets:set GEMINI_API_KEY",
-    "firebase:deploy": "npm --prefix functions ci && npx -y firebase-tools@15.37.0 deploy --only functions,firestore:rules,storage",
+    "firebase:deploy": "npm --prefix functions ci && npx -y firebase-tools@15.37.0 deploy --only functions,firestore,storage",
     "firebase:logs": "npx -y firebase-tools@15.37.0 functions:log --lines 60",
     "test:e2e:ui": "playwright test --ui",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
