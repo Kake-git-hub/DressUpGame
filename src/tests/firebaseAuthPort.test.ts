@@ -93,7 +93,7 @@ describe('口の本物', () => {
     expect(m.customParams).toEqual([{ prompt: 'select_account' }]);
     await expect(pending).resolves.toBeUndefined();
   });
-  it('popup(signin) は signInWithPopup。currentUser が無い link も signInWithPopup', async () => {
+  it('popup(signin) は signInWithPopup。currentUser が無い link は、窓を開かずに失敗する（入るに化けない）', async () => {
     const port = await portOf();
     const pending = port.popup('signin');
     expect(m.signInWithPopup).toHaveBeenCalledTimes(1);
@@ -101,9 +101,9 @@ describe('口の本物', () => {
     await pending;
     m.auth.currentUser = null;
     const second = port.popup('link');
-    expect(m.signInWithPopup).toHaveBeenCalledTimes(2);
+    await expect(second).rejects.toEqual({ code: 'auth/no-current-user' });
+    expect(m.signInWithPopup).toHaveBeenCalledTimes(1);
     expect(m.linkWithPopup).not.toHaveBeenCalled();
-    await second;
   });
   it('popup の失敗は、Firebase のエラーのまま返る（code を段取りが読む）', async () => {
     const port = await portOf();
@@ -120,8 +120,8 @@ describe('口の本物', () => {
     expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
     expect((m.signInWithCredential.mock.calls as unknown[][])[0][0]).toBe(m.auth);
     m.auth.currentUser = null;
-    await port.withToken('link', 't3', 'n3');
-    expect(m.signInWithCredential).toHaveBeenCalledTimes(2);
+    await expect(port.withToken('link', 't3', 'n3')).rejects.toEqual({ code: 'auth/no-current-user' });
+    expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
     expect(m.linkWithCredential).toHaveBeenCalledTimes(1);
   });
   it('current は、providerData の Google を読む', async () => {

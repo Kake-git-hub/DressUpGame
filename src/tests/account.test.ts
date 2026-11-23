@@ -15,7 +15,7 @@ import {
   outcomeOf,
   takeNotice,
 } from '../cloud/account';
-import type { AccountEnv, AuthPort, LoginOutcome } from '../cloud/account';
+import type { AccountEnv, AuthPort, LoginOutcome, LoginResult } from '../cloud/account';
 import { hasReturn, PENDING_KEY, RETURN_KEY, savePending, sha256Hex } from '../cloud/googleRedirect';
 import type { LoginIntent } from '../cloud/googleRedirect';
 import type { Library } from '../cloud/library';
@@ -234,6 +234,42 @@ describe('startRedirect（方法 2 の行き）', () => {
       throw new Error('blocked');
     });
     expect((await s.account.startRedirect('link')).outcome).toBe('failed');
+  });
+  it('戻るボタンで戻って来たら（bfcache）、待ちを解いて cancelled。覚えを消し、もう一度押せる', async () => {
+    const s = setup();
+    let restored: () => void = () => undefined;
+    s.env.onRestored = (listener) => {
+      restored = listener;
+    };
+    let settled: LoginResult | null = null;
+    void s.account.startRedirect('link').then((r) => (settled = r));
+    await vi.waitFor(() => expect(s.goTo).toHaveBeenCalledTimes(1));
+    expect(s.local.data.has(PENDING_KEY)).toBe(true);
+    expect(settled).toBeNull();
+    restored();
+    await vi.waitFor(() => expect(settled).toEqual({ outcome: 'cancelled' }));
+    expect(s.local.data.has(PENDING_KEY)).toBe(false);
+    expect(lines).toContain('result cancelled');
+    void s.account.startRedirect('link'); // 押し直せる（前の待ちを返さない）
+    await vi.waitFor(() => expect(s.goTo).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('結び付けの途中で読み込み直された（auth/provider-already-linked）', () => {
+  it('方法 1: link で provider-already-linked は、linked（成功）。signin では failed のまま', async () => {
+    const s = setup();
+    await s.account.prepare();
+    s.port.popup.mockRejectedValueOnce({ code: 'auth/provider-already-linked' });
+    expect(await s.account.loginWithPopup('link')).toEqual({ outcome: 'linked' });
+    s.port.popup.mockRejectedValueOnce({ code: 'auth/provider-already-linked' });
+    expect((await s.account.loginWithPopup('signin')).outcome).toBe('failed');
+  });
+  it('方法 2 の戻り: link で provider-already-linked は、linked。戻りは消える', async () => {
+    const s = setup();
+    await plantReturn(s, { intent: 'link' });
+    s.port.withToken.mockRejectedValueOnce({ code: 'auth/provider-already-linked' });
+    expect(await s.account.finishRedirect(async (saved) => saved)).toEqual({ outcome: 'linked' });
+    expect(s.session.data.has(RETURN_KEY)).toBe(false);
   });
 });
 

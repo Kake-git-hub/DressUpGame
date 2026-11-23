@@ -33,12 +33,14 @@ interface Setup {
   popup?: (intent: 'link' | 'signin') => Promise<LoginResult>;
   redirect?: (intent: 'link' | 'signin') => Promise<LoginResult>;
   logout?: () => Promise<void>;
+  noUser?: boolean; // つなぎ役が、まだ利用者を知らない（つながっていない）
+  signInFails?: boolean; // backend.signIn() が投げる（通信が無い）
   logoutSwapsUserTo?: string; // logout() の中で、つなぎ役のいまの利用者が、別の利用者（空の利用者）に替わる（偽物の裏側と同じ）
 }
 
 function setup(options: Setup = {}) {
   let user: StudioUser = { userCode: 'AAAA', tickets: options.tickets ?? 0, admin: options.admin ?? false };
-  let state = { user, jobs: [] as unknown[] };
+  let state = { user: (options.noUser ? undefined : user) as StudioUser | undefined, jobs: [] as unknown[] };
   const listeners = new Set<() => void>();
   let info = options.info ?? GUEST;
   const account = {
@@ -59,7 +61,10 @@ function setup(options: Setup = {}) {
   };
   const backend = {
     account: account as unknown as StudioAccount,
-    signIn: async () => user,
+    signIn: vi.fn(async () => {
+      if (options.signInFails) throw new Error('offline');
+      return user;
+    }),
     listMyItems: async () => Array.from({ length: options.items ?? 0 }, (_, i) => ({ id: `s${i}` })),
     openJobs: async () => Array.from({ length: options.jobs ?? 0 }, (_, i) => ({ id: `j${i}` })),
   };
@@ -78,7 +83,11 @@ function setup(options: Setup = {}) {
     state = { ...state, user };
     act(() => listeners.forEach((listener) => listener()));
   };
-  return { account, setInfo: (next: AccountInfo) => (info = next), setTickets };
+  // つなぎ役は知らせない（作者が、よそからチケットを配った）
+  const setTicketsQuietly = (tickets: number) => {
+    user = { ...user, tickets };
+  };
+  return { account, backend, setInfo: (next: AccountInfo) => (info = next), setTickets, setTicketsQuietly };
 }
 
 const popupButton = () => screen.getByTestId('account-login-popup') as HTMLButtonElement;
@@ -103,6 +112,58 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('「アカウント」の欄', () => {
+  it('つなぎ役が知らせなくても、20 秒おきに端末が空かを聞き直す（よそから配られたチケットを、置き去りにしない）', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const { account, setTicketsQuietly } = setup({ tickets: 0 });
+      await ready();
+      setTicketsQuietly(3);
+      await act(async () => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(popupButton().disabled).toBe(false); // 聞き直している間も、押せる
+      await act(async () => undefined);
+      fireEvent.click(popupButton());
+      expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('画面に戻ってきたとき（visible・focus）も、聞き直す', async () => {
+    const { account, backend, setTicketsQuietly } = setup({ tickets: 0 });
+    await ready();
+    const calls = (backend.signIn as Mock).mock.calls.length;
+    setTicketsQuietly(2);
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect((backend.signIn as Mock).mock.calls.length).toBeGreaterThan(calls));
+    fireEvent.click(popupButton());
+    expect(account.loginWithPopup).toHaveBeenLastCalledWith('link');
+    cleanup();
+    // 閉じたあとは、聞かない
+    const after = (backend.signIn as Mock).mock.calls.length;
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect((backend.signIn as Mock).mock.calls.length).toBe(after);
+  });
+
+  it('見えていない間の visibilitychange は、聞き直さない', async () => {
+    const { backend } = setup();
+    await ready();
+    const calls = (backend.signIn as Mock).mock.calls.length;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+    }
+    expect((backend.signIn as Mock).mock.calls.length).toBe(calls);
+  });
+
   it('欄を出したあとで、端末が空でなくなったら（チケットが届いた）、「入る」ではなく「結び付ける」にする（チケットを置き去りにしない）', async () => {
     const { account, setTickets } = setup({ tickets: 0 });
     await ready();
@@ -283,6 +344,48 @@ describe('「アカウント」の欄', () => {
     expect(await ids()).toEqual(['a1', 'a2', 'b1', 'c1']);
     // もう一度ためせる
     expect(screen.getByTestId('account-logout')).toBeTruthy();
+  });
+
+  const openLogout = async () => {
+    await waitFor(() => expect(screen.getByTestId('account-logout')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('account-logout'));
+    fireEvent.click(screen.getByTestId('account-logout-yes'));
+  };
+  const CANT_LOGOUT = 'ログアウトできませんでした。インターネットを確かめて、もう一度ためしてください';
+
+  it('つなぎ役が利用者を知らなくても、signIn() で聞いて、その服を外してからログアウトする', async () => {
+    const { account } = setup({ info: GOOGLE, noUser: true });
+    await openLogout();
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(account.logout).toHaveBeenCalledTimes(1);
+    expect(await ids()).toEqual(['b1', 'c1']);
+  });
+
+  it('利用者が分からない（つなぎ役も signIn() も）ときは、ログアウトしない: 文が出る・何も消さない・読み込み直さない・ためし直せる', async () => {
+    const { account } = setup({ info: GOOGLE, noUser: true, signInFails: true });
+    await openLogout();
+    await waitFor(() => expect(message()).toBe(CANT_LOGOUT));
+    expect(account.logout).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(await ids()).toEqual(['a1', 'a2', 'b1', 'c1']);
+    expect(screen.queryByTestId('account-logout-confirm')).toBeNull();
+    expect((screen.getByTestId('account-logout') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('ログアウトのあと、端末の控えが読めなくても（library.all が投げる）、読み込み直す', async () => {
+    setup({ info: GOOGLE });
+    library.all = async () => Promise.reject(new Error('idb'));
+    await openLogout();
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  });
+
+  it('入った（switched）あと、端末の控えが読めなくても、読み込み直す', async () => {
+    setup({ popup: async () => ({ outcome: 'switched' }) });
+    await ready();
+    library.all = async () => Promise.reject(new Error('idb'));
+    fireEvent.click(popupButton());
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES.switched);
   });
 });
 

@@ -4,7 +4,7 @@
  * 偽物の裏側も、本物と同じ段取り（src/cloud/account.ts）を通る。方法 2 の「画面を移る」だけが、にせの戻り（# を付けて読み込み直す）。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { dismissReveal, FAKE, fakeState, openHome, openStudio, order } from './helpers';
+import { APP, dismissReveal, FAKE, fakeState, openHome, openStudio, order } from './helpers';
 
 const EMAIL = 'tameshi@example.com';
 const MSG = {
@@ -213,6 +213,15 @@ test.describe('よその #', () => {
     await page.getByTestId('login-notice-ok').click();
     await expect(page.getByTestId('login-notice')).toHaveCount(0);
     expect((await page.evaluate(() => localStorage.getItem('dressup_fake_account'))) ?? '').not.toContain('true');
+  });
+
+  test('「つくる」を教えていない端末: にせの戻り（#state=…&id_token=…）の # は消え、証明は session にも残らない', async ({ page }) => {
+    await page.goto(`${APP}&studio=0&home=0#state=zzz&id_token=x.y.z`);
+    await page.waitForSelector('.app');
+    await page.waitForTimeout(500);
+    expect(page.url()).not.toContain('#');
+    expect(await page.evaluate(() => sessionStorage.getItem('dressup_login_return'))).toBeNull();
+    await expect(page.getByTestId('login-notice')).toHaveCount(0);
   });
 
   test('ログインの戻りでない #foo は、そのまま。知らせも出ない', async ({ page }) => {

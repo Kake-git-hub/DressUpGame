@@ -59,6 +59,7 @@ export interface AccountEnv {
   local: Store | null; // localStorage
   now(): number;
   note(...parts: string[]): void; // きろく（既定は diag.note('login', ...)）
+  onRestored?(listener: () => void): void; // 戻るボタンで、ページが（bfcache から）また出されたとき、呼ぶ
 }
 
 // 「つくる」を、まだ口が無い所に差しておく仮のもの（何もしない）
@@ -113,11 +114,16 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
     return result;
   };
   const succeeded = (intent: LoginIntent): LoginResult => ({ outcome: intent === 'link' ? 'linked' : 'switched' });
+  // 結び付けの途中で読み込み直されると、同じ証明がもう一度渡って、Firebase は「もう結び付いている」と答える。結び付いているので、成功
+  const alreadyLinked = (intent: LoginIntent, error: unknown): boolean =>
+    intent === 'link' && typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'auth/provider-already-linked';
+  const failedOrLinked = (intent: LoginIntent, error: unknown): LoginResult => noteResult(alreadyLinked(intent, error) ? succeeded(intent) : outcomeOf(error));
 
   const finish = async (intentNow: (saved: LoginIntent) => Promise<LoginIntent>): Promise<LoginResult | null> => {
     const check = await readReturn({ session: env.session, local: env.local, now: env.now });
     if (!check) return null;
     // 結果が出たら（成功でも失敗でも）戻りを消す。使っている途中で読み込み直されても、戻りは残る
+    let intent = check.ok ? check.intent : 'signin';
     try {
       if (!check.ok) {
         env.note('back', check.reason === 'error' ? `error=${check.error ?? ''}` : check.reason);
@@ -125,7 +131,6 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
       }
       env.note('back', 'ok');
       const auth = await getPort();
-      let intent = check.intent;
       try {
         intent = await intentNow(check.intent);
       } catch {
@@ -134,7 +139,7 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
       await auth.withToken(intent, check.idToken, check.rawNonce);
       return noteResult(succeeded(intent));
     } catch (error) {
-      return noteResult(outcomeOf(error));
+      return failedOrLinked(intent, error);
     } finally {
       clearReturn({ session: env.session, local: env.local });
     }
@@ -162,7 +167,7 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
       }
       const running: Promise<LoginResult> = opened.then(
         () => noteResult(succeeded(intent)),
-        (error: unknown) => noteResult(outcomeOf(error)),
+        (error: unknown) => failedOrLinked(intent, error),
       );
       popupRunning = running;
       void running.then(() => {
@@ -182,8 +187,14 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
           savePending(env.local, { state, rawNonce, intent, at: env.now() });
           env.note('start', 'redirect');
           env.goTo(buildAuthUrl({ clientId, redirectUri: env.redirectUri, state, nonce }));
-          // 画面が移る。返らない（返ると、移れなかった、と見なされる）
-          return await new Promise<LoginResult>(() => undefined);
+          // 画面が移る。返らない（返ると、移れなかった、と見なされる）。ただし、戻るボタンで戻って来たら（bfcache）、やめたことにする
+          return await new Promise<LoginResult>((resolve) => {
+            env.onRestored?.(() => {
+              clearReturn({ session: env.session, local: env.local });
+              redirectRunning = null;
+              resolve(noteResult({ outcome: 'cancelled' }));
+            });
+          });
         } catch (error) {
           return noteResult(outcomeOf(error));
         }
@@ -231,6 +242,10 @@ export function browserAccountEnv(goTo: (url: string) => void = (url) => window.
     local: safeStore(() => window.localStorage),
     now: () => Date.now(),
     note: (...parts) => diag.note('login', ...parts),
+    onRestored: (listener) =>
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted) listener();
+      }),
   };
 }
 

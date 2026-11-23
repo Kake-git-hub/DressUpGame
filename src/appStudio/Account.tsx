@@ -32,6 +32,7 @@ const TEXT = {
   logoutYes: 'ログアウトする',
   logoutNo: 'やめる',
   logoutFailed: 'ログアウトできませんでした。少し待ってから、もう一度ためしてください',
+  logoutOffline: 'ログアウトできませんでした。インターネットを確かめて、もう一度ためしてください',
 };
 
 const safeStorage = (pick: () => Storage): Storage | null => {
@@ -72,15 +73,34 @@ export function Account({ session, library, reload = () => window.location.reloa
   // 聞き直している間は、ボタンを押せない（古い「空」のまま「入る」と、届いたチケットや服を置き去りにする）
   const live = useSyncExternalStore(session.subscribe, session.getState);
   const stamp = `${live.user?.userCode}|${live.user?.tickets}|${live.user?.admin}|${live.jobs.length}`;
+  const signedIn = info?.kind === 'google';
   useEffect(() => {
     let alive = true;
-    void deviceEmpty(session.backend).then((isEmpty) => {
-      if (alive) setChecked({ stamp, empty: isEmpty });
-    });
+    const check = () =>
+      void deviceEmpty(session.backend).then((isEmpty) => {
+        if (alive) setChecked({ stamp, empty: isEmpty });
+      });
+    check();
+    // 作者がよそから配ったチケットは、つなぎ役が知らない。入っていない間は、20 秒おきと、画面に戻ったときにも聞き直す。
+    // この聞き直しの間は、前の答えのまま、ボタンを押せる（押せなくなるのは、状態の印が変わったときだけ）
+    if (signedIn) {
+      return () => {
+        alive = false;
+      };
+    }
+    const timer = setInterval(check, 20_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', check);
     return () => {
       alive = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', check);
     };
-  }, [session, stamp]);
+  }, [session, stamp, signedIn]);
   const empty = checked?.stamp === stamp ? checked.empty : null; // 状態が変わったあと、聞き直しが済むまでは null
 
   const ready = info !== null && empty !== null;
@@ -90,13 +110,21 @@ export function Account({ session, library, reload = () => window.location.reloa
   const handle = async (result: LoginResult, userBefore: string | null) => {
     if (result.outcome === 'switched') {
       // 入る前の利用者の服だけ、控えから外す（サーバーに残っている。「前の利用者の服」は触らない）
-      if (userBefore) await forgetAccount(library, userBefore, safeStorage(() => window.localStorage));
+      // 控えが読めなくても、利用者は替わっている。知らせは置き、読み込み直しは、必ずする
       try {
-        safeStorage(() => window.sessionStorage)?.setItem(NOTICE_KEY, LOGIN_MESSAGES.switched);
-      } catch {
-        // 知らせが置けなくても、読み込み直す
+        try {
+          if (userBefore) await forgetAccount(library, userBefore, safeStorage(() => window.localStorage));
+        } catch {
+          // 控えが外せなくても、進む
+        }
+        try {
+          safeStorage(() => window.sessionStorage)?.setItem(NOTICE_KEY, LOGIN_MESSAGES.switched);
+        } catch {
+          // 知らせが置けなくても、読み込み直す
+        }
+      } finally {
+        reload();
       }
-      reload();
       return;
     }
     if (!mounted.current) return;
@@ -137,8 +165,24 @@ export function Account({ session, library, reload = () => window.location.reloa
   const logout = async () => {
     setBusy(true);
     setMessage(null);
-    // ログアウト前の利用者コード（ログアウトで、つなぎ役のいまの利用者が、空の利用者に替わることがある）
-    const userCode = session.getState().user?.userCode;
+    // ログアウト前の利用者コード（ログアウトで、つなぎ役のいまの利用者が、空の利用者に替わることがある）。
+    // つなぎ役が知らなければ（つながっていない）、聞く。分からないままログアウトすると、この端末に服が残るので、ログアウトしない
+    let userCode = session.getState().user?.userCode;
+    if (!userCode) {
+      try {
+        userCode = (await session.backend.signIn()).userCode;
+      } catch {
+        userCode = undefined;
+      }
+    }
+    if (!userCode) {
+      if (mounted.current) {
+        setBusy(false);
+        setConfirming(false);
+        setMessage(TEXT.logoutOffline);
+      }
+      return;
+    }
     try {
       await account.logout();
     } catch {
@@ -150,9 +194,14 @@ export function Account({ session, library, reload = () => window.location.reloa
       }
       return;
     }
-    // うまくいったときだけ、端末の控えから、このアカウントの服を外す
-    if (userCode) await forgetAccount(library, userCode, safeStorage(() => window.localStorage));
-    reload();
+    // うまくいったときだけ、端末の控えから、このアカウントの服を外す。外せなくても、読み込み直す
+    try {
+      await forgetAccount(library, userCode, safeStorage(() => window.localStorage));
+    } catch {
+      // 控えが読めなくても、ログアウトはもう済んでいる
+    } finally {
+      reload();
+    }
   };
 
   const note = unavailable ? TEXT.unavailable : message;

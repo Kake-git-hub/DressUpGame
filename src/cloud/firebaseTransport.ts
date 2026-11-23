@@ -86,6 +86,8 @@ export interface AuthPortDeps {
   continueUri: string;
 }
 
+const NO_CURRENT_USER = { code: 'auth/no-current-user' };
+
 // AuthPort の本物。呼ぶ前に、匿名のログインは済んでいる（transport.auth() が待つ）
 export function createAuthPort(deps: AuthPortDeps): AuthPort {
   const { auth } = deps;
@@ -100,14 +102,18 @@ export function createAuthPort(deps: AuthPortDeps): AuthPort {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const user = auth.currentUser;
+      // 結び付けたいのに、いまの利用者が無いとき、入るに化けさせない（別の利用者に替わってしまう）
+      if (intent === 'link' && !user) return Promise.reject(NO_CURRENT_USER);
       const opened = intent === 'link' && user ? linkWithPopup(user, provider) : signInWithPopup(auth, provider);
       return opened.then(() => undefined);
     },
     async withToken(intent: LoginIntent, idToken: string, rawNonce: string): Promise<void> {
       const credential = new OAuthProvider('google.com').credential({ idToken, rawNonce });
       const user = auth.currentUser;
-      if (intent === 'link' && user) await linkWithCredential(user, credential);
-      else await signInWithCredential(auth, credential);
+      if (intent === 'link') {
+        if (!user) throw NO_CURRENT_USER;
+        await linkWithCredential(user, credential);
+      } else await signInWithCredential(auth, credential);
     },
     async signOut(): Promise<void> {
       await signOut(auth);

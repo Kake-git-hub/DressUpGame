@@ -17,6 +17,7 @@ import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
+import { clearReturn } from './cloud/googleRedirect';
 import type { CloudSession, SessionState } from './cloud/session';
 import { startsOnHome } from './home/homeMode';
 import type { LoadedContent } from './content/loadContent';
@@ -72,6 +73,19 @@ cleanupLegacyData();
 // アプリの中のスタジオ（服を作る画面）と、クローゼット。作者が教えた URL（?studio=1）を開いた端末にだけ、ホームにボタンを出す。
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
 const STUDIO_MODE = readStudioMode(window.location.search);
+// 「つくる」を教えていない端末は、Google の戻りを受け取らない。main.tsx が取り込んだ証明が、session に残らないように捨てる。
+// main.tsx の取り込みは、この module を読み込んだあとに走るので、モジュールの中ではなく、最初の描画のあと（useEffect）に呼ぶ
+const dropReturnWithoutStudio = (): void => {
+  if (STUDIO_MODE) return;
+  const pick = (get: () => Storage): Storage | null => {
+    try {
+      return get();
+    } catch {
+      return null;
+    }
+  };
+  clearReturn({ session: pick(() => window.sessionStorage), local: pick(() => window.localStorage) });
+};
 const StudioRoot = lazy(() => import('./appStudio'));
 const ClosetRoot = lazy(() => import('./closet'));
 // 服が届いた演出（届いたときに読み込む）
@@ -313,14 +327,31 @@ function App() {
     setAllClothing((await mergeMyItems(base, await library.all())).clothing);
   }, []);
 
-  // つなぎ役（サーバーとのやり取り）。「つくる」を出す端末でだけ、読み込む
+  // Google から戻って来たあとの知らせの文（下の起動の中で、戻りを仕上げたら入る）
+  const [loginNotice, setLoginNotice] = useState<string | null>(STARTUP_NOTICE);
+  useEffect(dropReturnWithoutStudio, []);
+  // つなぎ役（サーバーとのやり取り）。「つくる」を出す端末でだけ、読み込む。
+  // Google から戻って来ていたら、つなぎ役を画面に出す（= 裏でつなぎ始める）前に、戻りを受け取って仕上げる
+  // （古い利用者のまま始まった合わせが、入ったあとの利用者の服を、古い利用者コードで控えに入れないように）。
+  // 入った場合は、控えを外して読み込み直す（その知らせは、読み込み直しのあとに出る）。
+  // 開発用の設定（StrictMode）で 2 回走っても、証明を使うのは 1 回（completeRedirect と finishRedirect の守り）。
+  // 1 回めが取り消されても、知らせの文は失わない（2 回めは、同じ受け取りの結果を受ける。取り消しに関わらず、文は入れる）
   const [session, setSession] = useState<CloudSession | null>(null);
   useEffect(() => {
     if (!STUDIO_MODE) return;
     let cancelled = false;
     void import('./cloud/boot')
-      .then((boot) => {
-        if (!cancelled) setSession(boot.bootSession(STUDIO_MODE, library, refreshMyItems));
+      .then(async (boot) => {
+        const made = boot.bootSession(STUDIO_MODE, library, refreshMyItems);
+        if (boot.hasReturn(sessionStorage)) {
+          try {
+            const text = await boot.completeRedirect({ backend: made.backend, library, session: sessionStorage, local: localStorage, reload: () => window.location.reload() });
+            if (text) setLoginNotice(text);
+          } catch {
+            // 中身（メールアドレスなど）が入りうるので、エラーは書き出さない。つなぎ役は、そのまま出す
+          }
+        }
+        if (!cancelled) setSession(made);
       })
       .catch((error: unknown) => console.error('つなぎ役を読み込めませんでした:', error));
     return () => {
@@ -336,19 +367,6 @@ function App() {
     });
   }, [session, loadState]);
 
-  // Google から戻って来ていたら、受け取って仕上げる（入った場合は、控えを外して読み込み直す。その知らせは、読み込み直しのあとに出る）。
-  // 開発用の設定（StrictMode）で 2 回走っても、証明を使うのは 1 回（completeRedirect と finishRedirect の守り）
-  const [loginNotice, setLoginNotice] = useState<string | null>(STARTUP_NOTICE);
-  useEffect(() => {
-    if (!session) return;
-    void import('./cloud/boot')
-      .then(async (boot) => {
-        if (!boot.hasReturn(sessionStorage)) return;
-        const text = await boot.completeRedirect({ backend: session.backend, library, session: sessionStorage, local: localStorage, reload: () => window.location.reload() });
-        if (text) setLoginNotice(text);
-      })
-      .catch(() => undefined); // 中身（メールアドレスなど）が入りうるので、エラーは書き出さない
-  }, [session]);
   const noticeLayer = loginNotice && (
     <Suspense fallback={null}>
       <LoginNotice message={loginNotice} onClose={() => setLoginNotice(null)} />
