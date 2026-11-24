@@ -7,8 +7,14 @@
 import type { ManifestItem } from '../content/manifest';
 import type { SetRef, StudioUser } from './backend';
 
-// サーバーの版。2 = 生成を、サーバーの列で進める（アプリが「進める」を呼ばなくてよい）。op: 'signIn' の返事の api
-export const API_VERSION = 2;
+// サーバーの版（op: 'signIn' の返事の api）。
+//   2 = 生成を、サーバーの列で進める（アプリが「進める」を呼ばなくてよい）
+//   3 = 引き継ぎ（op: 'offer'・'adopt'。2 台めの端末のチケットと服を、アカウントに合わせる）
+export const SERVER_API = 3;
+// アプリが要る、いちばん古いサーバーの版（これより古いと、「サーバーが古い版です」で、作れない）
+export const MIN_API = 2;
+// 引き継ぎに要るサーバーの版（これより古いサーバーでは、合わせることだけが、できない）
+export const ADOPT_API = 3;
 
 export type WireUser = StudioUser;
 

@@ -7,7 +7,7 @@
 import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
-import { API_VERSION } from '../../src/cloud/wire.ts';
+import { SERVER_API } from '../../src/cloud/wire.ts';
 import { ackJob, deleteItem, listItems, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
@@ -82,7 +82,7 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Pr
   const user = (): Promise<UserView> => signIn(deps, uid);
   switch (d.op) {
     case 'signIn':
-      return { user: await user(), api: API_VERSION };
+      return { user: await user(), api: SERVER_API };
     case 'startJob': {
       // 写真（顔を似せる。base64）。無ければ null
       const photo = d.photo === undefined || d.photo === null ? null : Buffer.from(str(d.photo, Math.ceil((PHOTO_MAX_BYTES * 4) / 3) + 4), 'base64');

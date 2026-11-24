@@ -10,7 +10,7 @@ import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
 import type { MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
-import { API_VERSION } from './wire';
+import { MIN_API } from './wire';
 import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 
 export interface StudioTransport {
@@ -126,7 +126,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     async signIn() {
       const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
       // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない
-      if (typeof answer.api !== 'number' || answer.api < API_VERSION) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      if (typeof answer.api !== 'number' || answer.api < MIN_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       return { ...user! };
     },
     onUser(listener) {
