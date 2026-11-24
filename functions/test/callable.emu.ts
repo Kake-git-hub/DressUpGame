@@ -89,7 +89,7 @@ describe('サーバーの関数（エミュレーター）', () => {
     const { user, api } = await me.call<{ user: UserView; api: number }>({ op: 'signIn' });
     expect(user).toMatchObject({ tickets: 0, admin: false });
     expect(user.userCode).toMatch(/^[A-Z2-9]{8}$/);
-    expect(api).toBe(2);
+    expect(api).toBe(3);
 
     // チケットが無い: 断られ、文章の AI も呼ばれない
     const textBefore = fakes.gemini.text;

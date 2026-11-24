@@ -92,7 +92,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(2); // 列で生成を進めるサーバー
+    expect(api).toBe(3); // 3 = 引き継ぎ（offer・adopt）もできるサーバー
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
