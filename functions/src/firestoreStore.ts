@@ -13,7 +13,7 @@
  */
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { ADOPTED_MAX, CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, HandoffDoc, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/store.ts';
+import type { CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/store.ts';
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
 const docId = (id: string) => encodeURIComponent(id).replace(/\./g, '%2E').replace(/^__/, '%5F%5F');
@@ -234,12 +234,15 @@ export class FirestoreStore implements CloudStore {
     const snap = await this.handoff(word).get();
     return snap.exists ? (snap.data() as HandoffDoc) : null;
   }
-  async useHandoff(word: string, by: string): Promise<void> {
-    await this.db.runTransaction(async (tx) => {
+  async claimHandoff(word: string, by: string): Promise<HandoffClaim> {
+    return this.db.runTransaction(async (tx): Promise<HandoffClaim> => {
       const ref = this.handoff(word);
       const snap = await tx.get(ref);
-      if (!snap.exists || (snap.data() as HandoffDoc).usedBy) return;
-      tx.update(ref, { usedBy: by });
+      if (!snap.exists) return { status: 'unknown' };
+      const handoff = snap.data() as HandoffDoc;
+      if (handoff.usedBy && handoff.usedBy !== by) return { status: 'used' };
+      if (!handoff.usedBy) tx.update(ref, { usedBy: by });
+      return { status: 'ok', uid: handoff.uid };
     });
   }
   async moveTickets(from: string, to: string, now: number): Promise<number> {

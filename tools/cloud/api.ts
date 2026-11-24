@@ -79,6 +79,22 @@ export interface Caller {
 }
 
 /**
+ * Firebase の証明（関数が確かめたあとの中身）から、呼んだ人が匿名かを決める。
+ * 匿名 = sign_in_provider が anonymous（無ければ anonymous とみなす）で、しかも、結び付けた提供元が無い
+ * （identities の中に、空でない一覧が 1 つも無い）。
+ * 匿名のまま Google と結び付けた利用者（1 台めの端末が、アカウントになる道）は、証明の sign_in_provider が
+ * anonymous のままのことがある。そのときも、identities に google.com が入るので、匿名でない（named になり、offer できない）
+ */
+export function callerOfToken(token: unknown): Caller {
+  const firebase = (typeof token === 'object' && token !== null ? (token as { firebase?: unknown }).firebase : undefined) as { sign_in_provider?: unknown; identities?: unknown } | null | undefined;
+  const provider = typeof firebase === 'object' && firebase !== null ? firebase.sign_in_provider : undefined;
+  if (typeof provider === 'string' && provider !== 'anonymous') return { anonymous: false };
+  const identities = typeof firebase === 'object' && firebase !== null ? firebase.identities : undefined;
+  const linked = typeof identities === 'object' && identities !== null && Object.values(identities).some((list) => Array.isArray(list) && list.length > 0);
+  return { anonymous: !linked };
+}
+
+/**
  * アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服・引き継ぎ）。data.op で振り分ける。
  * 時間のかかる「進める」（runJob）は、列が呼ぶ別の関数（アプリからは呼べない）。
  * caller は、分からなければ匿名として扱う（引き継ぎの「もらう」側にならない = 安全な側）

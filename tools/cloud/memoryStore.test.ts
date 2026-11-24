@@ -130,15 +130,27 @@ describe('引き継ぎ（③-b）: チケットと服を移す・合い言葉・
     expect(await store.getHandoff(first)).toEqual({ uid: 'u1', createdAt: 5 });
     expect((await store.getUser('u1'))?.handoff).toBe(first);
     expect(await store.offerHandoff('u2', make, 6)).not.toBe(first);
-    await store.useHandoff(first, 'u9');
-    await store.useHandoff(first, 'u9');
-    expect(await store.getHandoff(first)).toEqual({ uid: 'u1', createdAt: 5, usedBy: 'u9' });
-    // ほかの人が、あとから使っても、最初の人のまま
-    await store.useHandoff(first, 'u8');
-    expect((await store.getHandoff(first))?.usedBy).toBe('u9');
+    await store.claimHandoff(first, 'u9');
     const next = await store.offerHandoff('u1', make, 7);
     expect(next).not.toBe(first);
     expect(await store.getHandoff('nope')).toBeNull();
+  });
+  it('claimHandoff: 知らない合い言葉 → unknown。初めて → 使った人を書いて、元の uid。同じ人がもう一度 → ok（書き直さない）。ほかの人 → used（最初の人のまま）', async () => {
+    const word = await store.offerHandoff('u1', () => 'w1', 5);
+    expect(await store.claimHandoff('nope', 'u9')).toEqual({ status: 'unknown' });
+    expect(store.handoffs.has('nope')).toBe(false);
+    expect(await store.claimHandoff(word, 'u9')).toEqual({ status: 'ok', uid: 'u1' });
+    expect(await store.getHandoff(word)).toEqual({ uid: 'u1', createdAt: 5, usedBy: 'u9' });
+    // 確定の返事が届かずに、もう一度（同じ人）
+    expect(await store.claimHandoff(word, 'u9')).toEqual({ status: 'ok', uid: 'u1' });
+    expect(await store.claimHandoff(word, 'u8')).toEqual({ status: 'used' });
+    expect(await store.getHandoff(word)).toEqual({ uid: 'u1', createdAt: 5, usedBy: 'u9' });
+  });
+  it('claimHandoff: 2 人が同時に押さえても、押さえられるのは 1 人だけ', async () => {
+    const word = await store.offerHandoff('u1', () => 'w1', 5);
+    const results = await Promise.all(['u7', 'u8', 'u9'].map((by) => store.claimHandoff(word, by)));
+    expect(results.filter((r) => r.status === 'ok')).toEqual([{ status: 'ok', uid: 'u1' }]);
+    expect(results.filter((r) => r.status === 'used')).toHaveLength(2);
   });
   it('markUser・addAdopted: 同じ値なら書かない。adopted は重ならず、20 件まで（古いものから落とす）', async () => {
     await store.markUser('u1', { movedTo: 'u2' });

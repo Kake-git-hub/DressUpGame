@@ -299,12 +299,14 @@ describe('Firestore の置き場（③-b 引き継ぎ）', () => {
     const [word] = words;
     expect(await store.getHandoff(word)).toEqual({ uid: a, createdAt: 4 });
     expect((await store.getUser(a))!.handoff).toBe(word);
-    await store.useHandoff(word, b);
-    await store.useHandoff(word, 'someone-else');
+    expect(await store.claimHandoff(word, b)).toEqual({ status: 'ok', uid: a });
+    expect(await store.claimHandoff(word, b)).toEqual({ status: 'ok', uid: a }); // 同じ人のやり直し
+    expect(await store.claimHandoff(word, 'someone-else')).toEqual({ status: 'used' });
     expect(await store.getHandoff(word)).toEqual({ uid: a, createdAt: 4, usedBy: b });
     expect(await store.offerHandoff(a, make, 5)).not.toBe(word);
     expect(await store.getHandoff('nope')).toBeNull();
-    await store.useHandoff('nope', b); // 無くても落ちない
+    expect(await store.claimHandoff('nope', b)).toEqual({ status: 'unknown' });
+    expect(await store.getHandoff('nope')).toBeNull(); // 無い合い言葉を、作らない
     await store.markUser(a, { movedTo: b });
     await store.markUser(a, { movedTo: b });
     expect(await store.getUser(a)).toMatchObject({ movedTo: b });
@@ -324,7 +326,7 @@ describe('Firestore の置き場（③-b 引き継ぎ）', () => {
     await store.putItem(b, shirt('my:j9-0-1', 12));
     // 書き換えの操作を、どれも 2 回ずつ呼ぶ置き場
     const replay = Object.create(store) as CloudStore;
-    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'useHandoff', 'createUser'] as const) {
+    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'claimHandoff', 'createUser'] as const) {
       const real = (store[name] as (...args: unknown[]) => Promise<unknown>).bind(store);
       (replay as unknown as Record<string, unknown>)[name] = async (...args: unknown[]) => {
         await real(...args);
@@ -356,6 +358,32 @@ describe('Firestore の置き場（③-b 引き継ぎ）', () => {
     expect(results.reduce((x, r) => x + r.items, 0)).toBe(1);
     expect((await store.getUser(b))!.tickets).toBe(5);
     expect((await store.listItems(b)).map((i) => i.id)).toEqual(['my:j1-0-1']);
+  });
+
+  it('2 つのアカウントが、同じ合い言葉で同時に adoptUser: 1 つだけ done、もう 1 つは used。元のチケットと服は、全部 done の側へ', async () => {
+    for (let round = 0; round < 3; round++) {
+      const [a, b] = await pair(4);
+      const c = uid();
+      await store.createUser(c, () => `C${c}`.toUpperCase(), 1);
+      const ids = ['my:j1-0-1', 'my:j2-0-1', 'my:j3-0', 'my:j4-0-1', 'my:j5-0-1'];
+      for (const [i, id] of ids.entries()) await store.putItem(a, shirt(id, 10 + i));
+      const deps = { store, adminCodes: [], now: () => 70, newWord: () => `${a}-x` } as unknown as CoreDeps;
+      const word = await store.offerHandoff(a, deps.newWord, 70);
+      const [rb, rc] = await Promise.all([adoptUser(deps, b, word), adoptUser(deps, c, word)]);
+      expect([rb.status, rc.status].sort()).toEqual(['done', 'used']);
+      const [winner, loser, won, lost] = rb.status === 'done' ? [b, c, rb, rc] : [c, b, rc, rb];
+      expect(won).toEqual({ status: 'done', tickets: 4, items: 5 });
+      expect(lost).toEqual({ status: 'used', tickets: 0, items: 0 });
+      expect((await store.getUser(winner))!.tickets).toBe(4);
+      expect((await store.getUser(loser))!.tickets).toBe(0);
+      expect((await store.getUser(a))!.tickets).toBe(0);
+      expect((await store.listItems(winner)).map((i) => i.id)).toEqual(ids);
+      expect(await store.listItems(loser)).toEqual([]);
+      expect(await store.listItems(a)).toEqual([]);
+      expect(await store.getUser(a)).toMatchObject({ movedTo: winner });
+      expect(await store.getHandoff(word)).toMatchObject({ usedBy: winner });
+      expect((await store.getUser(loser))!.adopted).toBeUndefined();
+    }
   });
 });
 

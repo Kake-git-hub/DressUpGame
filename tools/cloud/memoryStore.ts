@@ -2,7 +2,7 @@
  * メモリの中の置き場（テストと、手元の確認用）。本物（Firestore・Storage）と同じ形。
  */
 import { ADOPTED_MAX, CloudError } from './store.ts';
-import type { CloudFiles, CloudStore, HandoffDoc, ItemDoc, JobDoc, UserDoc } from './store.ts';
+import type { CloudFiles, CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, UserDoc } from './store.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 // チケットの数が壊れている（数でない）ときは、0 枚として扱う
@@ -172,9 +172,12 @@ export class MemoryStore implements CloudStore {
     const handoff = this.handoffs.get(word);
     return handoff ? clone(handoff) : null;
   }
-  async useHandoff(word: string, by: string): Promise<void> {
+  async claimHandoff(word: string, by: string): Promise<HandoffClaim> {
     const handoff = this.handoffs.get(word);
-    if (handoff && !handoff.usedBy) handoff.usedBy = by;
+    if (!handoff) return { status: 'unknown' };
+    if (handoff.usedBy && handoff.usedBy !== by) return { status: 'used' };
+    if (!handoff.usedBy) handoff.usedBy = by;
+    return { status: 'ok', uid: handoff.uid };
   }
   async moveTickets(from: string, to: string, now: number): Promise<number> {
     const target = this.mustUser(to);

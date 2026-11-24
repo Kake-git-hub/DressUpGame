@@ -7,7 +7,8 @@ import type { App as AdminApp } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { deleteApp as deleteClient, initializeApp } from 'firebase/app';
 import type { FirebaseApp } from 'firebase/app';
-import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signInAnonymously } from 'firebase/auth';
+import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, GoogleAuthProvider, linkWithCredential, signInAnonymously } from 'firebase/auth';
+import type { User } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ItemView, JobView } from '../../tools/cloud/api.ts';
@@ -23,6 +24,7 @@ const clients: FirebaseApp[] = [];
 
 interface Client {
   uid: string;
+  user: User;
   call<T>(data: unknown): Promise<T>;
 }
 // アプリ 1 つ分。email があれば、メールとパスワードの利用者（匿名でない）として入る
@@ -33,9 +35,9 @@ async function client(email?: string): Promise<Client> {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   const functions = getFunctions(app, REGION);
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  const uid = email ? (await createUserWithEmailAndPassword(auth, email, 'password-1234')).user.uid : (await signInAnonymously(auth)).user.uid;
+  const user = email ? (await createUserWithEmailAndPassword(auth, email, 'password-1234')).user : (await signInAnonymously(auth)).user;
   const studio = httpsCallable(functions, 'studio');
-  return { uid, call: async <T>(data: unknown) => (await studio(data)).data as T };
+  return { uid: user.uid, user, call: async <T>(data: unknown) => (await studio(data)).data as T };
 }
 const failure = (e: unknown) => {
   const error = e as { code?: string; details?: { code?: string } };
@@ -111,5 +113,29 @@ describe('引き継ぎ（エミュレーター）', () => {
     // B が、移した服を消す → 元の置き場の絵も消える
     await b.call({ op: 'deleteItem', id: made.id });
     expect((await b.call<{ items: ItemView[] }>({ op: 'items' })).items).toEqual([]);
+  });
+
+  it('匿名のまま Google と結び付けた利用者（1 台めが、アカウントになる道。uid は同じ）: 匿名でない。offer は断る。ほかの匿名の利用者の合い言葉で adopt → done（wait でない）で、チケットが移る', async () => {
+    const first = await client();
+    await first.call({ op: 'signIn' });
+    // エミュレーターは、署名の無い Google の証明（中身の JSON）を受け付ける
+    const sub = `linked-${Date.now()}`;
+    const linked = await linkWithCredential(first.user, GoogleAuthProvider.credential(JSON.stringify({ sub, email: `${sub}@example.com`, email_verified: true })));
+    expect(linked.user.uid).toBe(first.uid);
+    // エミュレーター（firebase-tools 15.37.0）では、結び付けたあとの証明は sign_in_provider: google.com、identities: { email, google.com }。
+    // 本物の Firebase で anonymous のままでも、identities で見分ける（callerOfToken のユニットテスト）
+    const claims = (await linked.user.getIdTokenResult()).claims as { firebase?: { identities?: Record<string, unknown[]> } };
+    expect(claims.firebase?.identities?.['google.com']).toHaveLength(1);
+
+    expect(failure(await first.call({ op: 'offer' }).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });
+    expect((await first.call<{ api: number }>({ op: 'signIn' })).api).toBe(3);
+    expect((await getAdminFirestore(admin).doc(`users/${first.uid}`).get()).data()).toMatchObject({ named: true });
+
+    const second = await client();
+    await second.call({ op: 'signIn' });
+    await grant(second.uid, 3);
+    const { word } = await second.call<{ word: string }>({ op: 'offer' });
+    expect(await first.call({ op: 'adopt', word })).toMatchObject({ status: 'done', tickets: 3, items: 0, user: { tickets: 3 } });
+    expect((await second.call<{ user: UserView }>({ op: 'signIn' })).user.tickets).toBe(0);
   });
 });

@@ -1057,11 +1057,9 @@ describe('引き継ぎ（③-b）: 合い言葉で、匿名の利用者のチケ
     expect(await offerHandoff(deps, 'C')).toBe('word2'); // 初めての利用者でも、作ってから
   });
 
-  it('adoptUser の答え: 知らない合い言葉 → unknown。ほかの人が使った → used。自分の合い言葉 → done（何もしない）。元が名前のある利用者 → refused', async () => {
+  it('adoptUser の答え: 知らない合い言葉 → unknown。ほかの人が使った → used。元が名前のある利用者 → refused（自分の合い言葉は、下のテスト）', async () => {
     const { word } = await twoUsers();
     expect(await adoptUser(deps, 'B', 'nope')).toEqual({ status: 'unknown', tickets: 0, items: 0 });
-    expect(await adoptUser(deps, 'A', word)).toEqual({ status: 'done', tickets: 0, items: 0 });
-    expect(await store.getUser('A')).not.toHaveProperty('movedTo');
     await store.markUser('A', { named: true });
     expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'refused', tickets: 0, items: 0 });
     expect(await tickets('A')).toBe(3);
@@ -1073,6 +1071,40 @@ describe('引き継ぎ（③-b）: 合い言葉で、匿名の利用者のチケ
     await userWith('C', 0);
     expect(await adoptUser(deps, 'C', word)).toEqual({ status: 'used', tickets: 0, items: 0 });
     expect(await tickets('C')).toBe(0);
+  });
+
+  it('2 つのアカウントが、同じ合い言葉で同時に adoptUser → 1 つだけ done（全部を受け取る）、もう 1 つは used（何も受け取らない）', async () => {
+    const { word } = await twoUsers();
+    await userWith('C', 0);
+    const [b, c] = await Promise.all([adoptUser(deps, 'B', word), adoptUser(deps, 'C', word)]);
+    expect([b.status, c.status].sort()).toEqual(['done', 'used']);
+    const [winner, loser] = b.status === 'done' ? ['B', 'C'] : ['C', 'B'];
+    expect(b.status === 'done' ? b : c).toEqual({ status: 'done', tickets: 3, items: 2 });
+    expect(b.status === 'done' ? c : b).toEqual({ status: 'used', tickets: 0, items: 0 });
+    expect(await tickets('A')).toBe(0);
+    expect(await ids('A')).toEqual([]);
+    expect(await tickets('C')).toBe(winner === 'C' ? 3 : 0);
+    expect(await ids(winner)).toEqual(expect.arrayContaining(['my:old1-0-1', 'my:old2-0']));
+    expect(await ids(loser)).not.toContain('my:old1-0-1');
+    expect(await store.getUser('A')).toMatchObject({ movedTo: winner });
+    expect(await store.getUser(loser)).not.toHaveProperty('adopted');
+  });
+
+  it('押さえたあとで断る・何もしない（元が名前のある利用者・自分の合い言葉）: 合い言葉は押さえたまま。チケットと服は、元（本物のアカウント）に残る', async () => {
+    const { word } = await twoUsers();
+    await store.markUser('A', { named: true });
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'refused', tickets: 0, items: 0 });
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'refused', tickets: 0, items: 0 });
+    expect(await store.getHandoff(word)).toMatchObject({ usedBy: 'B' });
+    expect(await tickets('A')).toBe(3);
+    expect(await ids('A')).toHaveLength(2);
+    await userWith('C', 0);
+    expect(await adoptUser(deps, 'C', word)).toEqual({ status: 'used', tickets: 0, items: 0 });
+    // 自分の合い言葉（Google と結び付けたあとの 1 台め）: 何も移さない。ほかの人は、もう使えない
+    const own = await offerHandoff(deps, 'C');
+    expect(await adoptUser(deps, 'C', own)).toEqual({ status: 'done', tickets: 0, items: 0 });
+    expect(await store.getUser('C')).not.toHaveProperty('movedTo');
+    expect(await adoptUser(deps, 'B', own)).toEqual({ status: 'used', tickets: 0, items: 0 });
   });
 
   it('移す: チケットは足され、服は両方。ID・名前・色・並び順・作った時刻・絵のパスは、そのまま。印と覚えが残る', async () => {
@@ -1109,7 +1141,7 @@ describe('引き継ぎ（③-b）: 合い言葉で、匿名の利用者のチケ
   it('取り引きのやり直し: どの書き換えも、確定のあとにもう一度呼ばれる → チケットも服も、1 回ぶん', async () => {
     const { word } = await twoUsers();
     // 書き換えの操作を、どれも 2 回ずつ呼ぶ（Firestore が、確定の返事が届かなかった取り引きを、もう一度呼ぶのと同じ）
-    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'useHandoff', 'updateJob', 'addTickets', 'refundOnce'] as const) {
+    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'claimHandoff', 'updateJob', 'addTickets', 'refundOnce'] as const) {
       const real = (store[name] as (...args: unknown[]) => Promise<unknown>).bind(store);
       (store as unknown as Record<string, unknown>)[name] = async (...args: unknown[]) => {
         await real(...args);

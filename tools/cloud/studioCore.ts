@@ -686,14 +686,16 @@ export async function offerHandoff(deps: CoreDeps, uid: string): Promise<string>
 export type AdoptStatus = 'done' | 'used' | 'unknown' | 'refused';
 /**
  * 合い言葉を出した（匿名でない）利用者 toUid へ、合い言葉の元の利用者のチケットと服を移す。
+ * 合い言葉は、移す前に、1 つの取り引きで押さえる（2 つのアカウントが同時に出しても、移せるのは 1 つだけ。服が分かれない）。
  * 印（movedTo・adopted）を先に書いてから移すので、途中で止まっても、あとの drain（仕事の終わり・signIn・もう一度の adopt）が続きを移す。
+ * 押さえたあとで断る・何もしない（自分の合い言葉・元が名前のある利用者・元がいない）ときは、合い言葉は押さえたまま。
+ * チケットと服は、元に残る（元は、本物のアカウント。ほかの人は、もう、その合い言葉で取れない）
  */
 export async function adoptUser(deps: CoreDeps, toUid: string, word: string): Promise<{ status: AdoptStatus; tickets: number; items: number }> {
   const none = { tickets: 0, items: 0 };
-  const handoff = await deps.store.getHandoff(word);
-  if (!handoff) return { status: 'unknown', ...none };
-  if (handoff.usedBy && handoff.usedBy !== toUid) return { status: 'used', ...none };
-  const from = handoff.uid;
+  const claim = await deps.store.claimHandoff(word, toUid);
+  if (claim.status !== 'ok') return { status: claim.status, ...none };
+  const from = claim.uid;
   if (from === toUid) return { status: 'done', ...none };
   const source = await deps.store.getUser(from);
   if (!source) return { status: 'unknown', ...none };
@@ -702,9 +704,7 @@ export async function adoptUser(deps: CoreDeps, toUid: string, word: string): Pr
   await deps.store.markUser(from, { movedTo: toUid });
   await signIn(deps, toUid);
   await deps.store.addAdopted(toUid, from);
-  const moved = await drain(deps, from, toUid);
-  await deps.store.useHandoff(word, toUid);
-  return { status: 'done', ...moved };
+  return { status: 'done', ...(await drain(deps, from, toUid)) };
 }
 
 // 服の ID（`my:{仕事}-{番号}-{回}`、前の版は `my:{仕事}-{番号}`）から、考えられる（仕事・番号）の組

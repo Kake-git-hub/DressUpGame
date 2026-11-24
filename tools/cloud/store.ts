@@ -32,6 +32,7 @@ export interface HandoffDoc {
   createdAt: number;
   usedBy?: string;
 }
+export type HandoffClaim = { status: 'ok'; uid: string } | { status: 'unknown' } | { status: 'used' };
 // adopted に覚えておく、元の uid の数
 export const ADOPTED_MAX = 20;
 
@@ -137,8 +138,9 @@ export interface CloudStore {
   // makeWord は、取り引きのやり直しで、2 回以上呼ばれることがある（確定したものだけが残る）
   offerHandoff(uid: string, makeWord: () => string, now: number): Promise<string>;
   getHandoff(word: string): Promise<HandoffDoc | null>;
-  // usedBy を書く（もう書いてあれば、書かない = 最初に使った人のまま）
-  useHandoff(word: string, by: string): Promise<void>;
+  // 合い言葉を、移す前に押さえる（1 つの取り引き）。無ければ unknown。ほかの人が押さえていれば used。
+  // そうでなければ usedBy = by を書いて（もう by なら、書かない）、移す元の uid を返す。同じ人なら、何度呼んでも ok
+  claimHandoff(word: string, by: string): Promise<HandoffClaim>;
   // from の残りのチケットを全部、to へ移す（1 つの取り引き。中で from を読み直す）。台帳に、from へ -n・to へ +n
   // （理由 `adopt:out:{to}`・`adopt:in:{from}`）。返り値は、移した枚数。0 なら、何も書かない。
   // from が名前のある利用者（named）なら、移さない（0）。to がいなければ CloudError('refused')

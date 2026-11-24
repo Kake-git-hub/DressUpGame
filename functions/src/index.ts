@@ -26,7 +26,8 @@ import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
-import { handleCall } from '../../tools/cloud/api.ts';
+import { callerOfToken, handleCall } from '../../tools/cloud/api.ts';
+import type { Caller } from '../../tools/cloud/api.ts';
 import { createPublicContent } from '../../tools/cloud/publicContent.ts';
 import { CloudError } from '../../tools/cloud/store.ts';
 import type { CloudFiles, CloudStore } from '../../tools/cloud/store.ts';
@@ -192,11 +193,9 @@ function uidOf(request: { auth?: { uid: string } | null }): string {
   return uid;
 }
 
-// 呼んだ人が、匿名のログインか（Firebase の証明の sign_in_provider）。分からなければ、匿名として扱う（引き継ぎで、もらう側にならない）
-function callerOf(request: { auth?: { token?: { firebase?: { sign_in_provider?: unknown } } } | null }): { anonymous: boolean } {
-  const provider = request.auth?.token?.firebase?.sign_in_provider;
-  return { anonymous: typeof provider !== 'string' || provider === 'anonymous' };
-}
+// 呼んだ人が、匿名のログインか（Firebase の証明の sign_in_provider と identities。決め方は callerOfToken）。
+// 分からなければ、匿名として扱う（引き継ぎで、もらう側にならない）
+const callerOf = (request: { auth?: { token?: unknown } | null }): Caller => callerOfToken(request.auth?.token);
 const opOf = (data: unknown) => (typeof data === 'object' && data !== null ? (data as { op?: unknown }).op : undefined);
 
 export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY], memory: '1GiB', timeoutSeconds: 180, concurrency: 8, maxInstances: 5 }, (request) =>

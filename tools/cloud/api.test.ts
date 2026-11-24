@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ContentStore } from '../content/manifestEdit.ts';
 import type { ImageAi, TextAi } from '../studio/ai.ts';
-import { handleCall } from './api.ts';
+import { callerOfToken, handleCall } from './api.ts';
 import type { ItemView, JobView } from './api.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { createPublicContent } from './publicContent.ts';
@@ -240,6 +240,27 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     await callAs('a1', { op: 'signIn' }, named); // そのあと、Google と結び付けた
     expect(await callAs('g1', { op: 'adopt', word }, named)).toMatchObject({ status: 'refused', tickets: 0 });
     expect((await store.getUser('a1'))!.tickets).toBe(2);
+  });
+});
+
+describe('呼んだ人が匿名か（Firebase の証明から）', () => {
+  it('匿名 = sign_in_provider が anonymous（または無い）で、しかも、結び付けた提供元（identities の中の、空でない一覧）が無い', () => {
+    expect(callerOfToken({ firebase: { sign_in_provider: 'anonymous' } })).toEqual({ anonymous: true });
+    expect(callerOfToken({ firebase: { sign_in_provider: 'anonymous', identities: {} } })).toEqual({ anonymous: true });
+    expect(callerOfToken({ firebase: { identities: {} } })).toEqual({ anonymous: true });
+    expect(callerOfToken({ firebase: { sign_in_provider: 'anonymous', identities: { 'google.com': [] } } })).toEqual({ anonymous: true });
+    expect(callerOfToken({})).toEqual({ anonymous: true });
+    expect(callerOfToken(undefined)).toEqual({ anonymous: true });
+    expect(callerOfToken(null)).toEqual({ anonymous: true });
+  });
+  it('匿名のまま Google と結び付けた（証明の sign_in_provider は anonymous のまま、identities に google.com）→ 匿名でない', () => {
+    expect(callerOfToken({ firebase: { sign_in_provider: 'anonymous', identities: { 'google.com': ['123'] } } })).toEqual({ anonymous: false });
+    expect(callerOfToken({ firebase: { identities: { 'google.com': ['123'], email: ['someone@example.com'] } } })).toEqual({ anonymous: false });
+  });
+  it('Google・メールとパスワードでのログイン → 匿名でない', () => {
+    expect(callerOfToken({ firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['123'] } } })).toEqual({ anonymous: false });
+    expect(callerOfToken({ firebase: { sign_in_provider: 'password', identities: { email: ['b@example.com'] } } })).toEqual({ anonymous: false });
+    expect(callerOfToken({ firebase: { sign_in_provider: 'password' } })).toEqual({ anonymous: false });
   });
 });
 
