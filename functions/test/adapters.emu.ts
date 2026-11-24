@@ -8,7 +8,9 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CloudError } from '../../tools/cloud/store.ts';
-import type { ItemDoc, JobDoc } from '../../tools/cloud/store.ts';
+import type { CloudStore, ItemDoc, JobDoc } from '../../tools/cloud/store.ts';
+import { adoptUser } from '../../tools/cloud/studioCore.ts';
+import type { CoreDeps } from '../../tools/cloud/studioCore.ts';
 import { FirestoreStore } from '../src/firestoreStore.ts';
 import { StorageFiles } from '../src/storageFiles.ts';
 import { PROJECT } from './ports.mjs';
@@ -220,6 +222,140 @@ describe('Firestore の置き場（v0.35.0 で足した操作）', () => {
     const found = (await store.listOpenJobs(500)).filter((r) => r.uid === a || r.uid === b).map((r) => `${r.uid === a ? 'a' : 'b'}/${r.job.id}`);
     expect(found).toEqual(['b/open-old', 'a/open-new']);
     expect((await store.listOpenJobs(1)).map((r) => r.job.id)).toEqual(['open-old']);
+  });
+});
+
+describe('Firestore の置き場（③-b 引き継ぎ）', () => {
+  const shirt = (id: string, createdAt: number): ItemDoc => ({
+    id,
+    dollId: 'doll',
+    item: { id, name: 'ふく', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 20, box: { x: 1, y: 2, w: 3, h: 4 } }, thumb: 'files/t.webp' },
+    paths: { 'files/a.webp': `users/x/items/${id}/a.webp` },
+    createdAt,
+    hue: 25,
+    order: createdAt + 1,
+  });
+  const ledgerOf = async (u: string) => (await getFirestore(app).collection(`users/${u}/ledger`).get()).docs.map((d) => d.data() as { count: number; reason: string });
+  async function pair(tickets: number): Promise<[string, string]> {
+    const a = uid();
+    const b = uid();
+    await store.createUser(a, () => `A${a}`.toUpperCase(), 1);
+    await store.createUser(b, () => `B${b}`.toUpperCase(), 1);
+    if (tickets > 0) await store.addTickets(a, tickets, 'grant', 1);
+    return [a, b];
+  }
+
+  it('moveTickets: 全部を移し、台帳に出た・入ったを残す。もう一度は 0。移す先がいなければ refused。元が named なら移さない', async () => {
+    const [a, b] = await pair(3);
+    await store.addTickets(b, 2, 'grant', 1);
+    expect(await store.moveTickets(a, b, 9)).toBe(3);
+    expect(await store.moveTickets(a, b, 9)).toBe(0);
+    expect((await store.getUser(a))!.tickets).toBe(0);
+    expect((await store.getUser(b))!.tickets).toBe(5);
+    expect((await ledgerOf(a)).filter((l) => l.reason.startsWith('adopt:'))).toEqual([{ count: -3, reason: `adopt:out:${b}`, at: 9 }]);
+    expect((await ledgerOf(b)).filter((l) => l.reason.startsWith('adopt:'))).toEqual([{ count: 3, reason: `adopt:in:${a}`, at: 9 }]);
+    expect(code(await store.moveTickets(a, 'nobody', 1).catch((e) => e))).toBe('refused');
+    await store.addTickets(a, 1, 'grant', 1);
+    await store.markUser(a, { named: true });
+    expect(await store.moveTickets(a, b, 1)).toBe(0);
+    expect((await store.getUser(a))!.tickets).toBe(1);
+  });
+
+  it('moveTickets: 同時に 6 回移し、その間に元へ 4 回足しても、無くならず、2 重にもならない（本物の取り引きのやり直し）', async () => {
+    const [a, b] = await pair(3);
+    const moved = await Promise.all([...Array.from({ length: 6 }, () => store.moveTickets(a, b, 2)), ...Array.from({ length: 4 }, () => store.addTickets(a, 1, 'refund', 2).then(() => 0))]);
+    const last = await store.moveTickets(a, b, 3);
+    expect(moved.reduce((x, y) => x + y, 0) + last).toBe(7);
+    expect((await store.getUser(a))!.tickets).toBe(0);
+    expect((await store.getUser(b))!.tickets).toBe(7);
+    expect((await ledgerOf(b)).reduce((x, l) => x + l.count, 0)).toBe(7);
+  });
+
+  it('moveItem: 中身はそのまま移る。元に無いと false。先に同じ ID があれば、書かずに元から消す。同時に 5 回でも、移るのは 1 回', async () => {
+    const [a, b] = await pair(0);
+    const doc = shirt('my:j1-0-1', 10);
+    await store.putItem(a, doc);
+    expect(await store.moveItem(a, b, doc.id)).toBe(true);
+    expect(await store.getItem(a, doc.id)).toBeNull();
+    expect(await store.getItem(b, doc.id)).toEqual(doc);
+    expect(await store.moveItem(a, b, doc.id)).toBe(false);
+    await store.putItem(a, { ...doc, hue: -40 });
+    expect(await store.moveItem(a, b, doc.id)).toBe(true);
+    expect((await store.getItem(b, doc.id))!.hue).toBe(25);
+    const other = shirt('my:j2-0-1', 20);
+    await store.putItem(a, other);
+    const results = await Promise.all(Array.from({ length: 5 }, () => store.moveItem(a, b, other.id)));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await store.getItem(b, other.id)).toEqual(other);
+    expect(await store.listItems(a)).toEqual([]);
+  });
+
+  it('合い言葉: 使われるまで同じ。使われたら新しい。usedBy は最初の人のまま。同時に 5 回もらっても 1 つ。印と覚え', async () => {
+    const [a, b] = await pair(0);
+    let n = 0;
+    const make = () => `${a}-w${++n}`;
+    const words = await Promise.all(Array.from({ length: 5 }, () => store.offerHandoff(a, make, 4)));
+    expect(new Set(words).size).toBe(1);
+    const [word] = words;
+    expect(await store.getHandoff(word)).toEqual({ uid: a, createdAt: 4 });
+    expect((await store.getUser(a))!.handoff).toBe(word);
+    await store.useHandoff(word, b);
+    await store.useHandoff(word, 'someone-else');
+    expect(await store.getHandoff(word)).toEqual({ uid: a, createdAt: 4, usedBy: b });
+    expect(await store.offerHandoff(a, make, 5)).not.toBe(word);
+    expect(await store.getHandoff('nope')).toBeNull();
+    await store.useHandoff('nope', b); // 無くても落ちない
+    await store.markUser(a, { movedTo: b });
+    await store.markUser(a, { movedTo: b });
+    expect(await store.getUser(a)).toMatchObject({ movedTo: b });
+    for (let i = 0; i < 22; i++) await store.addAdopted(b, `x${i}`);
+    await store.addAdopted(b, 'x3');
+    const adopted = (await store.getUser(b))!.adopted!;
+    expect(adopted).toHaveLength(20);
+    expect(adopted.slice(-2)).toEqual(['x21', 'x3']);
+    expect(code(await store.markUser('nobody', { named: true }).catch((e) => e))).toBe('refused');
+  });
+
+  it('adoptUser を本物の置き場で: どの書き換えも、確定のあとにもう一度呼ばれても（replayTransactions と同じ）、チケットも服も 1 回ぶん', async () => {
+    const [a, b] = await pair(3);
+    await store.addTickets(b, 1, 'grant', 1);
+    await store.putItem(a, shirt('my:j1-0-1', 10));
+    await store.putItem(a, shirt('my:j2-0', 11));
+    await store.putItem(b, shirt('my:j9-0-1', 12));
+    // 書き換えの操作を、どれも 2 回ずつ呼ぶ置き場
+    const replay = Object.create(store) as CloudStore;
+    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'useHandoff', 'createUser'] as const) {
+      const real = (store[name] as (...args: unknown[]) => Promise<unknown>).bind(store);
+      (replay as unknown as Record<string, unknown>)[name] = async (...args: unknown[]) => {
+        await real(...args);
+        return real(...args);
+      };
+    }
+    let words = 0;
+    const deps = { store: replay, adminCodes: [], now: () => 50, newWord: () => `${a}-r${++words}` } as unknown as CoreDeps;
+    const word = await replay.offerHandoff(a, deps.newWord, 50);
+    expect((await adoptUser(deps, b, word)).status).toBe('done');
+    expect(await adoptUser(deps, b, word)).toEqual({ status: 'done', tickets: 0, items: 0 });
+    expect((await store.getUser(a))!.tickets).toBe(0);
+    expect((await store.getUser(b))!.tickets).toBe(4);
+    expect((await store.listItems(a)).map((i) => i.id)).toEqual([]);
+    expect((await store.listItems(b)).map((i) => i.id)).toEqual(['my:j1-0-1', 'my:j2-0', 'my:j9-0-1']);
+    expect((await ledgerOf(b)).filter((l) => l.reason.startsWith('adopt:'))).toHaveLength(1);
+    expect((await store.getUser(b))!.adopted).toEqual([a]);
+    expect(await store.getHandoff(word)).toMatchObject({ usedBy: b });
+  });
+
+  it('adoptUser を同時に 4 回（アプリのやり直しと、2 つのタブ）: チケットも服も 1 回ぶん', async () => {
+    const [a, b] = await pair(5);
+    await store.putItem(a, shirt('my:j1-0-1', 10));
+    const deps = { store, adminCodes: [], now: () => 60, newWord: () => `${a}-c` } as unknown as CoreDeps;
+    const word = await store.offerHandoff(a, deps.newWord, 60);
+    const results = await Promise.all(Array.from({ length: 4 }, () => adoptUser(deps, b, word)));
+    expect(results.every((r) => r.status === 'done')).toBe(true);
+    expect(results.reduce((x, r) => x + r.tickets, 0)).toBe(5);
+    expect(results.reduce((x, r) => x + r.items, 0)).toBe(1);
+    expect((await store.getUser(b))!.tickets).toBe(5);
+    expect((await store.listItems(b)).map((i) => i.id)).toEqual(['my:j1-0-1']);
   });
 });
 

@@ -21,7 +21,19 @@ export interface UserDoc {
   userCode: string;
   tickets: number;
   createdAt: number;
+  movedTo?: string; // この利用者（匿名だった）のチケットと服は、この uid へ移す
+  adopted?: string[]; // この利用者が、もらった元の uid（古い順。20 件まで）
+  named?: boolean; // 匿名でない利用者として、1 回でも呼んだ（移す元には、できない）
+  handoff?: string; // この利用者の、いまの合い言葉
 }
+// 引き継ぎの合い言葉（handoffs/{合い言葉}）。uid = 移す元（合い言葉をもらった匿名の利用者）、usedBy = 使った人（移す先）
+export interface HandoffDoc {
+  uid: string;
+  createdAt: number;
+  usedBy?: string;
+}
+// adopted に覚えておく、元の uid の数
+export const ADOPTED_MAX = 20;
 
 // waiting = 順番待ち、working = 作成中、kept = 自分の服になった（itemId）、failed = できなかった（チケットは戻す）。
 // done（できたが、まだ服にしていない）・discarded（捨てた）は、前の版の名残
@@ -114,6 +126,25 @@ export interface CloudStore {
   updateItem(uid: string, itemId: string, change: (item: ItemDoc) => ItemDoc | null): Promise<ItemDoc>;
   listItems(uid: string): Promise<ItemDoc[]>; // 作った順
   deleteItem(uid: string, itemId: string): Promise<void>;
+
+  // ── 引き継ぎ（2 台めの端末の、匿名の利用者のチケットと服を、アカウントへ移す）──
+  // どれも、確定の返事が届かずに、もう一度呼ばれてよい（2 回めは、何も変えない）
+  // 利用者の印を書く。もう同じ値なら、書かない。利用者がいなければ CloudError('refused')
+  markUser(uid: string, change: { movedTo?: string; named?: true }): Promise<void>;
+  // adopted に足す（重ならない。もうあれば、新しい側へ動かす。20 件を超えたら、古いものから落とす）
+  addAdopted(uid: string, from: string): Promise<void>;
+  // その利用者の、まだ使っていない合い言葉があれば返す。無ければ、makeWord() で作って、handoffs と利用者に書く（1 つの取り引き）。
+  // makeWord は、取り引きのやり直しで、2 回以上呼ばれることがある（確定したものだけが残る）
+  offerHandoff(uid: string, makeWord: () => string, now: number): Promise<string>;
+  getHandoff(word: string): Promise<HandoffDoc | null>;
+  // usedBy を書く（もう書いてあれば、書かない = 最初に使った人のまま）
+  useHandoff(word: string, by: string): Promise<void>;
+  // from の残りのチケットを全部、to へ移す（1 つの取り引き。中で from を読み直す）。台帳に、from へ -n・to へ +n
+  // （理由 `adopt:out:{to}`・`adopt:in:{from}`）。返り値は、移した枚数。0 なら、何も書かない。
+  // from が名前のある利用者（named）なら、移さない（0）。to がいなければ CloudError('refused')
+  moveTickets(from: string, to: string, now: number): Promise<number>;
+  // 服 1 点を、from から to へ移す（1 つの取り引き。中で読み直す）。from に無ければ false。to に同じ ID があれば、書かずに from から消す（true）
+  moveItem(from: string, to: string, itemId: string): Promise<boolean>;
 }
 
 // 絵の置き場

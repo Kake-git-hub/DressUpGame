@@ -10,9 +10,9 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { ackJob, deleteItem, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
-import type { CandidateDoc, JobDoc } from './store.ts';
+import type { CandidateDoc, ItemDoc, JobDoc } from './store.ts';
 
 let dir: string;
 let store: MemoryStore;
@@ -25,6 +25,7 @@ let failImages: boolean;
 let imageGate: Promise<void> | null; // 絵ができるのを、ここで待たせる（長くかかる生成のまね）
 let clock: number;
 let ids: number;
+let words: number;
 let enqueued: [string, string, number | undefined][]; // 列に入れた仕事（利用者・仕事・何秒あとか）
 let enqueueFails: boolean;
 
@@ -77,6 +78,7 @@ beforeEach(async () => {
   imageGate = null;
   clock = 1_000_000;
   ids = 0;
+  words = 0;
   enqueued = [];
   enqueueFails = false;
   deps = {
@@ -91,6 +93,7 @@ beforeEach(async () => {
     limits: { perDay: 20, maxAttempts: 1 },
     now: () => clock,
     newId: () => `job${++ids}`,
+    newWord: () => `word${++words}`,
     enqueue: async (uid, jobId, delaySeconds) => {
       if (enqueueFails) throw new Error('queue down');
       enqueued.push([uid, jobId, delaySeconds]);
@@ -1013,5 +1016,219 @@ describe('顔写真から顔を作る', () => {
     expect(code(await normalizePhoto(Buffer.alloc(4_000_001)).catch((e) => e))).toBe('refused');
     expect((await signIn(deps, 'u1')).tickets).toBe(3);
     expect(planImages).toEqual([]);
+  });
+});
+
+describe('引き継ぎ（③-b）: 合い言葉で、匿名の利用者のチケットと服を、アカウントへ移す', () => {
+  // 匿名の利用者 A の服（絵は、A の置き場にある）
+  const ownItem = async (uid: string, id: string, createdAt: number, extra: Partial<ItemDoc> = {}): Promise<ItemDoc> => {
+    const folder = `users/${uid}/items/${id.replace(/[^A-Za-z0-9_-]/g, '_')}/`;
+    const doc: ItemDoc = {
+      id,
+      dollId,
+      item: { id, name: `ふく${createdAt}`, category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/t.webp' },
+      paths: { 'files/a.webp': `${folder}a.webp`, 'files/t.webp': `${folder}t.webp` },
+      createdAt,
+      hue: 30,
+      order: createdAt + 5,
+      updatedAt: createdAt,
+      ...extra,
+    };
+    await store.putItem(uid, doc);
+    for (const path of Object.values(doc.paths)) await files.put(path, Buffer.from(path), 'image/webp');
+    return doc;
+  };
+  const ids = async (uid: string) => (await listItems(deps, uid)).map((i) => i.id).sort();
+  const tickets = async (uid: string) => (await store.getUser(uid))!.tickets;
+  // A（匿名。チケット 3 枚・服 2 点）と、B（アカウント。チケット 5 枚・服 1 点）。A が合い言葉をもらう
+  async function twoUsers(): Promise<{ word: string; mine: ItemDoc[] }> {
+    await userWith('A', 3);
+    await userWith('B', 5);
+    const mine = [await ownItem('A', 'my:old1-0-1', 100), await ownItem('A', 'my:old2-0', 200)];
+    await ownItem('B', 'my:b1-0-1', 300);
+    return { word: await offerHandoff(deps, 'A'), mine };
+  }
+
+  it('offerHandoff: 同じ利用者には、使われるまで同じ合い言葉（乱数は deps.newWord）', async () => {
+    await userWith('A', 0);
+    const word = await offerHandoff(deps, 'A');
+    expect(word).toBe('word1');
+    expect(await offerHandoff(deps, 'A')).toBe(word);
+    expect(await offerHandoff(deps, 'C')).toBe('word2'); // 初めての利用者でも、作ってから
+  });
+
+  it('adoptUser の答え: 知らない合い言葉 → unknown。ほかの人が使った → used。自分の合い言葉 → done（何もしない）。元が名前のある利用者 → refused', async () => {
+    const { word } = await twoUsers();
+    expect(await adoptUser(deps, 'B', 'nope')).toEqual({ status: 'unknown', tickets: 0, items: 0 });
+    expect(await adoptUser(deps, 'A', word)).toEqual({ status: 'done', tickets: 0, items: 0 });
+    expect(await store.getUser('A')).not.toHaveProperty('movedTo');
+    await store.markUser('A', { named: true });
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'refused', tickets: 0, items: 0 });
+    expect(await tickets('A')).toBe(3);
+    expect(await ids('A')).toHaveLength(2);
+    expect(await store.getUser('A')).not.toHaveProperty('movedTo');
+    // 印を外して、B が使う → C が同じ合い言葉を出すと used
+    store.users.get('A')!.named = undefined;
+    expect((await adoptUser(deps, 'B', word)).status).toBe('done');
+    await userWith('C', 0);
+    expect(await adoptUser(deps, 'C', word)).toEqual({ status: 'used', tickets: 0, items: 0 });
+    expect(await tickets('C')).toBe(0);
+  });
+
+  it('移す: チケットは足され、服は両方。ID・名前・色・並び順・作った時刻・絵のパスは、そのまま。印と覚えが残る', async () => {
+    const { word, mine } = await twoUsers();
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'done', tickets: 3, items: 2 });
+    expect(await tickets('A')).toBe(0);
+    expect(await tickets('B')).toBe(8);
+    expect(await ids('A')).toEqual([]);
+    expect(await ids('B')).toEqual(['my:b1-0-1', 'my:old1-0-1', 'my:old2-0']);
+    for (const doc of mine) expect(await store.getItem('B', doc.id)).toEqual(doc);
+    expect(store.ledger.filter((l) => l.reason.startsWith('adopt:'))).toEqual([
+      { uid: 'A', count: -3, reason: 'adopt:out:B', at: clock },
+      { uid: 'B', count: 3, reason: 'adopt:in:A', at: clock },
+    ]);
+    expect(await store.getUser('A')).toMatchObject({ movedTo: 'B' });
+    expect(await store.getUser('B')).toMatchObject({ adopted: ['A'] });
+    expect(await store.getHandoff(word)).toMatchObject({ uid: 'A', usedBy: 'B' });
+    // 絵は、動かさない（A の置き場のまま。B から取れる）
+    for (const path of Object.values(mine[0].paths)) expect(await files.get(path)).not.toBeNull();
+  });
+
+  it('同じ合い言葉で、もう一度 adoptUser（返事が届かずに、アプリがもう一度呼んだ）→ 0・0。数は変わらない。残りがあれば、移る', async () => {
+    const { word } = await twoUsers();
+    await adoptUser(deps, 'B', word);
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'done', tickets: 0, items: 0 });
+    expect(await tickets('B')).toBe(8);
+    expect(await ids('B')).toHaveLength(3);
+    // あとから A に入った分（作者が、古い利用者コードに配った）も、もう一度出せば移る
+    await store.addTickets('A', 2, 'grant', clock);
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'done', tickets: 2, items: 0 });
+    expect(await tickets('B')).toBe(10);
+  });
+
+  it('取り引きのやり直し: どの書き換えも、確定のあとにもう一度呼ばれる → チケットも服も、1 回ぶん', async () => {
+    const { word } = await twoUsers();
+    // 書き換えの操作を、どれも 2 回ずつ呼ぶ（Firestore が、確定の返事が届かなかった取り引きを、もう一度呼ぶのと同じ）
+    for (const name of ['moveTickets', 'moveItem', 'markUser', 'addAdopted', 'offerHandoff', 'useHandoff', 'updateJob', 'addTickets', 'refundOnce'] as const) {
+      const real = (store[name] as (...args: unknown[]) => Promise<unknown>).bind(store);
+      (store as unknown as Record<string, unknown>)[name] = async (...args: unknown[]) => {
+        await real(...args);
+        return real(...args);
+      };
+    }
+    expect((await adoptUser(deps, 'B', word)).status).toBe('done');
+    expect(await adoptUser(deps, 'B', word)).toMatchObject({ status: 'done' });
+    expect(await tickets('A')).toBe(0);
+    expect(await tickets('B')).toBe(8);
+    expect(await ids('A')).toEqual([]);
+    expect(await ids('B')).toEqual(['my:b1-0-1', 'my:old1-0-1', 'my:old2-0']);
+    expect(store.ledger.filter((l) => l.reason.startsWith('adopt:'))).toHaveLength(2);
+    expect((await store.getUser('B'))!.adopted).toEqual(['A']);
+    // やり直しの中で、合い言葉がもう一度作られても、利用者の合い言葉は 1 つ
+    expect(await offerHandoff(deps, 'A')).not.toBe(word);
+  });
+
+  it('元の利用者の仕事が、進んでいる途中: できた服は、まだ移さない。終わったら（workJob の終わり）移る。できなかった分の払い戻しも、移る', async () => {
+    await userWith('A', 5);
+    await userWith('B', 0);
+    const { jobId } = await startJob(deps, 'A', twoParts());
+    deps.runBudgetMs = 0;
+    expect(await runJob(deps, 'A', jobId)).toBe('more'); // 1 点めは、もう服になった。2 点めは順番待ち
+    const madeId = `my:${jobId}-0-1`;
+    expect(await ids('A')).toEqual([madeId]);
+    const word = await offerHandoff(deps, 'A');
+    expect(await adoptUser(deps, 'B', word)).toEqual({ status: 'done', tickets: 3, items: 0 });
+    expect(await ids('A')).toEqual([madeId]); // 進めている途中の仕事が、やり直しで消すことがあるので
+    expect(await drain(deps, 'A', 'B')).toEqual({ tickets: 0, items: 0 });
+    delete deps.runBudgetMs;
+    failImages = true; // 2 点めは、できない → A に 1 枚戻る
+    await workJob(deps, 'A', jobId);
+    expect((await store.getJob('A', jobId))!.done).toBe(true);
+    expect(await ids('A')).toEqual([]);
+    expect(await ids('B')).toEqual([madeId]);
+    expect(await tickets('A')).toBe(0);
+    expect(await tickets('B')).toBe(4);
+    expect(files.files.has((await store.getItem('B', madeId))!.paths[(await store.getItem('B', madeId))!.item.image.file])).toBe(true);
+  }, 60_000);
+
+  it('workJob が投げても、移す。移すのに失敗しても、仕事の結果は変えない', async () => {
+    await userWith('A', 2);
+    await userWith('B', 0);
+    const { jobId } = await startJob(deps, 'A', oneTop());
+    const word = await offerHandoff(deps, 'A');
+    await adoptUser(deps, 'B', word);
+    await store.addTickets('A', 1, 'grant', clock);
+    // 仕事が見つからない（投げる）
+    await expect(workJob(deps, 'A', 'none')).rejects.toThrow();
+    expect(await tickets('B')).toBe(2);
+    // 移す所が落ちても、仕事は終わる
+    await store.addTickets('A', 1, 'grant', clock);
+    const realMove = store.moveTickets.bind(store);
+    store.moveTickets = async () => {
+      throw new Error('store is down');
+    };
+    await workJob(deps, 'A', jobId);
+    expect((await store.getJob('A', jobId))!.done).toBe(true);
+    store.moveTickets = realMove;
+    expect(await tickets('A')).toBe(1);
+  }, 60_000);
+
+  it('終わった仕事でも、仕事の「できた服」でない服（前の回の残り物）は、移さない。仕事の無い服は、移す', async () => {
+    await userWith('A', 0);
+    await userWith('B', 0);
+    const done: JobDoc = { id: 'jd', dollId, theme: 'うみ', styleId: 'anime', done: true, tickets: 1, createdAt: 1, heartbeat: 1, v: 2, candidates: [{ index: 0, name: 'ふく', categoryId: 'トップス', description: '', colors: [], status: 'kept', notes: [], tries: 2, itemId: 'my:jd-0-2' }, { index: 1, name: 'ふく', categoryId: 'トップス', description: '', colors: [], status: 'failed', notes: [], tries: 1, refunded: true }] };
+    await store.createJob('A', done);
+    // 前の版の仕事（kept でも itemId が無い）
+    await store.createJob('A', { ...done, id: 'legacy', v: undefined, candidates: [{ ...done.candidates[0], itemId: undefined }] });
+    await ownItem('A', 'my:jd-0-1', 1); // 残り物（片付けられる前）
+    await ownItem('A', 'my:jd-0-2', 2);
+    await ownItem('A', 'my:jd-1-1', 3); // できなかった品目の残り物
+    await ownItem('A', 'my:legacy-0', 4);
+    await ownItem('A', 'my:gone-0-1', 5); // 仕事が見つからない
+    const word = await offerHandoff(deps, 'A');
+    expect(await adoptUser(deps, 'B', word)).toMatchObject({ items: 3 });
+    expect(await ids('B')).toEqual(['my:gone-0-1', 'my:jd-0-2', 'my:legacy-0']);
+    expect(await ids('A')).toEqual(['my:jd-0-1', 'my:jd-1-1']);
+  });
+
+  it('drainAdopted: あとから元に入ったチケット・終わった仕事の服を、新しい順に 5 人まで移す。ほかへ移った元からは、取らない', async () => {
+    await userWith('B', 0);
+    for (const from of ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']) {
+      await userWith(from, 0);
+      await adoptUser(deps, 'B', await offerHandoff(deps, from));
+      await store.addTickets(from, 1, 'grant', clock);
+    }
+    await userWith('A7', 0);
+    await userWith('C', 0);
+    await adoptUser(deps, 'B', await offerHandoff(deps, 'A7'));
+    await adoptUser(deps, 'C', await offerHandoff(deps, 'A7')); // A7 は、そのあと C へ
+    await store.addTickets('A7', 4, 'grant', clock);
+    await drainAdopted(deps, 'B');
+    expect(await tickets('B')).toBe(4); // A3〜A6（A7 は C のもの。A1・A2 は古い）
+    expect(await tickets('A7')).toBe(4);
+    expect(await tickets('A1')).toBe(1);
+    await drainAdopted(deps, 'nobody'); // いない利用者でも落ちない
+  });
+
+  it('元が、あとから名前のある利用者になっていたら、移さない', async () => {
+    const { word } = await twoUsers();
+    await adoptUser(deps, 'B', word);
+    await store.addTickets('A', 2, 'grant', clock);
+    await store.markUser('A', { named: true });
+    expect(await drain(deps, 'A', 'B')).toEqual({ tickets: 0, items: 0 });
+    expect(await tickets('A')).toBe(2);
+  });
+
+  it('移した服を、先の利用者が消す → 元の置き場の絵も消える。ほかの服の絵は、消えない', async () => {
+    const { word, mine } = await twoUsers();
+    await ownItem('A', 'my:old1-0-12', 400); // 名前の似た、別の服（移さない）
+    await store.createJob('A', { id: 'old1', dollId, theme: '', styleId: 'anime', done: true, tickets: 0, createdAt: 1, heartbeat: 1, v: 2, candidates: [{ index: 0, name: '', categoryId: 'トップス', description: '', colors: [], status: 'kept', notes: [], itemId: 'my:old1-0-1' }] });
+    await adoptUser(deps, 'B', word);
+    expect(await ids('B')).toContain('my:old1-0-1');
+    await deleteItem(deps, 'B', 'my:old1-0-1');
+    for (const path of Object.values(mine[0].paths)) expect(await files.get(path)).toBeNull();
+    for (const path of Object.values(mine[1].paths)) expect(await files.get(path)).not.toBeNull();
+    expect([...files.files.keys()].filter((k) => k.includes('my_old1-0-12/'))).toHaveLength(2);
+    expect([...files.files.keys()].filter((k) => k.startsWith('users/B/'))).toHaveLength(2);
   });
 });

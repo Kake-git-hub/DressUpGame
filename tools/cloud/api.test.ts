@@ -77,6 +77,7 @@ beforeEach(async () => {
     limits: { perDay: 20, maxAttempts: 1 },
     now: () => clock,
     newId: () => `job${++ids}`,
+    newWord: () => `word${++ids}`,
     enqueue: async (uid, jobId) => {
       enqueued.push(`${uid}/${jobId}`);
     },
@@ -175,6 +176,70 @@ describe('アプリからの呼び出し', () => {
     const { job } = await call<{ job: JobView }>('u1', { op: 'job', jobId: 'old' });
     expect(job.candidates.map((c) => [c.index, c.status])).toEqual([[0, 'working'], [2, 'kept']]);
     expect(job.done).toBe(false); // まだ服にしていない候補がある
+  });
+});
+
+describe('引き継ぎ（③-b）: offer・adopt', () => {
+  const named = { anonymous: false };
+  const anon = { anonymous: true };
+  const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
+
+  it('signIn の返事の api は 3。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(3);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(3);
+    expect((await store.getUser('a1'))!.named).toBeUndefined();
+    const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
+    expect(answer).toMatchObject({ api: 3, user: { tickets: 0, admin: false } });
+    expect((await store.getUser('g1'))!.named).toBe(true);
+  });
+
+  it('offer は匿名の利用者だけ（{ word }）。adopt は、匿名なら wait。匿名でなければ、移して user も返す', async () => {
+    await call('a1', { op: 'signIn' });
+    await store.addTickets('a1', 3, 'test', clock);
+    expect(codeOf(await callAs('g1', { op: 'offer' }, named).catch((e) => e))).toBe('refused');
+    const { word } = await callAs<{ word: string }>('a1', { op: 'offer' }, anon);
+    expect(typeof word).toBe('string');
+    expect((await call<{ word: string }>('a1', { op: 'offer' })).word).toBe(word); // 既定は匿名
+    expect(await callAs('a1', { op: 'adopt', word }, anon)).toEqual({ status: 'wait', tickets: 0, items: 0 });
+    expect((await store.getUser('a1'))!.tickets).toBe(3);
+    const adopted = await callAs<{ status: string; tickets: number; items: number; user: UserView }>('g1', { op: 'adopt', word }, named);
+    expect(adopted).toMatchObject({ status: 'done', tickets: 3, items: 0, user: { tickets: 3 } });
+    expect(await callAs('g1', { op: 'adopt', word }, named)).toMatchObject({ status: 'done', tickets: 0, items: 0, user: { tickets: 3 } });
+    expect(await callAs('g2', { op: 'adopt', word }, named)).toMatchObject({ status: 'used' });
+    expect(await callAs('g2', { op: 'adopt', word: 'nope' }, named)).toMatchObject({ status: 'unknown' });
+    for (const data of [{ op: 'adopt' }, { op: 'adopt', word: 5 }, { op: 'adopt', word: '' }, { op: 'adopt', word: 'x'.repeat(101) }]) {
+      expect(codeOf(await callAs('g1', data, named).catch((e) => e))).toBe('refused');
+    }
+  });
+
+  it('あとから元に入ったチケットは、先の匿名でない signIn で移る', async () => {
+    await call('a1', { op: 'signIn' });
+    const { word } = await call<{ word: string }>('a1', { op: 'offer' });
+    await callAs('g1', { op: 'adopt', word }, named);
+    await store.addTickets('a1', 2, 'grant', clock);
+    expect((await callAs<{ user: UserView }>('g1', { op: 'signIn' }, anon)).user.tickets).toBe(0); // 匿名としての呼び出しでは、移さない
+    expect((await callAs<{ user: UserView }>('g1', { op: 'signIn' }, named)).user.tickets).toBe(2);
+    expect((await store.getUser('a1'))!.tickets).toBe(0);
+  });
+
+  it('移すのに失敗しても、signIn は通る', async () => {
+    await call('a1', { op: 'signIn' });
+    const { word } = await call<{ word: string }>('a1', { op: 'offer' });
+    await callAs('g1', { op: 'adopt', word }, named);
+    await store.addTickets('a1', 2, 'grant', clock);
+    store.moveTickets = async () => {
+      throw new Error('store is down');
+    };
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(3);
+  });
+
+  it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {
+    await call('a1', { op: 'signIn' });
+    await store.addTickets('a1', 2, 'test', clock);
+    const { word } = await call<{ word: string }>('a1', { op: 'offer' });
+    await callAs('a1', { op: 'signIn' }, named); // そのあと、Google と結び付けた
+    expect(await callAs('g1', { op: 'adopt', word }, named)).toMatchObject({ status: 'refused', tickets: 0 });
+    expect((await store.getUser('a1'))!.tickets).toBe(2);
   });
 });
 

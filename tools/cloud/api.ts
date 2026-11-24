@@ -8,7 +8,7 @@ import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { SERVER_API } from '../../src/cloud/wire.ts';
-import { ackJob, deleteItem, listItems, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -73,16 +73,43 @@ async function filesOf(deps: CoreDeps, item: ItemDoc): Promise<Record<string, st
   return files;
 }
 
+// 呼んだ人について、関数が Firebase の証明から分かること
+export interface Caller {
+  anonymous: boolean; // 匿名のログイン（まだ Google と結び付けていない）
+}
+
 /**
- * アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服）。data.op で振り分ける。
+ * アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服・引き継ぎ）。data.op で振り分ける。
  * 時間のかかる「進める」（runJob）は、列が呼ぶ別の関数（アプリからは呼べない）。
+ * caller は、分からなければ匿名として扱う（引き継ぎの「もらう」側にならない = 安全な側）
  */
-export async function handleCall(deps: CoreDeps, uid: string, data: unknown): Promise<unknown> {
+export async function handleCall(deps: CoreDeps, uid: string, data: unknown, caller: Caller = { anonymous: true }): Promise<unknown> {
   const d = (typeof data === 'object' && data !== null ? data : {}) as Record<string, unknown>;
   const user = (): Promise<UserView> => signIn(deps, uid);
   switch (d.op) {
-    case 'signIn':
+    case 'signIn': {
+      const view = await user();
+      if (caller.anonymous) return { user: view, api: SERVER_API };
+      // 名前のある利用者の印（古い合い言葉で、ほかへ移されないように）と、もらった元に残っている分を移す。
+      // 失敗しても、signIn は通す（つなげないと、アプリが何もできなくなる）
+      try {
+        await deps.store.markUser(uid, { named: true });
+        await drainAdopted(deps, uid);
+      } catch {
+        return { user: view, api: SERVER_API };
+      }
       return { user: await user(), api: SERVER_API };
+    }
+    case 'offer':
+      // 合い言葉は、匿名の利用者（2 台めの端末）だけ。アカウントのチケットと服を、合い言葉で持ち出させない
+      if (!caller.anonymous) throw refused('この利用者は、引き継ぎの合い言葉をもらえません');
+      return { word: await offerHandoff(deps, uid) };
+    case 'adopt': {
+      const word = str(d.word, 100);
+      // 匿名のうちは、移さない（アカウントに入ってから、もう一度）
+      if (caller.anonymous) return { status: 'wait', tickets: 0, items: 0 };
+      return { ...(await adoptUser(deps, uid, word)), user: await user() };
+    }
     case 'startJob': {
       // 写真（顔を似せる。base64）。無ければ null
       const photo = d.photo === undefined || d.photo === null ? null : Buffer.from(str(d.photo, Math.ceil((PHOTO_MAX_BYTES * 4) / 3) + 4), 'base64');

@@ -1,8 +1,8 @@
 /**
  * メモリの中の置き場（テストと、手元の確認用）。本物（Firestore・Storage）と同じ形。
  */
-import { CloudError } from './store.ts';
-import type { CloudFiles, CloudStore, ItemDoc, JobDoc, UserDoc } from './store.ts';
+import { ADOPTED_MAX, CloudError } from './store.ts';
+import type { CloudFiles, CloudStore, HandoffDoc, ItemDoc, JobDoc, UserDoc } from './store.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 // チケットの数が壊れている（数でない）ときは、0 枚として扱う
@@ -15,6 +15,7 @@ export class MemoryStore implements CloudStore {
   readonly ledger: { uid: string; count: number; reason: string; at: number }[] = [];
   readonly usage = new Map<string, number>();
   readonly refunds = new Set<string>();
+  readonly handoffs = new Map<string, HandoffDoc>();
 
   async getUser(uid: string): Promise<UserDoc | null> {
     const user = this.users.get(uid);
@@ -139,6 +140,60 @@ export class MemoryStore implements CloudStore {
   }
   async deleteItem(uid: string, itemId: string): Promise<void> {
     this.items.delete(`${uid}/${itemId}`);
+  }
+  // 引き継ぎの操作は、どれも、間に待ちを入れない（読んで書くまでが、割り込まれない = 本物の 1 つの取り引き）
+  private mustUser(uid: string): UserDoc {
+    const user = this.users.get(uid);
+    if (!user) throw new CloudError('refused', '利用者が見つかりません');
+    return user;
+  }
+  async markUser(uid: string, change: { movedTo?: string; named?: true }): Promise<void> {
+    const user = this.mustUser(uid);
+    if (change.movedTo !== undefined && user.movedTo !== change.movedTo) user.movedTo = change.movedTo;
+    if (change.named && user.named !== true) user.named = true;
+  }
+  async addAdopted(uid: string, from: string): Promise<void> {
+    const user = this.mustUser(uid);
+    const list = user.adopted ?? [];
+    if (list.at(-1) === from) return;
+    user.adopted = [...list.filter((u) => u !== from), from].slice(-ADOPTED_MAX);
+  }
+  async offerHandoff(uid: string, makeWord: () => string, now: number): Promise<string> {
+    const user = this.mustUser(uid);
+    const current = user.handoff ? this.handoffs.get(user.handoff) : undefined;
+    if (user.handoff && current && current.uid === uid && !current.usedBy) return user.handoff;
+    let word = makeWord();
+    while (this.handoffs.has(word)) word = makeWord();
+    this.handoffs.set(word, { uid, createdAt: now });
+    user.handoff = word;
+    return word;
+  }
+  async getHandoff(word: string): Promise<HandoffDoc | null> {
+    const handoff = this.handoffs.get(word);
+    return handoff ? clone(handoff) : null;
+  }
+  async useHandoff(word: string, by: string): Promise<void> {
+    const handoff = this.handoffs.get(word);
+    if (handoff && !handoff.usedBy) handoff.usedBy = by;
+  }
+  async moveTickets(from: string, to: string, now: number): Promise<number> {
+    const target = this.mustUser(to);
+    const source = this.users.get(from);
+    if (!source || source.named) return 0;
+    const count = have(source);
+    if (count <= 0) return 0;
+    source.tickets = 0;
+    target.tickets = have(target) + count;
+    this.ledger.push({ uid: from, count: -count, reason: `adopt:out:${to}`, at: now });
+    this.ledger.push({ uid: to, count, reason: `adopt:in:${from}`, at: now });
+    return count;
+  }
+  async moveItem(from: string, to: string, itemId: string): Promise<boolean> {
+    const item = this.items.get(`${from}/${itemId}`);
+    if (!item) return false;
+    if (!this.items.has(`${to}/${itemId}`)) this.items.set(`${to}/${itemId}`, clone(item));
+    this.items.delete(`${from}/${itemId}`);
+    return true;
   }
 }
 

@@ -7,12 +7,13 @@
  *   users/{uid}/items/{itemId}  自分の服
  *   userCodes/{利用者コード}    利用者コード → uid（重ならないようにするため）
  *   system/usage-{日付}         その日に作った画像の枚数
+ *   handoffs/{合い言葉}         引き継ぎの合い言葉（元の uid・時刻・使った人）
  *
  * アプリからは直接読めない（firestore.rules で全部断る）。ここは、管理者の権限で読み書きする。
  */
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
-import { CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/store.ts';
+import { ADOPTED_MAX, CloudError } from '../../tools/cloud/store.ts';
+import type { CloudStore, HandoffDoc, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/store.ts';
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
 const docId = (id: string) => encodeURIComponent(id).replace(/\./g, '%2E').replace(/^__/, '%5F%5F');
@@ -181,5 +182,92 @@ export class FirestoreStore implements CloudStore {
   }
   async deleteItem(uid: string, itemId: string): Promise<void> {
     await this.item(uid, itemId).delete();
+  }
+
+  // ── 引き継ぎ。どれも、取り引きの中で読み直すので、確定の返事が届かずにもう一度呼ばれても、2 回めは何も変えない ──
+  private handoff(word: string): DocumentReference {
+    return this.db.collection('handoffs').doc(docId(word));
+  }
+  async markUser(uid: string, change: { movedTo?: string; named?: true }): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      const user = snap.data() as UserDoc;
+      const patch: Partial<UserDoc> = {};
+      if (change.movedTo !== undefined && user.movedTo !== change.movedTo) patch.movedTo = change.movedTo;
+      if (change.named && user.named !== true) patch.named = true;
+      if (Object.keys(patch).length > 0) tx.update(ref, patch);
+    });
+  }
+  async addAdopted(uid: string, from: string): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      const list = (snap.data() as UserDoc).adopted;
+      const adopted = Array.isArray(list) ? list.filter((u): u is string => typeof u === 'string') : [];
+      if (adopted.at(-1) === from) return;
+      tx.update(ref, { adopted: [...adopted.filter((u) => u !== from), from].slice(-ADOPTED_MAX) });
+    });
+  }
+  async offerHandoff(uid: string, makeWord: () => string, now: number): Promise<string> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      const current = (snap.data() as UserDoc).handoff;
+      if (typeof current === 'string' && current) {
+        const old = await tx.get(this.handoff(current));
+        const data = old.data() as HandoffDoc | undefined;
+        if (data && data.uid === uid && !data.usedBy) return current;
+      }
+      // 合い言葉は 32 バイトの乱数なので、重なりは考えない（重なったら create が落ちて、取り引きごと失敗する = 上書きはしない）
+      const word = makeWord();
+      const handoff: HandoffDoc = { uid, createdAt: now };
+      tx.create(this.handoff(word), handoff);
+      tx.update(ref, { handoff: word });
+      return word;
+    });
+  }
+  async getHandoff(word: string): Promise<HandoffDoc | null> {
+    const snap = await this.handoff(word).get();
+    return snap.exists ? (snap.data() as HandoffDoc) : null;
+  }
+  async useHandoff(word: string, by: string): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.handoff(word);
+      const snap = await tx.get(ref);
+      if (!snap.exists || (snap.data() as HandoffDoc).usedBy) return;
+      tx.update(ref, { usedBy: by });
+    });
+  }
+  async moveTickets(from: string, to: string, now: number): Promise<number> {
+    return this.db.runTransaction(async (tx) => {
+      const fromRef = this.user(from);
+      const toRef = this.user(to);
+      const [source, target] = [await tx.get(fromRef), await tx.get(toRef)];
+      if (!target.exists) throw new CloudError('refused', '利用者が見つかりません');
+      if (!source.exists || (source.data() as UserDoc).named) return 0;
+      // ここで読み直した残り（前の回が確定していれば 0）
+      const count = have(source.data() as UserDoc);
+      if (count <= 0) return 0;
+      tx.update(fromRef, { tickets: 0 });
+      tx.update(toRef, { tickets: have(target.data() as UserDoc) + count });
+      tx.create(fromRef.collection('ledger').doc(), { count: -count, reason: `adopt:out:${to}`, at: now });
+      tx.create(toRef.collection('ledger').doc(), { count, reason: `adopt:in:${from}`, at: now });
+      return count;
+    });
+  }
+  async moveItem(from: string, to: string, itemId: string): Promise<boolean> {
+    return this.db.runTransaction(async (tx) => {
+      const fromRef = this.item(from, itemId);
+      const toRef = this.item(to, itemId);
+      const [source, target] = [await tx.get(fromRef), await tx.get(toRef)];
+      if (!source.exists) return false;
+      if (!target.exists) tx.set(toRef, source.data() as ItemDoc);
+      tx.delete(fromRef);
+      return true;
+    });
   }
 }

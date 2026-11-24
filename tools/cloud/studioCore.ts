@@ -34,6 +34,7 @@ export interface CoreDeps {
   limits: { perDay: number; perUserDay?: number; maxAttempts: number }; // 1 日の画像の上限（サーバー全体・利用者ごと）、1 品目あたりの生成回数
   now: () => number;
   newId: () => string;
+  newWord: () => string; // 引き継ぎの合い言葉（使い捨て。本物は 32 バイトの乱数）
   // 仕事を、列に入れる（列が、生成を進める関数を呼ぶ）。delaySeconds: 何秒あとに呼ばれるか（既定 0）
   enqueue: (uid: string, jobId: string, delaySeconds?: number) => Promise<void>;
   maxTries?: number; // 1 つの品目に取りかかれる回数（既定 3。超えたら、打ち切って払い戻す）
@@ -71,6 +72,8 @@ export const HUE_MIN = -180;
 export const HUE_MAX = 180;
 const ORDER_MAX = 500;
 const SWEEP_MAX = 200;
+// アカウントが signIn したとき、残りを移す元の数（新しい順）
+const DRAIN_ADOPTED = 5;
 
 // 利用者コード: まぎらわしい文字（I・O・0・1）を除いた 8 文字
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -528,10 +531,16 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
 
 // 列の関数の中身: 生成を進め、終わっていなければ、列に入れ直す
 export async function workJob(deps: CoreDeps, uid: string, jobId: string): Promise<void> {
-  const result = await runJob(deps, uid, jobId);
-  // ほかの呼び出しが進めている最中: そのまま終わると、落ちた直後のやり直しが空振りになり、だれも続きを進めなくなる
-  if (result === 'busy') await deps.enqueue(uid, jobId, BUSY_RETRY_SECONDS);
-  else if (result === 'more') await deps.enqueue(uid, jobId, 0);
+  try {
+    const result = await runJob(deps, uid, jobId);
+    // ほかの呼び出しが進めている最中: そのまま終わると、落ちた直後のやり直しが空振りになり、だれも続きを進めなくなる
+    if (result === 'busy') await deps.enqueue(uid, jobId, BUSY_RETRY_SECONDS);
+    else if (result === 'more') await deps.enqueue(uid, jobId, 0);
+  } finally {
+    // アカウントへ移した（匿名だった）利用者なら、この仕事でできた服・戻ったチケットも移す。
+    // 移すのに失敗しても、仕事は失敗にしない（次の仕事の終わり・アカウントの signIn で、また移す）
+    await drainMoved(deps, uid).catch(() => undefined);
+  }
 }
 
 // 終わっていないのに、だれも作っていない（まだ呼ばれていない・時間切れでやめた・落ちた）か、作成中のまま合図がとぎれている
@@ -650,7 +659,111 @@ export function listItems(deps: CoreDeps, uid: string): Promise<ItemDoc[]> {
 
 // force: 一覧に無くても、置き場の絵を消す（保存の途中で止まった書きかけの片付け）
 export async function deleteItem(deps: CoreDeps, uid: string, itemId: string, force = false): Promise<void> {
-  if (!force && !(await deps.store.getItem(uid, itemId))) return;
+  const item = force ? null : await deps.store.getItem(uid, itemId);
+  if (!force && !item) return;
   await deps.store.deleteItem(uid, itemId);
-  await deps.files.removeAll(itemPrefix(uid, itemId));
+  const own = itemPrefix(uid, itemId);
+  await deps.files.removeAll(own);
+  // 引き継いだ服は、絵が元の利用者の置き場にある（移すときに、絵は動かさない）。服が持っているパスのフォルダも消す。
+  // ほかの服の絵を消さないように、`users/{だれか}/items/{この服の ID}/` の形のものだけ
+  const folders = new Set<string>();
+  for (const path of Object.values(item?.paths ?? {})) {
+    const m = /^users\/[^/]+\/items\/([^/]+)\//.exec(path);
+    if (m && m[1] === safe(itemId) && m[0] !== own) folders.add(m[0]);
+  }
+  for (const folder of folders) await deps.files.removeAll(folder);
+}
+
+// ── 引き継ぎ（2 台めの端末の、匿名の利用者のチケットと服を、アカウントへ移す。設計書 8.5）──
+// どれも、何度呼ばれても、2 重に足さない（移すのは、置き場の 1 つの取り引きの中で読み直してから）
+
+// 匿名の利用者に、引き継ぎの合い言葉を渡す（まだ使われていなければ、前と同じもの）
+export async function offerHandoff(deps: CoreDeps, uid: string): Promise<string> {
+  await signIn(deps, uid);
+  return deps.store.offerHandoff(uid, deps.newWord, deps.now());
+}
+
+export type AdoptStatus = 'done' | 'used' | 'unknown' | 'refused';
+/**
+ * 合い言葉を出した（匿名でない）利用者 toUid へ、合い言葉の元の利用者のチケットと服を移す。
+ * 印（movedTo・adopted）を先に書いてから移すので、途中で止まっても、あとの drain（仕事の終わり・signIn・もう一度の adopt）が続きを移す。
+ */
+export async function adoptUser(deps: CoreDeps, toUid: string, word: string): Promise<{ status: AdoptStatus; tickets: number; items: number }> {
+  const none = { tickets: 0, items: 0 };
+  const handoff = await deps.store.getHandoff(word);
+  if (!handoff) return { status: 'unknown', ...none };
+  if (handoff.usedBy && handoff.usedBy !== toUid) return { status: 'used', ...none };
+  const from = handoff.uid;
+  if (from === toUid) return { status: 'done', ...none };
+  const source = await deps.store.getUser(from);
+  if (!source) return { status: 'unknown', ...none };
+  // 元が、あとから名前のある利用者になった（1 台めとして Google と結び付けた）: そのアカウントを、ほかへ移さない
+  if (source.named) return { status: 'refused', ...none };
+  await deps.store.markUser(from, { movedTo: toUid });
+  await signIn(deps, toUid);
+  await deps.store.addAdopted(toUid, from);
+  const moved = await drain(deps, from, toUid);
+  await deps.store.useHandoff(word, toUid);
+  return { status: 'done', ...moved };
+}
+
+// 服の ID（`my:{仕事}-{番号}-{回}`、前の版は `my:{仕事}-{番号}`）から、考えられる（仕事・番号）の組
+function jobRefs(itemId: string): { jobId: string; index: number }[] {
+  if (!itemId.startsWith('my:')) return [];
+  const parts = itemId.slice(3).split('-');
+  const refs: { jobId: string; index: number }[] = [];
+  for (let k = 1; k < parts.length; k++) {
+    const rest = parts.slice(k);
+    if (rest.length > 2 || !rest.every((p) => /^\d+$/.test(p))) continue;
+    refs.push({ jobId: parts.slice(0, k).join('-'), index: Number(rest[0]) });
+  }
+  return refs;
+}
+
+// その服を、いま移してよいか。
+// - 仕事が終わっていない: 移さない（進めている呼び出しが、やり直しで、その服と絵を消すことがある。終わったら、workJob の終わりが移す）
+// - 仕事は終わったが、その品目の「できた服」でない（前の回の残り物・できなかった品目の残り物）: 移さない
+//   （片付け = reap が、元の置き場の絵を消すので、移すと、絵の無い服になる。チケットも戻っている）
+// 「終わった」は、もとに戻らないので、読んだあとで変わっても、移してよいかは変わらない
+async function movable(deps: CoreDeps, from: string, item: ItemDoc): Promise<boolean> {
+  for (const ref of jobRefs(item.id)) {
+    const job = await deps.store.getJob(from, ref.jobId);
+    if (!job) continue;
+    if (!job.done) return false;
+    const c = job.candidates.find((x) => x.index === ref.index);
+    if (!c) return true;
+    // 前の版の「使う」は、itemId を書いていない
+    return c.status === 'kept' && (c.itemId === undefined || c.itemId === item.id);
+  }
+  return true;
+}
+
+// from のチケットと服を、to へ移す。何度呼ばれてもよい（残りがあれば移る。無ければ何も起きない）。絵のファイルは、動かさない
+export async function drain(deps: CoreDeps, from: string, to: string): Promise<{ tickets: number; items: number }> {
+  const source = await deps.store.getUser(from);
+  if (!source || source.named) return { tickets: 0, items: 0 };
+  const tickets = await deps.store.moveTickets(from, to, deps.now());
+  let items = 0;
+  for (const item of await deps.store.listItems(from)) {
+    if (!(await movable(deps, from, item))) continue;
+    if (await deps.store.moveItem(from, to, item.id)) items++;
+  }
+  return { tickets, items };
+}
+
+// 移した印（movedTo）のある利用者なら、残りを移す
+async function drainMoved(deps: CoreDeps, uid: string): Promise<void> {
+  const user = await deps.store.getUser(uid);
+  if (user?.movedTo) await drain(deps, uid, user.movedTo);
+}
+
+// アカウントが、つないだとき（signIn）: もらった元（新しい順に 5 人まで）に残りがあれば移す（払い戻し・作者が配った分）。
+// 元が、そのあとほかのアカウントへ移っていたら、取らない
+export async function drainAdopted(deps: CoreDeps, uid: string): Promise<void> {
+  const user = await deps.store.getUser(uid);
+  for (const from of (user?.adopted ?? []).slice(-DRAIN_ADOPTED).reverse()) {
+    const source = await deps.store.getUser(from).catch(() => null);
+    if (source?.movedTo !== uid) continue;
+    await drain(deps, from, uid).catch(() => undefined);
+  }
 }

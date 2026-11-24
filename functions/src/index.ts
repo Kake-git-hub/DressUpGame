@@ -16,7 +16,7 @@
  *   imagesPerUserPerDay 利用者 1 人が、1 日に作る画像の上限（数。既定 30。管理者にはかからない）
  * 1 日の区切りは、世界標準時の 0 時（日本の朝 9 時）。
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getFunctions } from 'firebase-admin/functions';
@@ -167,19 +167,22 @@ async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
     limits: { perDay, perUserDay, maxAttempts: MAX_ATTEMPTS },
     now: () => Date.now(),
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
+    newWord: () => randomBytes(32).toString('hex'),
     enqueue,
     ...(runBudgetMs !== undefined ? { runBudgetMs } : {}),
   };
 }
 
-// 利用者に伝える失敗（CloudError）は、理由の印（code）を付けて返す。それ以外は、記録して、くわしい中身は返さない
-async function answer<T>(name: string, run: () => Promise<T>): Promise<T> {
+// 利用者に伝える失敗（CloudError）は、理由の印（code）を付けて返す。それ以外は、記録して、くわしい中身は返さない。
+// quiet: 失敗の中身を記録しない（引き継ぎの合い言葉は、文書の名前 handoffs/{合い言葉} に使うので、Firestore の失敗の文に入ることがある）
+async function answer<T>(name: string, run: () => Promise<T>, quiet = false): Promise<T> {
   try {
     return await run();
   } catch (error) {
     if (error instanceof HttpsError) throw error;
     if (error instanceof CloudError) throw new HttpsError('failed-precondition', error.message, { code: error.code });
-    logger.error(`${name} で失敗しました`, error);
+    if (quiet) logger.error(`${name} で失敗しました`, { code: String((error as { code?: unknown } | null)?.code ?? (error as Error | null)?.name ?? 'unknown') });
+    else logger.error(`${name} で失敗しました`, error);
     throw new HttpsError('internal', 'サーバーで問題が起きました。少し待ってから、もう一度ためしてください', { code: 'unknown' });
   }
 }
@@ -189,8 +192,15 @@ function uidOf(request: { auth?: { uid: string } | null }): string {
   return uid;
 }
 
+// 呼んだ人が、匿名のログインか（Firebase の証明の sign_in_provider）。分からなければ、匿名として扱う（引き継ぎで、もらう側にならない）
+function callerOf(request: { auth?: { token?: { firebase?: { sign_in_provider?: unknown } } } | null }): { anonymous: boolean } {
+  const provider = request.auth?.token?.firebase?.sign_in_provider;
+  return { anonymous: typeof provider !== 'string' || provider === 'anonymous' };
+}
+const opOf = (data: unknown) => (typeof data === 'object' && data !== null ? (data as { op?: unknown }).op : undefined);
+
 export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY], memory: '1GiB', timeoutSeconds: 180, concurrency: 8, maxInstances: 5 }, (request) =>
-  answer('studio', async () => handleCall(await coreDeps(), uidOf(request), request.data)),
+  answer('studio', async () => handleCall(await coreDeps(), uidOf(request), request.data, callerOf(request)), ['offer', 'adopt'].includes(String(opOf(request.data)))),
 );
 
 export const studioWork = onTaskDispatched(
