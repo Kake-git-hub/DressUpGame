@@ -7,7 +7,9 @@ const m = vi.hoisted(() => {
   const auth = { currentUser: null as null | { uid: string; providerData: { providerId: string; email: string | null }[] }, authStateReady: vi.fn(async () => undefined) };
   const credentialCalls: unknown[] = [];
   const customParams: unknown[] = [];
+  const credentialFromError = vi.fn((error: unknown): unknown => ({ fake: 'stashed', from: error }));
   return {
+    credentialFromError,
     auth,
     credentialCalls,
     customParams,
@@ -44,6 +46,9 @@ vi.mock('firebase/auth', () => ({
     constructor(providerId: string) {
       this.providerId = providerId;
     }
+    static credentialFromError(error: unknown) {
+      return m.credentialFromError(error);
+    }
     credential(input: unknown) {
       m.credentialCalls.push([this.providerId, input]);
       return { fake: 'credential', input };
@@ -60,6 +65,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.credentialCalls.length = 0;
   m.customParams.length = 0;
+  m.credentialFromError.mockImplementation((error: unknown) => ({ fake: 'stashed', from: error }));
   m.auth.currentUser = { uid: 'u1', providerData: [] };
 });
 
@@ -123,6 +129,82 @@ describe('口の本物', () => {
     await expect(port.withToken('link', 't3', 'n3')).rejects.toEqual({ code: 'auth/no-current-user' });
     expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
     expect(m.linkWithCredential).toHaveBeenCalledTimes(1);
+  });
+  describe('signInWithStashed（「もう使われている」と断られたときの証明で入る）', () => {
+    const taken = { code: 'auth/credential-already-in-use', customData: { email: 'a@example.com' } };
+
+    it('結び付けが断られていなければ、false。signInWithCredential は呼ばない', async () => {
+      const port = await portOf();
+      expect(await port.signInWithStashed()).toBe(false);
+      expect(m.signInWithCredential).not.toHaveBeenCalled();
+    });
+    it('popup(link) が credential-already-in-use で落ちたあと: 落とし方はそのまま、証明で入る。2 回めは false', async () => {
+      const port = await portOf();
+      m.linkWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('link')).rejects.toBe(taken);
+      expect(m.credentialFromError).toHaveBeenCalledWith(taken);
+      expect(await port.signInWithStashed()).toBe(true);
+      expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
+      expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'stashed', from: taken }]);
+      expect(await port.signInWithStashed()).toBe(false);
+      expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
+    });
+    it('withToken(link) が credential-already-in-use で落ちたあとも、同じ', async () => {
+      const port = await portOf();
+      m.linkWithCredential.mockRejectedValueOnce(taken);
+      await expect(port.withToken('link', 't', 'n')).rejects.toBe(taken);
+      expect(await port.signInWithStashed()).toBe(true);
+      expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
+      expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'stashed', from: taken }]);
+    });
+    it('ほかの失敗では、覚えない', async () => {
+      const port = await portOf();
+      m.linkWithPopup.mockRejectedValueOnce({ code: 'auth/popup-blocked' });
+      await expect(port.popup('link')).rejects.toMatchObject({ code: 'auth/popup-blocked' });
+      m.linkWithCredential.mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+      await expect(port.withToken('link', 't', 'n')).rejects.toMatchObject({ code: 'auth/network-request-failed' });
+      expect(m.credentialFromError).not.toHaveBeenCalled();
+      expect(await port.signInWithStashed()).toBe(false);
+    });
+    it('signin の失敗では、覚えない（結び付けの断りだけ）', async () => {
+      const port = await portOf();
+      m.signInWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('signin')).rejects.toBe(taken);
+      expect(m.credentialFromError).not.toHaveBeenCalled();
+      expect(await port.signInWithStashed()).toBe(false);
+    });
+    it('証明が返らなければ（credentialFromError が null）、false', async () => {
+      const port = await portOf();
+      m.credentialFromError.mockReturnValueOnce(null);
+      m.linkWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('link')).rejects.toBe(taken);
+      expect(await port.signInWithStashed()).toBe(false);
+      expect(m.signInWithCredential).not.toHaveBeenCalled();
+    });
+    it('証明を取る処理が投げても、元の失敗がそのまま返る', async () => {
+      const port = await portOf();
+      m.credentialFromError.mockImplementationOnce(() => {
+        throw new Error('boom');
+      });
+      m.linkWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('link')).rejects.toBe(taken);
+      expect(await port.signInWithStashed()).toBe(false);
+    });
+    it('入れなければ（signInWithCredential が失敗）、投げる。覚えは捨てる', async () => {
+      const port = await portOf();
+      m.linkWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('link')).rejects.toBe(taken);
+      m.signInWithCredential.mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+      await expect(port.signInWithStashed()).rejects.toMatchObject({ code: 'auth/network-request-failed' });
+      expect(await port.signInWithStashed()).toBe(false);
+    });
+    it('新しく結び付けを始めたら、前の覚えは捨てる（古い証明で入らない）', async () => {
+      const port = await portOf();
+      m.linkWithPopup.mockRejectedValueOnce(taken);
+      await expect(port.popup('link')).rejects.toBe(taken);
+      await port.popup('link'); // 今度は成功
+      expect(await port.signInWithStashed()).toBe(false);
+    });
   });
   it('current は、providerData の Google を読む', async () => {
     const port = await portOf();

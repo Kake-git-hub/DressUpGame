@@ -20,6 +20,7 @@ function fakeServer(api: number | null = 2) {
   const jobs = new Map<string, WireJob>();
   const calls: Record<string, unknown>[] = [];
   const state = { fail: null as BackendError | null };
+  const adopt = { status: 'done' as 'done' | 'wait' | 'used' | 'unknown' | 'refused', tickets: 2, fail: null as BackendError | null };
   const item = (id: string): WireItem => ({
     id,
     dollId: 'doll',
@@ -64,6 +65,12 @@ function fakeServer(api: number | null = 2) {
             return { item: { ...item(String(data.id)), hue: Number(data.hue ?? 30) } };
           case 'orderItems':
             return { items: (data.ids as string[]).map((id, i) => ({ ...item(id), order: 100 - i })) };
+          case 'offer':
+            return { word: 'word-secret-1' };
+          case 'adopt':
+            if (adopt.fail) throw adopt.fail;
+            if (adopt.status === 'done') user.tickets += adopt.tickets;
+            return { status: adopt.status, tickets: adopt.tickets, items: 1, ...(adopt.status === 'done' ? { user: { ...user } } : {}) };
           case 'deleteItem':
             items.splice(0, items.length, ...items.filter((i) => i.id !== data.id));
             return { ok: true };
@@ -82,7 +89,7 @@ function fakeServer(api: number | null = 2) {
     items.push(item(`my:${jobId}-0-1`));
   };
   const count = (op: string) => calls.filter((c) => c.op === op).length;
-  return { transport, user, jobs, items, calls, state, finish, count, item };
+  return { transport, user, jobs, items, calls, state, adopt, finish, count, item };
 }
 
 // jsdom の FileReader はタイマーで動くので、本物のタイマーに戻してから読む
@@ -226,5 +233,71 @@ describe('本物の裏側', () => {
     expect(error).toBeInstanceOf(BackendError);
     expect((error as BackendError).code).toBe('no-tickets');
     expect((error as BackendError).message).toMatch(/のこり 0 枚/);
+  });
+
+  describe('引き継ぎ（合い言葉）', () => {
+    it('offerHandoff: api が 3 なら、op: offer を呼んで、合い言葉を返す。まだ signIn していなければ、先に signIn する', async () => {
+      const server = fakeServer(3);
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.offerHandoff()).toBe('word-secret-1');
+      expect(server.calls.map((c) => c.op)).toEqual(['signIn', 'offer']);
+      expect(server.calls[1]).toEqual({ op: 'offer' });
+      // 2 回めは、signIn を繰り返さない（api を覚えている）
+      await backend.offerHandoff();
+      expect(server.count('signIn')).toBe(1);
+      expect(server.count('offer')).toBe(2);
+    });
+    it('offerHandoff: signIn のあとなら、覚えた api を使う（signIn を重ねない）', async () => {
+      const server = fakeServer(3);
+      const backend = createRemoteBackend(server.transport);
+      await backend.signIn();
+      await backend.offerHandoff();
+      expect(server.count('signIn')).toBe(1);
+    });
+    it('offerHandoff: api が 2 のサーバーでは、offer を呼ばずに old-server', async () => {
+      const server = fakeServer(2);
+      const backend = createRemoteBackend(server.transport);
+      const error = await backend.offerHandoff().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BackendError);
+      expect((error as BackendError).code).toBe('old-server');
+      expect((error as BackendError).message).toMatch(/サーバーが古い版です/);
+      expect(server.count('offer')).toBe(0);
+    });
+    it('offerHandoff: 返事に合い言葉が無ければ、unknown で失敗する', async () => {
+      const server = fakeServer(3);
+      const call = server.transport.call.bind(server.transport);
+      server.transport.call = (async (data: Record<string, unknown>) => (data.op === 'offer' ? ({} as never) : call(data))) as typeof server.transport.call;
+      const error = await createRemoteBackend(server.transport).offerHandoff().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BackendError);
+      expect((error as BackendError).code).toBe('unknown');
+    });
+    it('adopt: op: adopt と合い言葉を渡し、返事の状態と数を返す。返事の user は、いつもの took（知らせる）', async () => {
+      const server = fakeServer(3);
+      const backend = createRemoteBackend(server.transport);
+      const seen: number[] = [];
+      backend.onUser((u) => seen.push(u.tickets));
+      expect(await backend.adopt('w1')).toEqual({ status: 'done', tickets: 2, items: 1 });
+      expect(server.calls.at(-1)).toEqual({ op: 'adopt', word: 'w1' });
+      expect(seen).toEqual([5]);
+      expect(await backend.signIn()).toMatchObject({ tickets: 5 });
+    });
+    it('adopt: user の無い返事（wait・unknown など）でも、状態を返す。利用者は変えない', async () => {
+      const server = fakeServer(3);
+      const backend = createRemoteBackend(server.transport);
+      await backend.signIn();
+      const seen: number[] = [];
+      backend.onUser((u) => seen.push(u.tickets));
+      for (const status of ['wait', 'used', 'unknown', 'refused'] as const) {
+        server.adopt.status = status;
+        expect(await backend.adopt('w1')).toEqual({ status, tickets: 2, items: 1 });
+      }
+      expect(seen).toEqual([]);
+    });
+    it('adopt: サーバーの失敗は、そのまま伝える', async () => {
+      const server = fakeServer(3);
+      server.adopt.fail = new BackendError('offline', 'つながりません');
+      const error = await createRemoteBackend(server.transport).adopt('w1').catch((e: unknown) => e);
+      expect((error as BackendError).code).toBe('offline');
+    });
   });
 });

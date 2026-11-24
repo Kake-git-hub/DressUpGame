@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeAuthPort, FAKE_EMAIL, fakeGoTo } from '../cloud/fakeAuth';
-import { buildAuthUrl, nonceOf, parseReturn } from '../cloud/googleRedirect';
+import { buildAuthUrl, nonceOf, parseReturn, subOf } from '../cloud/googleRedirect';
 
 const world = (google = false) => ({ link: vi.fn(), signin: vi.fn(), signOut: vi.fn(), isGoogle: vi.fn(() => google) });
 
@@ -53,6 +53,20 @@ describe('createFakeAuthPort', () => {
   });
 });
 
+describe('signInWithStashed（断りと一緒に返る証明で入る、のまね）', () => {
+  it('既定: 世界の「入る」をして true', async () => {
+    const w = world();
+    expect(await createFakeAuthPort(w, {}).signInWithStashed()).toBe(true);
+    expect(w.signin).toHaveBeenCalledTimes(1);
+  });
+  it('stashed が false: 何もせず false（証明が返らなかったまね）', async () => {
+    const w = world();
+    expect(await createFakeAuthPort(w, { stashed: false }).signInWithStashed()).toBe(false);
+    expect(w.signin).not.toHaveBeenCalled();
+    expect(w.link).not.toHaveBeenCalled();
+  });
+});
+
 describe('fakeGoTo（にせの「画面を移る」）', () => {
   const url = buildAuthUrl({ clientId: 'fake-client', redirectUri: 'http://localhost/app/', state: 'st1', nonce: 'nn1' });
   const win = () => {
@@ -68,6 +82,27 @@ describe('fakeGoTo（にせの「画面を移る」）', () => {
     expect(nonceOf(back!.idToken!)).toBe('nn1');
     expect(w.location.reload).toHaveBeenCalledTimes(1);
     expect(w.location.search).toBe('?studio=fake&home=0');
+  });
+  it('にせの証明には、sub（fake-sub）も入る', () => {
+    const w = win();
+    fakeGoTo(url, w, {});
+    const token = parseReturn(w.location.hash)!.idToken!;
+    expect(subOf(token)).toBe('fake-sub');
+    expect(nonceOf(token)).toBe('nn1');
+  });
+  it('prompt=none で silentFail: interaction_required の戻り。silentFail でも、選ぶ画面つきなら、ふつうに戻る', () => {
+    const silentUrl = buildAuthUrl({ clientId: 'fake-client', redirectUri: 'http://localhost/app/', state: 'st2', nonce: 'nn2', prompt: 'none', loginHint: 'fake-sub' });
+    const failing = win();
+    fakeGoTo(silentUrl, failing, { silentFail: true });
+    expect(parseReturn(failing.location.hash)).toEqual({ state: 'st2', error: 'interaction_required' });
+    expect(failing.location.reload).toHaveBeenCalledTimes(1);
+    const working = win();
+    fakeGoTo(silentUrl, working, {});
+    expect(parseReturn(working.location.hash)).toMatchObject({ state: 'st2' });
+    expect(parseReturn(working.location.hash)!.idToken).toBeDefined();
+    const chooser = win();
+    fakeGoTo(url, chooser, { silentFail: true });
+    expect(parseReturn(chooser.location.hash)!.idToken).toBeDefined();
   });
   it('access_denied: 戻りは error になる', () => {
     const w = win();

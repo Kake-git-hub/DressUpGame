@@ -10,7 +10,7 @@ import { browserAccountEnv, createAccount } from './account';
 import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
 import type { FakeWorld } from './fakeAuth';
-import type { MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
+import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
 
 export interface FakeOptions {
   tickets?: number; // 最初のチケット（保存されている利用者がいれば、そちらが優先）
@@ -22,6 +22,10 @@ export interface FakeOptions {
   oldServer?: boolean; // サーバーが古い版のときの動き
   loginFail?: string; // ログインを、この auth/… の語で失敗させる（方法 2 では、access_denied が Google の「キャンセル」のまね）
   googleTaken?: boolean; // 「結び付ける」を、いつも「もう使われている」にする
+  noAdopt?: boolean; // 合わせる（offerHandoff）が、サーバーが古い版のときの動き（old-server）
+  adoptFail?: number; // adopt を、この回数だけ、つながらない（offline）で失敗させる（残りの数は、端末に覚える）
+  stashed?: boolean; // false なら、「もう使われている」と断られたときの証明が、返らなかったことにする
+  silentFail?: boolean; // 画面なしの行き来（prompt=none）を、Google が interaction_required で断ったことにする
   // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角）。テストでは差し替える
   image?: (color: string) => Promise<Blob>;
 }
@@ -29,6 +33,8 @@ export interface FakeOptions {
 const KEY = 'dressup_fake_backend';
 const ACCOUNT_KEY = 'dressup_fake_account'; // { google: boolean } いまの利用者が、Google に結び付いているか
 const GOOGLE_KEY = 'dressup_fake_google'; // ログアウトして置いてある、Google のアカウントの世界（State）
+const HANDOFF_KEY = 'dressup_fake_handoff'; // { word, world } 引き継ぎの合い言葉と、そのときの匿名の世界の写し（State）
+const ADOPT_FAIL_KEY = 'dressup_fake_adopt_fail'; // adopt を、あと何回、失敗させるか
 const CANVAS = 1024;
 const SIZE = { w: 240, h: 200 };
 const COLORS = ['#e040a0', '#40a0e0', '#40c080', '#e0a040', '#8060e0', '#e06040'];
@@ -70,6 +76,7 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const colorOf = (index: number) => COLORS[index % COLORS.length];
 // 品目ごとに、ドールのキャンバスの上の位置を少しずつ変える（重なって見えなくならないように）
 const boxOf = (index: number) => ({ x: (CANVAS - SIZE.w) / 2, y: 300 + ((index * 150) % 450), w: SIZE.w, h: SIZE.h });
+const newWord = () => Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
 const newCode = () => Array.from({ length: 8 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
 const publicJob = (job: FakeJob): StudioJob => {
   const { dueAt: _dueAt, ...rest } = clone(job);
@@ -202,6 +209,16 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     for (const job of state.jobs) schedule(job.id);
     notifyUser();
   };
+  const readHandoff = (): { word: string; world: State } | null => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(HANDOFF_KEY) ?? 'null') as { word?: unknown; world?: unknown } | null;
+      const copy = parseState(JSON.stringify(saved?.world ?? null));
+      if (saved && typeof saved.word === 'string' && copy) return { word: saved.word, world: copy };
+    } catch {
+      // 読めなければ、無いものとして扱う
+    }
+    return null;
+  };
   const world: FakeWorld = {
     link() {
       // 置いてある Google の世界がある = その Google は、もう使われている
@@ -217,6 +234,9 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
           // 消せなくても進む
         }
         adopt(parked);
+      } else if (readHandoff()) {
+        // 合い言葉の写しがあるのに、置いてある世界が無い = 空のアカウント。写しの世界は、adopt が持ってくる
+        adopt({ user: { userCode: newCode(), tickets: 0, admin: false }, jobs: [], items: [], seen: [], counter: 0 });
       }
       setGoogle(true);
     },
@@ -233,8 +253,8 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     isGoogle: () => google,
   };
   const account = createAccount(
-    async () => createFakeAuthPort(world, { loginFail: options.loginFail, googleTaken: options.googleTaken }),
-    browserAccountEnv((url) => fakeGoTo(url, window, { loginFail: options.loginFail })),
+    async () => createFakeAuthPort(world, { loginFail: options.loginFail, googleTaken: options.googleTaken, stashed: options.stashed }),
+    browserAccountEnv((url) => fakeGoTo(url, window, { loginFail: options.loginFail, silentFail: options.silentFail })),
   );
 
   const toInfo = (saved: SavedItem): MyItemInfo => ({
@@ -352,6 +372,46 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       online();
       state.items = state.items.filter((i) => i.id !== id);
       save();
+    },
+    async offerHandoff() {
+      online();
+      if (options.noAdopt) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      // 使っていない合い言葉があれば、同じものを返す（写しは、いまの世界に取り替える）
+      const word = readHandoff()?.word ?? newWord();
+      try {
+        localStorage.setItem(HANDOFF_KEY, JSON.stringify({ word, world: state }));
+      } catch {
+        throw new BackendError('unknown', '合い言葉を置けませんでした');
+      }
+      return word;
+    },
+    async adopt(word): Promise<AdoptAnswer> {
+      online();
+      if (!google) return { status: 'wait', tickets: 0, items: 0 };
+      const handoff = readHandoff();
+      if (!handoff || handoff.word !== word) return { status: 'unknown', tickets: 0, items: 0 };
+      // つながらない失敗のまね（残りの数は、読み込み直しても続く）
+      const left = Number(localStorage.getItem(ADOPT_FAIL_KEY) ?? options.adoptFail ?? 0);
+      if (left > 0) {
+        try {
+          localStorage.setItem(ADOPT_FAIL_KEY, String(left - 1));
+        } catch {
+          // 数が置けなくても、この 1 回は失敗にする
+        }
+        throw new BackendError('offline', 'インターネットにつながっていません');
+      }
+      const have = new Set(state.items.map((i) => i.id));
+      const added = handoff.world.items.filter((i) => !have.has(i.id));
+      const tickets = handoff.world.user.tickets;
+      state = { ...state, items: [...state.items, ...added] };
+      try {
+        localStorage.removeItem(HANDOFF_KEY);
+      } catch {
+        // 消せなくても進む
+      }
+      setTickets(state.user.tickets + tickets);
+      save();
+      return { status: 'done', tickets, items: added.length };
     },
   };
 }

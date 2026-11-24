@@ -288,4 +288,116 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(await backend.listMyItems()).toHaveLength(1);
     });
   });
+
+  describe('引き継ぎ（合い言葉・移す）', () => {
+    const ready = async (options: Parameters<typeof make>[0] = {}) => {
+      const backend = make(options);
+      await backend.account.prepare();
+      return backend;
+    };
+    const withItem = async (backend: ReturnType<typeof make>) => {
+      await backend.startJob(top);
+      await vi.advanceTimersByTimeAsync(150);
+    };
+    const handoffOf = () => JSON.parse(localStorage.getItem('dressup_fake_handoff') ?? 'null') as { word: string; world: { user: { tickets: number }; items: { id: string }[] } } | null;
+
+    it('合い言葉 → 入る（空の新しい世界の Google）→ adopt で、チケットと服が足される', async () => {
+      const backend = await ready({ tickets: 5 });
+      await withItem(backend);
+      const before = await backend.signIn(); // チケット 4・服 1
+      const word = await backend.offerHandoff();
+      expect(word).toMatch(/\S{8,}/);
+      expect(handoffOf()?.word).toBe(word);
+      expect(await backend.account.signInWithStashed()).toBe(true);
+      const empty = await backend.signIn();
+      expect(empty).toMatchObject({ tickets: 0, admin: false });
+      expect(empty.userCode).not.toBe(before.userCode);
+      expect(await backend.listMyItems()).toEqual([]);
+      expect(await backend.account.prepare()).toMatchObject({ kind: 'google' });
+      const seen: number[] = [];
+      backend.onUser((u) => seen.push(u.tickets));
+      expect(await backend.adopt(word)).toEqual({ status: 'done', tickets: 4, items: 1 });
+      expect((await backend.signIn()).tickets).toBe(4);
+      expect(await backend.listMyItems()).toHaveLength(1);
+      expect(seen.at(-1)).toBe(4);
+      expect(handoffOf()).toBeNull();
+      // 読み込み直しても、足されたまま
+      expect((await make().signIn()).tickets).toBe(4);
+    });
+    it('もう一度 adopt → unknown（もう無い）。数は変わらない', async () => {
+      const backend = await ready({ tickets: 5 });
+      await withItem(backend);
+      const word = await backend.offerHandoff();
+      await backend.account.signInWithStashed();
+      await backend.adopt(word);
+      expect(await backend.adopt(word)).toEqual({ status: 'unknown', tickets: 0, items: 0 });
+      expect((await backend.signIn()).tickets).toBe(4);
+      expect(await backend.listMyItems()).toHaveLength(1);
+    });
+    it('合わない合い言葉は unknown。写しは消えない', async () => {
+      const backend = await ready({ tickets: 5 });
+      const word = await backend.offerHandoff();
+      await backend.account.signInWithStashed();
+      expect(await backend.adopt('not-the-word')).toEqual({ status: 'unknown', tickets: 0, items: 0 });
+      expect(handoffOf()?.word).toBe(word);
+      expect((await backend.signIn()).tickets).toBe(0);
+    });
+    it('合い言葉を、出す前に offer していなければ unknown', async () => {
+      const backend = await ready({ tickets: 5 });
+      await backend.account.loginWithPopup('link');
+      expect(await backend.adopt('anything')).toEqual({ status: 'unknown', tickets: 0, items: 0 });
+    });
+    it('Google でない（匿名の）利用者が adopt すると wait。何も変わらない', async () => {
+      const backend = await ready({ tickets: 5 });
+      const word = await backend.offerHandoff();
+      expect(await backend.adopt(word)).toEqual({ status: 'wait', tickets: 0, items: 0 });
+      expect(handoffOf()?.word).toBe(word);
+      expect((await backend.signIn()).tickets).toBe(5);
+    });
+    it('offerHandoff: 使っていない合い言葉があれば、同じものを返す（写しは最新に）', async () => {
+      const backend = await ready({ tickets: 5 });
+      const first = await backend.offerHandoff();
+      await withItem(backend);
+      expect(await backend.offerHandoff()).toBe(first);
+      expect(handoffOf()?.world.items).toHaveLength(1);
+    });
+    it('noAdopt: offerHandoff は old-server', async () => {
+      const backend = await ready({ noAdopt: true });
+      expect(codeOf(await backend.offerHandoff().catch((e) => e))).toBe('old-server');
+      expect(handoffOf()).toBeNull();
+    });
+    it('置いてある Google の世界があれば、入る → その世界に。adopt で、足される（同じ ID の服は足さない）', async () => {
+      const backend = await ready({ tickets: 5 });
+      await withItem(backend);
+      await backend.account.loginWithPopup('link');
+      await backend.account.logout(); // 世界 B（チケット 4・服 1）を置いて、空の世界へ
+      const word = await backend.offerHandoff();
+      // 空の世界の写しに、B と同じ ID の服と、チケット 2 があったことにする
+      const handoff = handoffOf()!;
+      const parked = JSON.parse(localStorage.getItem('dressup_fake_google')!) as { items: { id: string }[] };
+      localStorage.setItem('dressup_fake_handoff', JSON.stringify({ ...handoff, world: { ...handoff.world, user: { ...handoff.world.user, tickets: 2 }, items: parked.items } }));
+      expect(await backend.account.signInWithStashed()).toBe(true);
+      expect((await backend.signIn()).tickets).toBe(4);
+      expect(await backend.adopt(word)).toEqual({ status: 'done', tickets: 2, items: 0 });
+      expect((await backend.signIn()).tickets).toBe(6);
+      expect(await backend.listMyItems()).toHaveLength(1);
+    });
+    it('adoptFail: 数が残っている間は offline で落ちる（数は端末に覚える）。落ちた間は、合い言葉も世界も、そのまま', async () => {
+      const backend = await ready({ tickets: 5, adoptFail: 1 });
+      const word = await backend.offerHandoff();
+      await backend.account.signInWithStashed();
+      expect(codeOf(await backend.adopt(word).catch((e) => e))).toBe('offline');
+      expect(handoffOf()?.word).toBe(word);
+      expect((await backend.signIn()).tickets).toBe(0);
+      expect(await backend.adopt(word)).toEqual({ status: 'done', tickets: 5, items: 0 });
+    });
+    it('adoptFail の数は、読み込み直しても、つづき（もう一度、同じ数だけ落ちない）', async () => {
+      const backend = await ready({ tickets: 5, adoptFail: 1 });
+      const word = await backend.offerHandoff();
+      await backend.account.signInWithStashed();
+      await backend.adopt(word).catch(() => undefined);
+      const reopened = make({ adoptFail: 1 });
+      expect(await reopened.adopt(word)).toMatchObject({ status: 'done' });
+    });
+  });
 });

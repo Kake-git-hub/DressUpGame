@@ -8,8 +8,8 @@
  */
 import { diag } from '../services/diag';
 import type { StudioBackend } from './backend';
-import { buildAuthUrl, clearReturn, hasReturn, randomToken, readReturn, savePending, sha256Hex } from './googleRedirect';
-import type { LoginIntent } from './googleRedirect';
+import { buildAuthUrl, clearReturn, hasReturn, randomToken, readReturn, savePending, sha256Hex, subOf } from './googleRedirect';
+import type { LoginIntent, LoginStep } from './googleRedirect';
 import { redirectUriOf } from './googleRedirect';
 import type { Library } from './library';
 import { ACKED_KEY, NEW_KEY } from './session';
@@ -21,6 +21,8 @@ export type LoginOutcome = 'linked' | 'switched' | 'taken' | 'cancelled' | 'not-
 export interface LoginResult {
   outcome: LoginOutcome;
   code?: string; // auth/… の語だけ（きろく用）
+  step?: LoginStep; // 画面を移る方法の戻りのとき、どの行き来の戻りか（無ければ、最初の行き来）
+  hint?: string; // 結び付けが taken だったときだけ、証明の sub（次の行き来の login_hint 用。きろくには出さない）
 }
 
 export const LOGIN_MESSAGES: Record<LoginOutcome, string> = {
@@ -38,6 +40,8 @@ export interface AuthPort {
   current(): AccountInfo;
   popup(intent: LoginIntent): Promise<void>; // 呼ばれた、その場で窓を開く（中で、先に何も待たない）
   withToken(intent: LoginIntent, idToken: string, rawNonce: string): Promise<void>;
+  // 「もう使われている」と断られたときに Firebase が返した証明で、そのアカウントに入る。証明が無ければ false。入れなければ、投げる
+  signInWithStashed(): Promise<boolean>;
   signOut(): Promise<void>;
   clientId(): Promise<string | null>; // 方法 2 の client_id。分からなければ null
 }
@@ -46,7 +50,10 @@ export interface StudioAccount {
   prepare(): Promise<AccountInfo>; // 口を用意する（Firebase の読み込み・いまの利用者）。失敗は BackendError のまま投げる
   canRedirect(): Promise<boolean>; // 方法 2 の client_id が分かった
   loginWithPopup(intent: LoginIntent): Promise<LoginResult>; // prepare が済んでいなければ { outcome: 'not-ready' }
-  startRedirect(intent: LoginIntent): Promise<LoginResult>; // うまくいけば、画面が移る（返らない）
+  // うまくいけば、画面が移る（返らない）。options: 合わせるときの 2・3 回めの行き来（silent = 画面なし + hint で login_hint、chooser = 選ぶ画面つき）
+  startRedirect(intent: LoginIntent, options?: { step?: LoginStep; hint?: string }): Promise<LoginResult>;
+  // 断りと一緒に返った証明で入る（prepare の前でも、口を用意して呼ぶ）。証明が無ければ false
+  signInWithStashed(): Promise<boolean>;
   // 待っている戻りがあれば、受け取る。無ければ null。intentNow: 覚えていた intent を見て、いま使う intent を返す
   finishRedirect(intentNow: (saved: LoginIntent) => Promise<LoginIntent>): Promise<LoginResult | null>;
   logout(): Promise<void>; // signOut だけ（端末の控えは、呼ぶ側が forgetAccount）
@@ -68,6 +75,7 @@ export const noAccount: StudioAccount = {
   canRedirect: async () => false,
   loginWithPopup: async () => ({ outcome: 'not-ready' }),
   startRedirect: async () => ({ outcome: 'not-ready' }),
+  signInWithStashed: async () => false,
   finishRedirect: async () => null,
   logout: async () => undefined,
 };
@@ -124,10 +132,11 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
     if (!check) return null;
     // 結果が出たら（成功でも失敗でも）戻りを消す。使っている途中で読み込み直されても、戻りは残る
     let intent = check.ok ? check.intent : 'signin';
+    const step = check.step ? { step: check.step } : {};
     try {
       if (!check.ok) {
         env.note('back', check.reason === 'error' ? `error=${check.error ?? ''}` : check.reason);
-        return noteResult({ outcome: check.reason === 'error' && check.error === 'access_denied' ? 'cancelled' : 'failed' });
+        return { ...noteResult({ outcome: check.reason === 'error' && check.error === 'access_denied' ? 'cancelled' : 'failed' }), ...step };
       }
       env.note('back', 'ok');
       const auth = await getPort();
@@ -137,9 +146,12 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
         // 聞けなければ、覚えていたとおりにする
       }
       await auth.withToken(intent, check.idToken, check.rawNonce);
-      return noteResult(succeeded(intent));
+      return { ...noteResult(succeeded(intent)), ...step };
     } catch (error) {
-      return failedOrLinked(intent, error);
+      const result = failedOrLinked(intent, error);
+      // 「もう使われている」ときだけ、1 回めに選んだアカウントの番号（sub）を返す（きろくには出さない）
+      const hint = check.ok && result.outcome === 'taken' ? subOf(check.idToken) : null;
+      return { ...result, ...step, ...(hint ? { hint } : {}) };
     } finally {
       clearReturn({ session: env.session, local: env.local });
     }
@@ -175,7 +187,7 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
       });
       return running;
     },
-    startRedirect(intent) {
+    startRedirect(intent, options = {}) {
       if (redirectRunning) return redirectRunning;
       const running = (async (): Promise<LoginResult> => {
         try {
@@ -184,9 +196,11 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
           const state = randomToken();
           const rawNonce = randomToken();
           const nonce = await sha256Hex(rawNonce);
-          savePending(env.local, { state, rawNonce, intent, at: env.now() });
-          env.note('start', 'redirect');
-          env.goTo(buildAuthUrl({ clientId, redirectUri: env.redirectUri, state, nonce }));
+          const { step, hint } = options;
+          savePending(env.local, { state, rawNonce, intent, at: env.now(), ...(step ? { step } : {}) });
+          env.note('start', step ? `redirect ${step}` : 'redirect');
+          // silent: 1 回めに選んだアカウントを指定して、画面なしで戻してもらう。chooser: アカウントを選ぶ画面つき
+          env.goTo(buildAuthUrl({ clientId, redirectUri: env.redirectUri, state, nonce, ...(step === 'silent' ? { prompt: 'none' as const, ...(hint ? { loginHint: hint } : {}) } : {}) }));
           // 画面が移る。返らない（返ると、移れなかった、と見なされる）。ただし、戻るボタンで戻って来たら（bfcache）、やめたことにする
           return await new Promise<LoginResult>((resolve) => {
             env.onRestored?.(() => {
@@ -217,6 +231,9 @@ export function createAccount(port: () => Promise<AuthPort>, env: AccountEnv): S
         },
       );
       return running;
+    },
+    async signInWithStashed() {
+      return (await getPort()).signInWithStashed();
     },
     async logout() {
       await (await getPort()).signOut();

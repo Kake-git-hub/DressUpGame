@@ -7,7 +7,7 @@
 import { initializeApp } from 'firebase/app';
 import type { FirebaseOptions } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, linkWithCredential, linkWithPopup, OAuthProvider, signInAnonymously, signInWithCredential, signInWithPopup, signOut } from 'firebase/auth';
-import type { Auth } from 'firebase/auth';
+import type { Auth, AuthError, OAuthCredential } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import type { Functions } from 'firebase/functions';
 import type { AccountInfo, AuthPort } from './account';
@@ -87,11 +87,22 @@ export interface AuthPortDeps {
 }
 
 const NO_CURRENT_USER = { code: 'auth/no-current-user' };
+const TAKEN_CODE = 'auth/credential-already-in-use';
 
 // AuthPort の本物。呼ぶ前に、匿名のログインは済んでいる（transport.auth() が待つ）
 export function createAuthPort(deps: AuthPortDeps): AuthPort {
   const { auth } = deps;
   let lookedUp: Promise<string | null> | null = null;
+  // 結び付けが「もう使われている」と断られたとき、Firebase が一緒に返した証明（そのアカウントに入るのに使う。使ったら捨てる）
+  let stashed: OAuthCredential | null = null;
+  const stash = (error: unknown): void => {
+    if (typeof error !== 'object' || error === null || (error as { code?: unknown }).code !== TAKEN_CODE) return;
+    try {
+      stashed = OAuthProvider.credentialFromError(error as AuthError);
+    } catch {
+      stashed = null; // 証明が取れなくても、断られたことは、そのまま伝える
+    }
+  };
   return {
     current(): AccountInfo {
       const google = auth.currentUser?.providerData.find((p) => p.providerId === 'google.com');
@@ -104,16 +115,36 @@ export function createAuthPort(deps: AuthPortDeps): AuthPort {
       const user = auth.currentUser;
       // 結び付けたいのに、いまの利用者が無いとき、入るに化けさせない（別の利用者に替わってしまう）
       if (intent === 'link' && !user) return Promise.reject(NO_CURRENT_USER);
+      stashed = null; // 前の断りの証明は、使わない
       const opened = intent === 'link' && user ? linkWithPopup(user, provider) : signInWithPopup(auth, provider);
-      return opened.then(() => undefined);
+      return opened.then(
+        () => undefined,
+        (error: unknown) => {
+          if (intent === 'link') stash(error);
+          throw error;
+        },
+      );
     },
     async withToken(intent: LoginIntent, idToken: string, rawNonce: string): Promise<void> {
       const credential = new OAuthProvider('google.com').credential({ idToken, rawNonce });
       const user = auth.currentUser;
+      stashed = null; // 前の断りの証明は、使わない
       if (intent === 'link') {
         if (!user) throw NO_CURRENT_USER;
-        await linkWithCredential(user, credential);
+        try {
+          await linkWithCredential(user, credential);
+        } catch (error) {
+          stash(error);
+          throw error;
+        }
       } else await signInWithCredential(auth, credential);
+    },
+    async signInWithStashed(): Promise<boolean> {
+      const credential = stashed;
+      stashed = null; // 使ったら捨てる（入れなかったときも）
+      if (!credential) return false;
+      await signInWithCredential(auth, credential);
+      return true;
     },
     async signOut(): Promise<void> {
       await signOut(auth);

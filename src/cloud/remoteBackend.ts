@@ -9,8 +9,8 @@
 import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
-import type { MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
-import { MIN_API } from './wire';
+import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
+import { ADOPT_API, MIN_API } from './wire';
 import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 
 export interface StudioTransport {
@@ -45,6 +45,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   const pollMs = options.pollMs ?? 2500;
   const account = options.account ?? createAccount(() => transport.auth(), browserAccountEnv());
   let user: StudioUser | null = null;
+  let serverApi: number | null = null; // signIn の返事の api（合わせるのに要る版かを見る）
   const userListeners = new Set<(user: StudioUser) => void>();
   const known = new Map<string, StudioJob>(); // 最後に分かった進み具合
   const watches = new Map<string, Watch>();
@@ -125,6 +126,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     account,
     async signIn() {
       const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
+      if (typeof answer.api === 'number') serverApi = answer.api;
       // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない
       if (typeof answer.api !== 'number' || answer.api < MIN_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       return { ...user! };
@@ -179,6 +181,18 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     },
     async deleteMyItem(id) {
       await transport.call({ op: 'deleteItem', id });
+    },
+    async offerHandoff() {
+      if (serverApi === null) await backend.signIn();
+      // 古いサーバーは、offer を知らない。呼ばずに、断る（ほかの動きは、古いままで動く）
+      if ((serverApi ?? 0) < ADOPT_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      const { word } = await transport.call<{ word?: unknown }>({ op: 'offer' });
+      if (typeof word !== 'string' || !word) throw new BackendError('unknown', 'サーバーの返事を読み取れませんでした', { uncertain: true });
+      return word;
+    },
+    async adopt(word): Promise<AdoptAnswer> {
+      const { status, tickets, items } = took(await transport.call<AdoptAnswer & { user?: WireUser }>({ op: 'adopt', word }));
+      return { status, tickets, items };
     },
   };
   return backend;

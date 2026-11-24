@@ -11,11 +11,14 @@ export const LOGIN_TTL_MS = 600_000; // 10 分
 export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 export type LoginIntent = 'link' | 'signin'; // 結び付ける / 入る
+// 合わせるときの行き来の段階。silent = 画面なしで入る 2 回めの行き来、chooser = アカウントを選ぶ画面つきの 3 回め。無ければ、最初の行き来
+export type LoginStep = 'silent' | 'chooser';
 export interface PendingLogin {
   state: string;
   rawNonce: string;
   intent: LoginIntent;
   at: number;
+  step?: LoginStep;
 }
 export interface LoginReturn {
   state: string;
@@ -39,7 +42,7 @@ export function redirectUriOf(origin: string, baseUrl: string): string {
   return origin + baseUrl;
 }
 
-export function buildAuthUrl(input: { clientId: string; redirectUri: string; state: string; nonce: string }): string {
+export function buildAuthUrl(input: { clientId: string; redirectUri: string; state: string; nonce: string; prompt?: 'none' | 'select_account'; loginHint?: string }): string {
   const url = new URL(GOOGLE_AUTH_URL);
   url.searchParams.set('client_id', input.clientId);
   url.searchParams.set('redirect_uri', input.redirectUri);
@@ -47,7 +50,8 @@ export function buildAuthUrl(input: { clientId: string; redirectUri: string; sta
   url.searchParams.set('scope', 'openid email');
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('state', input.state);
-  url.searchParams.set('prompt', 'select_account');
+  url.searchParams.set('prompt', input.prompt ?? 'select_account');
+  if (input.loginHint) url.searchParams.set('login_hint', input.loginHint);
   return url.toString();
 }
 
@@ -110,10 +114,14 @@ export function savePending(local: Store | null, pending: PendingLogin): void {
 }
 
 const isIntent = (v: unknown): v is LoginIntent => v === 'link' || v === 'signin';
+const isStep = (v: unknown): v is LoginStep => v === 'silent' || v === 'chooser';
 function readPending(local: Store | null): PendingLogin | null {
   try {
     const value = JSON.parse(read(local, PENDING_KEY) ?? 'null') as Partial<PendingLogin> | null;
-    if (value && typeof value.state === 'string' && typeof value.rawNonce === 'string' && isIntent(value.intent) && typeof value.at === 'number') return value as PendingLogin;
+    if (value && typeof value.state === 'string' && typeof value.rawNonce === 'string' && isIntent(value.intent) && typeof value.at === 'number') {
+      // step が壊れていたら、無いものとして扱う（最初の行き来）
+      return { state: value.state, rawNonce: value.rawNonce, intent: value.intent, at: value.at, ...(isStep(value.step) ? { step: value.step } : {}) };
+    }
   } catch {
     // 壊れた覚えは、無いものとして扱う
   }
@@ -129,9 +137,10 @@ function readReturned(session: Store | null): LoginReturn | null {
   return null;
 }
 
+// error のとき、step と intent は、覚えの state が合っていたときだけ付く（どの行き来が断られたか分かるように）
 export type ReturnCheck =
-  | { ok: true; idToken: string; rawNonce: string; intent: LoginIntent }
-  | { ok: false; reason: 'none' | 'mismatch' | 'expired' | 'error'; error?: string };
+  | { ok: true; idToken: string; rawNonce: string; intent: LoginIntent; step?: LoginStep }
+  | { ok: false; reason: 'none' | 'mismatch' | 'expired' | 'error'; error?: string; step?: LoginStep; intent?: LoginIntent };
 
 // error の語は、きろくに書くので、英数字と _ だけを通す（40 文字まで）
 const safeWord = (text: string): string => text.replace(/[^A-Za-z0-9_]/g, '').slice(0, 40);
@@ -144,10 +153,11 @@ export async function readReturn(env: { session: Store | null; local: Store | nu
   if (!returned || !saved) return { ok: false, reason: 'none' };
   if (returned.state !== saved.state) return { ok: false, reason: 'mismatch' };
   if (env.now() - saved.at > LOGIN_TTL_MS) return { ok: false, reason: 'expired' };
-  if (returned.error !== undefined || !returned.idToken) return { ok: false, reason: 'error', error: safeWord(returned.error ?? '') };
+  const step = saved.step ? { step: saved.step } : {};
+  if (returned.error !== undefined || !returned.idToken) return { ok: false, reason: 'error', error: safeWord(returned.error ?? ''), intent: saved.intent, ...step };
   const nonce = nonceOf(returned.idToken);
   if (!nonce || nonce !== (await sha256Hex(saved.rawNonce))) return { ok: false, reason: 'mismatch' };
-  return { ok: true, idToken: returned.idToken, rawNonce: saved.rawNonce, intent: saved.intent };
+  return { ok: true, idToken: returned.idToken, rawNonce: saved.rawNonce, intent: saved.intent, ...step };
 }
 
 export function clearReturn(env: { session: Store | null; local: Store | null }): void {
@@ -155,17 +165,21 @@ export function clearReturn(env: { session: Store | null; local: Store | null })
   remove(env.local, PENDING_KEY);
 }
 
-// JWT のまん中（base64url の JSON。UTF-8）の nonce。読めなければ null
-export function nonceOf(idToken: string): string | null {
+// JWT のまん中（base64url の JSON。UTF-8）の、文字の項目。読めなければ null
+function claimOf(idToken: string, name: 'nonce' | 'sub'): string | null {
   try {
     const middle = idToken.split('.')[1];
     if (!middle) return null;
     const base64 = middle.replace(/-/g, '+').replace(/_/g, '/');
     const binary = atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4));
     const json = new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
-    const payload = JSON.parse(json) as { nonce?: unknown };
-    return typeof payload.nonce === 'string' ? payload.nonce : null;
+    const value = (JSON.parse(json) as Record<string, unknown>)[name];
+    return typeof value === 'string' && value ? value : null;
   } catch {
     return null;
   }
 }
+
+export const nonceOf = (idToken: string): string | null => claimOf(idToken, 'nonce');
+// Google の番号（sub）。2 回めの行き来で、1 回めに選んだアカウントを指定する login_hint に使う。きろくには出さない
+export const subOf = (idToken: string): string | null => claimOf(idToken, 'sub');

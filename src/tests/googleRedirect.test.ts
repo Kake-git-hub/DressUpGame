@@ -18,6 +18,7 @@ import {
   RETURN_KEY,
   savePending,
   sha256Hex,
+  subOf,
 } from '../cloud/googleRedirect';
 import type { PendingLogin } from '../cloud/googleRedirect';
 
@@ -62,6 +63,15 @@ describe('redirectUriOf・buildAuthUrl', () => {
     expect(url.searchParams.get('response_type')).toBe('id_token');
     expect(url.searchParams.get('scope')).toBe('openid email');
     expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.has('login_hint')).toBe(false);
+  });
+  it('画面なし（prompt=none）と login_hint を付けられる。login_hint は、指定したときだけ', () => {
+    const url = new URL(buildAuthUrl({ clientId: 'c', redirectUri: 'https://x.example/app/', state: 'st', nonce: 'nn', prompt: 'none', loginHint: '1234567890' }));
+    expect(url.searchParams.get('prompt')).toBe('none');
+    expect(url.searchParams.get('login_hint')).toBe('1234567890');
+    const chooser = new URL(buildAuthUrl({ clientId: 'c', redirectUri: 'https://x.example/app/', state: 'st', nonce: 'nn', prompt: 'select_account' }));
+    expect(chooser.searchParams.get('prompt')).toBe('select_account');
+    expect(chooser.searchParams.has('login_hint')).toBe(false);
   });
 });
 
@@ -140,7 +150,15 @@ describe('readReturn・clearReturn', () => {
   });
   it('error つきなら、その語を返す', async () => {
     const { env } = await setup({ state: 's1', error: 'access_denied' }, pending());
-    expect(await readReturn(env)).toEqual({ ok: false, reason: 'error', error: 'access_denied' });
+    expect(await readReturn(env)).toEqual({ ok: false, reason: 'error', error: 'access_denied', intent: 'link' });
+  });
+  it('error つきでも、覚えの state が合っていれば、step と intent を返す（どの行き来の戻りか分かるように）', async () => {
+    const { env } = await setup({ state: 's1', error: 'interaction_required' }, pending({ intent: 'signin', step: 'silent' }));
+    expect(await readReturn(env)).toEqual({ ok: false, reason: 'error', error: 'interaction_required', intent: 'signin', step: 'silent' });
+  });
+  it('state が違う error は、step も intent も返さない（ほかの行き来の戻りかもしれない）', async () => {
+    const { env } = await setup({ state: 'other', error: 'access_denied' }, pending({ step: 'chooser' }));
+    expect(await readReturn(env)).toEqual({ ok: false, reason: 'mismatch' });
   });
   it('nonce が合わなければ mismatch', async () => {
     const { env } = await setup({ state: 's1', idToken: jwt({ nonce: 'wrong' }) }, pending());
@@ -153,6 +171,20 @@ describe('readReturn・clearReturn', () => {
     expect(await readReturn(env)).toEqual(expected);
     expect(await readReturn(env)).toEqual(expected);
     expect(hasReturn(env.session)).toBe(true);
+  });
+  it('覚えに step があれば、ok の結果にも付く。無ければ付かない', async () => {
+    const idToken = await goodToken();
+    const silent = await setup({ state: 's1', idToken }, pending({ intent: 'signin', step: 'silent' }));
+    expect(await readReturn(silent.env)).toEqual({ ok: true, idToken, rawNonce: RAW, intent: 'signin', step: 'silent' });
+    const chooser = await setup({ state: 's1', idToken }, pending({ step: 'chooser' }));
+    expect(await readReturn(chooser.env)).toMatchObject({ ok: true, step: 'chooser' });
+    const first = await setup({ state: 's1', idToken }, pending());
+    expect(Object.keys((await readReturn(first.env))!)).not.toContain('step');
+  });
+  it('覚えの step が壊れていれば、無いものとして扱う（最初の行き来）', async () => {
+    const idToken = await goodToken();
+    const { env } = await setup({ state: 's1', idToken }, pending({ step: 'bogus' as never }));
+    expect(Object.keys((await readReturn(env))!)).not.toContain('step');
   });
   it('clearReturn で、戻りも覚えも消える', async () => {
     const { env } = await setup({ state: 's1', idToken: await goodToken() }, pending());
@@ -172,5 +204,18 @@ describe('nonceOf', () => {
     expect(nonceOf('x')).toBeNull();
     expect(nonceOf('a.b.c')).toBeNull();
     expect(nonceOf(jwt({ email: 'a@example.com' }))).toBeNull();
+  });
+});
+
+describe('subOf', () => {
+  it('JWT のまん中から sub を取る', () => {
+    expect(subOf(jwt({ sub: '1234567890', nonce: 'a' }))).toBe('1234567890');
+  });
+  it('壊れている・sub が無い・文字でない → null', () => {
+    expect(subOf('x')).toBeNull();
+    expect(subOf('a.b.c')).toBeNull();
+    expect(subOf(jwt({ nonce: 'a' }))).toBeNull();
+    expect(subOf(jwt({ sub: 123 }))).toBeNull();
+    expect(subOf(jwt({ sub: '' }))).toBeNull();
   });
 });

@@ -16,7 +16,7 @@ export interface FakeWorld {
   isGoogle(): boolean;
 }
 
-export function createFakeAuthPort(world: FakeWorld, options: { loginFail?: string; googleTaken?: boolean }): AuthPort {
+export function createFakeAuthPort(world: FakeWorld, options: { loginFail?: string; googleTaken?: boolean; stashed?: boolean }): AuthPort {
   // 呼ばれた、その場で動かす（本物の popup と同じく、何も待たない）
   const run = (intent: LoginIntent): Promise<void> => {
     try {
@@ -33,6 +33,12 @@ export function createFakeAuthPort(world: FakeWorld, options: { loginFail?: stri
     current: (): AccountInfo => (world.isGoogle() ? { kind: 'google', email: FAKE_EMAIL } : { kind: 'guest' }),
     popup: (intent) => run(intent),
     withToken: (intent) => run(intent),
+    // 断りと一緒に返る証明で入る、のまね。stashed が false なら、証明が返らなかったことにする
+    signInWithStashed: async () => {
+      if (options.stashed === false) return false;
+      world.signin();
+      return true;
+    },
     signOut: async () => world.signOut(),
     clientId: async () => 'fake-client',
   };
@@ -41,10 +47,12 @@ export function createFakeAuthPort(world: FakeWorld, options: { loginFail?: stri
 const b64url = (text: string) => btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 // にせの「Google の画面」: Google へ移る URL から state と nonce を読み、戻りの # を付けて、読み込み直す（いまの search は変えない）
-export function fakeGoTo(url: string, win: Pick<Window, 'location'>, options: { loginFail?: string }): void {
+export function fakeGoTo(url: string, win: Pick<Window, 'location'>, options: { loginFail?: string; silentFail?: boolean }): void {
   const params = new URL(url).searchParams;
   const state = params.get('state') ?? '';
   const nonce = params.get('nonce') ?? '';
-  win.location.hash = options.loginFail === 'access_denied' ? `#error=access_denied&state=${state}` : `#state=${state}&id_token=x.${b64url(JSON.stringify({ nonce, email: FAKE_EMAIL }))}.x`;
+  // 画面なし（prompt=none）は、silentFail なら、Google が「画面が要る」と断ったまね
+  if (params.get('prompt') === 'none' && options.silentFail) win.location.hash = `#error=interaction_required&state=${state}`;
+  else win.location.hash = options.loginFail === 'access_denied' ? `#error=access_denied&state=${state}` : `#state=${state}&id_token=x.${b64url(JSON.stringify({ nonce, email: FAKE_EMAIL, sub: 'fake-sub' }))}.x`;
   win.location.reload();
 }

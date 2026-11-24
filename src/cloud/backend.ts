@@ -77,6 +77,14 @@ export class BackendError extends Error {
 }
 export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';
 
+// adopt の答え。done = 移した（数は、いま移した分。もう移ったあとなら 0）、wait = 匿名のうちは移さない、used = ほかの人が使った合い言葉、
+// unknown = 知らない（もう使い終わった）合い言葉、refused = 移せない利用者
+export interface AdoptAnswer {
+  status: 'done' | 'wait' | 'used' | 'unknown' | 'refused';
+  tickets: number;
+  items: number;
+}
+
 export interface StudioBackend {
   // Google のアカウントでのログイン・ログアウト（段階 ③-a）
   readonly account: StudioAccount;
@@ -102,6 +110,10 @@ export interface StudioBackend {
   // 並び順を変える（ids の先頭ほど、先に並ぶ）。返り値は、変えた服
   orderMyItems(ids: string[]): Promise<MyItemInfo[]>;
   deleteMyItem(id: string): Promise<void>;
+  // 引き継ぎの合い言葉をもらう（匿名の利用者のうちに）。サーバーが古ければ BackendError('old-server')
+  offerHandoff(): Promise<string>;
+  // 合い言葉を出して、この利用者へ移してもらう
+  adopt(word: string): Promise<AdoptAnswer>;
 }
 
 // 自分の服の並び順: order の大きい順（同じなら、新しい順 → ID）

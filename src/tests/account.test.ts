@@ -57,6 +57,7 @@ function fakePort() {
     current: vi.fn((): ReturnType<AuthPort['current']> => ({ kind: 'guest' })),
     popup: vi.fn<AuthPort['popup']>(async () => undefined),
     withToken: vi.fn<AuthPort['withToken']>(async () => undefined),
+    signInWithStashed: vi.fn<AuthPort['signInWithStashed']>(async () => true),
     signOut: vi.fn(async (): Promise<void> => undefined),
     clientId: vi.fn(async (): Promise<string | null> => 'client-1.apps.googleusercontent.com'),
   };
@@ -73,12 +74,12 @@ function setup() {
   return { account, port, makePort, env, session, local, goTo, advance: (ms: number) => (t += ms) };
 }
 // Google から戻って来た状態を作る（覚え + 戻りの中身）
-async function plantReturn(s: ReturnType<typeof setup>, over: { intent?: LoginIntent; state?: string; returnState?: string; at?: number; error?: string; nonce?: string } = {}) {
+async function plantReturn(s: ReturnType<typeof setup>, over: { intent?: LoginIntent; state?: string; returnState?: string; at?: number; error?: string; nonce?: string; step?: 'silent' | 'chooser'; sub?: string } = {}) {
   const rawNonce = 'raw-nonce-secret-0123456789abcdef';
   const state = over.state ?? 'state-secret-123';
-  const idToken = jwt({ nonce: over.nonce ?? (await sha256Hex(rawNonce)), email: 'a@example.com' });
+  const idToken = jwt({ nonce: over.nonce ?? (await sha256Hex(rawNonce)), email: 'a@example.com', ...(over.sub ? { sub: over.sub } : {}) });
   secrets.push(rawNonce, state, idToken);
-  if (over.at !== -1) savePending(s.local, { state, rawNonce, intent: over.intent ?? 'link', at: over.at ?? s.env.now() });
+  if (over.at !== -1) savePending(s.local, { state, rawNonce, intent: over.intent ?? 'link', at: over.at ?? s.env.now(), ...(over.step ? { step: over.step } : {}) });
   s.session.setItem(RETURN_KEY, JSON.stringify(over.error ? { state: over.returnState ?? state, error: over.error } : { state: over.returnState ?? state, idToken }));
   return { rawNonce, idToken, state };
 }
@@ -142,6 +143,8 @@ describe('prepare・logout', () => {
     expect(await noAccount.canRedirect()).toBe(false);
     expect(await noAccount.loginWithPopup('link')).toEqual({ outcome: 'not-ready' });
     expect(await noAccount.startRedirect('link')).toEqual({ outcome: 'not-ready' });
+    expect(await noAccount.startRedirect('signin', { step: 'silent', hint: 'h' })).toEqual({ outcome: 'not-ready' });
+    expect(await noAccount.signInWithStashed()).toBe(false);
     expect(await noAccount.finishRedirect(async (i) => i)).toBeNull();
     await expect(noAccount.logout()).resolves.toBeUndefined();
   });
@@ -255,6 +258,66 @@ describe('startRedirect（方法 2 の行き）', () => {
   });
 });
 
+describe('startRedirect の step（合わせるときの 2・3 回めの行き来）', () => {
+  const go = async (s: ReturnType<typeof setup>, intent: LoginIntent, options?: { step?: 'silent' | 'chooser'; hint?: string }) => {
+    void s.account.startRedirect(intent, options);
+    await vi.waitFor(() => expect(s.goTo).toHaveBeenCalledTimes(1));
+    const url = new URL(s.goTo.mock.calls[0][0] as string);
+    const pending = JSON.parse(s.local.data.get(PENDING_KEY)!) as { state: string; rawNonce: string; intent: string; step?: string };
+    secrets.push(pending.state, pending.rawNonce);
+    return { url, pending };
+  };
+  it('step が無ければ、いままでどおり（select_account・login_hint なし・覚えに step なし・きろくは start redirect）', async () => {
+    const s = setup();
+    const { url, pending } = await go(s, 'link');
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.has('login_hint')).toBe(false);
+    expect(Object.keys(pending)).not.toContain('step');
+    expect(lines).toContain('start redirect');
+  });
+  it('silent: prompt=none と login_hint。覚えに step、きろくは start redirect silent（hint は出ない）', async () => {
+    const s = setup();
+    secrets.push('hint-sub-12345');
+    const { url, pending } = await go(s, 'signin', { step: 'silent', hint: 'hint-sub-12345' });
+    expect(url.searchParams.get('prompt')).toBe('none');
+    expect(url.searchParams.get('login_hint')).toBe('hint-sub-12345');
+    expect(pending).toMatchObject({ intent: 'signin', step: 'silent' });
+    expect(lines).toContain('start redirect silent');
+    expect(lines).not.toContain('start redirect');
+  });
+  it('silent で hint が無ければ、login_hint は付けない', async () => {
+    const s = setup();
+    const { url } = await go(s, 'signin', { step: 'silent' });
+    expect(url.searchParams.get('prompt')).toBe('none');
+    expect(url.searchParams.has('login_hint')).toBe(false);
+  });
+  it('chooser: 選ぶ画面つき（login_hint なし）。覚えに step、きろくは start redirect chooser', async () => {
+    const s = setup();
+    const { url, pending } = await go(s, 'signin', { step: 'chooser', hint: 'ignored-hint' });
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.has('login_hint')).toBe(false);
+    expect(pending).toMatchObject({ intent: 'signin', step: 'chooser' });
+    expect(lines).toContain('start redirect chooser');
+  });
+});
+
+describe('signInWithStashed（口へ渡すだけ）', () => {
+  it('prepare の前でも、口を用意して、口の結果をそのまま返す', async () => {
+    const s = setup();
+    expect(await s.account.signInWithStashed()).toBe(true);
+    expect(s.makePort).toHaveBeenCalledTimes(1);
+    expect(s.port.signInWithStashed).toHaveBeenCalledTimes(1);
+    s.port.signInWithStashed.mockResolvedValueOnce(false);
+    expect(await s.account.signInWithStashed()).toBe(false);
+    expect(s.makePort).toHaveBeenCalledTimes(1);
+  });
+  it('入れなければ、投げる', async () => {
+    const s = setup();
+    s.port.signInWithStashed.mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+    await expect(s.account.signInWithStashed()).rejects.toMatchObject({ code: 'auth/network-request-failed' });
+  });
+});
+
 describe('結び付けの途中で読み込み直された（auth/provider-already-linked）', () => {
   it('方法 1: link で provider-already-linked は、linked（成功）。signin では failed のまま', async () => {
     const s = setup();
@@ -335,6 +398,46 @@ describe('finishRedirect（方法 2 の戻り）', () => {
     s.port.withToken.mockRejectedValue({ code: 'auth/credential-already-in-use', customData: { email: 'a@example.com' } });
     expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'taken', code: 'auth/credential-already-in-use' });
     expect(hasReturn(s.session)).toBe(false);
+  });
+  it('step: どの行き来の戻りかを、結果に付ける（成功・失敗・Google の断り）。無ければ付かない', async () => {
+    const s = setup();
+    await plantReturn(s, { intent: 'signin', step: 'silent' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'switched', step: 'silent' });
+    await plantReturn(s, { intent: 'signin', step: 'chooser' });
+    s.port.withToken.mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'failed', code: 'auth/network-request-failed', step: 'chooser' });
+    await plantReturn(s, { intent: 'signin' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'switched' });
+  });
+  it('Google が断った戻り（error）にも step が付く。access_denied は cancelled、ほかは failed', async () => {
+    const s = setup();
+    await plantReturn(s, { intent: 'signin', step: 'silent', error: 'interaction_required' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'failed', step: 'silent' });
+    expect(lines).toContain('back error=interaction_required');
+    await plantReturn(s, { intent: 'signin', step: 'chooser', error: 'access_denied' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'cancelled', step: 'chooser' });
+    await plantReturn(s, { intent: 'link', error: 'access_denied' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'cancelled' });
+  });
+  it('taken のとき、だけ hint（証明の sub）を返す。きろくには出ない', async () => {
+    const s = setup();
+    secrets.push('google-sub-9876');
+    await plantReturn(s, { sub: 'google-sub-9876' });
+    s.port.withToken.mockRejectedValueOnce({ code: 'auth/credential-already-in-use' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'taken', code: 'auth/credential-already-in-use', hint: 'google-sub-9876' });
+    // 成功のときは、hint を返さない
+    await plantReturn(s, { sub: 'google-sub-9876' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'linked' });
+    // sub が証明に無ければ、hint は付かない
+    await plantReturn(s);
+    s.port.withToken.mockRejectedValueOnce({ code: 'auth/credential-already-in-use' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'taken', code: 'auth/credential-already-in-use' });
+  });
+  it('step と hint は、一緒に付く（silent で taken）', async () => {
+    const s = setup();
+    await plantReturn(s, { intent: 'signin', step: 'silent', sub: 'abc-sub' });
+    s.port.withToken.mockRejectedValueOnce({ code: 'auth/credential-already-in-use' });
+    expect(await s.account.finishRedirect(keep)).toEqual({ outcome: 'taken', code: 'auth/credential-already-in-use', step: 'silent', hint: 'abc-sub' });
   });
   it('口の用意に失敗しても failed。戻りは消える', async () => {
     const s = setup();
