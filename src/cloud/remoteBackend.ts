@@ -43,7 +43,9 @@ interface Watch {
 
 export function createRemoteBackend(transport: StudioTransport, options: RemoteOptions = {}): StudioBackend {
   const pollMs = options.pollMs ?? 2500;
-  const account = options.account ?? createAccount(() => transport.auth(), browserAccountEnv());
+  // ログインの段取りは、初めて使うときに作る（window を読むので。エミュレーターのテストなど、ブラウザでない所でも、裏側は作れるように）
+  let account: StudioAccount | null = options.account ?? null;
+  const getAccount = (): StudioAccount => (account ??= createAccount(() => transport.auth(), browserAccountEnv()));
   let user: StudioUser | null = null;
   let serverApi: number | null = null; // signIn の返事の api（合わせるのに要る版かを見る）
   const userListeners = new Set<(user: StudioUser) => void>();
@@ -123,7 +125,9 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   });
 
   const backend: StudioBackend = {
-    account,
+    get account() {
+      return getAccount();
+    },
     async signIn() {
       const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
       if (typeof answer.api === 'number') serverApi = answer.api;

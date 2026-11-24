@@ -110,6 +110,21 @@ describe('本物の裏側', () => {
     expect(createRemoteBackend(server.transport, { account: noAccount }).account).toBe(noAccount);
     expect(createRemoteBackend(server.transport).account).not.toBe(noAccount);
   });
+
+  it('ログインの段取り（window を使う）は、裏側を作るときには用意しない。初めて account を見たときに作る（ブラウザでない所 = エミュレーターのテストでも、裏側を作れるように）', () => {
+    const server = fakeServer();
+    const saved = globalThis.window;
+    // ブラウザでない所のまね: window が無い
+    Object.defineProperty(globalThis, 'window', { value: undefined, configurable: true });
+    try {
+      const backend = createRemoteBackend(server.transport);
+      expect(typeof backend.signIn).toBe('function'); // 作るだけなら、落ちない
+    } finally {
+      Object.defineProperty(globalThis, 'window', { value: saved, configurable: true });
+    }
+    const backend = createRemoteBackend(server.transport);
+    expect(backend.account).toBe(backend.account); // 2 回見ても、同じもの
+  });
   it('利用者を確かめる。チケットの残りが変わったら、知らせる', async () => {
     const server = fakeServer();
     const backend = createRemoteBackend(server.transport);
