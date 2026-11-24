@@ -123,6 +123,90 @@ describe('きろく（端末の上で起きたことの覚え書き）', () => {
   });
 });
 
+describe('ログインのきろく（読み込み直しをはさんでも残す）', () => {
+  const LOGIN_KEY = 'dressup_diag_login';
+  const env = { version: '0.38.0', userAgent: 'iPad', standalone: true, viewport: '820x1180@2', gl: null };
+
+  it('login の行は、別の保存にも、先頭に「月-日 時:分」（その端末の時刻）を付けて残る。ふだんの行は、いままでどおり', () => {
+    const storage = memoryStorage();
+    const at = new Date(2026, 10, 24, 9, 5, 30).getTime(); // 2026-11-24 09:05（端末の時刻）
+    const diag = createDiag({ storage, now: () => at });
+    diag.note('login', 'start', 'redirect');
+    diag.note('set', 7);
+    expect(diag.lines()).toEqual(['0.0 login start redirect', '0.0 set 7']);
+    expect(diag.loginLines()).toEqual(['11-24 09:05 0.0 login start redirect']);
+    expect(JSON.parse(storage.data.get(LOGIN_KEY)!)).toEqual(['11-24 09:05 0.0 login start redirect']);
+    // ふだんの保存には、いままでの行だけ（前の回の読み方は変わらない）
+    expect(JSON.parse(storage.data.get('dressup_diag')!)).toEqual(['0.0 login start redirect', '0.0 set 7']);
+  });
+
+  it('読み込み直し（createDiag の作り直し）を 3 回はさんでも、login の行は残る。「今回・前の回」には混ざらない', () => {
+    const storage = memoryStorage();
+    createDiag({ storage, now: () => 0 }).note('login', 'start', 'redirect');
+    createDiag({ storage, now: () => 0 }).note('login', 'back', 'ok');
+    createDiag({ storage, now: () => 0 }).note('login', 'result', 'taken');
+    const fourth = createDiag({ storage, now: () => 0 });
+    expect(fourth.loginLines()).toHaveLength(3);
+    expect(fourth.loginLines()[0]).toMatch(/^\d\d-\d\d \d\d:\d\d 0\.0 login start redirect$/);
+    expect(fourth.loginLines()[2]).toMatch(/login result taken$/);
+    expect(fourth.lines()).toEqual([]);
+    expect(fourth.previous()).toEqual(['0.0 login result taken']);
+    fourth.note('login', 'out');
+    expect(createDiag({ storage, now: () => 0 }).loginLines()).toHaveLength(4);
+  });
+
+  it('新しい 30 行までで、古い行から捨てる', () => {
+    const storage = memoryStorage();
+    const diag = createDiag({ storage, now: () => 0 });
+    for (let i = 1; i <= 35; i++) diag.note('login', 'n', i);
+    expect(diag.loginLines()).toHaveLength(30);
+    expect(diag.loginLines()[0]).toMatch(/login n 6$/);
+    expect(diag.loginLines()[29]).toMatch(/login n 35$/);
+    expect(JSON.parse(storage.data.get(LOGIN_KEY)!)).toHaveLength(30);
+  });
+
+  it('login でない行は、別の保存に入らない', () => {
+    const storage = memoryStorage();
+    const diag = createDiag({ storage, now: () => 0 });
+    diag.note('warn', 'x');
+    expect(diag.loginLines()).toEqual([]);
+    expect(storage.data.has(LOGIN_KEY)).toBe(false);
+  });
+
+  it('報告: login の行があれば、最後に「--- ログイン ---」と、その行が出る。無ければ、その見出しも出ない', () => {
+    const storage = memoryStorage();
+    const quiet = createDiag({ storage, now: () => 0 });
+    quiet.note('start');
+    expect(diagReport(quiet, env)).not.toContain('--- ログイン ---');
+    quiet.note('login', 'offer', 'ok');
+    const first = diagReport(quiet, env);
+    const lines = first.split('\n');
+    expect(lines[lines.length - 2]).toBe('--- ログイン ---');
+    expect(lines[lines.length - 1]).toMatch(/^\d\d-\d\d \d\d:\d\d 0\.0 login offer ok$/);
+    expect(first.indexOf('--- ログイン ---')).toBeGreaterThan(first.indexOf('--- 今回 ---'));
+    // 読み込み直したあとも、出る（今回の行が空でも）
+    const after = diagReport(createDiag({ storage, now: () => 0 }), env);
+    expect(after).toContain('--- ログイン ---');
+    expect(after).toContain('login offer ok');
+  });
+
+  it('login の保存が壊れていても・使えなくても、止まらない', () => {
+    expect(createDiag({ storage: memoryStorage({ [LOGIN_KEY]: '{こわれた' }), now: () => 0 }).loginLines()).toEqual([]);
+    expect(createDiag({ storage: memoryStorage({ [LOGIN_KEY]: '[1,"a"]' }), now: () => 0 }).loginLines()).toEqual(['a']);
+    const broken = {
+      getItem: () => {
+        throw new Error('使えません');
+      },
+      setItem: () => {
+        throw new Error('使えません');
+      },
+    };
+    const diag = createDiag({ storage: broken, now: () => 0 });
+    expect(() => diag.note('login', 'a')).not.toThrow();
+    expect(diag.loginLines()).toHaveLength(1);
+  });
+});
+
 describe('ほうこく（GitHub の Issue に、きろくを入れて開く URL）', () => {
   const report = ['きせかえ v0.35.1', 'iPad UA', 'standalone: true / 1024x748@2', 'gl: {"lost":false}', '--- 前の回 ---', '0.0 start v0.35.1', '--- 今回 ---', '0.0 start v0.35.1', '7.3 set parts=7 くつ,てぶくろ', '8.0 clothes n=8'].join('\n');
   const parse = (url: string) => {

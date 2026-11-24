@@ -7,7 +7,8 @@
  * きろく（env.note）・結果には、メールアドレス・証明・state・nonce を出さない。Firebase の失敗は、code（auth/…）の文字だけを取り出す。
  */
 import { diag } from '../services/diag';
-import type { StudioBackend } from './backend';
+import { BackendError } from './backend';
+import type { StudioBackend, StudioUser } from './backend';
 import { buildAuthUrl, clearReturn, hasReturn, randomToken, readReturn, savePending, sha256Hex, subOf } from './googleRedirect';
 import type { LoginIntent, LoginStep } from './googleRedirect';
 import { redirectUriOf } from './googleRedirect';
@@ -17,7 +18,7 @@ import { ACKED_KEY, NEW_KEY } from './session';
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export type AccountInfo = { kind: 'guest' } | { kind: 'google'; email: string };
-export type LoginOutcome = 'linked' | 'switched' | 'taken' | 'cancelled' | 'not-ready' | 'no-popup' | 'failed';
+export type LoginOutcome = 'linked' | 'switched' | 'taken' | 'cancelled' | 'not-ready' | 'no-popup' | 'failed' | 'merged' | 'merge-later' | 'taken-old-server' | 'press-again';
 export interface LoginResult {
   outcome: LoginOutcome;
   code?: string; // auth/… の語だけ（きろく用）
@@ -25,10 +26,17 @@ export interface LoginResult {
   hint?: string; // 結び付けが taken だったときだけ、証明の sub（次の行き来の login_hint 用。きろくには出さない）
 }
 
+// 合わせたあとの知らせの、後ろの文（起動のときにもう一度 adopt して合わさったときは、この文だけを出す）
+const MERGED_TAIL = 'この端末のチケットと服を、アカウントに合わせました';
+
 export const LOGIN_MESSAGES: Record<LoginOutcome, string> = {
   linked: 'Google のアカウントでログインしました',
   switched: 'Google のアカウントでログインしました',
-  taken: 'この Google のアカウントは、ほかの端末で使われています。この端末のチケットと服を合わせるのは、次の版でできるようになります',
+  merged: `Google のアカウントでログインしました。${MERGED_TAIL}`,
+  'merge-later': 'Google のアカウントでログインしました。この端末のチケットと服は、インターネットにつながったときに、合わせます',
+  'taken-old-server': 'この Google のアカウントは、ほかの端末で使われています。サーバーが古い版のため、まだ合わせられません（作者が載せ直す必要があります）',
+  'press-again': 'もう一度「小さい窓でログイン」を押すと、この端末のチケットと服を合わせて、ログインします',
+  taken: 'この Google のアカウントは、ほかの端末で使われています。合わせる準備ができませんでした。少し待ってから、もう一度ログインしてください',
   cancelled: 'ログインを やめました',
   'not-ready': 'Google のログインの準備が、まだできていません（作者の設定待ちです）',
   'no-popup': '小さい窓を開けませんでした。方法 2 を試してください',
@@ -300,36 +308,273 @@ export async function forgetAccount(library: Library, userCode: string, local: S
 
 export const NOTICE_KEY = 'dressup_login_notice'; // sessionStorage: 読み込み直しのあとに出す知らせの文
 
+// ---- 合わせる（2 台めの端末のチケットと服を、アカウントに移してもらう。設計書 8.4） ----
+
+export const ADOPT_KEY = 'dressup_adopt_pending'; // localStorage: 合い言葉の覚え（読み込み直し・アプリを閉じても残す）
+export const OFFER_TTL_MS = 600_000; // offered の覚えが効く時間（10 分）
+export const ADMIN_NOTE = '（この端末は管理者でしたが、合わせたので、管理者の印が外れました。Firebase の画面で、管理者の利用者コードを、いまの利用者コードに書き換えてください。手順書 2-11）';
+
+// stage: offered = 合い言葉をもらった（まだ、アカウントに入っていない）、switched = アカウントに入った（adopt の最後の返事を待っている）
+export interface AdoptPending {
+  word: string;
+  from: string; // 元の（匿名だった）利用者コード
+  stage: 'offered' | 'switched';
+  at: number;
+  hint?: string; // 1 回めに選んだアカウントの番号（sub）。きろくには出さない
+  admin?: boolean; // 元が管理者だった
+}
+
+// 10 分を過ぎた offered は、捨てて null（サーバーの合い言葉は、使われないまま残る。害は無い）。switched は、adopt が最後の返事をするまで残す
+export function readAdopt(local: Store | null, now: number): AdoptPending | null {
+  try {
+    const value = JSON.parse(local?.getItem(ADOPT_KEY) ?? 'null') as Partial<AdoptPending> | null;
+    if (!value || typeof value.word !== 'string' || !value.word || typeof value.from !== 'string' || typeof value.at !== 'number') return null;
+    if (value.stage !== 'offered' && value.stage !== 'switched') return null;
+    if (value.stage === 'offered' && now - value.at > OFFER_TTL_MS) {
+      clearAdopt(local);
+      return null;
+    }
+    return {
+      word: value.word,
+      from: value.from,
+      stage: value.stage,
+      at: value.at,
+      ...(typeof value.hint === 'string' && value.hint ? { hint: value.hint } : {}),
+      ...(value.admin === true ? { admin: true } : {}),
+    };
+  } catch {
+    return null; // 壊れた覚えは、無いものとして扱う
+  }
+}
+function writeAdopt(local: Store | null, pending: AdoptPending): boolean {
+  try {
+    local?.setItem(ADOPT_KEY, JSON.stringify(pending));
+    return local !== null;
+  } catch {
+    return false;
+  }
+}
+function clearAdopt(local: Store | null): void {
+  try {
+    local?.removeItem(ADOPT_KEY);
+  } catch {
+    // 消せなくても進む（次の起動で、サーバーが「もう使った」と答えて、捨てられる）
+  }
+}
+
+// 結び付けるか、入るか: 空なら入る。空でなくても、効いている offered の覚えがあれば入る
+// （合わせる途中。結び付けると、2 回めも「もう使われている」になって、行き来が終わらない）
+export function intentFor(empty: boolean, local: Store | null, now: number): LoginIntent {
+  if (empty) return 'signin';
+  return readAdopt(local, now)?.stage === 'offered' ? 'signin' : 'link';
+}
+
+export interface SettleDeps {
+  backend: StudioBackend;
+  library: Library;
+  session: Store | null;
+  local: Store | null;
+  now(): number;
+  reload(): void;
+  note(...parts: string[]): void;
+}
+
+// window から作る（Account の欄と、起動の仕上げが使う）
+export function browserSettleDeps(backend: StudioBackend, library: Library, reload: () => void = () => window.location.reload()): SettleDeps {
+  return { backend, library, session: safeStore(() => window.sessionStorage), local: safeStore(() => window.localStorage), now: () => Date.now(), reload, note: (...parts) => diag.note('login', ...parts) };
+}
+
+const putNotice = (session: Store | null, message: string): void => {
+  try {
+    session?.setItem(NOTICE_KEY, message);
+  } catch {
+    // 知らせが置けなくても、読み込み直す
+  }
+};
+const forgetQuietly = async (deps: SettleDeps, userCode: string): Promise<void> => {
+  try {
+    await forgetAccount(deps.library, userCode, deps.local);
+  } catch {
+    // 控えが外せなくても進む
+  }
+};
+
+// 入れた（switched）あとの仕上げ。覚えが無ければ、いままでどおり。あれば、adopt で合わせる。どの道も、最後に読み込み直す
+async function settleSwitched(deps: SettleDeps, before: StudioUser | null): Promise<null> {
+  const { backend, session, local, now, reload, note } = deps;
+  const record = readAdopt(local, now());
+  try {
+    if (!record) {
+      // 合わせるものが無い（空の端末・ふつうの入り直し）。入る前の利用者の服だけ、控えから外す
+      if (before) await forgetQuietly(deps, before.userCode);
+      putNotice(session, LOGIN_MESSAGES.switched);
+      return null;
+    }
+    // 段階を switched に書き直してから adopt する（adopt の途中で落ちても、次の起動で、もう一度できる）
+    writeAdopt(local, { ...record, stage: 'switched', at: now() });
+    let answer: Awaited<ReturnType<StudioBackend['adopt']>> | null = null;
+    try {
+      answer = await backend.adopt(record.word);
+    } catch {
+      answer = null; // 通信が切れた、など。理由は、きろくに書かない
+    }
+    const adminNote = record.admin ? ADMIN_NOTE : '';
+    if (answer?.status === 'done') {
+      // 合わさった。サーバーでは、アカウントのものになったので、端末の控えから、元の利用者の服を外す（読み込み直しのあと、アカウントの服として取り直す）
+      clearAdopt(local);
+      await forgetQuietly(deps, record.from);
+      note('adopt', 'ok', `tickets=${answer.tickets}`, `items=${answer.items}`);
+      note('result', 'merged');
+      putNotice(session, LOGIN_MESSAGES.merged + adminNote);
+    } else if (answer && (answer.status === 'used' || answer.status === 'unknown' || answer.status === 'refused')) {
+      // ほかの人が使った・もう使い終わった・移せない利用者。覚えを持ち続けても、何も起きない
+      clearAdopt(local);
+      note('adopt', answer.status);
+      putNotice(session, LOGIN_MESSAGES.switched);
+    } else {
+      // 落ちた・まだ匿名（wait）。覚えを残す。端末の控えは外さない（元の服は、端末で着られるまま）
+      note('adopt', 'later');
+      note('result', 'merge-later');
+      putNotice(session, LOGIN_MESSAGES['merge-later'] + adminNote);
+    }
+    return null;
+  } finally {
+    reload();
+  }
+}
+
+// ログインの結果の仕上げ（方法 1・2 で共通）。before: ログインの前の利用者（聞けなかったら null）。
+// 返り値: 画面に出す結果。読み込み直した・画面が移る（返らない）ときは null
+export async function settleLogin(deps: SettleDeps, result: LoginResult, method: 'popup' | 'redirect', before: StudioUser | null): Promise<LoginResult | null> {
+  const { backend, local, now, note } = deps;
+  const noted = (outcome: LoginOutcome): LoginResult => {
+    note('result', outcome);
+    return { outcome };
+  };
+
+  if (result.outcome === 'linked') {
+    if (readAdopt(local, now())?.stage === 'offered') clearAdopt(local); // 合わせる途中で、結び付けが通った
+    return result;
+  }
+
+  if (result.outcome === 'taken') {
+    // 行き来の戻り（step）での taken は、これ以上続けない（行き来は、最初・画面なし・選ぶ画面の 3 回まで）
+    if (result.step) return result;
+    if (!before) {
+      note('offer', 'failed'); // 元の利用者が分からないと、合わせられない
+      return result;
+    }
+    let word: string;
+    try {
+      word = await backend.offerHandoff();
+    } catch (error) {
+      if (error instanceof BackendError && error.code === 'old-server') {
+        note('offer', 'old-server');
+        return noted('taken-old-server');
+      }
+      note('offer', 'failed');
+      return result;
+    }
+    const pending: AdoptPending = { word, from: before.userCode, stage: 'offered', at: now(), ...(result.hint ? { hint: result.hint } : {}), ...(before.admin ? { admin: true } : {}) };
+    // 覚えが置けなければ、入ってはいけない（入ったあと、合い言葉を失う）
+    if (!writeAdopt(local, pending)) {
+      note('offer', 'failed');
+      return result;
+    }
+    note('offer', 'ok');
+    let stashed = false;
+    try {
+      stashed = await backend.account.signInWithStashed();
+    } catch {
+      stashed = false; // 理由は、きろくに書かない（Firebase のエラーには、メールアドレスが入りうる）
+    }
+    if (stashed) {
+      note('switch', 'stashed');
+      return settleSwitched(deps, before);
+    }
+    if (method === 'redirect') {
+      note('switch', 'silent');
+      // 画面が移れば、これは返らない。返ってきたら、移れなかった
+      return backend.account.startRedirect('signin', { step: 'silent', ...(pending.hint ? { hint: pending.hint } : {}) });
+    }
+    return noted('press-again'); // 小さい窓は、押してもらわないと開けない。覚え（offered）を残す
+  }
+
+  // 画面なしの行き来が、入れなかった（Google が断った・証明が通らなかった）→ アカウントを選ぶ画面つきで、もう 1 回だけ
+  if (result.step === 'silent' && result.outcome !== 'switched') {
+    note('switch', 'chooser');
+    return backend.account.startRedirect('signin', { step: 'chooser' });
+  }
+
+  if (result.outcome === 'switched') return settleSwitched(deps, before);
+
+  return result; // cancelled・not-ready・no-popup・failed、選ぶ画面の戻りの失敗: 何もしない
+}
+
+const resuming = new WeakMap<StudioBackend, Promise<string | null>>();
+
+// 起動のとき（つなぎ役を出す前）: 段階 switched の覚えがあれば、もう一度 adopt。合わさったら、知らせの文を返す
+export function resumeAdopt(deps: SettleDeps): Promise<string | null> {
+  const { backend, local, now, note } = deps;
+  const record = readAdopt(local, now());
+  if (!record || record.stage !== 'switched') return Promise.resolve(null);
+  // 同時に 2 回呼ばれても（StrictMode）、adopt は 1 回
+  const running = resuming.get(backend);
+  if (running) return running;
+  const run = (async (): Promise<string | null> => {
+    let answer: Awaited<ReturnType<StudioBackend['adopt']>>;
+    try {
+      answer = await backend.adopt(record.word);
+    } catch {
+      return null; // つながらない。覚えも、端末の服も、そのまま
+    }
+    if (answer.status === 'done') {
+      clearAdopt(local);
+      await forgetQuietly(deps, record.from);
+      note('adopt', 'ok', `tickets=${answer.tickets}`, `items=${answer.items}`);
+      return MERGED_TAIL;
+    }
+    if (answer.status === 'used' || answer.status === 'unknown' || answer.status === 'refused') {
+      clearAdopt(local);
+      note('adopt', answer.status);
+    }
+    return null; // wait: まだ匿名。何もしない
+  })();
+  resuming.set(backend, run);
+  const release = () => {
+    if (resuming.get(backend) === run) resuming.delete(backend);
+  };
+  void run.then(release, release);
+  return run;
+}
+
 const completing = new WeakMap<StudioBackend, Promise<string | null>>();
 
-// 起動のあと（つなぎ役ができたら）呼ぶ。戻りを受け取り、知らせの文を返す（無ければ null）。
-// 'switched' のときは、forgetAccount → 文を NOTICE_KEY に置く → reload()（返り値は null）
-export function completeRedirect(deps: { backend: StudioBackend; library: Library; session: Store | null; local: Store | null; reload(): void }): Promise<string | null> {
+// 起動のあと（つなぎ役ができたら）呼ぶ。戻りを受け取り、結果を settleLogin に通して、知らせの文を返す（無ければ null）。
+// 入れたときは、settleLogin が、控えを外す・文を NOTICE_KEY に置く・reload() する（返り値は null）
+export function completeRedirect(deps: { backend: StudioBackend; library: Library; session: Store | null; local: Store | null; reload(): void; now?: () => number; note?: (...parts: string[]) => void }): Promise<string | null> {
   const { backend, library, session, local, reload } = deps;
   // 同時に 2 回呼ばれても（StrictMode）、受け取りも読み込み直しも 1 回
   const running = completing.get(backend);
   if (running) return running;
   if (!hasReturn(session)) return Promise.resolve(null);
+  const settleDeps: SettleDeps = { backend, library, session, local, reload, now: deps.now ?? (() => Date.now()), note: deps.note ?? ((...parts) => diag.note('login', ...parts)) };
   const run = (async (): Promise<string | null> => {
-    // 入る前の利用者コード（入ったあとは、もう聞けない）。聞けなければ、控えは触らない
-    let before: string | null = null;
+    // 入る前の利用者（入ったあとは、もう聞けない）。聞けなければ、控えは触らない
+    let before: StudioUser | null = null;
     try {
-      before = (await backend.signIn()).userCode;
+      before = await backend.signIn();
     } catch {
       before = null;
     }
-    const result = await backend.account.finishRedirect(async (saved) => (saved === 'signin' && !(await deviceEmpty(backend)) ? 'link' : saved));
+    // 効いている offered の覚えがあれば、いつも signin（空でなくなっていても、結び付けに直さない。直すと、行き来が終わらない）
+    const result = await backend.account.finishRedirect(async (saved) => {
+      if (readAdopt(local, settleDeps.now())?.stage === 'offered') return 'signin';
+      return saved === 'signin' && !(await deviceEmpty(backend)) ? 'link' : saved;
+    });
     if (!result) return null;
-    const message = LOGIN_MESSAGES[result.outcome];
-    if (result.outcome !== 'switched') return message;
-    if (before) await forgetAccount(library, before, local);
-    try {
-      session?.setItem(NOTICE_KEY, message);
-    } catch {
-      // 知らせが置けなくても、読み込み直す
-    }
-    reload();
-    return null;
+    const settled = await settleLogin(settleDeps, result, 'redirect', before);
+    return settled ? LOGIN_MESSAGES[settled.outcome] : null;
   })();
   completing.set(backend, run);
   const release = () => {

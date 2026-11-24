@@ -6,6 +6,9 @@
  * 版数を 5 回押して、あいことば「log」で画面に出す（App.tsx）。外へは送らない。
  */
 const KEY = 'dressup_diag';
+// ログイン（kind が login）の行は、読み込み直しや開き直しで消えないように、別の保存にも残す（報告から、どの方法でできたかが読めるように）
+const LOGIN_KEY = 'dressup_diag_login';
+const LOGIN_MAX_LINES = 30;
 const MAX_LINES = 120;
 const MAX_LENGTH = 300;
 const BURST = 10; // 1 秒に、すぐ残す回数
@@ -19,6 +22,7 @@ export interface Diag {
   note: (kind: string, ...parts: unknown[]) => void;
   lines: () => string[]; // 今回（開いてから）の行
   previous: () => string[]; // 前の回の行
+  loginLines: () => string[]; // ログインの行（新しい 30 行まで。読み込み直しをはさんでも残る。先頭に「月-日 時:分」）
   install: (console: ConsoleLike, target: EventTargetLike) => void;
 }
 
@@ -65,6 +69,20 @@ export function createDiag(options: { storage?: Store | null; now?: () => number
     // 読めなければ、前の回は無し
   }
 
+  // ログインの行（別の保存）。読めなければ、無しから始める
+  let loginLog: string[] = [];
+  try {
+    const saved: unknown = JSON.parse(storage?.getItem(LOGIN_KEY) ?? '[]');
+    if (Array.isArray(saved)) loginLog = saved.filter((line): line is string => typeof line === 'string').slice(-LOGIN_MAX_LINES);
+  } catch {
+    // 読めなければ、無しから
+  }
+  const stamp = (at: number): string => {
+    const date = new Date(at);
+    const two = (n: number) => String(n).padStart(2, '0');
+    return `${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+  };
+
   // 端末に残す。ふだんは、1 行ごとにすぐ残す（落ちる直前の行が、いちばん大事）。
   // 1 秒に何行も続いたとき（警告が止まらない、など）だけ、まとめて残す（アプリを重くしない）
   let recent: number[] = [];
@@ -89,9 +107,19 @@ export function createDiag(options: { storage?: Store | null; now?: () => number
   const note = (kind: string, ...parts: unknown[]) => {
     try {
       const seconds = ((now() - started) / 1000).toFixed(1);
-      current.push(wellFormed([seconds, kind, ...parts.map(textOf)].join(' ').slice(0, MAX_LENGTH)));
+      const line = wellFormed([seconds, kind, ...parts.map(textOf)].join(' ').slice(0, MAX_LENGTH));
+      current.push(line);
       if (current.length > max) current.splice(0, current.length - max);
       save();
+      if (kind === 'login') {
+        loginLog.push(`${stamp(now())} ${line}`);
+        if (loginLog.length > LOGIN_MAX_LINES) loginLog.splice(0, loginLog.length - LOGIN_MAX_LINES);
+        try {
+          storage?.setItem(LOGIN_KEY, JSON.stringify(loginLog)); // ログインの行は少ないので、まとめずに、すぐ残す
+        } catch {
+          // 残せなくても動く
+        }
+      }
     } catch {
       // きろくのせいで、アプリを止めない
     }
@@ -101,6 +129,7 @@ export function createDiag(options: { storage?: Store | null; now?: () => number
     note,
     lines: () => [...current],
     previous: () => [...before],
+    loginLines: () => [...loginLog],
     install: (console, target) => {
       const warn = console.warn;
       const error = console.error;
@@ -133,6 +162,7 @@ export interface DiagEnv {
 
 // 画面に出す・写して送る文
 export function diagReport(diag: Diag, env: DiagEnv): string {
+  const login = diag.loginLines();
   return [
     `きせかえ v${env.version}`,
     env.userAgent,
@@ -142,6 +172,7 @@ export function diagReport(diag: Diag, env: DiagEnv): string {
     ...diag.previous(),
     '--- 今回 ---',
     ...diag.lines(),
+    ...(login.length > 0 ? ['--- ログイン ---', ...login] : []),
   ].join('\n');
 }
 

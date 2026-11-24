@@ -16,5 +16,5 @@ export const firebaseConfig = {
 // サーバーの関数を置く場所（東京）
 export const FUNCTIONS_REGION = 'asia-northeast1';
 
-// 方法 2（画面を移る）の Google の client_id。公開してよい値。空のあいだは、アプリが Firebase に聞いて調べる（作者が Google を有効にしたら、書き込む）
-export const GOOGLE_CLIENT_ID = '';
+// 画面を移る方法の Google の client_id（Firebase が作ったウェブ用のもの）。公開してよい値。空なら、アプリが Firebase に聞いて調べる
+export const GOOGLE_CLIENT_ID = '389373249780-na1putbqacl36ste99du074tm5hojb8d.apps.googleusercontent.com';

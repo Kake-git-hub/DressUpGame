@@ -331,7 +331,8 @@ function App() {
   const [loginNotice, setLoginNotice] = useState<string | null>(STARTUP_NOTICE);
   useEffect(dropReturnWithoutStudio, []);
   // つなぎ役（サーバーとのやり取り）。「つくる」を出す端末でだけ、読み込む。
-  // Google から戻って来ていたら、つなぎ役を画面に出す（= 裏でつなぎ始める）前に、戻りを受け取って仕上げる
+  // Google から戻って来ていたら、つなぎ役を画面に出す（= 裏でつなぎ始める）前に、戻りを受け取って仕上げる。
+  // そのあと（戻りが無いときも）、合わせの途中の覚えがあれば、もう一度 adopt する
   // （古い利用者のまま始まった合わせが、入ったあとの利用者の服を、古い利用者コードで控えに入れないように）。
   // 入った場合は、控えを外して読み込み直す（その知らせは、読み込み直しのあとに出る）。
   // 開発用の設定（StrictMode）で 2 回走っても、証明を使うのは 1 回（completeRedirect と finishRedirect の守り）。
@@ -343,12 +344,27 @@ function App() {
     void import('./cloud/boot')
       .then(async (boot) => {
         const made = boot.bootSession(STUDIO_MODE, library, refreshMyItems);
+        let reloading = false;
+        const reload = () => {
+          reloading = true;
+          window.location.reload();
+        };
         if (boot.hasReturn(sessionStorage)) {
           try {
-            const text = await boot.completeRedirect({ backend: made.backend, library, session: sessionStorage, local: localStorage, reload: () => window.location.reload() });
+            const text = await boot.completeRedirect({ backend: made.backend, library, session: sessionStorage, local: localStorage, reload });
             if (text) setLoginNotice(text);
           } catch {
             // 中身（メールアドレスなど）が入りうるので、エラーは書き出さない。つなぎ役は、そのまま出す
+          }
+        }
+        // 合わせの途中（アカウントには入ったが、adopt の返事が届かなかった）なら、つなぎ役を出す前に、もう一度 adopt する。
+        // 読み込み直しが始まっていれば、やらない（直したあとの起動でやる）
+        if (!reloading) {
+          try {
+            const text = await boot.resumeAdopt(boot.browserSettleDeps(made.backend, library, reload));
+            if (text) setLoginNotice(text);
+          } catch {
+            // 合わせられなくても、つなぎ役は出す（覚えは残るので、次の起動でやり直す）
           }
         }
         if (!cancelled) setSession(made);

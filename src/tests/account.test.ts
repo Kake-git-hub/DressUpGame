@@ -3,19 +3,26 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendError } from '../cloud/backend';
-import type { MyItem, StudioBackend } from '../cloud/backend';
+import type { AdoptAnswer, MyItem, StudioBackend, StudioUser } from '../cloud/backend';
 import {
+  ADMIN_NOTE,
+  ADOPT_KEY,
   completeRedirect,
   createAccount,
   deviceEmpty,
   forgetAccount,
+  intentFor,
   LOGIN_MESSAGES,
   noAccount,
   NOTICE_KEY,
+  OFFER_TTL_MS,
   outcomeOf,
+  readAdopt,
+  resumeAdopt,
+  settleLogin,
   takeNotice,
 } from '../cloud/account';
-import type { AccountEnv, AuthPort, LoginOutcome, LoginResult } from '../cloud/account';
+import type { AccountEnv, AdoptPending, AuthPort, LoginOutcome, LoginResult, SettleDeps } from '../cloud/account';
 import { hasReturn, PENDING_KEY, RETURN_KEY, savePending, sha256Hex } from '../cloud/googleRedirect';
 import type { LoginIntent } from '../cloud/googleRedirect';
 import type { Library } from '../cloud/library';
@@ -542,7 +549,11 @@ describe('completeRedirect（戻りの仕上げ）', () => {
       signIn: vi.fn(async () => ({ userCode: 'OLD1', tickets: over.tickets ?? 0, admin: false })),
       listMyItems: async () => [],
       openJobs: async () => [],
-      account: { finishRedirect },
+      offerHandoff: vi.fn(async () => {
+        throw new BackendError('offline', 'つながりません');
+      }),
+      adopt: vi.fn(),
+      account: { finishRedirect, signInWithStashed: vi.fn(async () => false), startRedirect: vi.fn() },
     } as unknown as StudioBackend;
     const reload = vi.fn();
     if (over.outcome !== null) session.setItem(RETURN_KEY, '{"state":"s","idToken":"a.b.c"}');
@@ -574,11 +585,46 @@ describe('completeRedirect（戻りの仕上げ）', () => {
     expect(b.library.ids()).toEqual(['my:a1', 'my:b1']);
     expect(b.reload).toHaveBeenCalledTimes(1);
   });
-  it('taken → 文を返す。何も消さない', async () => {
+  it('taken（合い言葉がもらえなかった）→ 文を返す。何も消さない', async () => {
     const b = build({ outcome: 'taken', saved: 'link' });
     expect(await b.run()).toBe(LOGIN_MESSAGES.taken);
     expect(b.library.ids()).toEqual(['my:a1', 'my:b1']);
     expect(b.reload).not.toHaveBeenCalled();
+  });
+  it('効いている offered の覚えがあれば、空でなくても、いつも signin（link に直さない）。覚えが無ければ、いままでどおり', async () => {
+    const withRecord = build({ outcome: 'linked', saved: 'signin', tickets: 2 });
+    withRecord.local.setItem(ADOPT_KEY, JSON.stringify({ word: 'w', from: 'OLD1', stage: 'offered', at: Date.now() }));
+    await withRecord.run();
+    expect(withRecord.asked).toEqual(['signin']);
+    const expired = build({ outcome: 'linked', saved: 'signin', tickets: 2 });
+    expired.local.setItem(ADOPT_KEY, JSON.stringify({ word: 'w', from: 'OLD1', stage: 'offered', at: Date.now() - OFFER_TTL_MS - 1000 }));
+    await expired.run();
+    expect(expired.asked).toEqual(['link']);
+    const switched = build({ outcome: 'linked', saved: 'signin', tickets: 2 });
+    switched.local.setItem(ADOPT_KEY, JSON.stringify({ word: 'w', from: 'OLD1', stage: 'switched', at: Date.now() }));
+    await switched.run();
+    expect(switched.asked).toEqual(['link']);
+  });
+  it('switched で、offered の覚えがあれば、settleLogin を通る: adopt して、合わせた文を置いて、読み込み直す', async () => {
+    const b = build({ outcome: 'switched', saved: 'signin', tickets: 3 });
+    b.local.setItem(ADOPT_KEY, JSON.stringify({ word: 'w', from: 'OLD1', stage: 'offered', at: Date.now() }));
+    (b.backend.adopt as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 'done', tickets: 3, items: 1 });
+    expect(await b.run()).toBeNull();
+    expect(b.backend.adopt).toHaveBeenCalledWith('w');
+    expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
+    expect(b.library.ids()).toEqual(['my:b1']);
+    expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    expect(b.reload).toHaveBeenCalledTimes(1);
+  });
+  it('taken のとき、行き来の戻りの step は settleLogin に渡る（silent の戻りの taken は、次の行き来を始めない）', async () => {
+    const b = build({ outcome: 'taken', saved: 'signin' });
+    b.finishRedirect.mockImplementationOnce(async (intentNow) => {
+      await intentNow('signin');
+      return { outcome: 'taken', step: 'silent' } as LoginResult;
+    });
+    expect(await b.run()).toBe(LOGIN_MESSAGES.taken);
+    expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+    expect(b.backend.account.startRedirect).not.toHaveBeenCalled();
   });
   it('intentNow: 覚えが signin で、空でなければ link。空なら signin', async () => {
     const notEmpty = build({ outcome: 'linked', saved: 'signin', tickets: 2 });
@@ -593,6 +639,494 @@ describe('completeRedirect（戻りの仕上げ）', () => {
     await Promise.all([b.run(), b.run()]);
     expect(b.finishRedirect).toHaveBeenCalledTimes(1);
     expect(b.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('readAdopt・intentFor（合わせる途中の覚え）', () => {
+  const NOW = 5_000_000;
+  const put = (local: ReturnType<typeof memoryStore>, over: Partial<AdoptPending> & { raw?: string } = {}) => {
+    const { raw, ...rest } = over;
+    local.setItem(ADOPT_KEY, raw ?? JSON.stringify({ word: 'w-1', from: 'OLD1', stage: 'offered', at: NOW - 1000, ...rest }));
+  };
+  it('覚えが無い・壊れている・形が違う → null', () => {
+    const local = memoryStore();
+    expect(readAdopt(local, NOW)).toBeNull();
+    expect(readAdopt(null, NOW)).toBeNull();
+    for (const raw of ['{こわれた', 'null', '[]', '{"word":"w","from":"A","stage":"other","at":1}', '{"word":1,"from":"A","stage":"offered","at":1}', '{"word":"w","from":"A","stage":"offered"}']) {
+      put(local, { raw });
+      expect(readAdopt(local, NOW)).toBeNull();
+    }
+  });
+  it('効いている offered は、そのまま返る（hint・admin も）', () => {
+    const local = memoryStore();
+    put(local, { hint: 'sub-1', admin: true });
+    expect(readAdopt(local, NOW)).toEqual({ word: 'w-1', from: 'OLD1', stage: 'offered', at: NOW - 1000, hint: 'sub-1', admin: true });
+    put(local);
+    expect(readAdopt(local, NOW)).toEqual({ word: 'w-1', from: 'OLD1', stage: 'offered', at: NOW - 1000 });
+  });
+  it('offered は 10 分まで効く。過ぎたら、捨てて null（保存からも消える）', () => {
+    const local = memoryStore();
+    put(local, { at: NOW - OFFER_TTL_MS });
+    expect(readAdopt(local, NOW)).not.toBeNull(); // ちょうど 10 分は、まだ効く
+    put(local, { at: NOW - OFFER_TTL_MS - 1 });
+    expect(readAdopt(local, NOW)).toBeNull();
+    expect(local.data.has(ADOPT_KEY)).toBe(false);
+  });
+  it('switched は、時間がたっても、adopt が最後の返事をするまで残る', () => {
+    const local = memoryStore();
+    put(local, { stage: 'switched', at: NOW - 30 * 24 * 3600_000 });
+    expect(readAdopt(local, NOW)?.stage).toBe('switched');
+    expect(local.data.has(ADOPT_KEY)).toBe(true);
+  });
+  it('intentFor: 空なら入る。空でなければ結び付ける。ただし、効いている offered があれば入る', () => {
+    const local = memoryStore();
+    expect(intentFor(true, local, NOW)).toBe('signin');
+    expect(intentFor(false, local, NOW)).toBe('link');
+    expect(intentFor(false, null, NOW)).toBe('link');
+    put(local);
+    expect(intentFor(false, local, NOW)).toBe('signin');
+    expect(intentFor(true, local, NOW)).toBe('signin');
+    put(local, { at: NOW - OFFER_TTL_MS - 1 }); // 過ぎた offered は、無いのと同じ
+    expect(intentFor(false, local, NOW)).toBe('link');
+    put(local, { stage: 'switched' }); // switched は、入るの決め手にしない
+    expect(intentFor(false, local, NOW)).toBe('link');
+  });
+});
+
+describe('settleLogin（ログインの結果の仕上げ）', () => {
+  const WORD = 'handoff-word-secret-0123456789';
+  const HINT = 'google-sub-hint-555';
+  const BEFORE: StudioUser = { userCode: 'OLD1', tickets: 3, admin: false };
+  const never = () => new Promise<LoginResult>(() => undefined);
+  const answer = (status: AdoptAnswer['status'], tickets = 0, items = 0): AdoptAnswer => ({ status, tickets, items });
+
+  function build(over: { word?: string } = {}) {
+    secrets.push(WORD, HINT);
+    const session = memoryStore();
+    const local = memoryStore({ [NEW_KEY]: '["my:a1"]', [ACKED_KEY]: '["j1"]' });
+    const library = memoryLibrary([myItem('my:a1', 'OLD1'), myItem('my:a2', 'OLD1'), myItem('my:b1', 'BBBB'), myItem('my:n1')]);
+    const account = {
+      signInWithStashed: vi.fn(async () => true),
+      startRedirect: vi.fn<(intent: LoginIntent, options?: { step?: 'silent' | 'chooser'; hint?: string }) => Promise<LoginResult>>(never),
+    };
+    const backend = {
+      offerHandoff: vi.fn(async () => over.word ?? WORD),
+      adopt: vi.fn(async (word: string): Promise<AdoptAnswer> => (void word, answer('done', 3, 2))),
+      account,
+    };
+    let t = 2_000_000;
+    const reload = vi.fn();
+    const deps: SettleDeps = { backend: backend as unknown as StudioBackend, library, session, local, now: () => t, reload, note: (...parts) => void lines.push(parts.join(' ')) };
+    const record = (): AdoptPending | null => JSON.parse(local.data.get(ADOPT_KEY) ?? 'null') as AdoptPending | null;
+    const plant = (pending: Partial<AdoptPending> = {}) => local.setItem(ADOPT_KEY, JSON.stringify({ word: WORD, from: 'OLD1', stage: 'offered', at: t - 1000, ...pending }));
+    return { deps, backend, account, session, local, library, reload, record, plant, advance: (ms: number) => (t += ms) };
+  }
+  type Built = ReturnType<typeof build>;
+  const settle = (b: Built, result: LoginResult, method: 'popup' | 'redirect' = 'redirect', before: StudioUser | null = BEFORE) => settleLogin(b.deps, result, method, before);
+
+  describe('linked', () => {
+    it('そのまま返す。覚えが無ければ、何も起きない', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'linked' })).toEqual({ outcome: 'linked' });
+      expect(b.reload).not.toHaveBeenCalled();
+      expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+    });
+    it('効いている offered の覚えがあれば、捨てる（合わせる途中で、結び付けが通った）', async () => {
+      const b = build();
+      b.plant();
+      expect(await settle(b, { outcome: 'linked' })).toEqual({ outcome: 'linked' });
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    });
+    it('switched の覚えは、捨てない（adopt の返事が来るまで残す）', async () => {
+      const b = build();
+      b.plant({ stage: 'switched' });
+      await settle(b, { outcome: 'linked' });
+      expect(b.record()?.stage).toBe('switched');
+    });
+  });
+
+  describe('taken（もう使われている）', () => {
+    it('合い言葉をもらい、覚えを書く（offered・元の利用者コード・hint）。きろくに offer ok', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken', hint: HINT });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.record()).toEqual({ word: WORD, from: 'OLD1', stage: 'offered', at: 2_000_000, hint: HINT });
+      expect(lines).toContain('offer ok');
+    });
+    it('管理者の端末なら、覚えに admin を付ける', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken' }, 'redirect', { ...BEFORE, admin: true });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.record()).toEqual({ word: WORD, from: 'OLD1', stage: 'offered', at: 2_000_000, admin: true });
+    });
+    it('サーバーが古い（old-server）→ taken-old-server。覚えは書かない・先へ進まない', async () => {
+      const b = build();
+      b.backend.offerHandoff.mockRejectedValue(new BackendError('old-server', 'サーバーが古い'));
+      expect(await settle(b, { outcome: 'taken' })).toEqual({ outcome: 'taken-old-server' });
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.account.signInWithStashed).not.toHaveBeenCalled();
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+      expect(lines).toContain('offer old-server');
+      expect(lines).toContain('result taken-old-server');
+    });
+    it.each([
+      ['つながらない（BackendError）', () => new BackendError('offline', 'つながりません')],
+      ['そのほかの例外', () => new Error('x')],
+    ])('合い言葉がもらえない（%s）→ taken。覚えは書かない・先へ進まない。きろくに offer failed', async (_name, make) => {
+      const b = build();
+      b.backend.offerHandoff.mockRejectedValue(make());
+      expect(await settle(b, { outcome: 'taken' })).toEqual({ outcome: 'taken' });
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+      expect(lines).toContain('offer failed');
+    });
+    it('ログイン前の利用者が聞けなかったとき（before が null）は、元が分からないので、合わせない（taken）', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'taken' }, 'redirect', null)).toEqual({ outcome: 'taken' });
+      expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(lines).toContain('offer failed');
+    });
+    it('断りと一緒に返った証明で入れる → きろくに switch stashed。画面を移らず、そのまま adopt まで進む（合わさって、読み込み直す）', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'taken', hint: HINT })).toBeNull();
+      expect(b.account.signInWithStashed).toHaveBeenCalledTimes(1);
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+      expect(b.backend.adopt).toHaveBeenCalledWith(WORD);
+      expect(lines).toContain('switch stashed');
+      expect(lines).toContain('adopt ok tickets=3 items=2');
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+    });
+    it('方法 2 で、証明が返らない（false）→ 画面なしの行き来を始める（signin・step silent・hint）。きろくに switch silent', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      const pending = settle(b, { outcome: 'taken', hint: HINT });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.account.startRedirect).toHaveBeenCalledWith('signin', { step: 'silent', hint: HINT });
+      expect(lines).toContain('switch silent');
+      expect(b.reload).not.toHaveBeenCalled();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      // 画面が移ったとき、startRedirect は返らない。返らない間、settleLogin も返らない（null を返さない・何も続けない）
+      let settled = false;
+      void pending.then(() => (settled = true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(settled).toBe(false);
+    });
+    it('方法 2 で、証明で入ろうとして投げた → 画面なしの行き来（投げたことは、表に出さない）', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockRejectedValue({ code: 'auth/network-request-failed', customData: { email: 'a@example.com' } });
+      void settle(b, { outcome: 'taken', hint: HINT });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.account.startRedirect).toHaveBeenCalledWith('signin', { step: 'silent', hint: HINT });
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+    });
+    it('hint が無ければ、hint なしで画面なしの行き来を始める', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken' });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.account.startRedirect).toHaveBeenCalledWith('signin', { step: 'silent' });
+    });
+    it('画面を移れなかった（startRedirect が返った）ときは、その結果を返す', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      b.account.startRedirect.mockResolvedValue({ outcome: 'not-ready' });
+      expect(await settle(b, { outcome: 'taken', hint: HINT })).toEqual({ outcome: 'not-ready' });
+      expect(b.record()?.stage).toBe('offered'); // 覚えは残る（10 分以内に、押し直せる）
+    });
+    it('方法 1（小さい窓）で、証明が返らない → press-again。覚え（offered）を残す。画面は移らない', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      expect(await settle(b, { outcome: 'taken', hint: HINT }, 'popup')).toEqual({ outcome: 'press-again' });
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+      expect(b.record()).toMatchObject({ word: WORD, from: 'OLD1', stage: 'offered' });
+      expect(lines).toContain('result press-again');
+    });
+    it('方法 1 でも、証明が返れば（stashed）その場で入って合わさる', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'taken' }, 'popup')).toBeNull();
+      expect(b.backend.adopt).toHaveBeenCalledTimes(1);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+    });
+    it('行き来の戻り（step が付いた taken）では、もう合い言葉をもらわず、次の行き来も始めない（そのまま返す）', async () => {
+      for (const step of ['silent', 'chooser'] as const) {
+        const b = build();
+        expect(await settle(b, { outcome: 'taken', step })).toEqual({ outcome: 'taken', step });
+        expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+        expect(b.account.signInWithStashed).not.toHaveBeenCalled();
+        expect(b.account.startRedirect).not.toHaveBeenCalled();
+      }
+    });
+  });
+
+  describe('画面なしの行き来（step: silent）が switched でなかった', () => {
+    it.each([
+      ['Google が画面が要ると断った', { outcome: 'failed', step: 'silent' }],
+      ['access_denied（cancelled）', { outcome: 'cancelled', step: 'silent' }],
+      ['証明を渡して失敗', { outcome: 'failed', code: 'auth/network-request-failed', step: 'silent' }],
+    ] as Array<[string, LoginResult]>)('%s → 選ぶ画面つきの行き来（signin・step chooser）。きろくに switch chooser', async (_name, result) => {
+      const b = build();
+      b.plant({ hint: HINT });
+      void settle(b, result);
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.account.startRedirect).toHaveBeenCalledWith('signin', { step: 'chooser' });
+      expect(lines).toContain('switch chooser');
+      expect(b.reload).not.toHaveBeenCalled();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+    });
+    it('画面を移れなければ、その結果を返す', async () => {
+      const b = build();
+      b.plant();
+      b.account.startRedirect.mockResolvedValue({ outcome: 'not-ready' });
+      expect(await settle(b, { outcome: 'failed', step: 'silent' })).toEqual({ outcome: 'not-ready' });
+    });
+  });
+
+  describe('行き来は最大 3 回（最初・画面なし・選ぶ画面）で止まる', () => {
+    it('最初が taken → 画面なし（失敗）→ 選ぶ画面（キャンセル）: startRedirect は 2 回だけ。3 回めは始めない。結果は cancelled のまま', async () => {
+      const b = build();
+      b.account.signInWithStashed.mockResolvedValue(false);
+      // 1 回めの戻り（taken）
+      void settle(b, { outcome: 'taken', hint: HINT });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.account.startRedirect.mock.calls[0]).toEqual(['signin', { step: 'silent', hint: HINT }]);
+      // 2 回めの戻り（Google が画面なしを断った）
+      void settle(b, { outcome: 'failed', step: 'silent' });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(2));
+      expect(b.account.startRedirect.mock.calls[1]).toEqual(['signin', { step: 'chooser' }]);
+      // 3 回めの戻り（選ぶ画面で「キャンセル」）
+      expect(await settle(b, { outcome: 'cancelled', step: 'chooser' })).toEqual({ outcome: 'cancelled', step: 'chooser' });
+      expect(b.account.startRedirect).toHaveBeenCalledTimes(2);
+      expect(b.backend.offerHandoff).toHaveBeenCalledTimes(1);
+      expect(b.account.signInWithStashed).toHaveBeenCalledTimes(1);
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(b.reload).not.toHaveBeenCalled();
+      expect(b.library.ids()).toContain('my:a1'); // 匿名のまま。何も変わらない
+    });
+    it.each([
+      ['failed', { outcome: 'failed', step: 'chooser' }],
+      ['taken', { outcome: 'taken', step: 'chooser' }],
+      ['not-ready', { outcome: 'not-ready', step: 'chooser' }],
+    ] as Array<[string, LoginResult]>)('選ぶ画面の戻りが switched でなければ（%s）、何も始めずに、そのまま返す', async (_name, result) => {
+      const b = build();
+      b.plant();
+      expect(await settle(b, result)).toEqual(result);
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+      expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+      expect(b.reload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('switched（入れた）', () => {
+    it('覚えが無い → いままでどおり: 入る前の利用者の服だけ外し、知らせ switched を置いて、読み込み直す。adopt は呼ばない', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'switched' })).toBeNull();
+      expect(b.library.ids()).toEqual(['my:b1', 'my:n1']);
+      expect(b.local.data.has(NEW_KEY)).toBe(false);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.switched);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+    });
+    it('覚えが無く、入る前の利用者が聞けなかったら、何も消さずに読み込み直す', async () => {
+      const b = build();
+      expect(await settle(b, { outcome: 'switched' }, 'redirect', null)).toBeNull();
+      expect(b.library.ids()).toHaveLength(4);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+    });
+    it('覚えがある → adopt の前に、段階を switched に書き直す（adopt の途中で落ちても、次の起動でやり直せる）', async () => {
+      const b = build();
+      b.plant({ hint: HINT });
+      let during: AdoptPending | null = null;
+      b.backend.adopt.mockImplementation(async () => {
+        during = b.record();
+        return answer('done', 1, 1);
+      });
+      await settle(b, { outcome: 'switched' });
+      expect(during).toMatchObject({ word: WORD, from: 'OLD1', stage: 'switched' });
+    });
+    it('done → 覚えを消す・元の利用者の服だけ控えから外す・知らせ merged・きろく（adopt ok tickets=N items=M・result merged）・読み込み直す', async () => {
+      const b = build();
+      b.plant();
+      expect(await settle(b, { outcome: 'switched' })).toBeNull();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.library.ids()).toEqual(['my:b1', 'my:n1']);
+      expect(b.local.data.has(NEW_KEY)).toBe(false);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+      expect(lines).toContain('adopt ok tickets=3 items=2');
+      expect(lines).toContain('result merged');
+    });
+    it('done で、覚えの admin が true → 知らせの文に ADMIN_NOTE が足される', async () => {
+      const b = build();
+      b.plant({ admin: true });
+      await settle(b, { outcome: 'switched' });
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged + ADMIN_NOTE);
+    });
+    it.each(['used', 'unknown', 'refused'] as const)('%s → 覚えを消す・知らせ switched・きろく adopt %s。端末の控えは外さない・読み込み直す', async (status) => {
+      const b = build();
+      b.plant({ admin: true });
+      b.backend.adopt.mockResolvedValue(answer(status));
+      expect(await settle(b, { outcome: 'switched' })).toBeNull();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.switched);
+      expect(b.library.ids()).toHaveLength(4);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+      expect(lines).toContain(`adopt ${status}`);
+    });
+    it('adopt が落ちた（つながらない）→ 覚えは switched のまま残る・控えの服は外さない（NEW の印も）・知らせ merge-later・きろく adopt later・読み込み直す', async () => {
+      const b = build();
+      b.plant();
+      b.backend.adopt.mockRejectedValue(new BackendError('offline', 'つながりません', { uncertain: true }));
+      expect(await settle(b, { outcome: 'switched' })).toBeNull();
+      expect(b.record()).toMatchObject({ word: WORD, from: 'OLD1', stage: 'switched' });
+      expect(b.library.ids()).toEqual(['my:a1', 'my:a2', 'my:b1', 'my:n1']); // 端末の服が残る
+      expect(b.local.data.has(NEW_KEY)).toBe(true);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES['merge-later']);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+      expect(lines).toContain('adopt later');
+      expect(lines).toContain('result merge-later');
+    });
+    it('adopt が wait（まだ匿名）→ adopt が落ちたのと同じ（覚えを残し、控えは外さず、merge-later）', async () => {
+      const b = build();
+      b.plant();
+      b.backend.adopt.mockResolvedValue(answer('wait'));
+      await settle(b, { outcome: 'switched' });
+      expect(b.record()?.stage).toBe('switched');
+      expect(b.library.ids()).toHaveLength(4);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES['merge-later']);
+    });
+    it('merge-later で、覚えの admin が true → 知らせの文に ADMIN_NOTE が足される', async () => {
+      const b = build();
+      b.plant({ admin: true });
+      b.backend.adopt.mockRejectedValue(new Error('offline'));
+      await settle(b, { outcome: 'switched' });
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES['merge-later'] + ADMIN_NOTE);
+    });
+    it('端末の控えが読めなくても（done のあと）、知らせを置いて、読み込み直す', async () => {
+      const b = build();
+      b.plant();
+      b.library.all = async () => Promise.reject(new Error('idb'));
+      await settle(b, { outcome: 'switched' });
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
+      expect(b.reload).toHaveBeenCalledTimes(1);
+    });
+    it('10 分を過ぎた offered の覚えは、捨てる（覚えが無いのと同じ。adopt は呼ばない）', async () => {
+      const b = build();
+      b.plant({ at: 2_000_000 - OFFER_TTL_MS - 1 });
+      await settle(b, { outcome: 'switched' });
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.switched);
+    });
+    it('前から残っている switched の覚え（ログアウトをはさんでも消さない）は、次に入ったアカウントに合わさる', async () => {
+      const b = build();
+      b.plant({ stage: 'switched', at: 2_000_000 - 3 * 24 * 3600_000 });
+      await settle(b, { outcome: 'switched' });
+      expect(b.backend.adopt).toHaveBeenCalledWith(WORD);
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.session.data.get(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
+    });
+  });
+
+  describe('ほか（何もしない）', () => {
+    it.each([
+      { outcome: 'cancelled' },
+      { outcome: 'not-ready' },
+      { outcome: 'no-popup' },
+      { outcome: 'failed' },
+      { outcome: 'failed', code: 'auth/network-request-failed' },
+      { outcome: 'cancelled', step: 'chooser' },
+    ] as LoginResult[])('%j → そのまま返す。バックエンドも端末も触らない', async (result) => {
+      const b = build();
+      b.plant();
+      const before = b.local.data.get(ADOPT_KEY);
+      expect(await settle(b, result)).toEqual(result);
+      expect(b.local.data.get(ADOPT_KEY)).toBe(before);
+      expect(b.library.ids()).toHaveLength(4);
+      expect(b.reload).not.toHaveBeenCalled();
+      expect(b.backend.offerHandoff).not.toHaveBeenCalled();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(b.account.startRedirect).not.toHaveBeenCalled();
+    });
+  });
+
+  it('文: 新しい 4 つの結果と、書き換えた taken の文', () => {
+    expect(LOGIN_MESSAGES.merged).toBe('Google のアカウントでログインしました。この端末のチケットと服を、アカウントに合わせました');
+    expect(LOGIN_MESSAGES['merge-later']).toBe('Google のアカウントでログインしました。この端末のチケットと服は、インターネットにつながったときに、合わせます');
+    expect(LOGIN_MESSAGES['taken-old-server']).toBe('この Google のアカウントは、ほかの端末で使われています。サーバーが古い版のため、まだ合わせられません（作者が載せ直す必要があります）');
+    expect(LOGIN_MESSAGES['press-again']).toBe('もう一度「小さい窓でログイン」を押すと、この端末のチケットと服を合わせて、ログインします');
+    expect(LOGIN_MESSAGES.taken).toBe('この Google のアカウントは、ほかの端末で使われています。合わせる準備ができませんでした。少し待ってから、もう一度ログインしてください');
+    expect(ADMIN_NOTE).toBe('（この端末は管理者でしたが、合わせたので、管理者の印が外れました。Firebase の画面で、管理者の利用者コードを、いまの利用者コードに書き換えてください。手順書 2-11）');
+  });
+});
+
+describe('resumeAdopt（起動のとき、もう一度 adopt）', () => {
+  const WORD = 'handoff-word-secret-resume-77';
+  function build() {
+    secrets.push(WORD);
+    const session = memoryStore();
+    const local = memoryStore({ [NEW_KEY]: '["my:a1"]' });
+    const library = memoryLibrary([myItem('my:a1', 'OLD1'), myItem('my:b1', 'BBBB')]);
+    const backend = { adopt: vi.fn(async (word: string): Promise<AdoptAnswer> => (void word, { status: 'done', tickets: 3, items: 1 })) };
+    const reload = vi.fn();
+    const deps: SettleDeps = { backend: backend as unknown as StudioBackend, library, session, local, now: () => 9_000_000, reload, note: (...parts) => void lines.push(parts.join(' ')) };
+    const plant = (stage: AdoptPending['stage'], at = 8_900_000) => local.setItem(ADOPT_KEY, JSON.stringify({ word: WORD, from: 'OLD1', stage, at }));
+    return { deps, backend, local, library, reload, plant };
+  }
+  it('覚えが無ければ、何もしない（バックエンドに聞かない）→ null', async () => {
+    const b = build();
+    expect(await resumeAdopt(b.deps)).toBeNull();
+    expect(b.backend.adopt).not.toHaveBeenCalled();
+  });
+  it('offered の覚えでは、何もしない（まだ入っていない）', async () => {
+    const b = build();
+    b.plant('offered');
+    expect(await resumeAdopt(b.deps)).toBeNull();
+    expect(b.backend.adopt).not.toHaveBeenCalled();
+    expect(b.local.data.has(ADOPT_KEY)).toBe(true);
+  });
+  it('switched で done → 覚えを消す・元の利用者の服を外す・「この端末のチケットと服を、アカウントに合わせました」を返す。読み込み直さない', async () => {
+    const b = build();
+    b.plant('switched', 1); // 古くても、switched は効く
+    expect(await resumeAdopt(b.deps)).toBe('この端末のチケットと服を、アカウントに合わせました');
+    expect(b.backend.adopt).toHaveBeenCalledWith(WORD);
+    expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    expect(await b.library.all().then((all) => all.map((i) => i.id))).toEqual(['my:b1']);
+    expect(b.local.data.has(NEW_KEY)).toBe(false);
+    expect(b.reload).not.toHaveBeenCalled();
+    expect(lines).toContain('adopt ok tickets=3 items=1');
+  });
+  it.each(['used', 'unknown', 'refused'] as const)('%s → 覚えを消す・null。控えは外さない', async (status) => {
+    const b = build();
+    b.plant('switched');
+    b.backend.adopt.mockResolvedValue({ status, tickets: 0, items: 0 });
+    expect(await resumeAdopt(b.deps)).toBeNull();
+    expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    expect((await b.library.all()).length).toBe(2);
+    expect(lines).toContain(`adopt ${status}`);
+  });
+  it.each([
+    ['落ちた'],
+    ['wait'],
+  ])('%s → 何も変えない（覚えは残る・控えの服は残る）→ null', async (name) => {
+    const b = build();
+    b.plant('switched');
+    if (name === '落ちた') b.backend.adopt.mockRejectedValue(new BackendError('offline', 'つながりません'));
+    else b.backend.adopt.mockResolvedValue({ status: 'wait', tickets: 0, items: 0 });
+    expect(await resumeAdopt(b.deps)).toBeNull();
+    expect(b.local.data.has(ADOPT_KEY)).toBe(true);
+    expect((await b.library.all()).length).toBe(2);
+    expect(b.local.data.has(NEW_KEY)).toBe(true);
+  });
+  it('同時に 2 回呼ばれても（StrictMode）、adopt は 1 回', async () => {
+    const b = build();
+    b.plant('switched');
+    const [first, second] = await Promise.all([resumeAdopt(b.deps), resumeAdopt(b.deps)]);
+    expect(first).toBe(second);
+    expect(b.backend.adopt).toHaveBeenCalledTimes(1);
   });
 });
 

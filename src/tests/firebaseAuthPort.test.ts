@@ -57,6 +57,7 @@ vi.mock('firebase/auth', () => ({
 }));
 
 import { createAuthPort, createFirebaseTransport, lookupClientId } from '../cloud/firebaseTransport';
+import { GOOGLE_CLIENT_ID } from '../cloud/firebaseConfig';
 
 const AUTH_URI = 'https://accounts.google.com/o/oauth2/auth?client_id=123-abc.apps.googleusercontent.com&x=1';
 const jsonResponse = (body: unknown, status = 200) => ({ ok: status === 200, status, json: async () => body }) as unknown as Response;
@@ -228,17 +229,24 @@ describe('口の本物', () => {
     await transport.call({ op: 'signIn' });
     expect(m.signInAnonymously).toHaveBeenCalledTimes(2);
   });
-  it('clientId は、設定があればそれ。無ければ 1 回だけ調べて覚える', async () => {
+  it('clientId は、設定（GOOGLE_CLIENT_ID）の値。調べに行かない', async () => {
     const fetchSpy = vi.fn(async () => jsonResponse({ authUri: AUTH_URI }));
     vi.stubGlobal('fetch', fetchSpy);
     try {
       const port = await portOf();
-      expect(await port.clientId()).toBe('123-abc.apps.googleusercontent.com');
-      expect(await port.clientId()).toBe('123-abc.apps.googleusercontent.com');
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(await port.clientId()).toBe(GOOGLE_CLIENT_ID);
+      expect(GOOGLE_CLIENT_ID).toBe('389373249780-na1putbqacl36ste99du074tm5hojb8d.apps.googleusercontent.com');
+      expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+  it('設定の値が空なら、1 回だけ調べて覚える', async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse({ authUri: AUTH_URI }));
+    const port = createAuthPort({ auth: m.auth as never, resetSignIn: () => undefined, fetchImpl: fetchSpy as unknown as typeof fetch, apiKey: 'K', clientId: '', continueUri: 'u' });
+    expect(await port.clientId()).toBe('123-abc.apps.googleusercontent.com');
+    expect(await port.clientId()).toBe('123-abc.apps.googleusercontent.com');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
   it('設定に client_id があれば、調べに行かない', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ authUri: AUTH_URI }));

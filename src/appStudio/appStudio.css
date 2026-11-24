@@ -242,6 +242,18 @@
   max-width: 100%;
   white-space: normal; /* 文が長いので、折り返す */
 }
+.studio-account-fallback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.studio-account-small {
+  width: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
 .studio-account-row {
   justify-content: space-between;
 }

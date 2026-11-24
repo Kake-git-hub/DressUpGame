@@ -3,11 +3,14 @@
  *
  * 方法 1（小さい窓）は、ボタンを押した、その場で窓を開かないと、ブラウザ（とくに iPad・iPhone）が止める。
  * だから、準備（口・client_id・端末が空か）は、欄が出たときに済ませておき、onClick では、何も待たずに loginWithPopup を呼ぶ。
- * 文は、設計書 7.1・7.2・7.4 のとおり（大人向け）。メールアドレスは、きろく・console には出さない（画面にだけ出す）。
+ * ボタンは、大きい 1 つ（画面を移る方法）と、「うまくいかないとき」の小さい 1 つ（小さい窓）。
+ * ログインの結果の仕上げ（もう使われているときの合わせる・入ったあとの読み込み直し）は、account.ts の settleLogin に任せる。
+ * 文は、設計書 7.1・7.2・7.4・8.8 のとおり（大人向け）。メールアドレスは、きろく・console には出さない（画面にだけ出す）。
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { deviceEmpty, forgetAccount, LOGIN_MESSAGES, NOTICE_KEY } from '../cloud/account';
+import { browserSettleDeps, deviceEmpty, forgetAccount, intentFor, LOGIN_MESSAGES, settleLogin } from '../cloud/account';
 import type { AccountInfo, LoginResult } from '../cloud/account';
+import type { StudioUser } from '../cloud/backend';
 import type { LoginIntent } from '../cloud/googleRedirect';
 import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
@@ -21,9 +24,9 @@ interface Props {
 const TEXT = {
   heading: 'アカウント',
   lead: 'Google のアカウントでログインすると、ほかの端末でも、同じチケットと服を使えます。',
-  popup: 'Google でログイン（方法 1: 小さい窓）',
-  redirect: 'Google でログイン（方法 2: 画面を移る）',
-  trial: 'ためしの版です。どちらの方法で、うまくいったか・いかなかったかを、きろく（log）から報告してください。',
+  redirect: 'Google でログイン',
+  fallback: 'うまくいかないとき: ',
+  popup: '小さい窓でログイン',
   preparing: '準備しています…',
   unavailable: 'いまは、ログインの準備ができません（インターネットを確かめてください）',
   busy: 'ログインしています…',
@@ -104,31 +107,17 @@ export function Account({ session, library, reload = () => window.location.reloa
   const empty = checked?.stamp === stamp ? checked.empty : null; // 状態が変わったあと、聞き直しが済むまでは null
 
   const ready = info !== null && empty !== null;
-  const intent: LoginIntent = empty ? 'signin' : 'link';
 
-  // 結果を、欄に反映する。switched は、読み込み直すので、待ちのまま
-  const handle = async (result: LoginResult, userBefore: string | null) => {
-    if (result.outcome === 'switched') {
-      // 入る前の利用者の服だけ、控えから外す（サーバーに残っている。「前の利用者の服」は触らない）
-      // 控えが読めなくても、利用者は替わっている。知らせは置き、読み込み直しは、必ずする
-      try {
-        try {
-          if (userBefore) await forgetAccount(library, userBefore, safeStorage(() => window.localStorage));
-        } catch {
-          // 控えが外せなくても、進む
-        }
-        try {
-          safeStorage(() => window.sessionStorage)?.setItem(NOTICE_KEY, LOGIN_MESSAGES.switched);
-        } catch {
-          // 知らせが置けなくても、読み込み直す
-        }
-      } finally {
-        reload();
-      }
-      return;
+  // 結果を、欄に反映する。仕上げ（settleLogin）が null を返したら（読み込み直す・画面が移る）、待ちのまま
+  const handle = async (result: LoginResult, method: 'popup' | 'redirect', before: StudioUser | null) => {
+    let settled: LoginResult | null;
+    try {
+      settled = await settleLogin(browserSettleDeps(session.backend, library, reload), result, method, before);
+    } catch {
+      settled = { outcome: 'failed' }; // 中身（メールアドレスなど）が入りうるので、エラーは書き出さない
     }
-    if (!mounted.current) return;
-    if (result.outcome === 'linked') {
+    if (!settled || !mounted.current) return;
+    if (settled.outcome === 'linked') {
       try {
         setInfo(await account.prepare());
       } catch {
@@ -137,28 +126,32 @@ export function Account({ session, library, reload = () => window.location.reloa
     }
     if (!mounted.current) return;
     setBusy(false);
-    setMessage(LOGIN_MESSAGES[result.outcome]);
+    setMessage(LOGIN_MESSAGES[settled.outcome]);
   };
+
+  // 結び付けるか、入るか。合わせる途中（10 分以内の offered の覚え）なら、空でなくても入る
+  const intentNow = (): LoginIntent => intentFor(empty === true, safeStorage(() => window.localStorage), Date.now());
 
   const loginWithPopup = () => {
     // 窓を開くのが、最初。この前に await しない（ブラウザに止められる）
-    const pending = account.loginWithPopup(intent);
-    const userBefore = session.getState().user?.userCode ?? null;
+    const pending = account.loginWithPopup(intentNow());
+    const before = session.getState().user ?? null;
     setBusy(true);
     setMessage(null);
     void pending.then(
-      (result) => handle(result, userBefore),
-      () => handle({ outcome: 'failed' }, userBefore),
+      (result) => handle(result, 'popup', before),
+      () => handle({ outcome: 'failed' }, 'popup', before),
     );
   };
 
   const loginWithRedirect = () => {
+    const before = session.getState().user ?? null;
     setBusy(true);
     setMessage(null);
     // 画面が移れば、これは返らない。返ってきたら、移れなかった
-    void account.startRedirect(intent).then(
-      (result) => handle(result, null),
-      () => handle({ outcome: 'failed' }, null),
+    void account.startRedirect(intentNow()).then(
+      (result) => handle(result, 'redirect', before),
+      () => handle({ outcome: 'failed' }, 'redirect', before),
     );
   };
 
@@ -239,15 +232,17 @@ export function Account({ session, library, reload = () => window.location.reloa
         <>
           <p className="studio-note">{TEXT.lead}</p>
           <div className="studio-account-buttons">
-            <button type="button" onClick={loginWithPopup} disabled={!ready || busy} data-testid="account-login-popup">
-              {TEXT.popup}
-            </button>
             <button type="button" onClick={loginWithRedirect} disabled={!ready || busy} data-testid="account-login-redirect">
               {TEXT.redirect}
             </button>
           </div>
+          <div className="studio-hint studio-account-fallback">
+            <span>{TEXT.fallback}</span>
+            <button type="button" className="studio-account-small" onClick={loginWithPopup} disabled={!ready || busy} data-testid="account-login-popup">
+              {TEXT.popup}
+            </button>
+          </div>
           {!ready && !unavailable && <p className="studio-hint">{TEXT.preparing}</p>}
-          <p className="studio-hint">{TEXT.trial}</p>
         </>
       )}
       {busy && info?.kind !== 'google' && (
