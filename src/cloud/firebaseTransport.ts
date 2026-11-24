@@ -93,15 +93,20 @@ const TAKEN_CODE = 'auth/credential-already-in-use';
 export function createAuthPort(deps: AuthPortDeps): AuthPort {
   const { auth } = deps;
   let lookedUp: Promise<string | null> | null = null;
-  // 結び付けが「もう使われている」と断られたとき、Firebase が一緒に返した証明（そのアカウントに入るのに使う。使ったら捨てる）
-  let stashed: OAuthCredential | null = null;
-  const stash = (error: unknown): void => {
+  // 結び付けが「もう使われている」と断られたとき、そのアカウントに入るのに使う証明の候補（先に試す順。使ったら捨てる）。
+  // 乱数つきの証明は、断りと一緒に返る証明に乱数が無いことがあるので、redirect の道では、自分で作った証明も候補に入れる
+  let stashed: OAuthCredential[] = [];
+  const stash = (error: unknown, built?: OAuthCredential): void => {
     if (typeof error !== 'object' || error === null || (error as { code?: unknown }).code !== TAKEN_CODE) return;
+    const candidates: OAuthCredential[] = [];
     try {
-      stashed = OAuthProvider.credentialFromError(error as AuthError);
+      const fromError = OAuthProvider.credentialFromError(error as AuthError);
+      if (fromError) candidates.push(fromError);
     } catch {
-      stashed = null; // 証明が取れなくても、断られたことは、そのまま伝える
+      // 証明が取れなくても、断られたことは、そのまま伝える
     }
+    if (built) candidates.push(built);
+    stashed = candidates;
   };
   return {
     current(): AccountInfo {
@@ -115,7 +120,7 @@ export function createAuthPort(deps: AuthPortDeps): AuthPort {
       const user = auth.currentUser;
       // 結び付けたいのに、いまの利用者が無いとき、入るに化けさせない（別の利用者に替わってしまう）
       if (intent === 'link' && !user) return Promise.reject(NO_CURRENT_USER);
-      stashed = null; // 前の断りの証明は、使わない
+      stashed = []; // 前の断りの証明は、使わない
       const opened = intent === 'link' && user ? linkWithPopup(user, provider) : signInWithPopup(auth, provider);
       return opened.then(
         () => undefined,
@@ -128,23 +133,31 @@ export function createAuthPort(deps: AuthPortDeps): AuthPort {
     async withToken(intent: LoginIntent, idToken: string, rawNonce: string): Promise<void> {
       const credential = new OAuthProvider('google.com').credential({ idToken, rawNonce });
       const user = auth.currentUser;
-      stashed = null; // 前の断りの証明は、使わない
+      stashed = []; // 前の断りの証明は、使わない
       if (intent === 'link') {
         if (!user) throw NO_CURRENT_USER;
         try {
           await linkWithCredential(user, credential);
         } catch (error) {
-          stash(error);
+          stash(error, credential);
           throw error;
         }
       } else await signInWithCredential(auth, credential);
     },
     async signInWithStashed(): Promise<boolean> {
-      const credential = stashed;
-      stashed = null; // 使ったら捨てる（入れなかったときも）
-      if (!credential) return false;
-      await signInWithCredential(auth, credential);
-      return true;
+      const candidates = stashed;
+      stashed = []; // 使ったら捨てる（入れなかったときも）
+      let last: unknown;
+      for (const candidate of candidates) {
+        try {
+          await signInWithCredential(auth, candidate);
+          return true;
+        } catch (error) {
+          last = error;
+        }
+      }
+      if (candidates.length > 0) throw last;
+      return false;
     },
     async signOut(): Promise<void> {
       await signOut(auth);

@@ -7,6 +7,8 @@ import type { AdoptAnswer, MyItem, StudioBackend, StudioUser } from '../cloud/ba
 import {
   ADMIN_NOTE,
   ADOPT_KEY,
+  BACKLOG_KEY,
+  BACKLOG_MAX,
   completeRedirect,
   createAccount,
   deviceEmpty,
@@ -862,6 +864,108 @@ describe('settleLogin（ログインの結果の仕上げ）', () => {
     });
   });
 
+  describe('積み残し（作りかけの合い言葉を、新しい合わせで失わない）', () => {
+    const WORD_A = 'handoff-word-A-secret-aaaa';
+    const backlog = (b: Built): Array<{ word: string; from: string }> => JSON.parse(b.local.data.get(BACKLOG_KEY) ?? '[]') as Array<{ word: string; from: string }>;
+    const byWord = (b: Built, table: Record<string, AdoptAnswer | 'throw'>) =>
+      b.backend.adopt.mockImplementation(async (word: string) => {
+        const value = table[word];
+        if (value === 'throw') throw new Error('offline');
+        return value ?? answer('done', 1, 1);
+      });
+
+    it('A の switched が残ったまま、ログアウトして D で合わせても、A の合い言葉も adopt される（端到端）', async () => {
+      const b = build({ word: 'handoff-word-D-secret-dddd' });
+      secrets.push(WORD_A, 'handoff-word-D-secret-dddd');
+      // A の合わせは、通信が切れて終わらなかった
+      b.plant({ word: WORD_A, from: 'OLD1', stage: 'switched' });
+      // ログアウトして匿名の D になり、また結び付ける → taken
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken' }, 'redirect', { userCode: 'DDDD', tickets: 1, admin: false });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(backlog(b)).toEqual([{ word: WORD_A, from: 'OLD1' }]);
+      expect(b.record()).toMatchObject({ word: 'handoff-word-D-secret-dddd', from: 'DDDD', stage: 'offered' });
+      // 画面なしの行き来が戻って、入れた → adopt（D の分と、A の積み残し）
+      expect(await settle(b, { outcome: 'switched', step: 'silent' }, 'redirect', { userCode: 'DDDD', tickets: 1, admin: false })).toBeNull();
+      expect(b.backend.adopt).toHaveBeenCalledWith('handoff-word-D-secret-dddd');
+      expect(b.backend.adopt).toHaveBeenCalledWith(WORD_A);
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+      expect(b.local.data.has(BACKLOG_KEY)).toBe(false);
+      expect(b.library.ids()).toEqual(['my:b1', 'my:n1']); // A（OLD1）の服は、控えから外れた
+      expect(lines.filter((line) => line === 'adopt ok tickets=3 items=2')).toHaveLength(2);
+    });
+    it('積み残しは最大 5 件。あふれたら、古いものから捨てる', async () => {
+      const b = build();
+      b.local.setItem(BACKLOG_KEY, JSON.stringify(Array.from({ length: BACKLOG_MAX }, (_, i) => ({ word: `old-${i}`, from: `F${i}` }))));
+      b.plant({ stage: 'switched' });
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken' });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      const list = backlog(b);
+      expect(list).toHaveLength(BACKLOG_MAX);
+      expect(list.map((entry) => entry.word)).toEqual(['old-1', 'old-2', 'old-3', 'old-4', WORD]);
+    });
+    it('offered の覚えは、積み残しに入れない（まだ入っていない）', async () => {
+      const b = build();
+      b.plant({ stage: 'offered' });
+      b.account.signInWithStashed.mockResolvedValue(false);
+      void settle(b, { outcome: 'taken' });
+      await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
+      expect(b.local.data.has(BACKLOG_KEY)).toBe(false);
+    });
+    it('積み残しが wait なら残す。used・unknown・refused なら捨てる。落ちたら残す', async () => {
+      const b = build();
+      b.plant();
+      b.local.setItem(
+        BACKLOG_KEY,
+        JSON.stringify([
+          { word: 'w-wait', from: 'F1' },
+          { word: 'w-used', from: 'F2' },
+          { word: 'w-unknown', from: 'F3' },
+          { word: 'w-refused', from: 'F4' },
+          { word: 'w-down', from: 'F5' },
+        ]),
+      );
+      byWord(b, { 'w-wait': answer('wait'), 'w-used': answer('used'), 'w-unknown': answer('unknown'), 'w-refused': answer('refused'), 'w-down': 'throw' });
+      await settle(b, { outcome: 'switched' });
+      expect(backlog(b)).toEqual([
+        { word: 'w-wait', from: 'F1' },
+        { word: 'w-down', from: 'F5' },
+      ]);
+      expect(lines).toEqual(expect.arrayContaining(['adopt used', 'adopt unknown', 'adopt refused', 'adopt later']));
+      expect(b.library.ids()).toHaveLength(2); // 現在の覚え（done）の OLD1 だけ外れた。積み残しの捨てた分は、控えを外さない
+    });
+    it('積み残しの合い言葉は、きろくに出さない（done の分も）', async () => {
+      const b = build();
+      secrets.push('w-secret-bl');
+      b.plant();
+      b.local.setItem(BACKLOG_KEY, JSON.stringify([{ word: 'w-secret-bl', from: 'BBBB' }]));
+      await settle(b, { outcome: 'switched' });
+      expect(b.library.ids()).toEqual(['my:n1']); // BBBB の服も外れた
+      expect(b.local.data.has(BACKLOG_KEY)).toBe(false);
+    });
+    it('置き場が書けなくても、投げない（積み残しが書けなければ、合わせに進まず taken のまま返す）', async () => {
+      const b = build();
+      b.plant({ stage: 'switched' });
+      const original = b.local.setItem;
+      b.local.setItem = (key: string, value: string) => {
+        if (key === BACKLOG_KEY) throw new Error('quota');
+        original(key, value);
+      };
+      await expect(settle(b, { outcome: 'taken' })).resolves.toEqual({ outcome: 'taken' });
+      expect(b.record()).toMatchObject({ word: WORD, stage: 'switched' }); // 元の覚えは、そのまま
+      expect(lines).toContain('offer failed');
+      // 入れたあとの積み残しの書き戻しが失敗しても、投げない
+      b.local.setItem = (key: string, value: string) => {
+        if (key === BACKLOG_KEY) throw new Error('quota');
+        original(key, value);
+      };
+      original(BACKLOG_KEY, JSON.stringify([{ word: 'w-x', from: 'F' }]));
+      byWord(b, { 'w-x': answer('wait') });
+      await expect(settle(b, { outcome: 'switched' })).resolves.toBeNull();
+    });
+  });
+
   describe('画面なしの行き来（step: silent）が switched でなかった', () => {
     it.each([
       ['Google が画面が要ると断った', { outcome: 'failed', step: 'silent' }],
@@ -1070,11 +1174,12 @@ describe('resumeAdopt（起動のとき、もう一度 adopt）', () => {
     const session = memoryStore();
     const local = memoryStore({ [NEW_KEY]: '["my:a1"]' });
     const library = memoryLibrary([myItem('my:a1', 'OLD1'), myItem('my:b1', 'BBBB')]);
-    const backend = { adopt: vi.fn(async (word: string): Promise<AdoptAnswer> => (void word, { status: 'done', tickets: 3, items: 1 })) };
+    const prepare = vi.fn(async (): Promise<{ kind: 'guest' } | { kind: 'google'; email: string }> => ({ kind: 'guest' }));
+    const backend = { adopt: vi.fn(async (word: string): Promise<AdoptAnswer> => (void word, { status: 'done', tickets: 3, items: 1 })), account: { prepare } };
     const reload = vi.fn();
     const deps: SettleDeps = { backend: backend as unknown as StudioBackend, library, session, local, now: () => 9_000_000, reload, note: (...parts) => void lines.push(parts.join(' ')) };
     const plant = (stage: AdoptPending['stage'], at = 8_900_000) => local.setItem(ADOPT_KEY, JSON.stringify({ word: WORD, from: 'OLD1', stage, at }));
-    return { deps, backend, local, library, reload, plant };
+    return { deps, backend, prepare, local, library, reload, plant };
   }
   it('覚えが無ければ、何もしない（バックエンドに聞かない）→ null', async () => {
     const b = build();
@@ -1120,6 +1225,83 @@ describe('resumeAdopt（起動のとき、もう一度 adopt）', () => {
     expect(b.local.data.has(ADOPT_KEY)).toBe(true);
     expect((await b.library.all()).length).toBe(2);
     expect(b.local.data.has(NEW_KEY)).toBe(true);
+  });
+  describe('offered のまま、もう Google に入っていた（入った直後にページが落ちた）', () => {
+    const googleNow = (b: ReturnType<typeof build>) => b.prepare.mockResolvedValue({ kind: 'google', email: 'a@example.com' });
+    it('offered + Google → switched に書き直して adopt する（合わさったら、知らせの文）', async () => {
+      const b = build();
+      googleNow(b);
+      b.plant('offered');
+      expect(await resumeAdopt(b.deps)).toBe('この端末のチケットと服を、アカウントに合わせました');
+      expect(b.backend.adopt).toHaveBeenCalledWith(WORD);
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    });
+    it('adopt が wait なら、switched として残る（次の起動で、また adopt）', async () => {
+      const b = build();
+      googleNow(b);
+      b.plant('offered');
+      b.backend.adopt.mockResolvedValue({ status: 'wait', tickets: 0, items: 0 });
+      expect(await resumeAdopt(b.deps)).toBeNull();
+      expect(JSON.parse(b.local.data.get(ADOPT_KEY) ?? 'null')).toMatchObject({ word: WORD, stage: 'switched' });
+    });
+    it('offered + 匿名 → 何もしない（覚えもそのまま）', async () => {
+      const b = build();
+      b.plant('offered');
+      expect(await resumeAdopt(b.deps)).toBeNull();
+      expect(b.prepare).toHaveBeenCalled();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(JSON.parse(b.local.data.get(ADOPT_KEY) ?? 'null')).toMatchObject({ stage: 'offered', at: 8_900_000 });
+    });
+    it('10 分を過ぎた offered + Google でも、adopt する（期限で捨てる前に見る）', async () => {
+      const b = build();
+      googleNow(b);
+      b.plant('offered', 9_000_000 - OFFER_TTL_MS - 5_000);
+      expect(await resumeAdopt(b.deps)).toBe('この端末のチケットと服を、アカウントに合わせました');
+      expect(b.backend.adopt).toHaveBeenCalledWith(WORD);
+    });
+    it('10 分を過ぎた offered + 匿名 → いつもの期限どおり、捨てる', async () => {
+      const b = build();
+      b.plant('offered', 9_000_000 - OFFER_TTL_MS - 5_000);
+      expect(await resumeAdopt(b.deps)).toBeNull();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(false);
+    });
+    it('prepare が投げたら、何もしない（覚えもそのまま。期限で捨てることもしない）', async () => {
+      const b = build();
+      b.prepare.mockRejectedValue(new Error('offline'));
+      b.plant('offered', 9_000_000 - OFFER_TTL_MS - 5_000);
+      expect(await resumeAdopt(b.deps)).toBeNull();
+      expect(b.backend.adopt).not.toHaveBeenCalled();
+      expect(b.local.data.has(ADOPT_KEY)).toBe(true);
+    });
+  });
+  describe('積み残し', () => {
+    it('覚えが無くても、積み残しだけあれば、adopt する。done なら、控えを外して文を返し、積み残しを消す', async () => {
+      const b = build();
+      b.local.setItem(BACKLOG_KEY, JSON.stringify([{ word: 'w-bl', from: 'OLD1' }]));
+      expect(await resumeAdopt(b.deps)).toBe('この端末のチケットと服を、アカウントに合わせました');
+      expect(b.backend.adopt).toHaveBeenCalledWith('w-bl');
+      expect(b.local.data.has(BACKLOG_KEY)).toBe(false);
+      expect((await b.library.all()).map((i) => i.id)).toEqual(['my:b1']);
+    });
+    it('積み残しが wait / 落ちた → 残す。文は無い', async () => {
+      const b = build();
+      b.local.setItem(BACKLOG_KEY, JSON.stringify([{ word: 'w-1', from: 'OLD1' }, { word: 'w-2', from: 'OLD1' }]));
+      b.backend.adopt.mockImplementation(async (word: string) => {
+        if (word === 'w-2') throw new Error('offline');
+        return { status: 'wait' as const, tickets: 0, items: 0 };
+      });
+      expect(await resumeAdopt(b.deps)).toBeNull();
+      expect(JSON.parse(b.local.data.get(BACKLOG_KEY) ?? 'null')).toHaveLength(2);
+      expect(lines).toContain('adopt later');
+    });
+    it('switched の覚えと積み残しの両方を adopt する', async () => {
+      const b = build();
+      b.plant('switched');
+      b.local.setItem(BACKLOG_KEY, JSON.stringify([{ word: 'w-bl', from: 'BBBB' }]));
+      await resumeAdopt(b.deps);
+      expect(b.backend.adopt.mock.calls.map((call) => call[0])).toEqual([WORD, 'w-bl']);
+    });
   });
   it('同時に 2 回呼ばれても（StrictMode）、adopt は 1 回', async () => {
     const b = build();

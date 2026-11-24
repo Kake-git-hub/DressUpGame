@@ -158,6 +158,56 @@ describe('口の本物', () => {
       expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
       expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'stashed', from: taken }]);
     });
+    describe('証明の候補（redirect の道: 乱数つきの証明は、断りの証明だけでは足りないことがある）', () => {
+      it('withToken(link) の断り: 断りの証明が断られたら、さっき作った証明で入る（2 回呼ぶ・true）', async () => {
+        const port = await portOf();
+        m.linkWithCredential.mockRejectedValueOnce(taken);
+        await expect(port.withToken('link', 't', 'n')).rejects.toBe(taken);
+        m.signInWithCredential.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+        expect(await port.signInWithStashed()).toBe(true);
+        expect(m.signInWithCredential).toHaveBeenCalledTimes(2);
+        expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'stashed', from: taken }]);
+        expect(m.signInWithCredential.mock.calls[1]).toEqual([m.auth, { fake: 'credential', input: { idToken: 't', rawNonce: 'n' } }]);
+        expect(await port.signInWithStashed()).toBe(false); // 使ったら捨てる
+      });
+      it('どちらも断られたら、最後の失敗を投げる。候補は捨てる', async () => {
+        const port = await portOf();
+        m.linkWithCredential.mockRejectedValueOnce(taken);
+        await expect(port.withToken('link', 't', 'n')).rejects.toBe(taken);
+        m.signInWithCredential.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+        m.signInWithCredential.mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+        await expect(port.signInWithStashed()).rejects.toMatchObject({ code: 'auth/network-request-failed' });
+        expect(m.signInWithCredential).toHaveBeenCalledTimes(2);
+        expect(await port.signInWithStashed()).toBe(false);
+      });
+      it('credentialFromError が null でも、さっき作った証明を試す', async () => {
+        const port = await portOf();
+        m.credentialFromError.mockReturnValueOnce(null);
+        m.linkWithCredential.mockRejectedValueOnce(taken);
+        await expect(port.withToken('link', 't', 'n')).rejects.toBe(taken);
+        expect(await port.signInWithStashed()).toBe(true);
+        expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
+        expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'credential', input: { idToken: 't', rawNonce: 'n' } }]);
+      });
+      it('credentialFromError が投げても、さっき作った証明を試す', async () => {
+        const port = await portOf();
+        m.credentialFromError.mockImplementationOnce(() => {
+          throw new Error('boom');
+        });
+        m.linkWithCredential.mockRejectedValueOnce(taken);
+        await expect(port.withToken('link', 't', 'n')).rejects.toBe(taken);
+        expect(await port.signInWithStashed()).toBe(true);
+        expect(m.signInWithCredential.mock.calls[0]).toEqual([m.auth, { fake: 'credential', input: { idToken: 't', rawNonce: 'n' } }]);
+      });
+      it('popup(link) の道は、断りの証明だけ（候補は 1 つ）。断られたら投げる', async () => {
+        const port = await portOf();
+        m.linkWithPopup.mockRejectedValueOnce(taken);
+        await expect(port.popup('link')).rejects.toBe(taken);
+        m.signInWithCredential.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+        await expect(port.signInWithStashed()).rejects.toMatchObject({ code: 'auth/invalid-credential' });
+        expect(m.signInWithCredential).toHaveBeenCalledTimes(1);
+      });
+    });
     it('ほかの失敗では、覚えない', async () => {
       const port = await portOf();
       m.linkWithPopup.mockRejectedValueOnce({ code: 'auth/popup-blocked' });

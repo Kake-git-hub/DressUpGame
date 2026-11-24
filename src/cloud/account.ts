@@ -324,16 +324,12 @@ export interface AdoptPending {
   admin?: boolean; // 元が管理者だった
 }
 
-// 10 分を過ぎた offered は、捨てて null（サーバーの合い言葉は、使われないまま残る。害は無い）。switched は、adopt が最後の返事をするまで残す
-export function readAdopt(local: Store | null, now: number): AdoptPending | null {
+// 期限を見ずに、覚えをそのまま読む（壊れた・形が違う覚えは null）。起動のときの resumeAdopt だけが使う
+function readRawAdopt(local: Store | null): AdoptPending | null {
   try {
     const value = JSON.parse(local?.getItem(ADOPT_KEY) ?? 'null') as Partial<AdoptPending> | null;
     if (!value || typeof value.word !== 'string' || !value.word || typeof value.from !== 'string' || typeof value.at !== 'number') return null;
     if (value.stage !== 'offered' && value.stage !== 'switched') return null;
-    if (value.stage === 'offered' && now - value.at > OFFER_TTL_MS) {
-      clearAdopt(local);
-      return null;
-    }
     return {
       word: value.word,
       from: value.from,
@@ -345,6 +341,16 @@ export function readAdopt(local: Store | null, now: number): AdoptPending | null
   } catch {
     return null; // 壊れた覚えは、無いものとして扱う
   }
+}
+
+// 10 分を過ぎた offered は、捨てて null（サーバーの合い言葉は、使われないまま残る。害は無い）。switched は、adopt が最後の返事をするまで残す
+export function readAdopt(local: Store | null, now: number): AdoptPending | null {
+  const value = readRawAdopt(local);
+  if (value?.stage === 'offered' && now - value.at > OFFER_TTL_MS) {
+    clearAdopt(local);
+    return null;
+  }
+  return value;
 }
 function writeAdopt(local: Store | null, pending: AdoptPending): boolean {
   try {
@@ -360,6 +366,72 @@ function clearAdopt(local: Store | null): void {
   } catch {
     // 消せなくても進む（次の起動で、サーバーが「もう使った」と答えて、捨てられる）
   }
+}
+
+// ---- 積み残し（上書きされそうな switched の覚えの合い言葉。adopt が通るまで、取っておく） ----
+
+export const BACKLOG_KEY = 'dressup_adopt_backlog'; // localStorage: [{ word, from }]（最大 5 件、古いものから捨てる）
+export const BACKLOG_MAX = 5;
+export interface BacklogEntry {
+  word: string;
+  from: string;
+}
+
+function readBacklog(local: Store | null): BacklogEntry[] {
+  try {
+    const value = JSON.parse(local?.getItem(BACKLOG_KEY) ?? 'null') as unknown;
+    if (!Array.isArray(value)) return [];
+    const list: BacklogEntry[] = [];
+    for (const entry of value as Array<Partial<BacklogEntry> | null>) {
+      if (entry && typeof entry.word === 'string' && entry.word && typeof entry.from === 'string') list.push({ word: entry.word, from: entry.from });
+    }
+    return list.slice(-BACKLOG_MAX);
+  } catch {
+    return [];
+  }
+}
+function writeBacklog(local: Store | null, list: BacklogEntry[]): boolean {
+  try {
+    if (list.length === 0) local?.removeItem(BACKLOG_KEY);
+    else local?.setItem(BACKLOG_KEY, JSON.stringify(list.slice(-BACKLOG_MAX)));
+    return local !== null || list.length === 0;
+  } catch {
+    return false;
+  }
+}
+// switched の覚えを、上書きされる前に積み残しへ移す。置けなければ false
+function pushBacklog(local: Store | null, record: AdoptPending): boolean {
+  const rest = readBacklog(local).filter((entry) => entry.word !== record.word);
+  return writeBacklog(local, [...rest, { word: record.word, from: record.from }]);
+}
+
+// 積み残しの合い言葉を、全部 adopt してみる（Google のアカウントに入っているときに呼ぶ）。1 つでも合わさったら true
+async function tryBacklog(deps: SettleDeps): Promise<boolean> {
+  const { backend, local, note } = deps;
+  const entries = readBacklog(local);
+  if (entries.length === 0) return false;
+  const kept: BacklogEntry[] = [];
+  let merged = false;
+  for (const entry of entries) {
+    let answer: Awaited<ReturnType<StudioBackend['adopt']>> | null = null;
+    try {
+      answer = await backend.adopt(entry.word);
+    } catch {
+      answer = null; // 通信が切れた、など。理由は、きろくに書かない
+    }
+    if (answer?.status === 'done') {
+      merged = true;
+      await forgetQuietly(deps, entry.from);
+      note('adopt', 'ok', `tickets=${answer.tickets}`, `items=${answer.items}`);
+    } else if (answer && (answer.status === 'used' || answer.status === 'unknown' || answer.status === 'refused')) {
+      note('adopt', answer.status);
+    } else {
+      note('adopt', 'later');
+      kept.push(entry);
+    }
+  }
+  writeBacklog(local, kept);
+  return merged;
 }
 
 // 結び付けるか、入るか: 空なら入る。空でなくても、効いている offered の覚えがあれば入る
@@ -419,6 +491,7 @@ async function settleSwitched(deps: SettleDeps, before: StudioUser | null): Prom
       answer = null; // 通信が切れた、など。理由は、きろくに書かない
     }
     const adminNote = record.admin ? ADMIN_NOTE : '';
+    await tryBacklog(deps); // 前に積み残した合い言葉も（通った分だけ、控えから外す）
     if (answer?.status === 'done') {
       // 合わさった。サーバーでは、アカウントのものになったので、端末の控えから、元の利用者の服を外す（読み込み直しのあと、アカウントの服として取り直す）
       clearAdopt(local);
@@ -475,6 +548,12 @@ export async function settleLogin(deps: SettleDeps, result: LoginResult, method:
       note('offer', 'failed');
       return result;
     }
+    // 入ったのに adopt が終わっていない覚え（switched）は、上書きする前に、積み残しへ移す（合い言葉を失わない）
+    const unfinished = readAdopt(local, now());
+    if (unfinished?.stage === 'switched' && !pushBacklog(local, unfinished)) {
+      note('offer', 'failed');
+      return result;
+    }
     const pending: AdoptPending = { word, from: before.userCode, stage: 'offered', at: now(), ...(result.hint ? { hint: result.hint } : {}), ...(before.admin ? { admin: true } : {}) };
     // 覚えが置けなければ、入ってはいけない（入ったあと、合い言葉を失う）
     if (!writeAdopt(local, pending)) {
@@ -513,32 +592,56 @@ export async function settleLogin(deps: SettleDeps, result: LoginResult, method:
 
 const resuming = new WeakMap<StudioBackend, Promise<string | null>>();
 
-// 起動のとき（つなぎ役を出す前）: 段階 switched の覚えがあれば、もう一度 adopt。合わさったら、知らせの文を返す
+// Google に入っているかを、アカウントに聞く（入った直後にページが落ちて、覚えが offered のままのとき）。聞けなければ null
+async function signedInToGoogle(backend: StudioBackend): Promise<boolean | null> {
+  try {
+    return (await backend.account.prepare()).kind === 'google';
+  } catch {
+    return null;
+  }
+}
+
+// 起動のとき（つなぎ役を出す前）: 段階 switched の覚え・積み残しがあれば、もう一度 adopt。合わさったら、知らせの文を返す。
+// offered のまま残っていても、もう Google に入っていれば switched として扱う（期限の前に、先に見る）
 export function resumeAdopt(deps: SettleDeps): Promise<string | null> {
   const { backend, local, now, note } = deps;
-  const record = readAdopt(local, now());
-  if (!record || record.stage !== 'switched') return Promise.resolve(null);
+  if (!readRawAdopt(local) && readBacklog(local).length === 0) return Promise.resolve(null);
   // 同時に 2 回呼ばれても（StrictMode）、adopt は 1 回
   const running = resuming.get(backend);
   if (running) return running;
   const run = (async (): Promise<string | null> => {
-    let answer: Awaited<ReturnType<StudioBackend['adopt']>>;
-    try {
-      answer = await backend.adopt(record.word);
-    } catch {
-      return null; // つながらない。覚えも、端末の服も、そのまま
+    let record = readRawAdopt(local);
+    if (record?.stage === 'offered') {
+      const google = await signedInToGoogle(backend);
+      if (google) {
+        record = { ...record, stage: 'switched', at: now() };
+        writeAdopt(local, record);
+      } else if (google === false) {
+        record = readAdopt(local, now()); // 入っていない: 10 分の期限のとおり
+      } else {
+        record = null; // 聞けなかった: 今回は何もしない（覚えも、期限で捨てずに残す）
+      }
     }
-    if (answer.status === 'done') {
-      clearAdopt(local);
-      await forgetQuietly(deps, record.from);
-      note('adopt', 'ok', `tickets=${answer.tickets}`, `items=${answer.items}`);
-      return MERGED_TAIL;
+    let notice: string | null = null;
+    if (record?.stage === 'switched') {
+      let answer: Awaited<ReturnType<StudioBackend['adopt']>> | null = null;
+      try {
+        answer = await backend.adopt(record.word);
+      } catch {
+        answer = null; // つながらない。覚えも、端末の服も、そのまま
+      }
+      if (answer?.status === 'done') {
+        clearAdopt(local);
+        await forgetQuietly(deps, record.from);
+        note('adopt', 'ok', `tickets=${answer.tickets}`, `items=${answer.items}`);
+        notice = MERGED_TAIL;
+      } else if (answer && (answer.status === 'used' || answer.status === 'unknown' || answer.status === 'refused')) {
+        clearAdopt(local);
+        note('adopt', answer.status);
+      } // 落ちた・wait（まだ匿名）: 何もしない
     }
-    if (answer.status === 'used' || answer.status === 'unknown' || answer.status === 'refused') {
-      clearAdopt(local);
-      note('adopt', answer.status);
-    }
-    return null; // wait: まだ匿名。何もしない
+    if (await tryBacklog(deps)) notice = MERGED_TAIL;
+    return notice;
   })();
   resuming.set(backend, run);
   const release = () => {
