@@ -9,7 +9,11 @@ import { APP, dismissReveal, FAKE, fakeState, openHome, openStudio, order } from
 const EMAIL = 'tameshi@example.com';
 const MSG = {
   done: 'Google のアカウントでログインしました',
-  taken: 'この Google のアカウントは、ほかの端末で使われています。この端末のチケットと服を合わせるのは、次の版でできるようになります',
+  merged: 'Google のアカウントでログインしました。この端末のチケットと服を、アカウントに合わせました',
+  mergeLater: 'Google のアカウントでログインしました。この端末のチケットと服は、インターネットにつながったときに、合わせます',
+  oldServer: 'この Google のアカウントは、ほかの端末で使われています。サーバーが古い版のため、まだ合わせられません（作者が載せ直す必要があります）',
+  pressAgain: 'もう一度「小さい窓でログイン」を押すと、この端末のチケットと服を合わせて、ログインします',
+  adminNote: 'この端末は管理者でしたが、合わせたので、管理者の印が外れました',
   cancelled: 'ログインを やめました',
   noPopup: '小さい窓を開けませんでした。方法 2 を試してください',
   failed: 'ログインできませんでした。少し待ってから、もう一度ためしてください',
@@ -29,9 +33,9 @@ async function openAccount(page: Page) {
   await page.getByTestId('account-section').scrollIntoViewIfNeeded();
 }
 // 1 点作って、できあがるまで待つ（チケット 1 枚）
-async function makeOne(page: Page) {
+async function makeOne(page: Page, theme = 'うみ') {
   await openStudio(page);
-  await order(page, { label: 'トップス' }, 'うみ');
+  await order(page, { label: 'トップス' }, theme);
   await expect(page.getByTestId('studio-job')).toHaveCount(0, { timeout: 15_000 });
   await dismissReveal(page);
   await page.getByTestId('studio-close').click();
@@ -40,6 +44,64 @@ async function makeOne(page: Page) {
 const closetItems = async (page: Page) => {
   await page.getByTestId('home-closet').click();
   await expect(page.getByTestId('closet')).toBeVisible({ timeout: 60_000 });
+};
+// 偽物の設定を、あとから書き換えて、読み込み直す（設定は、起動のときに読まれる）
+async function patchOptions(page: Page, patch: Record<string, unknown>) {
+  await page.evaluate((p) => {
+    const saved = JSON.parse(localStorage.getItem('dressup_fake_options') ?? '{}') as Record<string, unknown>;
+    localStorage.setItem('dressup_fake_options', JSON.stringify({ ...saved, ...p }));
+  }, patch);
+  await page.reload();
+  await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 60_000 });
+}
+// 2 台めの端末を用意する（本物の画面の操作で）:
+//   Google のアカウントの世界 = チケット 5・服 1 点（うみのトップス）。ログアウトして、置いてある（dressup_fake_google）
+//   この端末 = 別の匿名の利用者。チケット 3・服 1 点（ほしのトップス）。ホームに戻った状態
+// 服の ID は、偽物の中の通し番号から付くので、アカウントの世界と同じ ID にならないように、番号を進めてから作る
+async function setupSecondDevice(page: Page, options: Record<string, unknown> = {}, admin = false) {
+  await openHome(page, { tickets: 6 });
+  await makeOne(page, 'うみ');
+  await openAccount(page);
+  await sectionReady(page);
+  await popupButton(page).click();
+  await expect(page.getByTestId('account-email')).toBeVisible();
+  await page.getByTestId('account-logout').click();
+  await page.getByTestId('account-logout-yes').click();
+  await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 30_000 });
+  expect(await page.evaluate(() => localStorage.getItem('dressup_fake_google'))).not.toBeNull();
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem('dressup_fake_backend')!) as { user: { tickets: number }; counter: number };
+    state.user.tickets = 4;
+    state.counter = 10;
+    localStorage.setItem('dressup_fake_backend', JSON.stringify(state));
+  });
+  await page.reload();
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await makeOne(page, 'ほし');
+  expect((await fakeState(page))!.user.tickets).toBe(3);
+  if (admin) {
+    await page.evaluate(() => {
+      const state = JSON.parse(localStorage.getItem('dressup_fake_backend')!) as { user: { admin: boolean } };
+      state.user.admin = true;
+      localStorage.setItem('dressup_fake_backend', JSON.stringify(state));
+    });
+  }
+  await patchOptions(page, options);
+}
+// 合わさったあとの確かめ: チケット 8 枚・服 2 点（うみ・ほし）・「ログイン中」
+async function expectMerged(page: Page) {
+  await openAccount(page);
+  await expect(page.getByTestId('account-email')).toContainText('ログイン中');
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 8 枚');
+  await page.getByTestId('studio-close').click();
+  await closetItems(page);
+  await expect(page.getByTestId('closet-item')).toHaveCount(2);
+  await expect(page.getByTestId('closet-item').filter({ hasText: 'うみのトップス' })).toHaveCount(1);
+  await expect(page.getByTestId('closet-item').filter({ hasText: 'ほしのトップス' })).toHaveCount(1);
+}
+const noticeOk = async (page: Page) => {
+  await page.getByTestId('login-notice-ok').click();
+  await expect(page.getByTestId('login-notice')).toHaveCount(0);
 };
 const diagText = async (page: Page) => {
   page.once('dialog', (d) => void d.accept('log'));
@@ -128,42 +190,165 @@ test('ログアウト → 方法 2 で入り直す: 空の端末になり、入�
   expect(text).not.toContain('id_token');
 });
 
-test('もう使われている Google: 空でない端末（チケット 3）では、方法 1 も方法 2 も「ほかの端末で使われています」。チケットも、ログイン前の表示も変わらない', async ({ page }) => {
-  await openHome(page, { tickets: 5 });
+test('合わさる（主の方法）: 空でない端末（チケット 3・服 1）が、もう使われている Google（チケット 5・服 1）に画面を移ってログイン → 知らせ → チケット 8 枚・服 2 点。URL に # は残らない', async ({ page }) => {
+  await setupSecondDevice(page);
   await openAccount(page);
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 3 枚');
+  await expect(page.getByTestId('account-email')).toHaveCount(0);
   await sectionReady(page);
-  await popupButton(page).click();
-  await expect(page.getByTestId('account-email')).toBeVisible();
-  await page.getByTestId('account-logout').click();
-  await page.getByTestId('account-logout-yes').click();
-  await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 30_000 });
-  // ここで、Google の世界が置いてあり、この端末は、チケット 3 枚の別の利用者
-  await page.evaluate(() => {
-    const state = JSON.parse(localStorage.getItem('dressup_fake_backend')!) as { user: { tickets: number } };
-    state.user.tickets = 3;
-    localStorage.setItem('dressup_fake_backend', JSON.stringify(state));
-  });
-  expect(await page.evaluate(() => localStorage.getItem('dressup_fake_google'))).not.toBeNull();
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+  await expect(page.getByTestId('login-notice')).not.toContainText(MSG.adminNote);
+  expect(page.url()).not.toContain('#');
+  await noticeOk(page);
+  await expectMerged(page);
+  // 合い言葉の覚えは、残っていない。置いてあった Google の世界も、もう無い
+  expect(await page.evaluate(() => localStorage.getItem('dressup_adopt_pending'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('dressup_fake_google'))).toBeNull();
+  // 読み込み直しても、続く（2 重に足されない）
   await page.reload();
   await expect(page.getByTestId('home-screen')).toBeVisible();
-
   await openAccount(page);
-  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 3 枚');
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 8 枚');
+  const state = (await fakeState(page))!;
+  expect(state.user.tickets).toBe(8);
+  expect(state.items).toHaveLength(2);
+});
+
+test('合わさる（画面なしの行き来）: 断りと一緒に返る証明が無い（stashed: false）と、画面なしの行き来で入って、同じ結果。URL に # は残らない', async ({ page }) => {
+  await setupSecondDevice(page, { stashed: false });
+  await openAccount(page);
   await sectionReady(page);
-  await popupButton(page).click();
-  await expect(page.getByTestId('account-message')).toHaveText(MSG.taken);
-  await expect(page.getByTestId('account-email')).toHaveCount(0);
-  await expect(popupButton(page)).toBeEnabled();
-  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 3 枚');
-
   await redirectButton(page).click();
-  await expect(page.getByTestId('login-notice')).toContainText(MSG.taken, { timeout: 30_000 });
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
   expect(page.url()).not.toContain('#');
-  await page.getByTestId('login-notice-ok').click();
+  expect(new URL(page.url()).hash).toBe('');
+  await noticeOk(page);
+  await expectMerged(page);
+});
+
+test('合わさる（選ぶ画面つきの行き来）: 画面なしを Google が断る（silentFail）と、選ぶ画面つきで入って、同じ結果', async ({ page }) => {
+  await setupSecondDevice(page, { stashed: false, silentFail: true });
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+  expect(page.url()).not.toContain('#');
+  await noticeOk(page);
+  await expectMerged(page);
+  await page.getByTestId('closet-close').click();
+  // 行き来の段階が、きろくに残っている
+  const text = await diagText(page);
+  for (const word of ['login switch silent', 'login back error=interaction_required', 'login switch chooser', 'login result merged']) expect(text).toContain(word);
+});
+
+test('adopt が落ちる（adoptFail: 2。合わせる場面と、読み込み直した直後のやり直しの 2 回）: 「つながったときに、合わせます」。チケットは 5 枚のまま・端末の服は残る。読み込み直すと、合わさる（8 枚・2 点）', async ({ page }) => {
+  await setupSecondDevice(page, { adoptFail: 2 });
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.mergeLater, { timeout: 30_000 });
+  await noticeOk(page);
+  // まだ合っていない: アカウントの 5 枚。端末の服（ほしのトップス）は、端末の控えに残っている
+  const mid = (await fakeState(page))!;
+  expect(mid.user.tickets).toBe(5);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dressup_adopt_pending') ?? 'null')?.stage)).toBe('switched');
+  await openAccount(page);
+  await expect(page.getByTestId('account-email')).toContainText('ログイン中');
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 5 枚');
+  await page.getByTestId('studio-close').click();
+  await closetItems(page);
+  await expect(page.getByTestId('closet-item').filter({ hasText: 'ほしのトップス' })).toHaveCount(1);
+  await page.getByTestId('closet-close').click();
+
+  // 読み込み直す（次の起動）: もう一度 adopt して、合わさる。（直前の読み込み直しでの 1 回めのやり直しは、落ちている）
+  await page.reload();
+  await expect(page.getByTestId('login-notice')).toContainText('この端末のチケットと服を、アカウントに合わせました', { timeout: 30_000 });
+  await noticeOk(page);
+  await expectMerged(page);
+  expect(await page.evaluate(() => localStorage.getItem('dressup_adopt_pending'))).toBeNull();
+});
+
+test('古いサーバー（noAdopt）: 「サーバーが古い版のため、まだ合わせられません」。チケット 3 枚のまま・ログイン前のまま。覚えも残らない', async ({ page }) => {
+  await setupSecondDevice(page, { noAdopt: true });
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.oldServer, { timeout: 30_000 });
+  expect(page.url()).not.toContain('#');
+  await noticeOk(page);
   expect((await fakeState(page))!.user.tickets).toBe(3);
+  expect(await page.evaluate(() => localStorage.getItem('dressup_adopt_pending'))).toBeNull();
   await openAccount(page);
   await expect(page.getByTestId('account-email')).toHaveCount(0);
   await expect(page.getByTestId('studio-tickets')).toContainText('のこり 3 枚');
+  await page.getByTestId('studio-close').click();
+  await closetItems(page);
+  await expect(page.getByTestId('closet-item')).toHaveCount(1);
+  // 置いてある Google の世界も、そのまま
+  expect(await page.evaluate(() => localStorage.getItem('dressup_fake_google'))).not.toBeNull();
+});
+
+test.describe('小さい窓で合わさる', () => {
+  test('証明が返る: 「小さい窓でログイン」→ 読み込み直しのあと、知らせ → 8 枚・2 点', async ({ page }) => {
+    await setupSecondDevice(page);
+    await openAccount(page);
+    await sectionReady(page);
+    await popupButton(page).click();
+    await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+    await noticeOk(page);
+    await expectMerged(page);
+  });
+
+  test('証明が返らない（stashed: false）: 「もう一度「小さい窓でログイン」を押すと…」→ もう一度押す → 合わさる', async ({ page }) => {
+    await setupSecondDevice(page, { stashed: false });
+    await openAccount(page);
+    await sectionReady(page);
+    await popupButton(page).click();
+    await expect(page.getByTestId('account-message')).toHaveText(MSG.pressAgain);
+    await expect(page.getByTestId('account-email')).toHaveCount(0);
+    expect((await fakeState(page))!.user.tickets).toBe(3);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dressup_adopt_pending') ?? 'null')?.stage)).toBe('offered');
+    await expect(popupButton(page)).toBeEnabled();
+    await popupButton(page).click();
+    await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+    await noticeOk(page);
+    await expectMerged(page);
+  });
+});
+
+test('管理者の端末: 同じく合わさって、知らせに「この端末は管理者でしたが…」が入る', async ({ page }) => {
+  await setupSecondDevice(page, {}, true);
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.adminNote);
+  await expect(page.getByTestId('login-notice')).toContainText('手順書 2-11');
+  await noticeOk(page);
+  await expectMerged(page);
+});
+
+test('きろく: 合わさったあと、「--- ログイン ---」に段取りの行がある。メールも合い言葉も証明も無い', async ({ page }) => {
+  await setupSecondDevice(page);
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
+  await noticeOk(page);
+  const text = await diagText(page);
+  expect(text).toContain('--- ログイン ---');
+  const section = text.slice(text.indexOf('--- ログイン ---'));
+  for (const word of ['login offer ok', 'login switch stashed', 'login adopt ok tickets=3 items=1', 'login result merged']) expect(section).toContain(word);
+  // 画面の大きさの「1180x820@1」にも @ があるので、ログインの行だけを見る
+  const loginLines = section.split('\n').filter((line) => line.includes(' login '));
+  expect(loginLines.length).toBeGreaterThanOrEqual(5);
+  expect(loginLines.join('\n')).not.toContain('@');
+  expect(text).not.toContain('example.com');
+  expect(text).not.toContain('id_token');
+  expect(text).not.toContain('fake-sub');
+  // 合い言葉（32 桁の 16 進）は、出ない
+  expect(text).not.toMatch(/[0-9a-f]{32}/);
 });
 
 test.describe('やめた・窓が開かない', () => {
