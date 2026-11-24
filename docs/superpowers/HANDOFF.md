@@ -1,4 +1,4 @@
-# 引き継ぎ（2026-11-24 時点、v0.37.0）
+# 引き継ぎ（2026-11-24 時点、v0.38.0）
 
 **0 章が、いまの状態。** 1 章から下は、v0.28.0（2026-11-20）までの記録で、0 章と食い違う所は 0 章が正しい。
 
@@ -9,33 +9,34 @@
 - 版ごとの設計と結果: `docs/superpowers/specs/`、計画: `docs/superpowers/plans/`
 - 使い方と更新履歴: `README.md`
 
-## 0. いまの状態（2026-11-24、v0.37.0）
+## 0. いまの状態（2026-11-24、v0.38.0）
 
 | 項目 | 状態 |
 |---|---|
-| ゲームの版 | v0.37.0（ログインの試し版）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
+| ゲームの版 | v0.38.0（2 台めの端末を、アカウントに合わせる）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.37.0（ログインの試し版）も同じ日に公開済み（作者がカードで「公開する」）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `2b876a5`）。ゲームに出るドールは「おんなのこ」（ID は `アニメ　その２`。147 点）と「おとこのこ」（20 点）。「アニメ」「リアル」は非表示 |
-| サーバー | 作者の Firebase（`dressup-game-89f6e`、東京）に、**v0.35.0 の版が載っている**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
+| サーバー | **v0.38.0 で、サーバーの中身を変えた。作者の載せ直し待ち**（`docs/firebase-setup.md` の 2-11。載せ直すまでは、2 台めの端末を合わせることだけが、できない）。いまは、作者の Firebase（`dressup-game-89f6e`、東京）に、**v0.35.0 の版が載っている**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
 | テスト | 0-4 を見る |
 
 ### 0-A. 次のセッションが、最初にすること
 
-段階 ①②は公開まで済んだ。**③ ログインは、試し版（③-a、v0.37.0）を公開して、作者の実機の結果を待っている。** 残りは ③-b（2 台めの端末を合わせる）→ ④ 並び順 → ⑤ 交換 → ⑥ 支払い（0-1 の表。1 段階ずつ、1 つの版として出す）。
+段階 ①②③は、公開まで済んだ（③ は、③-a 試し版 v0.37.0 → ③-b 合わせる v0.38.0）。**③-b は、作者のサーバーの載せ直しと、2 台での試しを待っている。** 残りは ④ 並び順 → ⑤ 交換 → ⑥ 支払い（0-1 の表。1 段階ずつ、1 つの版として出す）。
 
-1. `git fetch origin main` して、`main`（v0.37.0）から始める。作業ブランチは、そのセッションで決められたもの（前のセッションは `claude/quirky-cori-3yr6ov`。`main` と同じ所まで進んでいる）。**`npm ci` と `(cd functions && npm ci)` を、最初に走らせる**（この作業環境の `node_modules` は古いことがある。2026-11-23 は、Firebase の部品が入っていなくて、ビルドが落ちた）。隣の素材は `git -C ../DressUpGame-content pull --ff-only`。
-2. GitHub の Issue に、作者の報告（題が `[きろく] …`）が来ていないかを見る（`docs/reports/README.md`）。来ていたら、読んで `docs/reports/` に写し、片付いたら閉じる。**③-a の実機の結果は、ここに来る**（きろくの `login …` の行。読み方は、設計書 `specs/2026-11-23-login-design.md` の 7.3）。
-3. **作者が Google のログインを有効にしたか**を確かめる（こちらから聞ける。下のコマンドで、`authUri` が返れば有効。`OPERATION_NOT_ALLOWED` なら、まだ）。有効なら、返事の `authUri` の中の `client_id` を、`src/cloud/firebaseConfig.ts` の `GOOGLE_CLIENT_ID` に書く（公開してよい値。書くと、アプリが毎回聞かずに済む）。
+1. `git fetch origin main` して、`main`（v0.38.0）から始める。作業ブランチは、そのセッションで決められたもの（前のセッションは `claude/quirky-cori-3yr6ov`。`main` と同じ所まで進んでいる）。**`npm ci` と `(cd functions && npm ci)` を、最初に走らせる**（この作業環境の `node_modules` は古いことがある）。隣の素材は `git -C ../DressUpGame-content pull --ff-only`。
+2. GitHub の Issue に、作者の報告（題が `[きろく] …`）が来ていないかを見る（`docs/reports/README.md`）。来ていたら、読んで `docs/reports/` に写し、片付いたら閉じる。**③-b の実機の結果は、ここに来る**。きろくの「--- ログイン ---」の行（v0.38.0 から、読み込み直しをはさんでも残る）の読み方:
+   - `login offer ok` → `login switch stashed`（行き来なしで入れた）／`switch silent`（画面なしの行き来）／`switch chooser`（選ぶ画面つきの行き来）→ `login adopt ok tickets=N items=M` → `login result merged`: 合わさった。
+   - `login offer old-server`: サーバーが、まだ載せ直されていない。
+   - `login adopt later`: 入れたが、移すのが、まだ（次の起動でやり直す）。続くなら、サーバーの記録（`npm run firebase:logs`）を、チャットに貼ってもらう。
+   - `login result failed code=auth/…`: Firebase の理由の語。`missing-or-invalid-nonce` なら、証明の渡し方。
+3. **作者がサーバーを載せ直したか**は、こちらからは見えない（`api` の数は、ログインした利用者にしか返らない）。作者に聞く。
+4. 実機で「合わせる」が通ったら、③ は終わり。**段階 ④（並び順）の設計に進む**（進め方は、いままでと同じ）。④ で決まっていること: 管理者だけが、カテゴリとアイテムの既定の並び順を変える。持ち方（公開の素材に書くか、サーバーに持つか）は、設計のときに決める（`specs/2026-11-23-closet-and-unstoppable-generation-design.md` の 9 章）。**管理者は、利用者コード（`adminCodes`）で決まる。管理者の端末を、ほかのアカウントに合わせると、利用者コードが替わる**（`docs/firebase-setup.md` の 2-11 の 3）。
+5. 通らなかったら: きろくを見て、直す（設計書 `specs/2026-11-23-login-design.md` の 8 章と 12 章の「確かめられていないこと」）。
+6. ③ で残したこと（急がない）: `specs/2026-11-23-stage3a-ledger.md`・`specs/2026-11-24-stage3b-ledger.md` の「残したこと」。Apple のログインは、Apple Developer の登録が済んでから。
+7. ⑤⑥ で決まっていることは、`specs/2026-11-23-closet-and-unstoppable-generation-design.md` の 9 章と、`plans/2026-11-23-payment-plan.md`（⑥ の「作者に決めてもらうこと」: 値段とパック・特商法の表記に出す名前と連絡先・最初の無料のチケット・配ったチケットの扱い。期限は 6 か月に決定）。
 
-   ```bash
-   KEY=$(grep -o "apiKey: '[^']*'" src/cloud/firebaseConfig.ts | cut -d"'" -f2); curl -sS -X POST "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=$KEY" -H 'Content-Type: application/json' -d '{"providerId":"google.com","continueUri":"https://kake-git-hub.github.io/DressUpGame/"}'
-   ```
+**試し版（③-a）の実機の結果**（`docs/reports/2026-11-24-ipad-v0.37.0-login.md`）: iPad のホーム画面アプリで、小さい窓も、画面を移る方法も、できた。Android は「次の版で」と出た（2 台めとして正しい）。
 
-4. **実機の結果を見て、③-b の設計を仕上げる**（設計書の 8 章が骨組み。進め方は、①②③-a と同じ）。決めること:
-   - 端末ごとに、どちらの方法を使うか（方法 1: 小さい窓 = `linkWithPopup`／方法 2: 画面を移る = 自前の `id_token` の流れ）。ボタンは 1 つにする。**両方とも iPad のホーム画面アプリで動かなければ、設計書 5 章の案 5（別の端末で認める。QR や短いコード）を設計し直す。**
-   - きろくに `login result failed code=auth/missing-or-invalid-nonce` が出ていたら、方法 2 の証明の渡し方（`OAuthProvider('google.com').credential({ idToken, rawNonce })`。`nonce` は、もとの乱数の SHA-256 の 16 進）が、Firebase に合っていない。直す。
-   - 2 台めの端末（空でない）を合わせる: **先にサーバーで、匿名の利用者のチケットと服を、そのアカウントへ移す。移し終えてから、入り直す**（8 章）。サーバーを変えるので、作者の PC での載せ直しが要る。載せ直す前は「サーバーが古い版です」と出して、何も変えない。
-5. ③-a で残したこと（急がない）: `specs/2026-11-23-stage3a-ledger.md` の「残したこと」。
-6. ④⑤⑥ で決まっていることは、`specs/2026-11-23-closet-and-unstoppable-generation-design.md` の 9 章と、`plans/2026-11-23-payment-plan.md`（⑥ の「作者に決めてもらうこと」: 値段とパック・特商法の表記に出す名前と連絡先・最初の無料のチケット・配ったチケットの扱い。期限は 6 か月に決定）。
+**③-b で、作者が決めたこと（2026-11-24、カードで）**: ボタンは 1 つにして、**画面を移る方法を主に**（小さい窓は「うまくいかないとき」として残す）。2 台めの端末は、**聞かずに合わせる**。**管理者の端末も、聞かずに合わせる**（こちらは「止めて、手順を出す」を出したが、作者は、止めないほうを選んだ。合わせたあとの知らせで伝える）。
 
 **③ で、作者が決めたこと（2026-11-23、カードで）**: 2 台めの端末のチケットと服は、アカウントに**合わせる**（足す）。ログインのボタンは「つくる」の中だけ（ホームには置かない）。子どもへの守りは、**確かめの文だけ**（保護者の確認は出さない。`ASK_ADULT` は false のまま）。先に小さな試し版を出して、実機で試してから、2 台めの引き継ぎを作る。Apple は、Apple Developer の登録が済んでから。管理者は、いままでどおり `adminCodes`（利用者コード。結び付けても、利用者コードは変わらない）。
 
@@ -71,7 +72,7 @@
 |---|---|---|
 | ① つくるまわり（v0.35.0） | ホームを全員に／つくるはテーマだけ・演出／閉じても生成が進む（サーバーの列）／クローゼット／自分の服を先に | **公開済み。サーバーも載せ直し済み。作者が本物で試して「うまくいった」**（2026-11-23） |
 | ② 縦画面（v0.36.0） | 服の絵を大きく・2 段まで、色のスライダーを「その服がなる色」の太い帯に、編集の枠をいちばん手前に・角のつまみを外側へ | **公開済み。実機（iPad・スマホ）での確認待ち**。設計: `specs/2026-11-23-portrait-rework-design.md`、計画: `plans/2026-11-23-stage2-portrait.md` |
-| ③ ログイン | Google のアカウントと結び付け（Apple は、Apple Developer の登録が済んでから）。複数の端末で同じアカウント | **③-a 試し版（v0.37.0）を公開済み。作者の設定（`docs/firebase-setup.md` の 2-10）と、実機の結果を待っている。** ③-b（2 台めを合わせる。サーバーを変える）は、結果のあと。設計: `specs/2026-11-23-login-design.md`、計画: `plans/2026-11-23-stage3a-login-trial.md` |
+| ③ ログイン | Google のアカウントと結び付け（Apple は、Apple Developer の登録が済んでから）。複数の端末で同じアカウント | **③-a 試し版（v0.37.0）・③-b 合わせる（v0.38.0）とも、公開済み。③-b は、サーバーの載せ直し（`docs/firebase-setup.md` の 2-11）と、2 台での試しを待っている。** 設計: `specs/2026-11-23-login-design.md`（7 章 = ③-a、8 章 = ③-b）、計画: `plans/2026-11-23-stage3a-login-trial.md`・`plans/2026-11-24-stage3b-login-merge.md` |
 | ④ 並び順 | 管理者だけが、カテゴリとアイテムの既定の並び順を変える | 未着手 |
 | ⑤ 交換 | 端末を持ち寄ったときだけできる、1 対 1 の入れ替え（互いの画面の QR コードを読み合う方式を軸に） | 未着手 |
 | ⑥ 支払い | Web アプリのまま、Stripe でチケットを売る。期限は 6 か月（作者の決定） | 計画書の下書きだけ |
@@ -96,6 +97,18 @@
 - **偽物の裏側**（`?studio=fake`）: 利用者の世界を入れ替える（`dressup_fake_account`・`dressup_fake_google`）。`dressup_fake_options` に `loginFail`（`auth/…` の語、または `access_denied`）・`googleTaken`。方法 2 は、にせの「画面を移る」（その場で、にせの戻りを付けて読み込み直す）。にせのメールアドレスは `tameshi@example.com`。
 - **E2E**: `e2e/account.spec.ts`（偽物）、`e2e/appStudioReal.spec.ts`（本物の裏側。Firebase・Google 宛ての通信は、全部受け止める）。
 
+### 0-1d. 段階 ③-b の作り（次に触る人へ）
+
+- **合わせ方**: 匿名の利用者 A のうちに、サーバーから「引き継ぎの合い言葉」をもらう（`op: 'offer'`）→ 端末に覚える（`localStorage` の `dressup_adopt_pending`: 合い言葉・A の利用者コード・段階 `offered`／`switched`）→ アカウント B に入る → 合い言葉を出す（`op: 'adopt'`）→ サーバーが A → B へ移す。段取りは `src/cloud/account.ts` の `settleLogin`（ログインの結果の仕上げ。方法 1・2 で共通）と `resumeAdopt`（起動のとき、移し残しをやり直す）。
+- **B に入る道**（きろくの `login switch …`）: (1) Firebase が断りと一緒に返す証明（`signInWithStashed`。`src/cloud/firebaseTransport.ts`）→ (2) 画面を出さない行き来（`prompt=none` と `login_hint`）→ (3) アカウントを選ぶ画面つきの行き来。行き来は、最大 3 回で止まる（何回めかは、`dressup_login_pending` の `step`）。小さい窓は、(1) がだめなら「もう一度押す」。
+- **結び付けるか、入るか**（`intentFor`）: 空なら入る。空でなくても、10 分以内の `offered` の覚えがあれば入る。ほかは結び付ける。
+- **移し残し**: `switched` の覚えは、`adopt` が決まった答え（`done`・`used`・`unknown`・`refused`）を返すまで、消さない（ログアウトしても）。次の合わせで上書きされそうなときは、`dressup_adopt_backlog`（5 つまで）へ。端末の控えの服は、`adopt` が `done` を返してから外す。
+- **サーバー**（`tools/cloud/studioCore.ts`）: `offerHandoff`・`adoptUser`・`drain`・`drainAdopted`。置き場（`store.ts`）に `claimHandoff`（合い言葉を、1 つの取り引きで押さえる）・`moveTickets`・`moveItem`（どれも、取り引きの中で読み直す。やり直されても、2 回めは何も移さない）・`markUser`・`addAdopted`。利用者に `movedTo`・`adopted`・`named`・`handoff`。合い言葉は `handoffs/{合い言葉}`。進んでいる仕事の服は、終わるまで移さない（`workJob` の終わりと、アカウントの `signIn` のときに、残りを移す）。`deleteItem` は、移した服の、元の置き場の絵も消す。
+- **匿名かどうか**（`tools/cloud/api.ts` の `callerOfToken`）: 証明の「入った方法」が匿名で、**かつ**、結び付いている提供元が無い。`offer` は匿名だけ、`adopt` は匿名でない利用者だけ（匿名なら `wait`）。
+- **版の数**（`src/cloud/wire.ts`）: `SERVER_API = 3`（サーバーが返す）・`MIN_API = 2`（アプリが要る最低）・`ADOPT_API = 3`（合わせるのに要る）。サーバーの中身を変えて、古いアプリが困るようにしない限り、`MIN_API` は上げない。
+- **きろく**: `login` の行は、別の保存（`dressup_diag_login`、30 行）にも残り、報告の「--- ログイン ---」に出る（`src/services/diag.ts`）。
+- **偽物の裏側**: `dressup_fake_options` に `noAdopt`（古いサーバー）・`adoptFail`（数。その回数だけ落とす）・`stashed`（false で、(1) を通らない）・`silentFail`（(2) を断る）。合い言葉と世界の写しは `dressup_fake_handoff`。
+
 ### 0-2. 段階 ① の作り（次に触る人へ）
 
 - **生成の流れ**: アプリ →（関数 `studio` の `startJob`）→ チケットを引くのと仕事を作るのを 1 つの取り引きで → 列（Cloud Tasks）に入れる → 列が関数 `studioWork` を呼ぶ → `tools/cloud/studioCore.ts` の `workJob` → `runJob` が 1 点ずつ作り、**できたらその場で自分の服として保存**（候補は `kept`、服の ID は `my:{仕事}-{番号}-{取りかかった回数}`）。アプリは「進める」を呼ばない（聞くだけ）。
@@ -110,7 +123,9 @@
 
 ### 0-3. 作者に確かめてもらうこと（こちらでは確かめられない）
 
-**いま、いちばん待っていること（③-a、v0.37.0）**: (a) Firebase の画面での設定 3 つ（`docs/firebase-setup.md` の 2-10: Google を有効に・承認済みドメインに `kake-git-hub.github.io`・Google Cloud で戻り先の URL `https://kake-git-hub.github.io/DressUpGame/`）。(b) iPad・スマホのホーム画面アプリと、できれば PC で、方法 1・方法 2 を試して、きろくから報告（2-10 の 4）。**こちらでは、本物の Google の画面を 1 回も通していない**（設計書 11 章の「確かめられていないこと」）。
+**いま、いちばん待っていること（③-b、v0.38.0）**: (a) PC で、サーバーの載せ直し（`docs/firebase-setup.md` の 2-11 の 1）。(b) 2 台めの端末（スマホ）で「Google でログイン」→ 知らせ「…合わせました」→ チケットとクローゼットを見て、きろくから報告（2-11 の 2）。(c) 管理者の端末を合わせたら、`adminCodes` の書き換え（2-11 の 3）。**こちらでは、本物の Google と本物のサーバーで、「合わせる」を 1 回も通していない**（設計書 12 章の「確かめられていないこと」）。
+
+**2026-11-24 に済んだ（③-a）**: Firebase の画面での設定 3 つ（2-10）。iPad のホーム画面アプリで、方法 1・方法 2 とも、ログインできた。
 
 **2026-11-23 に済んだ**: 1 の載せ直し（`Deploy complete!`）。2 は、作者が「つくる」を試して「うまくいった」（すぐ閉じたか・セットもかは、聞いていない）。**まだ聞いていない**: 3 の実機の手ざわり、v0.36.0 の縦画面・色の帯・枠とつまみ、「GitHub に ほうこくする」が iPad のホーム画面アプリから使えるか（GitHub のログイン）。
 
@@ -122,7 +137,7 @@
 
 ### 0-4. テストと、この作業環境の注意
 
-- v0.37.0 の結果: ユニット 1007 件・E2E 136 件、すべて通過。型・ESLint エラー 0（前からある警告 1）。エミュレーター 22 件は、v0.35.0 のときの数（サーバーは、それから変えていないので、走らせていない）。
+- v0.38.0 の結果: ユニット 1179 件中 1178 件（下の 1 件を除く）、エミュレーター 31 件、E2E 144 件が通過。型・ESLint エラー 0（前からある警告 1）。**サーバーに関わる所を変えていなくても、エミュレーターのテストは走らせること**（v0.37.0 で、アプリの側の変更が、エミュレーターのテスト 3 件を落としていた。走らせていなくて、気づかなかった）。
 - この作業環境に入ったら、最初に `npm ci` と `(cd functions && npm ci)`（`node_modules` が古いと、`npm run build` が Firebase の型で落ち、E2E のサーバーが 60 秒で時間切れになる）。
 
 - ユニット: `npx vitest run`。`tools/studio/processSwap.test.ts` の 1 件（「AI が絵を 12px ずらして…」）は、この作業環境では 5 秒の時間切れで落ちることがある（前からある。処理が遅い環境のせい。このブランチの変更とは関係ない）。
