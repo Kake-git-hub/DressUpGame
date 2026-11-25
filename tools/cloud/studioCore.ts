@@ -633,6 +633,8 @@ export async function ackJob(deps: CoreDeps, uid: string, jobId: string): Promis
 
 // 自分の服の、名前・既定の色を変える
 export async function updateItem(deps: CoreDeps, uid: string, itemId: string, change: { name?: string; hue?: number }): Promise<ItemDoc> {
+  // 相手が「はい」と決めた服は、変えない（名前・色が変わると、決めた服と別のものになる）
+  if (await inLiveTrade(deps, uid, itemId, 'joined')) throw new CloudError('refused', 'この服は、こうかんの はなしが すすんでいるので、かえられません');
   return deps.store.updateItem(uid, itemId, (item) => {
     const next: ItemDoc = { ...item, item: { ...item.item } };
     if (typeof change.name === 'string') next.item.name = plainName(change.name, item.item.name);
@@ -820,13 +822,19 @@ async function loadTrade(deps: CoreDeps, uid: string, tradeId: string): Promise<
 // その人の、前の交換（生きていれば）をやめにする
 async function replacePrevious(deps: CoreDeps, uid: string, except?: string): Promise<void> {
   const prev = (await deps.store.getUser(uid))?.trade;
-  if (prev && prev !== except) await endTrade(deps, prev, 'replaced').catch(() => undefined);
+  if (!prev || prev === except) return;
+  try {
+    await endTrade(deps, prev, 'replaced');
+  } catch (e) {
+    // 交換が無い（'refused'）ときだけ、見のがす。ほかの失敗は、前の交換が生きたままかもしれないので、そのまま返す
+    if (!(e instanceof CloudError && e.code === 'refused')) throw e;
+  }
 }
 // その服が、その人の生きている（時間切れでない）交換に出ているか
-async function inLiveTrade(deps: CoreDeps, uid: string, itemId: string): Promise<boolean> {
+async function inLiveTrade(deps: CoreDeps, uid: string, itemId: string, only?: 'joined'): Promise<boolean> {
   const id = (await deps.store.getUser(uid))?.trade;
   const t = id ? await deps.store.getTrade(id) : null;
-  if (!t || !isLive(t) || timedOut(t, deps.now())) return false;
+  if (!t || !isLive(t) || timedOut(t, deps.now()) || (only && t.status !== only)) return false;
   const side = sideOf(t, uid);
   return side !== null && t[side]?.itemId === itemId;
 }
@@ -966,12 +974,13 @@ export async function tradeAccept(deps: CoreDeps, uid: string, tradeId: string):
   if (t.status === 'done' || t.status === 'cancelled') return wireTrade(deps, uid, t);
   if (t.status !== 'joined') throw refuseTrade('unknown');
   const me = sideOf(t, uid)!;
+  const now = deps.now();
   const marked = await deps.store.updateTrade(tradeId, (cur) => {
-    if (cur.status !== 'joined' || cur[me]?.accepted) return null;
+    if (cur.status !== 'joined' || cur[me]?.accepted || timedOut(cur, now)) return null;
     return { ...cur, [me]: { ...cur[me]!, accepted: true } };
   });
   // 自分の分を立てたあとの交換を読み直して、両方立っていれば入れ替える（相手が先に立てていても、あとでも）
-  let latest = (await deps.store.getTrade(tradeId)) ?? marked;
+  let latest = await settleTrade(deps, (await deps.store.getTrade(tradeId)) ?? marked);
   if (latest.status === 'joined' && latest.a.accepted && latest.b?.accepted) latest = await deps.store.swapTrade(tradeId, deps.now());
   return wireTrade(deps, uid, latest);
 }

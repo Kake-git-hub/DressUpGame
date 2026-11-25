@@ -1319,8 +1319,10 @@ describe('交換', () => {
   it('accept twice concurrently swaps once', async () => {
     const id = await joined();
     const [x, y] = await Promise.all([tradeAccept(deps, 'ua', id), tradeAccept(deps, 'ub', id)]);
-    // 先に立てたほうは、まだ「そろっていない」と返ることがある。どちらも、次に見れば done
-    expect([x.status, y.status]).toContain('done');
+    // 入れ替えは 1 回。あとに着いたほうは done。先に着いたほうは、相手が立てる前に動いたので joined（自分は立てた）のことがある
+    const results = [x, y];
+    expect(results.some((r) => r.status === 'done')).toBe(true);
+    for (const r of results) if (r.status !== 'done') expect(r).toMatchObject({ status: 'joined', myAccepted: true });
     expect((await tradeView(deps, 'ua', id)).status).toBe('done');
     expect((await tradeView(deps, 'ub', id)).status).toBe('done');
     expect(await store.getItem('ua', 'my:y-0-1')).not.toBeNull();
@@ -1433,6 +1435,42 @@ describe('交換', () => {
     const { code } = await tradeOpen(deps, 'uc', 'my:z-0-1');
     await tradeClaim(deps, 'ub', code);
     expect(await tradeView(deps, 'ub', first.tradeId)).toMatchObject({ status: 'cancelled', reason: 'replaced' });
+  });
+  it('failing to end the previous trade fails the new one and keeps the pointer', async () => {
+    const id = await joined();
+    await giver('ua', 'my:w-0-1');
+    const real = store.updateTrade.bind(store);
+    store.updateTrade = async () => {
+      throw new Error('firestore down');
+    };
+    await expect(tradeOpen(deps, 'ua', 'my:w-0-1')).rejects.toThrow('firestore down');
+    expect((await store.getUser('ua'))?.trade).toBe(id);
+    // 読み取るほう（ub は、joined の交換の B）も同じ
+    await giver('uc', 'my:z-0-1');
+    store.updateTrade = real;
+    const { code } = await tradeOpen(deps, 'uc', 'my:z-0-1');
+    store.updateTrade = async () => {
+      throw new Error('firestore down');
+    };
+    await expect(tradeClaim(deps, 'ub', code)).rejects.toThrow('firestore down');
+    expect((await store.getUser('ub'))?.trade).toBe(id);
+    store.updateTrade = real;
+    expect((await tradeView(deps, 'ua', id)).status).toBe('joined');
+  });
+  it('cannot rename or recolor an item in a joined trade', async () => {
+    const id = await joined();
+    await expect(updateItem(deps, 'ua', 'my:x-0-1', { name: 'へんこう' })).rejects.toMatchObject({ code: 'refused' });
+    await expect(updateItem(deps, 'ub', 'my:y-0-1', { hue: 90 })).rejects.toMatchObject({ code: 'refused' });
+    await tradeCancel(deps, 'ua', id);
+    expect((await updateItem(deps, 'ua', 'my:x-0-1', { name: 'へんこう' })).item.name).toBe('へんこう');
+  });
+  it('an expired joined trade does not swap on accept', async () => {
+    const id = await joined();
+    await tradeAccept(deps, 'ua', id);
+    clock += TRADE_JOINED_MS + 1000;
+    expect(await tradeAccept(deps, 'ub', id)).toMatchObject({ status: 'cancelled', reason: 'expired' });
+    expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
+    expect(await store.getItem('ub', 'my:x-0-1')).toBeNull();
   });
   it('timeouts', async () => {
     // open のまま 10 分
