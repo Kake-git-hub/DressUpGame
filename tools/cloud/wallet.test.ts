@@ -41,6 +41,13 @@ describe('readWallet / walletFields', () => {
     expect(w.free).toBe(0);
     expect(w.lots[0].left).toBe(4);
   });
+  it('tickets が数でないとき（手の型違い）は、差を見ない。買った分を引かない', () => {
+    const w = readWallet({ free: 2, lots: [L('A', 5)], tickets: '7' as unknown as number, ticketsWritten: 7 }, NOW);
+    expect(w.free).toBe(2);
+    expect(w.lots[0].left).toBe(5);
+    const n = readWallet({ free: 2, lots: [L('A', 5)], tickets: undefined as unknown as number, ticketsWritten: 7 }, NOW);
+    expect(usable(n, NOW)).toBe(7);
+  });
   it('切れた lot は配った分に化けない', () => {
     const w = readWallet({ free: 2, lots: [L('A', 5, NOW - 1)], tickets: 7, ticketsWritten: 7 }, NOW);
     expect(usable(w, NOW)).toBe(2);

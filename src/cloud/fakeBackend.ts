@@ -107,7 +107,8 @@ function readWallet(user: Partial<StoredUser> & { tickets: number }): { free: nu
   const lots = (user.lots ?? []).map((l) => ({ ...l }));
   if (user.free === undefined && user.lots === undefined && user.ticketsWritten === undefined) return { free: user.tickets, lots: [] };
   let free = user.free ?? 0;
-  const d = user.ticketsWritten === undefined ? 0 : user.tickets - user.ticketsWritten;
+  // tickets が有限の数でないときは、差を見ない（サーバーの readWallet と同じ）
+  const d = user.ticketsWritten === undefined || !Number.isFinite(user.tickets) ? 0 : user.tickets - user.ticketsWritten;
   if (d > 0) free += d;
   else if (d < 0) {
     let need = -d;

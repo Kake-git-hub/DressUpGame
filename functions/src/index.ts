@@ -46,7 +46,7 @@ import type { CoreDeps, PublicContent } from '../../tools/cloud/studioCore.ts';
 import { firebaseConfig } from '../../src/cloud/firebaseConfig.ts';
 import { createGemini, createGeminiText, GEMINI_IMAGE_MODEL, GEMINI_TEXT_MODEL } from '../../tools/studio/ai.ts';
 import { FirestoreStore } from './firestoreStore.ts';
-import { createStripeGateway } from './stripeGateway.ts';
+import { createStripeGateway, stripeKeysUsable } from './stripeGateway.ts';
 import { StorageFiles } from './storageFiles.ts';
 
 const REGION = 'asia-northeast1';
@@ -193,14 +193,14 @@ async function enqueue(uid: string, jobId: string, delaySeconds = 0): Promise<vo
   }
 }
 
-// 支払いの口。エミュレーターのテストならにせもの、秘密の値が空なら無し（買えない）
+// 支払いの口。エミュレーターのテストならにせもの、秘密の値が本物の形でなければ無し（買えない。仮の値「pending」も無しの扱い）
 // 秘密の値を読むので、その秘密を持つ関数（studio・stripeHook）からだけ呼ぶ
 let stripeGateway: { key: string; secret: string; gateway: PaymentGateway } | null = null;
 function payGateway(): PaymentGateway | null {
   if (fakePay) return (fakeGateway ??= createFakeGateway());
   const secretKey = STRIPE_SECRET_KEY.value();
   const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
-  if (!secretKey || !webhookSecret) return null;
+  if (!stripeKeysUsable(secretKey, webhookSecret)) return null;
   if (stripeGateway?.key !== secretKey || stripeGateway.secret !== webhookSecret) stripeGateway = { key: secretKey, secret: webhookSecret, gateway: createStripeGateway(secretKey, webhookSecret) };
   return stripeGateway.gateway;
 }
@@ -298,8 +298,8 @@ export const stripeHook = onRequest({ region: REGION, secrets: [STRIPE_SECRET_KE
   }
   const gateway = payGateway();
   if (!gateway) {
-    logger.error('stripeHook: Stripe の秘密の値が入っていません');
-    res.status(500).send('not configured');
+    logger.warn('stripeHook: Stripe の秘密の値が本物ではありません（仮の値のままです）。何もしません');
+    res.status(503).send('not configured');
     return;
   }
   let event;

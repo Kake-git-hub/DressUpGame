@@ -21,7 +21,9 @@ export function readWallet(user: Pick<UserDoc, 'tickets' | 'free' | 'lots' | 'ti
   }
   let free = finite(user.free);
   const lots = (user.lots ?? []).filter((l) => l.left >= 0).map((l) => ({ ...l }));
-  const d = user.ticketsWritten === undefined ? 0 : tickets - finite(user.ticketsWritten);
+  // tickets が数でない（手で型を間違えた）ときは、差を見ない（0 枚と読んで、買った分まで引かない）
+  const ticketsIsNumber = typeof user.tickets === 'number' && Number.isFinite(user.tickets);
+  const d = user.ticketsWritten === undefined || !ticketsIsNumber ? 0 : tickets - finite(user.ticketsWritten);
   if (d > 0) free += d;
   else if (d < 0) {
     let need = -d;

@@ -43,6 +43,8 @@ test('売っていなくても、管理者には、買うボタンが出る', as
   await openHome(page, { shop: { open: false }, admin: true });
   await openStudio(page);
   await expect(page.getByTestId('studio-buy')).toBeVisible();
+  // 管理者にも、試しに買った結果（枚数）が見える
+  await expect(tickets(page)).toContainText('管理者（チケットの制限なし）・🎫 のこり 5 枚');
 });
 
 test('ログインしていないと、押してすぐ、ログインの案内が出る（保護者の確認の前）', async ({ page }) => {

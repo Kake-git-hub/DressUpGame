@@ -1,11 +1,15 @@
 /**
  * 支払いの口の本物（Stripe）。中身の決まりは tools/cloud/payment.ts の PaymentGateway。
- * 支払いの方法（カード・コンビニなど）は、Stripe の管理画面の既定に任せる（ここでは指定しない）。
+ * 支払いの方法は、カードだけ（allowed_payment_method_types。Apple Pay・Google Pay もカードの一種として出る）。
+ * 鍵が本物の形か（sk_・whsec_ で始まるか）は stripeKeysUsable で見る（「pending」などの仮の値は、鍵が無いのと同じ扱い）。
  */
 import Stripe from 'stripe';
 import { BadSignatureError } from '../../tools/cloud/payment.ts';
 import type { CheckoutInput, PayEvent, PaymentGateway } from '../../tools/cloud/payment.ts';
 import { SESSION_MS } from '../../tools/cloud/payment.ts';
+
+// 秘密の値が本物の形のときだけ true（載せ直しのために入れた仮の値「pending」などは、鍵が無いのと同じ）
+export const stripeKeysUsable = (secretKey: string, webhookSecret: string): boolean => secretKey.startsWith('sk_') && webhookSecret.startsWith('whsec_');
 
 // Stripe の支払いページの期限は「作ってから 30 分より先」でなければならない。通信の分だけ余裕を足す
 const MIN_SESSION_MS = SESSION_MS + 60_000;
@@ -38,6 +42,7 @@ export function createStripeGateway(secretKey: string, webhookSecret: string, cl
       const now = Date.now();
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        allowed_payment_method_types: ['card'],
         line_items: [{ quantity: 1, price_data: { currency: 'jpy', unit_amount: pack.price, product_data: { name: `チケット ${pack.tickets} 枚（服 ${pack.tickets} 点ぶん）` } } }],
         client_reference_id: uid,
         metadata: { uid, pack: pack.id, tickets: String(pack.tickets), expiresAt: String(input.purchaseExpiresAt), createdAt: String(now) },

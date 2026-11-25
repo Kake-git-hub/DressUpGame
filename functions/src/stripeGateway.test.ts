@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import { BadSignatureError } from '../../tools/cloud/payment.ts';
 import type { PayEvent } from '../../tools/cloud/payment.ts';
-import { createStripeGateway } from './stripeGateway.ts';
+import { createStripeGateway, stripeKeysUsable } from './stripeGateway.ts';
 
 const SECRET = 'whsec_unit';
 const stripe = new Stripe('sk_test_unit');
@@ -90,6 +90,7 @@ describe('createCheckout / getSession', () => {
     const params = create.mock.calls[0][0];
     expect(params).toMatchObject({
       mode: 'payment',
+      allowed_payment_method_types: ['card'],
       line_items: [{ quantity: 1, price_data: { currency: 'jpy', unit_amount: 300, product_data: { name: 'チケット 10 枚（服 10 点ぶん）' } } }],
       client_reference_id: 'u1',
       metadata: { uid: 'u1', pack: '10-300', tickets: '10', expiresAt: '2000000000000' },
@@ -97,7 +98,7 @@ describe('createCheckout / getSession', () => {
       cancel_url: 'https://app.test/?pay=cancel',
       locale: 'ja',
     });
-    expect(params).not.toHaveProperty('payment_method_types');
+    expect(params.allowed_payment_method_types).toEqual(['card']);
     expect(Number(params.metadata.createdAt)).toBeGreaterThanOrEqual(now);
     // 作ってから 30 分より先（通信の分の余裕を足す）で、秒の単位
     expect(params.expires_at).toBeGreaterThanOrEqual(Math.floor(now / 1000) + 31 * 60);
@@ -112,5 +113,18 @@ describe('createCheckout / getSession', () => {
     expect(await gateway.getSession('cs_1')).toEqual({ id: 'cs_1', paid: true, paidAt: null, expired: false, uid: 'u1' });
     retrieve.mockResolvedValueOnce({ id: 'cs_2', payment_status: 'unpaid', status: 'expired', client_reference_id: null, metadata: { uid: 'u2' } });
     expect(await gateway.getSession('cs_2')).toEqual({ id: 'cs_2', paid: false, paidAt: null, expired: true, uid: 'u2' });
+  });
+});
+
+describe('stripeKeysUsable', () => {
+  it('sk_ と whsec_ で始まる本物の形だけ使える', () => {
+    expect(stripeKeysUsable('sk_test_abc', 'whsec_abc')).toBe(true);
+    expect(stripeKeysUsable('sk_live_abc', 'whsec_abc')).toBe(true);
+  });
+  it('仮の値（pending）・空・片方だけでは使えない', () => {
+    expect(stripeKeysUsable('pending', 'pending')).toBe(false);
+    expect(stripeKeysUsable('sk_test_abc', 'pending')).toBe(false);
+    expect(stripeKeysUsable('pending', 'whsec_abc')).toBe(false);
+    expect(stripeKeysUsable('', '')).toBe(false);
   });
 });

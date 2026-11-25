@@ -649,6 +649,13 @@ describe('端末の保存を手で書き換えたとき', () => {
     expect(user.free).toBe(2);
     expect(user.tickets).toBe(2);
   });
+  it('tickets が数でないときは、差を見ず、買った分を引かない', async () => {
+    const lot = { count: 5, left: 5, expiresAt: Date.now() + 86_400_000 };
+    seed({ tickets: 'x', free: 2, lots: [lot], ticketsWritten: 7 });
+    const user = await make().signIn();
+    expect(user.free).toBe(2);
+    expect(user.lots[0].left).toBe(5);
+  });
   it('書き換えのあとは、ticketsWritten が合い、もう一度読んでも変わらない', async () => {
     seed({ tickets: 4, free: 5, lots: [], ticketsWritten: 5 });
     const backend = make();

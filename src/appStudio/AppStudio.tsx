@@ -161,14 +161,14 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
           <h2>✨ 服を作る</h2>
           {user && (
             <span className="studio-tickets" data-testid="studio-tickets">
-              {user.admin ? '管理者（チケットの制限なし）' : `🎫 のこり ${user.tickets} 枚`}
+              {user.admin ? `管理者（チケットの制限なし）・🎫 のこり ${user.tickets} 枚` : `🎫 のこり ${user.tickets} 枚`}
             </span>
           )}
           <button type="button" onClick={onClose} aria-label="とじる" data-testid="studio-close">
             ✕
           </button>
         </header>
-        {user && !user.admin && user.lots.length > 0 && (
+        {user && user.lots.length > 0 && (
           <div className="shop-lots" data-testid="studio-lots">
             <span data-testid="studio-lot">
               うち {user.lots[0].left} 枚は {formatJstDate(user.lots[0].expiresAt)}まで
