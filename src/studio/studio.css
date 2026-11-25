@@ -79,3 +79,20 @@ details.form > summary { cursor: pointer; font-weight: bold; width: 100%; }
 .set-box { background: #faf8ff; border: 1px solid #e0daf5; border-radius: 8px; padding: 8px; margin: 8px 0; }
 .set-box .thumbs label { display: flex; gap: 4px; font-size: 12px; }
 .set-box .thumbs label input { width: 56px; }
+/* 一覧の切り替え（くわしく／ならべかえ） */
+.library-view button[aria-pressed='true'] { background: #6a4fd0; color: #fff; border-color: #6a4fd0; }
+.thumbs figure.flash { outline: 3px solid #6a4fd0; outline-offset: 2px; }
+/* ならべかえ */
+.sort-view .sort-box { background: #fff; border-radius: 10px; padding: 6px 8px; margin: 6px 0; }
+.sort-view h3 { margin: 0 0 4px; font-size: 14px; display: flex; gap: 8px; align-items: baseline; }
+.sort-categories { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.sort-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid #c9c3e3; border-radius: 16px; background: #faf9ff; font-size: 13px; cursor: grab; user-select: none; }
+.sort-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.sort-thumb { position: relative; width: 64px; height: 64px; background: #efeef5; border-radius: 4px; cursor: grab; user-select: none; }
+.sort-thumb img { width: 64px; height: 64px; object-fit: contain; display: block; pointer-events: none; }
+.sort-thumb i { position: absolute; left: 2px; top: 1px; font-size: 10px; color: #888; font-style: normal; }
+.sort-set { display: flex; flex-wrap: wrap; }
+.sort-set img { width: 32px; height: 32px; }
+.sort-view .dragging { opacity: 0.35; }
+.sort-view .drop-before { box-shadow: -3px 0 0 #6a4fd0; }
+.sort-view .drop-after { box-shadow: 3px 0 0 #6a4fd0; }

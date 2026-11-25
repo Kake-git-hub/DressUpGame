@@ -413,7 +413,7 @@ test.describe('スタジオ', () => {
     });
   });
   test.describe('一覧での並べ替え・位置の直し、ドールの設定、作りかけの候補', () => {
-    const manifestNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')) as { dolls: { id: string; name: string; hidden?: boolean; items: Item[] }[] };
+    const manifestNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')) as { dolls: { id: string; name: string; hidden?: boolean; items: Item[]; categories: { id: string; menuOrder: number }[]; sets?: { id: string }[] }[] };
     const tops = () => manifestNow().dolls[0].items.filter((i) => i.category === 'トップス');
 
     test('一覧: ◀ ▶ でメニューでの順番が変わり、「位置・大きさ」で動かして保存すると、位置が変わる', async ({ page }) => {
@@ -451,6 +451,67 @@ test.describe('スタジオ', () => {
       await page.getByRole('button', { name: 'やめる' }).click();
       await expect(page.getByTestId('placer')).toHaveCount(0);
       expect(tops()[0].image.box).toEqual(after.image.box);
+    });
+
+    test('ならべかえ: カテゴリ・服をつかんで動かすと順番が変わり、押すと「くわしく」のその服へ', async ({ page }) => {
+      const manifestText = () => fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8');
+      await page.getByTestId('tab-library').click();
+      await page.getByTestId('library-view-sort').click();
+      await expect(page.getByTestId('sort-view')).toBeVisible();
+      // カテゴリ: 最後のチップを、最初のチップの左半分へ
+      const chips = page.getByTestId('sort-category');
+      const ids = await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')));
+      expect(ids.length).toBeGreaterThanOrEqual(2);
+      await chips.last().dragTo(chips.first(), { targetPosition: { x: 2, y: 5 } });
+      const cats = () => [...manifestNow().dolls[0].categories].sort((a, b) => a.menuOrder - b.menuOrder).map((c) => c.id);
+      await expect.poll(cats).toEqual([ids.at(-1), ...ids.slice(0, -1)]);
+      expect(manifestNow().dolls[0].categories.map((c) => c.menuOrder).sort((a, b) => a - b)).toEqual(ids.map((_, i) => i));
+      await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual([ids.at(-1), ...ids.slice(0, -1)]);
+      // 服: トップスの 1 点めを、2 点めの右半分へ
+      const row = page.getByTestId('sort-row-トップス').getByTestId('sort-item');
+      const before = tops().map((i) => i.id);
+      const box = (await row.nth(1).boundingBox())!;
+      await row.first().dragTo(row.nth(1), { targetPosition: { x: box.width - 2, y: 5 } });
+      await expect.poll(() => tops().map((i) => i.id)).toEqual([before[1], before[0], ...before.slice(2)]);
+      await expect(row.first()).toHaveAttribute('data-id', before[1]);
+      // セット: 一時のセットを足して 2 組以上にし、最後を最初の前へ。終わったら一時のセットを消す
+      const extra = tops()[0].id;
+      expect((await page.request.patch('http://127.0.0.1:4174/api/items', { data: { id: extra, set: { name: 'ならべかえのためし' } } })).ok()).toBe(true);
+      await page.reload();
+      await page.getByTestId('tab-library').click();
+      const setIds = (manifestNow().dolls[0].sets ?? []).map((x) => x.id);
+      expect(setIds.length).toBeGreaterThanOrEqual(2);
+      const setThumbs = page.getByTestId('sort-set');
+      await expect(setThumbs).toHaveCount(setIds.length);
+      await setThumbs.last().dragTo(setThumbs.first(), { targetPosition: { x: 2, y: 5 } });
+      await expect.poll(() => (manifestNow().dolls[0].sets ?? []).map((x) => x.id)).toEqual([setIds.at(-1), ...setIds.slice(0, -1)]);
+      expect((await page.request.patch('http://127.0.0.1:4174/api/items', { data: { id: extra, leaveSet: setIds.at(-1) } })).ok()).toBe(true);
+      await page.reload();
+      await page.getByTestId('tab-library').click();
+      await expect(page.getByTestId('sort-set')).toHaveCount(setIds.length - 1);
+      // ほかの段へ落としても、同じ所に落としても、何も変わらない
+      const snapshot = manifestText();
+      const other = page.locator('[data-testid^="sort-row-"]:not([data-testid="sort-row-トップス"])').first().getByTestId('sort-item').first();
+      await row.first().dragTo(other);
+      await row.first().dragTo(row.first(), { targetPosition: { x: 2, y: 5 } }); // 動かして、元の所に落とす
+      await page.waitForTimeout(500);
+      expect(manifestText()).toBe(snapshot);
+      // 押すと、くわしくのその服へ（一覧ファイルは変わらない）
+      await row.first().click();
+      await expect(page.getByTestId('library-view-detail')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator(`[data-item-id="${tops()[0].id}"]`)).toBeInViewport();
+      expect(manifestText()).toBe(snapshot);
+      // 読み込み直すと、さっき選んだ表示（くわしく）で開く。並び順の数字の欄は無い
+      await page.reload();
+      await page.getByTestId('tab-library').click();
+      await expect(page.getByTestId('library-view-detail')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByLabel('並び順')).toHaveCount(0);
+      // ならべかえを選ぶと、読み込み直してもならべかえで開く
+      await page.getByTestId('library-view-sort').click();
+      await page.reload();
+      await page.getByTestId('tab-library').click();
+      await expect(page.getByTestId('sort-view')).toBeVisible();
+      await page.getByTestId('library-view-detail').click();
     });
 
     test('一覧のセット: パーツが並び、重ね順を決められ、外したり、ほかの服を足したりできる', async ({ page }) => {

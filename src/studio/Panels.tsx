@@ -11,6 +11,7 @@ import { ItemCard } from './ItemCard';
 import { ItemPlacer } from './ItemPlacer';
 import { dropIndex, moveInList, sortCategories } from './order';
 import { forgetParts } from './partsCache';
+import { SortView } from './SortView';
 import { STYLE_PRESETS, findStyle } from './stylePresets';
 import { useUnsaved } from './unsaved';
 import type { CardSource, ItemCardHandle } from './ItemCard';
@@ -547,7 +548,43 @@ export function Backgrounds({ doll, manifest, onChanged }: Common & { manifest: 
 
 const NEW_SET = '__new-set';
 
+// 一覧の表示（くわしく／ならべかえ）を PC に覚える。読めなければ「くわしく」
+const VIEW_KEY = 'dressup_studio_library_view';
+type LibraryView = 'detail' | 'sort';
+function readView(): LibraryView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'sort' ? 'sort' : 'detail';
+  } catch {
+    return 'detail';
+  }
+}
+function saveView(view: LibraryView) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // 覚えられなくても、表示は切り替わる
+  }
+}
+
 export function Library({ doll, onChanged }: Common) {
+  const [view, setViewState] = useState<LibraryView>(readView);
+  const [focus, setFocus] = useState<string | null>(null); // ならべかえで押した服（くわしくで、その服へ）
+  const setView = (next: LibraryView) => {
+    setViewState(next);
+    saveView(next);
+  };
+  useEffect(() => {
+    if (view !== 'detail' || !focus) return;
+    document.querySelector(`[data-item-id="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: 'center' });
+    const timer = setTimeout(() => setFocus(null), 2000);
+    return () => clearTimeout(timer);
+  }, [view, focus]);
+  const switcher = (
+    <div className="row library-view">
+      <button aria-pressed={view === 'detail'} onClick={() => setView('detail')} data-testid="library-view-detail">くわしく</button>
+      <button aria-pressed={view === 'sort'} onClick={() => setView('sort')} data-testid="library-view-sort">ならべかえ</button>
+    </div>
+  );
   // 服が入っているセットの名前（「、」でつなぐ）
   const setNames = (item: { set?: string | string[] }) => itemSetIds(item).map((id) => doll.sets?.find((x) => x.id === id)?.name ?? '').join('」「');
   const [error, setError] = useState<string | null>(null);
@@ -565,8 +602,24 @@ export function Library({ doll, onChanged }: Common) {
     }
   };
   const categories = sortCategories(doll.categories);
+  if (view === 'sort') {
+    return (
+      <section>
+        {switcher}
+        <SortView
+          doll={doll}
+          onChanged={onChanged}
+          onOpenItem={(id) => {
+            setFocus(id);
+            setView('detail');
+          }}
+        />
+      </section>
+    );
+  }
   return (
     <section>
+      {switcher}
       {error && <p className="error">{error}</p>}
       {(doll.sets ?? []).length > 0 && (
         <div className="category" data-testid="library-sets">
@@ -646,7 +699,7 @@ export function Library({ doll, onChanged }: Common) {
           })}
         </div>
       )}
-      <p className="hint">「重ね順」は大きいほど手前。「並び順」はメニューでの順番（小さいほど先）。カテゴリの中の服の順番は、絵をドラッグするか ◀ ▶ で変えられます。「位置・大きさ」で、ゲームで最初に着せたときの位置と大きさを直せます。</p>
+      <p className="hint">「重ね順」は大きいほど手前。メニューでの順番は「ならべかえ」で変えられます（カテゴリの中の服の順番は、ここでも絵をドラッグするか ◀ ▶ で変えられます）。「位置・大きさ」で、ゲームで最初に着せたときの位置と大きさを直せます。</p>
       {placingItem && <ItemPlacer doll={doll} item={placingItem} onClose={() => setPlacing(null)} onSaved={onChanged} />}
       {categories.map((c) => {
         const items = doll.items.filter((i) => i.category === c.id);
@@ -663,7 +716,6 @@ export function Library({ doll, onChanged }: Common) {
               <b>{c.label}</b>
               <span>{items.length} 点</span>
               <label>重ね順 <input type="number" defaultValue={c.layer} onBlur={(e) => Number(e.target.value) !== c.layer && set({ layer: Number(e.target.value) })} /></label>
-              <label>並び順 <input type="number" defaultValue={c.menuOrder} onBlur={(e) => Number(e.target.value) !== c.menuOrder && set({ menuOrder: Number(e.target.value) })} /></label>
               <label><input type="checkbox" checked={c.overlap} onChange={(e) => set({ overlap: e.target.checked })} /> 重ね着できる</label>
               <label><input type="checkbox" checked={c.movable} onChange={(e) => set({ movable: e.target.checked })} /> 自由配置</label>
               {items.length === 0 && <button onClick={() => void guard(() => api.deleteCategory(doll.id, c.id))}>カテゴリを消す</button>}
@@ -673,7 +725,8 @@ export function Library({ doll, onChanged }: Common) {
                 <figure
                   key={item.id}
                   data-testid="library-item"
-                  className={dragged?.id === item.id ? 'dragging' : undefined}
+                  data-item-id={item.id}
+                  className={[dragged?.id === item.id ? 'dragging' : '', focus === item.id ? 'flash' : ''].filter(Boolean).join(' ') || undefined}
                   onDragOver={(e) => dragged?.category === c.id && e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
