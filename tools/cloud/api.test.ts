@@ -8,7 +8,9 @@ import { ContentStore } from '../content/manifestEdit.ts';
 import type { ImageAi, TextAi } from '../studio/ai.ts';
 import { callerOfToken, handleCall } from './api.ts';
 import type { ItemView, JobView } from './api.ts';
+import { createFakeGateway } from './fakeGateway.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
+import { parsePacks } from './payment.ts';
 import { createPublicContent } from './publicContent.ts';
 import { CloudError } from './store.ts';
 import { runJob } from './studioCore.ts';
@@ -93,7 +95,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(4); // 4 = 交換もできるサーバー（3 = 引き継ぎ）
+    expect(api).toBe(5); // 5 = 支払いもできるサーバー（4 = 交換、3 = 引き継ぎ）
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -185,11 +187,11 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
   const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
 
   it('signIn の返事の api は 3。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
-    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(4);
-    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(4);
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(5);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(5);
     expect((await store.getUser('a1'))!.named).toBeUndefined();
     const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
-    expect(answer).toMatchObject({ api: 4, user: { tickets: 0, admin: false } });
+    expect(answer).toMatchObject({ api: 5, user: { tickets: 0, admin: false } });
     expect((await store.getUser('g1'))!.named).toBe(true);
   });
 
@@ -230,7 +232,7 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     store.moveTickets = async () => {
       throw new Error('store is down');
     };
-    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(4);
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(5);
   });
 
   it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {
@@ -315,3 +317,25 @@ describe('公開されている素材を読む', () => {
     await expect(broken.assets.dollTemplate(dollDoc)).rejects.toThrow(/読めません/);
   });
 });
+
+describe('支払いの op', () => {
+  it('shop・checkout・purchase・shopAck が通り、返事に user がある', async () => {
+    const gateway = createFakeGateway();
+    deps.pay = { gateway, salesOpen: true, packs: parsePacks('10:300'), welcomeTickets: 0, returnUrl: 'https://app.test/', checkoutsPerDay: 10 };
+    const named = { anonymous: false };
+    const callNamed = <T>(data: unknown) => handleCall(deps, 'p1', data, named) as Promise<T>;
+    expect(await callNamed({ op: 'shop' })).toMatchObject({ open: true, packs: [{ id: '10-300', tickets: 10, price: 300 }], announce: [], user: { tickets: 0 } });
+    const made = await callNamed<{ session: string; url: string; expiresAt: number }>({ op: 'checkout', pack: '10-300', adultAt: 1, agreedAt: 2 });
+    expect(made.url).toContain(made.session);
+    expect(await callNamed({ op: 'purchase', session: made.session })).toMatchObject({ status: 'open', added: 0, user: { tickets: 0 } });
+    gateway.pay(made.session, clock);
+    expect(await callNamed({ op: 'purchase', session: made.session })).toMatchObject({ status: 'paid', added: 10, tickets: 10, user: { tickets: 10 } });
+    expect(await callNamed({ op: 'shopAck', session: made.session })).toMatchObject({ ok: true, user: { tickets: 10 } });
+    expect((await callNamed<{ announce: unknown[] }>({ op: 'shop' })).announce).toEqual([]);
+    // 匿名は買えない・形の違う呼び出しは断る
+    const err = await (handleCall(deps, 'p2', { op: 'checkout', pack: '10-300', adultAt: 1, agreedAt: 2 }) as Promise<unknown>).catch((e: CloudError) => e);
+    expect((err as CloudError).message).toMatch(/^pay:login/);
+    await expect(callNamed({ op: 'checkout', pack: '10-300' })).rejects.toMatchObject({ code: 'refused' });
+  });
+});
+

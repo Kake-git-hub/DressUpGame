@@ -2,8 +2,8 @@
  * メモリの中の置き場（テストと、手元の確認用）。本物（Firestore・Storage）と同じ形。
  */
 import { ADOPTED_MAX, CloudError } from './store.ts';
-import type { CloudFiles, CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, TradeDoc, UserDoc } from './store.ts';
-import { draw, expire, merge, readWallet, refundTicket, usable, walletFields } from './wallet.ts';
+import type { CloudFiles, CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, PurchaseDoc, TradeDoc, UserDoc } from './store.ts';
+import { addFree, addLot, draw, expire, merge, readWallet, reclaim, refundTicket, usable, walletFields } from './wallet.ts';
 import type { Wallet } from './wallet.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -24,6 +24,7 @@ export class MemoryStore implements CloudStore {
   readonly refunds = new Set<string>();
   readonly handoffs = new Map<string, HandoffDoc>();
   readonly trades = new Map<string, TradeDoc>();
+  readonly purchases = new Map<string, PurchaseDoc>();
 
   async getUser(uid: string): Promise<UserDoc | null> {
     const user = this.users.get(uid);
@@ -296,6 +297,67 @@ export class MemoryStore implements CloudStore {
     const user = this.mustUser(uid);
     if (tradeId === null) delete user.trade;
     else user.trade = tradeId;
+  }
+
+  // 支払い（どれも、間に待ちを入れない = 本物の 1 つの取り引き）
+  async putPurchase(p: PurchaseDoc): Promise<void> {
+    this.purchases.set(p.id, clone(p));
+  }
+  async getPurchase(id: string): Promise<PurchaseDoc | null> {
+    const p = this.purchases.get(id);
+    return p ? clone(p) : null;
+  }
+  async fulfillPurchase(id: string, paidAt: number, now: number): Promise<{ added: number; purchase: PurchaseDoc } | null> {
+    const p = this.purchases.get(id);
+    if (!p) return null;
+    if (p.status === 'paid') return { added: 0, purchase: clone(p) };
+    const opened = this.open(p.uid, now);
+    const lot: Lot = { id, count: p.tickets, left: p.tickets, boughtAt: paidAt, expiresAt: p.expiresAt };
+    this.ledger.push({ uid: p.uid, count: p.tickets, reason: `buy:${id}`, at: now });
+    this.save(opened, addLot(opened.wallet, lot), now);
+    p.status = 'paid';
+    p.paidAt = paidAt;
+    return { added: p.tickets, purchase: clone(p) };
+  }
+  async expirePurchase(id: string): Promise<void> {
+    const p = this.purchases.get(id);
+    if (p && p.status === 'open') p.status = 'expired';
+  }
+  async reclaimPurchase(id: string, target: number, now: number): Promise<number> {
+    const p = this.purchases.get(id);
+    if (!p || p.status !== 'paid') return 0;
+    const before = p.reclaimed ?? 0;
+    if (!(target > before)) return 0;
+    const opened = this.open(p.uid, now);
+    const { wallet, taken } = reclaim(opened.wallet, id, target - before);
+    if (taken > 0) this.ledger.push({ uid: p.uid, count: -taken, reason: `refund-paid:${id}`, at: now });
+    this.save(opened, wallet, now);
+    p.reclaimed = target;
+    return taken;
+  }
+  async listUnannounced(uid: string): Promise<PurchaseDoc[]> {
+    return [...this.purchases.values()]
+      .filter((p) => p.uid === uid && p.status === 'paid' && !p.announced)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(clone);
+  }
+  async markAnnounced(id: string): Promise<void> {
+    const p = this.purchases.get(id);
+    if (p) p.announced = true;
+  }
+  async countCheckout(uid: string, day: string, perDay: number): Promise<void> {
+    const key = `checkout:${day}:${uid}`;
+    const used = this.usage.get(key) ?? 0;
+    if (used >= perDay) throw new CloudError('limit', '今日は、お支払いを始められる回数の上限に達しました。あした、もう一度ためしてください');
+    this.usage.set(key, used + 1);
+  }
+  async markWelcome(uid: string, n: number, now: number): Promise<number> {
+    const opened = this.open(uid, now);
+    if (opened.user.welcomed) return 0;
+    this.ledger.push({ uid, count: n, reason: 'welcome', at: now });
+    this.save(opened, addFree(opened.wallet, n), now);
+    opened.user.welcomed = true;
+    return n;
   }
 }
 

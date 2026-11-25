@@ -10,14 +10,16 @@
  *   system/trade-{日付}-{uid}   その人がその日に始めた交換の回数
  *   handoffs/{合い言葉}         引き継ぎの合い言葉（元の uid・時刻・使った人）
  *   trades/{id}                 交換（双方の uid・服・状態・読み取りの印）
+ *   purchases/{session}         支払い（Checkout Session の ID。買った人・枚数・状態）
+ *   checkouts/{uid}_{日付}      その人がその日に作った支払いページの回数
  *
  * アプリからは直接読めない（firestore.rules で全部断る）。ここは、管理者の権限で読み書きする。
  */
 import { FieldValue } from 'firebase-admin/firestore';
 import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { ADOPTED_MAX, CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, TradeDoc, UserDoc } from '../../tools/cloud/store.ts';
-import { draw, expire, merge, readWallet, refundTicket, usable, walletFields } from '../../tools/cloud/wallet.ts';
+import type { CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, PurchaseDoc, TradeDoc, UserDoc } from '../../tools/cloud/store.ts';
+import { addFree, addLot, draw, expire, merge, readWallet, reclaim, refundTicket, usable, walletFields } from '../../tools/cloud/wallet.ts';
 import type { Wallet } from '../../tools/cloud/wallet.ts';
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
@@ -38,6 +40,9 @@ export class FirestoreStore implements CloudStore {
   }
   private trade(id: string): DocumentReference {
     return this.db.collection('trades').doc(docId(id));
+  }
+  private purchase(id: string): DocumentReference {
+    return this.db.collection('purchases').doc(docId(id));
   }
   private item(uid: string, itemId: string): DocumentReference {
     return this.user(uid).collection('items').doc(docId(itemId));
@@ -378,6 +383,89 @@ export class FirestoreStore implements CloudStore {
       const snap = await tx.get(ref);
       if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
       tx.update(ref, { trade: tradeId ?? FieldValue.delete() });
+    });
+  }
+
+  // 支払い
+  async putPurchase(p: PurchaseDoc): Promise<void> {
+    await this.purchase(p.id).set(p);
+  }
+  async getPurchase(id: string): Promise<PurchaseDoc | null> {
+    const snap = await this.purchase(id).get();
+    return snap.exists ? (snap.data() as PurchaseDoc) : null;
+  }
+  async fulfillPurchase(id: string, paidAt: number, now: number): Promise<{ added: number; purchase: PurchaseDoc } | null> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.purchase(id);
+      const snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      const p = snap.data() as PurchaseDoc;
+      if (p.status === 'paid') return { added: 0, purchase: p };
+      const opened = await this.open(tx, p.uid, now);
+      const lot: Lot = { id, count: p.tickets, left: p.tickets, boughtAt: paidAt, expiresAt: p.expiresAt };
+      // 台帳の行の名前を支払いから決める（取り引きのやり直しでも、2 行にならない）
+      tx.create(opened.ref.collection('ledger').doc(docId(`buy:${id}`)), { count: p.tickets, reason: `buy:${id}`, at: now });
+      this.write(tx, opened, addLot(opened.wallet, lot), now);
+      const purchase: PurchaseDoc = { ...p, status: 'paid', paidAt };
+      tx.update(ref, { status: 'paid', paidAt });
+      return { added: p.tickets, purchase };
+    });
+  }
+  async expirePurchase(id: string): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.purchase(id);
+      const snap = await tx.get(ref);
+      if (snap.exists && (snap.data() as PurchaseDoc).status === 'open') tx.update(ref, { status: 'expired' });
+    });
+  }
+  async reclaimPurchase(id: string, target: number, now: number): Promise<number> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.purchase(id);
+      const snap = await tx.get(ref);
+      if (!snap.exists) return 0;
+      const p = snap.data() as PurchaseDoc;
+      const before = p.reclaimed ?? 0;
+      if (p.status !== 'paid' || !(target > before)) return 0;
+      const opened = await this.open(tx, p.uid, now);
+      const { wallet, taken } = reclaim(opened.wallet, id, target - before);
+      if (taken > 0) tx.create(opened.ref.collection('ledger').doc(), { count: -taken, reason: `refund-paid:${id}`, at: now });
+      this.write(tx, opened, wallet, now);
+      tx.update(ref, { reclaimed: target });
+      return taken;
+    });
+  }
+  async listUnannounced(uid: string): Promise<PurchaseDoc[]> {
+    const snap = await this.db.collection('purchases').where('uid', '==', uid).where('status', '==', 'paid').get();
+    return snap.docs
+      .map((d) => d.data() as PurchaseDoc)
+      .filter((p) => !p.announced)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+  async markAnnounced(id: string): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.purchase(id);
+      const snap = await tx.get(ref);
+      if (snap.exists) tx.update(ref, { announced: true });
+    });
+  }
+  async countCheckout(uid: string, day: string, perDay: number): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.db.collection('checkouts').doc(`${docId(uid)}_${docId(day)}`);
+      const snap = await tx.get(ref);
+      const used = snap.exists ? Number((snap.data() as { count?: unknown }).count) || 0 : 0;
+      if (used >= perDay) throw new CloudError('limit', '今日は、お支払いを始められる回数の上限に達しました。あした、もう一度ためしてください');
+      tx.set(ref, { count: used + 1 });
+    });
+  }
+  async markWelcome(uid: string, n: number, now: number): Promise<number> {
+    return this.db.runTransaction(async (tx) => {
+      const opened = await this.open(tx, uid, now);
+      const snap = await tx.get(opened.ref);
+      if ((snap.data() as UserDoc).welcomed) return 0;
+      tx.create(opened.ref.collection('ledger').doc(), { count: n, reason: 'welcome', at: now });
+      this.write(tx, opened, addFree(opened.wallet, n), now);
+      tx.update(opened.ref, { welcomed: true });
+      return n;
     });
   }
 }

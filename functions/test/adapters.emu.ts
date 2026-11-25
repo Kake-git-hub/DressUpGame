@@ -8,7 +8,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, ItemDoc, JobDoc } from '../../tools/cloud/store.ts';
+import type { CloudStore, ItemDoc, JobDoc, PurchaseDoc } from '../../tools/cloud/store.ts';
 import { adoptUser } from '../../tools/cloud/studioCore.ts';
 import type { CoreDeps } from '../../tools/cloud/studioCore.ts';
 import { FirestoreStore } from '../src/firestoreStore.ts';
@@ -444,6 +444,78 @@ describe('Firestore の置き場（③-b 引き継ぎ）', () => {
       expect(await store.getHandoff(word)).toMatchObject({ usedBy: winner });
       expect((await store.getUser(loser))!.adopted).toBeUndefined();
     }
+  });
+});
+
+describe('Firestore の置き場（⑥ 支払い）', () => {
+  const purchase = (id: string, u: string, over: Partial<PurchaseDoc> = {}): PurchaseDoc => ({ id, uid: u, pack: '10-300', tickets: 10, price: 300, status: 'open', createdAt: 1, expiresAt: 1_000_000, adultAt: 1, agreedAt: 2, ...over });
+  const ledgerOf = async (u: string) => (await getFirestore(app).collection(`users/${u}/ledger`).get()).docs.map((d) => d.data());
+  const newUser = async () => {
+    const u = uid();
+    await store.createUser(u, () => `P${u}`.toUpperCase(), 1);
+    return u;
+  };
+
+  it('fulfillPurchase: 同時に 5 回呼んでも、lot も台帳 buy: も 1 つ。無い支払いは null。expired でも足す', async () => {
+    const u = await newUser();
+    const id = `cs-${u}`;
+    expect(await store.fulfillPurchase(id, 5, 6)).toBeNull();
+    await store.putPurchase(purchase(id, u, { status: 'expired' }));
+    const results = await Promise.all(Array.from({ length: 5 }, () => store.fulfillPurchase(id, 5, 6)));
+    expect(results.filter((r) => r!.added === 10)).toHaveLength(1);
+    expect(await store.getPurchase(id)).toMatchObject({ status: 'paid', paidAt: 5 });
+    expect(await store.getWallet(u, 7)).toMatchObject({ free: 0, lots: [{ id, count: 10, left: 10, boughtAt: 5, expiresAt: 1_000_000 }] });
+    expect((await ledgerOf(u)).filter((r) => r.reason === `buy:${id}`)).toHaveLength(1);
+    expect((await store.getUser(u))!.tickets).toBe(10);
+  });
+  it('expirePurchase は open のときだけ', async () => {
+    const u = await newUser();
+    await store.putPurchase(purchase(`a-${u}`, u));
+    await store.putPurchase(purchase(`b-${u}`, u, { status: 'paid' }));
+    await store.expirePurchase(`a-${u}`);
+    await store.expirePurchase(`b-${u}`);
+    expect((await store.getPurchase(`a-${u}`))!.status).toBe('expired');
+    expect((await store.getPurchase(`b-${u}`))!.status).toBe('paid');
+  });
+  it('reclaimPurchase: 3 枚使ったあと半額 → 5 枚取って残り 2。同時に 4 回呼んでも 1 回ぶん。大きくなる目標だけ、差を取る', async () => {
+    const u = await newUser();
+    const id = `cs-${u}`;
+    await store.putPurchase(purchase(id, u));
+    await store.fulfillPurchase(id, 5, 6);
+    await store.charge(u, 3, 'job', 7);
+    const taken = await Promise.all(Array.from({ length: 4 }, () => store.reclaimPurchase(id, 5, 8)));
+    expect(taken.reduce((a, b) => a + b, 0)).toBe(5);
+    expect((await store.getUser(u))!.tickets).toBe(2);
+    expect(await store.reclaimPurchase(id, 4, 9)).toBe(0);
+    expect(await store.reclaimPurchase(id, 10, 9)).toBe(2); // 残りの 2 枚まで
+    expect((await store.getUser(u))!.tickets).toBe(0);
+    expect(await store.getPurchase(id)).toMatchObject({ reclaimed: 10 });
+    expect((await ledgerOf(u)).filter((r) => String(r.reason).startsWith('refund-paid:'))).toHaveLength(2);
+    expect(await store.reclaimPurchase('nothing', 1, 9)).toBe(0);
+  });
+  it('listUnannounced・markAnnounced: paid で、伝えていないものだけ', async () => {
+    const u = await newUser();
+    await store.putPurchase(purchase(`a-${u}`, u, { status: 'paid' }));
+    await store.putPurchase(purchase(`b-${u}`, u, { status: 'paid', createdAt: 2 }));
+    await store.putPurchase(purchase(`c-${u}`, u));
+    expect((await store.listUnannounced(u)).map((p) => p.id)).toEqual([`a-${u}`, `b-${u}`]);
+    await store.markAnnounced(`a-${u}`);
+    expect((await store.listUnannounced(u)).map((p) => p.id)).toEqual([`b-${u}`]);
+  });
+  it('countCheckout: 同時に 9 回 → 上限の 4 回まで。日が変われば、また数える', async () => {
+    const u = await newUser();
+    const results = await Promise.all(Array.from({ length: 9 }, () => store.countCheckout(u, '2026-11-25', 4).then(() => 'ok', code)));
+    expect(results.filter((r) => r === 'ok')).toHaveLength(4);
+    expect(results.filter((r) => r === 'limit')).toHaveLength(5);
+    await store.countCheckout(u, '2026-11-26', 4);
+  });
+  it('markWelcome: 同時に 5 回でも free +3 は 1 回。台帳 welcome は 1 行。いなければ refused', async () => {
+    const u = await newUser();
+    const given = await Promise.all(Array.from({ length: 5 }, () => store.markWelcome(u, 3, 5)));
+    expect(given.reduce((a, b) => a + b, 0)).toBe(3);
+    expect(await store.getUser(u)).toMatchObject({ free: 3, tickets: 3, welcomed: true });
+    expect((await ledgerOf(u)).filter((r) => r.reason === 'welcome')).toHaveLength(1);
+    expect(await store.markWelcome(`nobody-${u}`, 3, 5).then(() => 'ok', code)).toBe('refused');
   });
 });
 

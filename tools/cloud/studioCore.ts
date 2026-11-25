@@ -18,6 +18,7 @@ import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
 import { readWallet, usable as usableCount } from './wallet.ts';
+import type { PayDeps } from './payment.ts';
 import type { WireTrade, WireTradeItem, TradeRefusal } from '../../src/cloud/wire.ts';
 import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef, TradeDoc, TradeEndReason } from './store.ts';
 
@@ -29,6 +30,7 @@ export interface PublicContent {
 
 export interface CoreDeps {
   store: CloudStore;
+  pay?: PayDeps; // 支払い（無ければ、売らない・ようこそ 0）
   files: CloudFiles;
   ai: AiClients;
   content: PublicContent;
@@ -82,7 +84,7 @@ const DRAIN_ADOPTED = 5;
 // 利用者コード: まぎらわしい文字（I・O・0・1）を除いた 8 文字
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const makeCode = () => Array.from({ length: 8 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
-const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
+export const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);
 // 置き場のパスには、記号を使わない
 const safe = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '_');
 const jobPrefix = (uid: string, jobId: string, index: number) => `users/${uid}/jobs/${safe(jobId)}/${index}-`;

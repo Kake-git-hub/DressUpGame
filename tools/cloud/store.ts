@@ -31,6 +31,22 @@ export interface UserDoc {
   ticketsWritten?: number; // 最後に書いた tickets（手で書き換えた差を見分ける）
   welcomed?: true; // 最初に配る分を、もう配った
 }
+// 支払い（purchases/{Checkout Session の ID}）。expiresAt = 買ったチケットの期限
+export interface PurchaseDoc {
+  id: string;
+  uid: string;
+  pack: string;
+  tickets: number;
+  price: number;
+  status: 'open' | 'paid' | 'expired';
+  createdAt: number;
+  expiresAt: number;
+  adultAt: number; // 保護者の確認を通した時刻
+  agreedAt: number; // 最終確認で同意した時刻
+  paidAt?: number;
+  reclaimed?: number; // 返金・取り消しで、もう取り戻した枚数（目標の数。引けなかった分も含む）
+  announced?: true; // アプリに「ふえました」を伝え終えた
+}
 // 買ったチケットのまとまり（id = 支払いの番号）
 export interface Lot {
   id: string;
@@ -211,6 +227,25 @@ export interface CloudStore {
   countTrade(uid: string, day: string, perDay: number): Promise<void>;
   // 利用者のいまの交換の ID を書く（null で消す）。利用者がいなければ CloudError('refused')
   setUserTrade(uid: string, tradeId: string | null): Promise<void>;
+
+  // ── 支払い（買ったチケットを、財布に足す・取り戻す）──
+  // Checkout を作ったあとに書く
+  putPurchase(p: PurchaseDoc): Promise<void>;
+  getPurchase(id: string): Promise<PurchaseDoc | null>;
+  // 支払い済みにして、買った分を財布に足す（1 つの取り引き）。open なら lot {id, tickets, left: tickets, boughtAt: paidAt, expiresAt}・paid・台帳 buy:{id}。
+  // もう paid なら added 0。expired でも、支払い済みと言われたら足す（30 分を過ぎて払えたとき）。無ければ null
+  fulfillPurchase(id: string, paidAt: number, now: number): Promise<{ added: number; purchase: PurchaseDoc } | null>;
+  // open のときだけ expired にする
+  expirePurchase(id: string): Promise<void>;
+  // 買った分から、target - reclaimed 枚を取り戻す（1 つの取り引き。大きくなるときだけ。lot の left より多くは取らない）。台帳 refund-paid:{id}。取った枚数を返す
+  reclaimPurchase(id: string, target: number, now: number): Promise<number>;
+  // paid で、まだアプリに伝えていない支払い
+  listUnannounced(uid: string): Promise<PurchaseDoc[]>;
+  markAnnounced(id: string): Promise<void>;
+  // 支払いページを 1 回作ったと数える。その日（day）の上限（perDay）に達していたら CloudError('limit')（数は増えない）
+  countCheckout(uid: string, day: string, perDay: number): Promise<void>;
+  // 最初に配る分（ようこそ）を配る（1 つの取り引き）。welcomed が無ければ free に n 枚・welcomed・台帳 welcome。足した枚数（もう配っていれば 0）
+  markWelcome(uid: string, n: number, now: number): Promise<number>;
 }
 
 // 絵の置き場

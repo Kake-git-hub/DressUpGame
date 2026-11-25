@@ -8,6 +8,7 @@ import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { SERVER_API } from '../../src/cloud/wire.ts';
+import { checkout, purchase, shop, shopAck, welcome } from './payment.ts';
 import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
@@ -53,6 +54,10 @@ const itemView = (item: ItemDoc): ItemView => ({
 const refused = (message = '呼び出しの形が正しくありません') => new CloudError('refused', message);
 const str = (value: unknown, max = 200): string => {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) throw refused();
+  return value;
+};
+const num = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw refused();
   return value;
 };
 function target(value: unknown): Target {
@@ -114,7 +119,14 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown, cal
       } catch {
         return { user: view, api: SERVER_API };
       }
-      return { user: await user(), api: SERVER_API };
+      // 最初のログインなら、ようこそのチケット（失敗しても通す）
+      let given = 0;
+      try {
+        given = await welcome(deps, uid);
+      } catch {
+        given = 0;
+      }
+      return { user: await user(), api: SERVER_API, ...(given > 0 ? { welcome: given } : {}) };
     }
     case 'offer':
       // 合い言葉は、匿名の利用者（2 台めの端末）だけ。アカウントのチケットと服を、合い言葉で持ち出させない
@@ -181,6 +193,16 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown, cal
     case 'tradeCancel':
       await tradeCancel(deps, uid, str(d.tradeId, 100));
       return { ok: true };
+    // 支払い（チケットを買う）
+    case 'shop':
+      return { ...(await shop(deps, uid)), user: await user() };
+    case 'checkout':
+      return { ...(await checkout(deps, uid, caller, { pack: str(d.pack, 100), adultAt: num(d.adultAt), agreedAt: num(d.agreedAt) })), user: await user() };
+    case 'purchase':
+      return { ...(await purchase(deps, uid, str(d.session, 200))), user: await user() };
+    case 'shopAck':
+      await shopAck(deps, uid, str(d.session, 200));
+      return { ok: true, user: await user() };
     default:
       throw refused();
   }
