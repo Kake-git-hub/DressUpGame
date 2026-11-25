@@ -159,7 +159,7 @@ interface StartedJob {
 }
 
 export function Generate({ doll, status, onChanged }: Common & { status: Status }) {
-  const categories = sortCategories(doll.categories);
+  const categories = sortCategories(doll.categories, doll.items);
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(() => findStyle(remember.get('style')).id);
   const [target, setTarget] = useState(() => {
@@ -601,7 +601,7 @@ export function Library({ doll, onChanged }: Common) {
       setError(message(e));
     }
   };
-  const categories = sortCategories(doll.categories);
+  const categories = sortCategories(doll.categories, doll.items);
   if (view === 'sort') {
     return (
       <section>

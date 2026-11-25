@@ -514,6 +514,30 @@ test.describe('スタジオ', () => {
       await page.getByTestId('library-view-detail').click();
     });
 
+    test('ならべかえ: 保存している間に落としたものは、無視する（前の並べ替えを戻さない）', async ({ page }) => {
+      await page.getByTestId('tab-library').click();
+      await page.getByTestId('library-view-sort').click();
+      const chips = page.getByTestId('sort-category');
+      const ids = await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')));
+      expect(ids.length).toBeGreaterThanOrEqual(3);
+      // 保存の返事を 1.5 秒遅らせる
+      await page.route('**/api/categories/order', async (route) => {
+        await new Promise((r) => setTimeout(r, 1500));
+        await route.continue();
+      });
+      await chips.last().dragTo(chips.first(), { targetPosition: { x: 2, y: 5 } });
+      // 返事が来る前に、もう 1 つ動かす（画面は、まだ前の並び）
+      await chips.nth(1).dragTo(chips.first(), { targetPosition: { x: 2, y: 5 } });
+      const cats = () => [...manifestNow().dolls[0].categories].sort((a, b) => a.menuOrder - b.menuOrder).map((c) => c.id);
+      const first = [ids.at(-1), ...ids.slice(0, -1)];
+      await expect.poll(cats).toEqual(first);
+      await page.waitForTimeout(2500);
+      expect(cats()).toEqual(first);
+      await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual(first);
+      await page.unroute('**/api/categories/order');
+      await page.getByTestId('library-view-detail').click();
+    });
+
     test('一覧のセット: パーツが並び、重ね順を決められ、外したり、ほかの服を足したりできる', async ({ page }) => {
       const setItems = () => manifestNow().dolls[0].items.filter((i) => (i as Item & { set?: string }).set === 'アニメ/セット/うみのセット') as (Item & { layer?: number })[];
       expect(setItems().map((i) => i.name).sort()).toEqual(['うみのかざり', 'うみのシャツ']);

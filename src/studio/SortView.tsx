@@ -2,7 +2,7 @@
  * 一覧の「ならべかえ」: カテゴリ・セット・服の絵を小さく詰めて並べ、つかんで動かすと、その順番がゲームのメニューの順番になる。
  * 数字は入れない。服の絵を押すと「くわしく」のその服へ。
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import type { ManifestDoll } from '../content/manifest';
 import { itemSetIds } from '../content/manifest';
@@ -30,17 +30,27 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [dragged, setDragged] = useState<Dragged | null>(null);
   const [mark, setMark] = useState<Mark | null>(null);
-  const categories = sortCategories(doll.categories);
+  // 保存して読み直すまでの間は、落としても無視する（画面の並びが古いので、前の並べ替えを戻してしまう）
+  const saving = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const categories = sortCategories(doll.categories, doll.items);
   const sets = doll.sets ?? [];
 
   const guard = async (fn: () => Promise<unknown>) => {
+    saving.current = true;
+    setBusy(true);
     setError(null);
     try {
       await fn();
     } catch (e) {
       setError(message(e));
     }
-    await onChanged();
+    try {
+      await onChanged();
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
   };
 
   // 並べ替えられるものの、つかむ・上を通る・落とすの手続き。ids は、その group のいまの並び
@@ -66,7 +76,7 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
       const from = dragged?.group === group ? ids.indexOf(dragged.id) : -1;
       setDragged(null);
       setMark(null);
-      if (from < 0) return;
+      if (from < 0 || saving.current) return;
       const to = dropIndex(from, ids.indexOf(id), isAfter(e));
       if (to === from) return; // 同じ所: 何も送らない
       void guard(() => save(moveInList(ids, from, to)));
@@ -78,7 +88,7 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
   const categoryIds = categories.map((c) => c.id);
   const setIds = sets.map((s) => s.id);
   return (
-    <section className="sort-view" data-testid="sort-view">
+    <section className={busy ? 'sort-view saving' : 'sort-view'} data-testid="sort-view" aria-busy={busy}>
       {error && <p className="error">{error}</p>}
       <p className="hint">カテゴリも服もセットも、つかんで動かすと、その順番がゲームのメニューの順番になります。服を押すと「くわしく」でその服が開きます。</p>
       <div className="sort-box sort-categories">

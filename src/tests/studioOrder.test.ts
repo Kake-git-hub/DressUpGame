@@ -40,3 +40,23 @@ describe('renumberCategories', () => {
     ]);
   });
 });
+
+describe('sortCategories（ゲームと同じ、同じ menuOrder の決め方）', () => {
+  it('同じ menuOrder なら、そのカテゴリの最初の服の重ね順（服に無ければカテゴリの重ね順）→ 最初の服が一覧で先のほう', () => {
+    // おんなのこ（2026-11-25 の素材）と同じ形: てぶくろ・ソックスがどちらも 3、重ね順 1。てぶくろの最初の服は重ね順 8
+    const cats = [
+      { id: 'てぶくろ', menuOrder: 3, layer: 1 },
+      { id: 'ソックス', menuOrder: 3, layer: 1 },
+      { id: 'から', menuOrder: 3, layer: 0 },
+    ];
+    const items = [
+      { id: 's1', category: 'ソックス' },
+      { id: 't1', category: 'てぶくろ', layer: 8 },
+    ];
+    expect(sortCategories(cats, items).map((c) => c.id)).toEqual(['ソックス', 'てぶくろ', 'から']);
+    // 重ね順も同じなら、最初の服が一覧で先のほう
+    const glovesFirst = [{ id: 't1', category: 'てぶくろ' }, { id: 's1', category: 'ソックス' }];
+    expect(sortCategories(cats.slice(0, 2), glovesFirst).map((c) => c.id)).toEqual(['てぶくろ', 'ソックス']);
+    expect(sortCategories(cats.slice(0, 2), [...glovesFirst].reverse()).map((c) => c.id)).toEqual(['ソックス', 'てぶくろ']);
+  });
+});

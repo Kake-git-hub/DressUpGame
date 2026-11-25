@@ -13,11 +13,19 @@ export function moveInList<T>(list: T[], from: number, to: number): T[] {
 // from 番目の服を、target 番目の服の前（after なら後ろ）に落としたときの、動かした先の番号
 export const dropIndex = (from: number, target: number, after: boolean): number => (from === target ? from : target + (after ? 1 : 0) - (from < target ? 1 : 0));
 
-// カテゴリを、ゲームのメニューと同じ順に並べる（menuOrder の小さい順 → 同じなら重ね順の小さい順 → 同じなら元の並び）。元の配列は変えない
-export function sortCategories<T extends { menuOrder: number; layer: number }>(categories: T[]): T[] {
+// カテゴリを、ゲームのメニューと同じ順に並べる（src/components/DressUpMenu.tsx と同じ決め方）。元の配列は変えない
+// menuOrder の小さい順 → 同じなら、そのカテゴリの最初の服の重ね順（服に無ければカテゴリの重ね順）→ 最初の服が一覧で先のほう →
+// 元の並び（服の無いカテゴリは、ゲームには出ないので、同じ menuOrder の中で後ろ）
+export function sortCategories<T extends { id: string; menuOrder: number; layer: number }>(
+  categories: T[],
+  items: { category: string; layer?: number }[] = [],
+): T[] {
   return categories
-    .map((c, index) => ({ c, index }))
-    .sort((a, b) => a.c.menuOrder - b.c.menuOrder || a.c.layer - b.c.layer || a.index - b.index)
+    .map((c, index) => {
+      const first = items.findIndex((i) => i.category === c.id);
+      return { c, index, layer: first < 0 ? c.layer : (items[first].layer ?? c.layer), first: first < 0 ? Infinity : first };
+    })
+    .sort((a, b) => a.c.menuOrder - b.c.menuOrder || Number(a.first === Infinity) - Number(b.first === Infinity) || a.layer - b.layer || a.first - b.first || a.index - b.index)
     .map((x) => x.c);
 }
 

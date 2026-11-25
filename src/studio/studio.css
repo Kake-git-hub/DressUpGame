@@ -96,3 +96,4 @@ details.form > summary { cursor: pointer; font-weight: bold; width: 100%; }
 .sort-view .dragging { opacity: 0.35; }
 .sort-view .drop-before { box-shadow: -3px 0 0 #6a4fd0; }
 .sort-view .drop-after { box-shadow: 3px 0 0 #6a4fd0; }
+.sort-view.saving { cursor: progress; }
