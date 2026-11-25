@@ -820,9 +820,9 @@ async function loadTrade(deps: CoreDeps, uid: string, tradeId: string): Promise<
   return settleTrade(deps, t);
 }
 // その人の、前の交換（生きていれば）をやめにする
-async function replacePrevious(deps: CoreDeps, uid: string, except?: string): Promise<void> {
+async function replacePrevious(deps: CoreDeps, uid: string): Promise<void> {
   const prev = (await deps.store.getUser(uid))?.trade;
-  if (!prev || prev === except) return;
+  if (!prev) return;
   try {
     await endTrade(deps, prev, 'replaced');
   } catch (e) {
@@ -890,6 +890,8 @@ export async function tradeClaim(deps: CoreDeps, uid: string, code: string): Pro
   if (t.status !== 'open') throw refuseTrade('busy');
   if (deps.now() - t.codeAt > TRADE_CODE_MS) throw refuseTrade('expired');
   await countTrade(deps, uid);
+  // 前の交換は、読み取りを書く前にやめにする（やめられなければ、ここで止まり、この交換は読み取られない）
+  await replacePrevious(deps, uid);
   const now = deps.now();
   // 読み直して決める（割り込まれたら、やり直し）。change は、2 回以上呼ばれることがある
   let verdict = null as TradeRefusal | null;
@@ -903,7 +905,6 @@ export async function tradeClaim(deps: CoreDeps, uid: string, code: string): Pro
     return { ...cur, status: 'claimed', b: { uid }, claimedAt: now };
   });
   if (verdict) throw refuseTrade(verdict);
-  await replacePrevious(deps, uid, claimed.id);
   await deps.store.setUserTrade(uid, claimed.id);
   return { tradeId: claimed.id };
 }
@@ -974,9 +975,8 @@ export async function tradeAccept(deps: CoreDeps, uid: string, tradeId: string):
   if (t.status === 'done' || t.status === 'cancelled') return wireTrade(deps, uid, t);
   if (t.status !== 'joined') throw refuseTrade('unknown');
   const me = sideOf(t, uid)!;
-  const now = deps.now();
   const marked = await deps.store.updateTrade(tradeId, (cur) => {
-    if (cur.status !== 'joined' || cur[me]?.accepted || timedOut(cur, now)) return null;
+    if (cur.status !== 'joined' || cur[me]?.accepted || timedOut(cur, deps.now())) return null;
     return { ...cur, [me]: { ...cur[me]!, accepted: true } };
   });
   // 自分の分を立てたあとの交換を読み直して、両方立っていれば入れ替える（相手が先に立てていても、あとでも）

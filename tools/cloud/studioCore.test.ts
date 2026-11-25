@@ -1445,16 +1445,19 @@ describe('交換', () => {
     };
     await expect(tradeOpen(deps, 'ua', 'my:w-0-1')).rejects.toThrow('firestore down');
     expect((await store.getUser('ua'))?.trade).toBe(id);
-    // 読み取るほう（ub は、joined の交換の B）も同じ
+    // 読み取るほう（ub は、joined の交換の B）も同じ。前の交換をやめにする呼び出しだけ失敗させる
     await giver('uc', 'my:z-0-1');
     store.updateTrade = real;
-    const { code } = await tradeOpen(deps, 'uc', 'my:z-0-1');
-    store.updateTrade = async () => {
-      throw new Error('firestore down');
+    const second = await tradeOpen(deps, 'uc', 'my:z-0-1');
+    store.updateTrade = (tid, change) => {
+      if (tid === id) throw new Error('firestore down');
+      return real(tid, change);
     };
-    await expect(tradeClaim(deps, 'ub', code)).rejects.toThrow('firestore down');
-    expect((await store.getUser('ub'))?.trade).toBe(id);
+    await expect(tradeClaim(deps, 'ub', second.code)).rejects.toThrow('firestore down');
     store.updateTrade = real;
+    expect((await store.getUser('ub'))?.trade).toBe(id);
+    expect(await store.getTrade(second.tradeId)).toMatchObject({ status: 'open' });
+    expect((await store.getTrade(second.tradeId))?.b).toBeUndefined();
     expect((await tradeView(deps, 'ua', id)).status).toBe('joined');
   });
   it('cannot rename or recolor an item in a joined trade', async () => {
@@ -1471,6 +1474,20 @@ describe('交換', () => {
     expect(await tradeAccept(deps, 'ub', id)).toMatchObject({ status: 'cancelled', reason: 'expired' });
     expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
     expect(await store.getItem('ub', 'my:x-0-1')).toBeNull();
+  });
+  it('accept updater re-checks the timeout by itself', async () => {
+    const id = await joined();
+    await tradeAccept(deps, 'ua', id);
+    // 入口の確かめを通ったあと、書く前に、時間が切れる
+    const real = store.updateTrade.bind(store);
+    store.updateTrade = (tid, change) => {
+      store.updateTrade = real;
+      clock += TRADE_JOINED_MS + 1000;
+      return real(tid, change);
+    };
+    expect(await tradeAccept(deps, 'ub', id)).toMatchObject({ status: 'cancelled', reason: 'expired' });
+    expect((await store.getTrade(id))?.b?.accepted).toBeUndefined();
+    expect(await store.getItem('ub', 'my:y-0-1')).not.toBeNull();
   });
   it('timeouts', async () => {
     // open のまま 10 分
