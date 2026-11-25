@@ -11,6 +11,7 @@
 import { BackendError } from './backend';
 import type { BackendErrorCode, StudioBackend, StudioJob, StudioUser } from './backend';
 import type { Library } from './library';
+import { diag } from '../services/diag';
 import { syncLibrary } from './sync';
 
 export interface SessionState {
@@ -22,6 +23,7 @@ export interface SessionState {
   arrivals: StudioJob[]; // jobs のうち、終わっていて、できた服を端末に取り込んだあとのもの。古い順（演出を出す順）
   newItemIds: string[]; // NEW の印の服（できてから、まだ 1 回も開いていない）
   storeFailed: boolean; // 端末に保存できなかった服がある
+  welcome: number | null; // ようこそのチケットの枚数（初めてのログインで足された分。「つくる」で 1 回知らせたら null に戻す）
 }
 
 export interface CloudSession {
@@ -34,6 +36,7 @@ export interface CloudSession {
   ack(jobId: string): Promise<void>; // 演出・知らせを見た
   markSeen(itemId: string): void; // NEW の印を消す
   markNew(itemId: string): void; // NEW の印を付ける（交換でもらった服など）
+  clearWelcome(): void; // ようこその知らせを見た
   readonly backend: StudioBackend;
 }
 
@@ -72,7 +75,7 @@ export function createSession(deps: {
   const storage: Store | null = deps.storage ?? (typeof localStorage !== 'undefined' ? localStorage : null);
   const visible = deps.visible ?? (() => typeof document === 'undefined' || document.visibilityState === 'visible');
   const listeners = new Set<() => void>();
-  let state: SessionState = { status: 'idle', user: null, problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: readList(storage, NEW_KEY), storeFailed: false };
+  let state: SessionState = { status: 'idle', user: null, problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: readList(storage, NEW_KEY), storeFailed: false, welcome: null };
   const set = (change: Partial<SessionState>) => {
     state = { ...state, ...change };
     listeners.forEach((listener) => listener());
@@ -189,6 +192,11 @@ export function createSession(deps: {
     return connecting;
   };
 
+  // ようこその枚数は、起動のときの signIn で届く（「つくる」を開くより前）。signIn の前から聞いておき、知らせを持っておく
+  backend.onWelcome((tickets) => {
+    diag.note('welcome', `added=${tickets}`);
+    set({ welcome: tickets });
+  });
   backend.onUser((user) => {
     if (state.user && (state.user.tickets !== user.tickets || state.user.free !== user.free || JSON.stringify(state.user.lots) !== JSON.stringify(user.lots) || state.user.admin !== user.admin || state.user.userCode !== user.userCode)) set({ user });
   });
@@ -233,6 +241,9 @@ export function createSession(deps: {
       }
       set({ jobs: state.jobs.filter((job) => job.id !== jobId), arrivals: state.arrivals.filter((job) => job.id !== jobId) });
       await backend.ackJob(jobId).catch(() => undefined);
+    },
+    clearWelcome() {
+      if (state.welcome !== null) set({ welcome: null });
     },
     markNew(itemId) {
       if (state.newItemIds.includes(itemId)) return;

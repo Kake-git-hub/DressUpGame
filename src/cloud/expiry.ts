@@ -15,3 +15,9 @@ export function addMonthsJst(at: number, months: number): number {
     Date.UTC(year, month, day, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()) - JST
   );
 }
+
+// 日本時間の暦の「2027年5月25日」
+export function formatJstDate(at: number): string {
+  const d = new Date(at + JST);
+  return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
+}

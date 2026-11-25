@@ -17,6 +17,8 @@ import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
+import { clearPayReturn, readPayReturn } from './appStudio/payReturn';
+import type { PayReturn } from './appStudio/payReturn';
 import { clearReturn } from './cloud/googleRedirect';
 import type { CloudSession, SessionState } from './cloud/session';
 import { startsOnHome } from './home/homeMode';
@@ -72,7 +74,12 @@ cleanupLegacyData();
 
 // アプリの中のスタジオ（服を作る画面）と、クローゼット。作者が教えた URL（?studio=1）を開いた端末にだけ、ホームにボタンを出す。
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
-const STUDIO_MODE = readStudioMode(window.location.search);
+// 支払いのページから戻ってきた（?pay=…）。親は「つくる」から来たので、この端末に「つくる」を教えていなくても、この読み込みだけは「つくる」を出す
+// （本物の支払いの戻りの URL には ?studio= が付かない。覚えには書かない）
+const PAY_RETURN = readPayReturn(window.location.search);
+const STUDIO_MODE = readStudioMode(window.location.search) ?? (PAY_RETURN && PAY_RETURN.kind !== 'fake' ? 'real' : null);
+// にせの支払いページ（偽物の裏側のときだけ）
+const FakePayPage = lazy(() => import('./appStudio/FakePayPage').then((m) => ({ default: m.FakePayPage })));
 // 「つくる」を教えていない端末は、Google の戻りを受け取らない。main.tsx が取り込んだ証明が、session に残らないように捨てる。
 // main.tsx の取り込みは、この module を読み込んだあとに走るので、モジュールの中ではなく、最初の描画のあと（useEffect）に呼ぶ
 const dropReturnWithoutStudio = (): void => {
@@ -240,12 +247,18 @@ function App() {
   const canvasSize = layout.canvas;
 
   // ホーム画面を出している / ゲームの画面
-  const [onHome, setOnHome] = useState(START_ON_HOME);
+  // 支払いから戻ったときは、「つくる」を開いて始める（戻りの知らせは、閉じるまで）
+  const [payReturn, setPayReturn] = useState<PayReturn | null>(PAY_RETURN && PAY_RETURN.kind !== 'fake' ? PAY_RETURN : null);
+  useEffect(() => {
+    if (PAY_RETURN && PAY_RETURN.kind !== 'fake') clearPayReturn();
+  }, []);
+  const [onHome, setOnHome] = useState(START_ON_HOME && !payReturn);
   // 服を作る画面・クローゼットを開いているか（どちらも、ホームから開き、閉じるとホームにもどる）
-  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(payReturn !== null);
   const [closetOpen, setClosetOpen] = useState(false);
   const closeStudio = useCallback(() => {
     setStudioOpen(false);
+    setPayReturn(null);
     setOnHome(true);
   }, []);
   const studioOpenRef = useRef(false);
@@ -1089,9 +1102,11 @@ function App() {
                 onClose={closeStudio}
                 onOpenCloset={() => {
                   setStudioOpen(false);
+                  setPayReturn(null);
                   setOnHome(true);
                   setClosetOpen(true);
                 }}
+                payReturn={payReturn}
                 skipGate={!ASK_ADULT}
                 demo={STUDIO_MODE === 'fake'}
               />
@@ -1111,4 +1126,16 @@ function App() {
   );
 }
 
-export default App;
+// にせの支払いページの戻り先（?pay=fake）では、ゲームを出さず、にせの支払いページだけを出す
+function AppRoot() {
+  if (PAY_RETURN?.kind === 'fake' && STUDIO_MODE === 'fake') {
+    return (
+      <Suspense fallback={null}>
+        <FakePayPage session={PAY_RETURN.session} />
+      </Suspense>
+    );
+  }
+  return <App />;
+}
+
+export default AppRoot;

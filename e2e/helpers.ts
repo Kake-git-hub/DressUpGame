@@ -27,6 +27,11 @@ export interface FakeOptions {
   loginFail?: string;
   googleTaken?: boolean;
   noTrade?: boolean;
+  shop?: { open?: boolean; packs?: string };
+  payResult?: 'paid' | 'cancel' | 'slow';
+  welcome?: number;
+  anonymous?: boolean;
+  fakeLots?: { count: number; daysLeft: number }[];
   partner?: { claimAfterMs?: number; chooseMs?: number; acceptAfterMs?: number; refuse?: string; cancelAfterMs?: number };
 }
 

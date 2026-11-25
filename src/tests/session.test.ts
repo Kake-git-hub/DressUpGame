@@ -333,3 +333,15 @@ describe('つなぎ役', () => {
     expect(session.getState().arrivals.map((j) => j.id)).toEqual([jobId]);
   });
 });
+
+describe('ようこそ', () => {
+  it('最初のログインで届いた枚数を持ち、見たと伝えると消える（つくるを開く前に届いていても失わない）', async () => {
+    localStorage.clear();
+    const session = createSession({ backend: createFakeBackend({ image, planMs: 0, welcome: 4 }), library: memoryLibrary(), onLibraryChanged: () => undefined, storage: localStorage });
+    expect(session.getState().welcome).toBeNull();
+    await session.connect();
+    expect(session.getState().welcome).toBe(4);
+    session.clearWelcome();
+    expect(session.getState().welcome).toBeNull();
+  });
+});

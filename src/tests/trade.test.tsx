@@ -25,7 +25,7 @@ const item = (id: string, owner = 'me'): MyItem => ({
 const tradeItem = (id: string): TradeItem => ({ id, dollId: 'd', name: `ふく ${id}`, categoryId: 'top', hue: 0, thumb: new Blob(['x']) });
 const view = (status: TradeState['status'], extra: Partial<TradeState> = {}): TradeState => ({ id: 't1', status, me: 'b', mine: tradeItem('a'), theirs: tradeItem('z'), myAccepted: false, theirAccepted: false, ...extra });
 
-const sessionState: SessionState = { status: 'ready', user: { userCode: 'me' } as SessionState['user'], problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: [], storeFailed: false };
+const sessionState: SessionState = { status: 'ready', user: { userCode: 'me' } as SessionState['user'], problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: [], storeFailed: false, welcome: null };
 const library: Library = { all: async () => [item('a'), item('b')], put: async () => undefined, remove: async () => undefined };
 
 function setup(backend: Partial<StudioBackend>, over: { library?: Library; refresh?: () => Promise<void>; onLibraryChanged?: () => Promise<void> } = {}) {

@@ -1,0 +1,100 @@
+/* チケットを買う画面。「つくる」の画面のうえに重ねる（.studio-panel の見た目を使う） */
+.shop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(60, 40, 60, 0.55);
+  padding: calc(var(--top-inset, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  touch-action: pan-y;
+}
+.shop-panel {
+  max-width: 560px;
+}
+.shop-packs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.studio-panel button.shop-pack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 10px;
+  min-height: 84px;
+  font-size: 16px;
+  background: #faf5ff;
+}
+.shop-pack b {
+  font-size: 22px;
+  color: #7a4fb0;
+}
+.shop-confirm {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+}
+.shop-confirm dt {
+  font-weight: bold;
+}
+.shop-confirm dd {
+  margin: 0;
+  min-width: 0;
+}
+.shop-links {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.shop-links a {
+  color: #5b3a8c;
+}
+@media (max-width: 480px) {
+  .shop-confirm {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .shop-confirm dd {
+    margin-bottom: 6px;
+  }
+}
+/* 支払いから戻った・お知らせ */
+.shop-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f1e8fb;
+  border: 1px solid #c9b8cf;
+}
+.shop-banner > span {
+  flex: 1;
+}
+.shop-buy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.shop-lots {
+  margin: 0;
+  font-size: 13px;
+}
+/* にせの支払いページ */
+.fake-pay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef1f6;
+  padding: 16px;
+}

@@ -5,7 +5,7 @@
  * チケット・生成・保存は、サーバーが行う。「作る」の返事が返ったあとは、この画面を閉じても、アプリを閉じても、
  * サーバーが最後まで作り、できた服は自動でクローゼットに入る（届いた知らせは、つなぎ役 = session が出す）。
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { StudioTarget } from '../cloud/backend';
 import type { Library } from '../cloud/library';
@@ -14,10 +14,16 @@ import type { ManifestCategory } from '../content/manifest';
 import { isBackHairCategory } from '../pipeline/hairSplit';
 import { DEFAULT_STYLE_ID, STYLE_PRESETS } from '../studio/stylePresets';
 import type { DollData } from '../types';
+import { formatJstDate } from '../cloud/expiry';
 import { Account } from './Account';
+import { AdultGate } from './AdultGate';
 import { jobNotice } from './jobNotice';
 import { OrderShow } from './OrderShow';
 import type { OrderPhase, ShopArt } from './OrderShow';
+import type { PayReturn } from './payReturn';
+import { Shop } from './Shop';
+import { RETURN_TEXT, usePay } from './usePay';
+import './shop.css';
 
 interface Props {
   session: CloudSession;
@@ -29,6 +35,7 @@ interface Props {
   onOpenCloset: () => void;
   demo?: boolean; // 確認用（偽物の裏側）。絵は色の四角で、チケットもにせもの
   art?: ShopArt;
+  payReturn?: PayReturn | null; // 支払いのページから戻ってきたとき（?pay=done / cancel）
 }
 
 const SET = '__set';
@@ -43,7 +50,7 @@ const NOTICE = {
   crowded: 'こみあっています。できたら、クローゼットに入ります。',
 };
 
-export function AppStudio({ session, library, dolls, categoriesByDoll, initialDollId, onClose, onOpenCloset, demo = false, art }: Props) {
+export function AppStudio({ session, library, dolls, categoriesByDoll, initialDollId, onClose, onOpenCloset, demo = false, art, payReturn = null }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { user } = state;
   const [dollId, setDollId] = useState(() => (dolls.some((d) => d.id === initialDollId) ? initialDollId : (dolls[0]?.id ?? '')));
@@ -61,6 +68,12 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
   const [phase, setPhase] = useState<OrderPhase | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  // 支払い: 買うボタン・戻りの確かめ・お知らせ。保護者の確認は、買うたびに毎回（通った時刻を、最終確認のあと checkout に渡す）
+  const pay = usePay(session, payReturn);
+  const [buying, setBuying] = useState<'gate' | 'shop' | null>(null);
+  const [adultAt, setAdultAt] = useState(0);
+  const [moreLots, setMoreLots] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
   // 「こみあっています」に切り替えるために、ときどき描き直す
   const [now, setNow] = useState(() => Date.now());
 
@@ -146,6 +159,44 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
             ✕
           </button>
         </header>
+        {user && !user.admin && user.lots.length > 0 && (
+          <div className="shop-lots" data-testid="studio-lots">
+            <span data-testid="studio-lot">
+              うち {user.lots[0].left} 枚は {formatJstDate(user.lots[0].expiresAt)}まで
+            </span>
+            {user.lots.length > 1 && (
+              <>
+                {' '}
+                <button type="button" onClick={() => setMoreLots((v) => !v)} aria-expanded={moreLots} data-testid="studio-lots-more">
+                  ほか
+                </button>
+                {moreLots && (
+                  <ul data-testid="studio-lots-list">
+                    {user.lots.slice(1).map((lot) => (
+                      <li key={lot.expiresAt}>
+                        うち {lot.left} 枚は {formatJstDate(lot.expiresAt)}まで
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {pay.returned && (
+          <p className="shop-banner" data-testid="pay-return" data-status={pay.returned.status}>
+            <span>{pay.returned.status === 'paid' ? `チケットが ${pay.returned.added} 枚 ふえました` : RETURN_TEXT[pay.returned.status]}</span>
+          </p>
+        )}
+        {pay.notices.map((n) => (
+          <p key={n.id} className="shop-banner" data-testid="pay-notice">
+            <span>{n.text}</span>
+            <button type="button" onClick={() => pay.dismiss(n.id)} data-testid="pay-notice-ok">
+              OK
+            </button>
+          </p>
+        ))}
 
         {problem ? (
           <p className="studio-error" data-testid="studio-problem">
@@ -256,13 +307,20 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
               </section>
             )}
 
-            <div className="studio-row">
+            <div className="shop-buy-row">
               <button type="button" onClick={onOpenCloset} data-testid="studio-open-closet">
                 👗 クローゼットを見る
               </button>
+              {pay.shop?.open && pay.shop.packs.length > 0 && (
+                <button type="button" onClick={() => setBuying('gate')} data-testid="studio-buy">
+                  🎫 チケットを買う
+                </button>
+              )}
             </div>
 
-            <Account session={session} library={library} />
+            <div ref={accountRef}>
+              <Account session={session} library={library} />
+            </div>
 
             {user && (
               <p className="studio-hint">
@@ -272,6 +330,28 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
           </>
         )}
       </div>
+
+      {buying === 'gate' && (
+        <AdultGate
+          onCancel={() => setBuying(null)}
+          onPass={() => {
+            setAdultAt(Date.now());
+            setBuying('shop');
+          }}
+        />
+      )}
+      {buying === 'shop' && pay.shop && (
+        <Shop
+          backend={session.backend}
+          packs={pay.shop.packs}
+          adultAt={adultAt}
+          onClose={() => setBuying(null)}
+          onLogin={() => {
+            setBuying(null);
+            accountRef.current?.scrollIntoView?.({ block: 'center' });
+          }}
+        />
+      )}
 
       {phase && <OrderShow phase={phase} lines={lines} art={art} onDone={() => setPhase(null)} />}
     </div>
