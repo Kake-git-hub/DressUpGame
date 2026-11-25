@@ -38,10 +38,21 @@ export type PayEvent =
   | { kind: 'disputed'; session: string }
   | { kind: 'other' };
 
+// 署名が合わない知らせ（hook は 400 を返す）。Stripe への問い合わせの失敗などは、これにしない（hook は 500 で、送り直させる）
+export class BadSignatureError extends Error {
+  constructor(message = 'bad signature') {
+    super(message);
+    this.name = 'BadSignatureError';
+  }
+}
+
+// 知らせの片づき方。orphan / no-user は、払われたのにチケットを足せなかったので、作者が記録を見て手当てする
+export type PayOutcome = 'ok' | 'orphan' | 'no-user';
+
 export interface PaymentGateway {
   createCheckout(input: CheckoutInput): Promise<{ id: string; url: string }>;
   getSession(id: string): Promise<{ id: string; paid: boolean; paidAt: number | null; expired: boolean; uid: string | null }>;
-  // 署名が違えば投げる（返金・取り消しは、Stripe に聞いて session を引くので、非同期）
+  // 署名が違えば BadSignatureError を投げる（それ以外の失敗は、ふつうの Error）。返金・取り消しは、Stripe に聞いて session を引くので、非同期）
   parseEvent(body: Buffer, signature: string): Promise<PayEvent>;
 }
 
@@ -177,40 +188,42 @@ async function restore(deps: CoreDeps, session: string, meta: PayMeta | undefine
   await deps.store.putPurchase({ id: session, uid: meta.uid, pack: meta.pack, tickets: meta.tickets, price: meta.price, status: 'open', createdAt: meta.createdAt, expiresAt: meta.expiresAt, adultAt: 0, agreedAt: 0 });
 }
 
-// 知らせを 1 つ片づける。利用者がもういない（refused）ときは、足しようが無いので、何もせず終える（呼び直させない）
-export async function handlePayEvent(deps: CoreDeps, event: PayEvent): Promise<void> {
+// 知らせを 1 つ片づける。利用者がもういない（refused）ときは、足しようが無いので投げずに 'no-user' を返す（呼び直させない）
+export async function handlePayEvent(deps: CoreDeps, event: PayEvent): Promise<PayOutcome> {
   try {
-    await handle(deps, event);
+    return await handle(deps, event);
   } catch (e) {
-    if (e instanceof CloudError && e.code === 'refused') return;
+    if (e instanceof CloudError && e.code === 'refused') return 'no-user';
     throw e;
   }
 }
 
-async function handle(deps: CoreDeps, event: PayEvent): Promise<void> {
+async function handle(deps: CoreDeps, event: PayEvent): Promise<PayOutcome> {
   switch (event.kind) {
     case 'completed':
       if (event.paid) {
         await restore(deps, event.session, event.meta);
+        // 払われたのに purchases が無く、作り直せもしない
+        if (!(await deps.store.getPurchase(event.session))) return 'orphan';
         await fulfill(deps, event.session, event.paidAt);
       }
-      return;
+      return 'ok';
     case 'expired':
       await deps.store.expirePurchase(event.session);
-      return;
+      return 'ok';
     case 'refunded':
     case 'disputed': {
       const p = await deps.store.getPurchase(event.session);
-      if (!p) return;
+      if (!p) return 'ok';
       // 知らせの順が入れ替わったときは、先に足してから引く
       if (p.status !== 'paid') await fulfill(deps, event.session, deps.now());
       const target =
         event.kind === 'disputed' ? p.tickets : event.amount > 0 ? Math.min(p.tickets, Math.ceil((p.tickets * event.refunded) / event.amount)) : 0;
       await deps.store.reclaimPurchase(event.session, target, deps.now());
-      return;
+      return 'ok';
     }
     default:
-      return;
+      return 'ok';
   }
 }
 

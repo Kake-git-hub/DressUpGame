@@ -2,6 +2,7 @@
  * 支払いの口のにせもの（テストとエミュレーター用）。作った session を覚え、pay・expire で状態を変えられる。
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { BadSignatureError } from './payment.ts';
 import type { PayEvent, PaymentGateway } from './payment.ts';
 
 export interface FakeSession {
@@ -50,7 +51,7 @@ export function createFakeGateway(): FakeGateway {
     async parseEvent(body, signature) {
       const want = Buffer.from(signBody(body.toString('utf8')));
       const got = Buffer.from(signature);
-      if (want.length !== got.length || !timingSafeEqual(want, got)) throw new Error('bad signature');
+      if (want.length !== got.length || !timingSafeEqual(want, got)) throw new BadSignatureError();
       return JSON.parse(body.toString('utf8')) as PayEvent;
     },
     pay(id, paidAt) {

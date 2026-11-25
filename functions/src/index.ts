@@ -36,7 +36,7 @@ import { callerOfToken, handleCall } from '../../tools/cloud/api.ts';
 import type { Caller } from '../../tools/cloud/api.ts';
 import { createFakeGateway } from '../../tools/cloud/fakeGateway.ts';
 import type { FakeGateway } from '../../tools/cloud/fakeGateway.ts';
-import { handlePayEvent, parsePacks } from '../../tools/cloud/payment.ts';
+import { BadSignatureError, handlePayEvent, parsePacks } from '../../tools/cloud/payment.ts';
 import type { PayDeps, PaymentGateway } from '../../tools/cloud/payment.ts';
 import { createPublicContent } from '../../tools/cloud/publicContent.ts';
 import { CloudError } from '../../tools/cloud/store.ts';
@@ -168,7 +168,7 @@ function workFunctionUri(): Promise<string | undefined> {
 
 // 列の関数の中身
 async function work(uid: string, jobId: string): Promise<void> {
-  await workJob(await coreDeps(WORK_BUDGET_MS), uid, jobId);
+  await workJob(await coreDeps({ ai: true, pay: false }, WORK_BUDGET_MS), uid, jobId);
 }
 
 // 仕事を、列に入れる（列が studioWork を呼ぶ）
@@ -194,18 +194,24 @@ async function enqueue(uid: string, jobId: string, delaySeconds = 0): Promise<vo
 }
 
 // 支払いの口。エミュレーターのテストならにせもの、秘密の値が空なら無し（買えない）
+// 秘密の値を読むので、その秘密を持つ関数（studio・stripeHook）からだけ呼ぶ
+let stripeGateway: { key: string; secret: string; gateway: PaymentGateway } | null = null;
 function payGateway(): PaymentGateway | null {
   if (fakePay) return (fakeGateway ??= createFakeGateway());
   const secretKey = STRIPE_SECRET_KEY.value();
   const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
-  return secretKey && webhookSecret ? createStripeGateway(secretKey, webhookSecret) : null;
+  if (!secretKey || !webhookSecret) return null;
+  if (stripeGateway?.key !== secretKey || stripeGateway.secret !== webhookSecret) stripeGateway = { key: secretKey, secret: webhookSecret, gateway: createStripeGateway(secretKey, webhookSecret) };
+  return stripeGateway.gateway;
 }
 
-async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
+// needs: 関数が持っている秘密の値の分だけ読む（持っていない秘密を読むと、毎回「値が無い」という警告が出る）
+//   ai = Gemini の鍵（studio・studioWork・studioSweep）、pay = Stripe の鍵（studio・stripeHook）
+async function coreDeps(needs: { ai: boolean; pay: boolean }, runBudgetMs?: number): Promise<CoreDeps> {
   const { store, files, content, config } = getServices();
   const { adminCodes, perDay, perUserDay, salesOpen, packs, welcomeTickets, payReturnUrl } = await config();
-  const pay: PayDeps = { gateway: payGateway(), salesOpen, packs: parsePacks(packs), welcomeTickets, returnUrl: payReturnUrl, checkoutsPerDay: CHECKOUTS_PER_USER_PER_DAY };
-  const key = GEMINI_API_KEY.value();
+  const pay: PayDeps | undefined = !needs.pay ? undefined : { gateway: payGateway(), salesOpen, packs: parsePacks(packs), welcomeTickets, returnUrl: payReturnUrl, checkoutsPerDay: CHECKOUTS_PER_USER_PER_DAY };
+  const key = needs.ai ? GEMINI_API_KEY.value() : '';
   return {
     store,
     files,
@@ -217,7 +223,7 @@ async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
     newWord: () => randomBytes(32).toString('hex'),
     enqueue,
-    pay,
+    ...(pay ? { pay } : {}),
     ...(runBudgetMs !== undefined ? { runBudgetMs } : {}),
   };
 }
@@ -247,7 +253,7 @@ const callerOf = (request: { auth?: { token?: unknown } | null }): Caller => cal
 const opOf = (data: unknown) => (typeof data === 'object' && data !== null ? (data as { op?: unknown }).op : undefined);
 
 export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], memory: '1GiB', timeoutSeconds: 180, concurrency: 8, maxInstances: 5 }, (request) =>
-  answer('studio', async () => handleCall(await coreDeps(), uidOf(request), request.data, callerOf(request)), ['offer', 'adopt'].includes(String(opOf(request.data)))),
+  answer('studio', async () => handleCall(await coreDeps({ ai: true, pay: true }), uidOf(request), request.data, callerOf(request)), ['offer', 'adopt'].includes(String(opOf(request.data)))),
 );
 
 export const studioWork = onTaskDispatched(
@@ -280,7 +286,7 @@ export const studioWork = onTaskDispatched(
 );
 
 export const studioSweep = onSchedule({ schedule: 'every 60 minutes', region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' }, async () => {
-  const seen = await sweep(await coreDeps());
+  const seen = await sweep(await coreDeps({ ai: true, pay: false }));
   if (seen > 0) logger.info(`見回り: 終わっていない仕事 ${seen} 件を手当てしました`);
 });
 
@@ -300,17 +306,26 @@ export const stripeHook = onRequest({ region: REGION, secrets: [STRIPE_SECRET_KE
   try {
     event = await gateway.parseEvent(req.rawBody, String(req.header('stripe-signature') ?? ''));
   } catch (error) {
-    logger.warn('stripeHook: 署名を確かめられませんでした', { error: String(error) });
-    res.status(400).send('bad signature');
+    if (error instanceof BadSignatureError) {
+      logger.warn('stripeHook: 署名が合いませんでした', { error: String(error) });
+      res.status(400).send('bad signature');
+    } else {
+      // Stripe への問い合わせの失敗など。送り直させる
+      logger.error('stripeHook: 知らせの中身を読めませんでした', { error: String(error) });
+      res.status(500).send('failed');
+    }
     return;
   }
+  const session = 'session' in event ? event.session : undefined;
   try {
-    await handlePayEvent(await coreDeps(), event);
-    // 支払いの番号は、サーバーの記録にだけ残る（公開されない）
-    logger.info('stripeHook: 知らせを処理しました', { kind: event.kind, session: 'session' in event ? event.session : undefined });
+    const outcome = await handlePayEvent(await coreDeps({ ai: false, pay: true }), event);
+    // 支払いの番号は、サーバーの記録にだけ残る（公開されない）。「【要手当て】」で探せる
+    if (outcome === 'orphan') logger.error('【要手当て】支払い済みなのに、チケットを足せませんでした（purchases が無く、作り直せません）。Stripe で返金するか、手で配ってください', { kind: event.kind, session });
+    else if (outcome === 'no-user') logger.error('【要手当て】支払い済みなのに、利用者がいないため、足せませんでした。Stripe で返金してください', { kind: event.kind, session });
+    else logger.info('stripeHook: 知らせを処理しました', { kind: event.kind, session });
     res.status(200).send('ok');
   } catch (error) {
-    logger.error('stripeHook: 知らせを処理できませんでした', { kind: event.kind, error: String(error) });
+    logger.error('stripeHook: 知らせを処理できませんでした', { kind: event.kind, session, error: String(error) });
     res.status(500).send('failed');
   }
 });

@@ -163,20 +163,22 @@ describe('払われたのに purchases が無いとき', () => {
   const meta = () => ({ uid: 'u1', pack: '10-300', tickets: 10, price: 300, expiresAt: addMonthsJst(clock, 6), createdAt: clock - 1000 });
   it('知らせの meta から purchases を作り直して足す（2 回めは足さない）', async () => {
     const event: PayEvent = { kind: 'completed', session: 'cs_lost', paid: true, paidAt: clock, meta: meta() };
-    await handlePayEvent(deps, event);
+    expect(await handlePayEvent(deps, event)).toBe('ok');
     await handlePayEvent(deps, event);
     expect(await tickets()).toBe(10);
     expect(await store.getPurchase('cs_lost')).toMatchObject({ uid: 'u1', status: 'paid', tickets: 10, price: 300, adultAt: 0, agreedAt: 0 });
   });
   it('meta が合わない（枚数と値段が pack と違う・期限が作成より前）なら作らない', async () => {
-    await handlePayEvent(deps, { kind: 'completed', session: 'cs_a', paid: true, paidAt: clock, meta: { ...meta(), tickets: 11 } });
-    await handlePayEvent(deps, { kind: 'completed', session: 'cs_b', paid: true, paidAt: clock, meta: { ...meta(), expiresAt: clock - 2000 } });
+    // 足せなかった払いは 'orphan' で伝える（hook が、作者に分かる印をつけて記録する）
+    expect(await handlePayEvent(deps, { kind: 'completed', session: 'cs_a', paid: true, paidAt: clock, meta: { ...meta(), tickets: 11 } })).toBe('orphan');
+    expect(await handlePayEvent(deps, { kind: 'completed', session: 'cs_b', paid: true, paidAt: clock, meta: { ...meta(), expiresAt: clock - 2000 } })).toBe('orphan');
+    expect(await handlePayEvent(deps, { kind: 'completed', session: 'cs_c', paid: true, paidAt: clock })).toBe('orphan');
     expect(await store.getPurchase('cs_a')).toBeNull();
     expect(await store.getPurchase('cs_b')).toBeNull();
     expect(await tickets()).toBe(0);
   });
   it('利用者がもういなくても、知らせは投げずに終わる', async () => {
-    await handlePayEvent(deps, { kind: 'completed', session: 'cs_ghost', paid: true, paidAt: clock, meta: { ...meta(), uid: 'ghost' } });
+    expect(await handlePayEvent(deps, { kind: 'completed', session: 'cs_ghost', paid: true, paidAt: clock, meta: { ...meta(), uid: 'ghost' } })).toBe('no-user');
   });
 });
 

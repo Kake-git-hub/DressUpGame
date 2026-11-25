@@ -3,6 +3,7 @@
  * 支払いの方法（カード・コンビニなど）は、Stripe の管理画面の既定に任せる（ここでは指定しない）。
  */
 import Stripe from 'stripe';
+import { BadSignatureError } from '../../tools/cloud/payment.ts';
 import type { CheckoutInput, PayEvent, PaymentGateway } from '../../tools/cloud/payment.ts';
 import { SESSION_MS } from '../../tools/cloud/payment.ts';
 
@@ -19,8 +20,9 @@ function metaOf(session: Stripe.Checkout.Session): { uid: string; pack: string; 
   return meta.uid && meta.pack && Number.isSafeInteger(meta.tickets) && Number.isSafeInteger(meta.price) && Number.isSafeInteger(meta.expiresAt) && Number.isSafeInteger(meta.createdAt) ? meta : undefined;
 }
 
-export function createStripeGateway(secretKey: string, webhookSecret: string): PaymentGateway {
-  const stripe = new Stripe(secretKey);
+// client は、テストで差し替える用
+export function createStripeGateway(secretKey: string, webhookSecret: string, client?: Stripe): PaymentGateway {
+  const stripe = client ?? new Stripe(secretKey);
 
   // 返金・取り消しの知らせは payment_intent しか持たないので、支払いページを引く
   async function sessionOfIntent(intent: string | { id: string } | null | undefined): Promise<string | null> {
@@ -54,7 +56,13 @@ export function createStripeGateway(secretKey: string, webhookSecret: string): P
     },
 
     async parseEvent(body, signature): Promise<PayEvent> {
-      const event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+      let event: Stripe.Event;
+      try {
+        event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+      } catch (error) {
+        // 署名の確かめの失敗だけ BadSignatureError にする（このあとの Stripe への問い合わせの失敗は、そのまま投げる）
+        throw new BadSignatureError(String(error));
+      }
       switch (event.type) {
         case 'checkout.session.completed':
         case 'checkout.session.async_payment_succeeded': {
