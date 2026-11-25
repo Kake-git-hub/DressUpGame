@@ -211,7 +211,7 @@ describe('生成を始める（列）', () => {
     const job = (await store.getJob('u1', jobId))!;
     expect(job.v).toBe(2);
     expect(job.queuedAt).toBe(clock);
-    expect(store.ledger).toContainEqual({ uid: 'u1', count: -1, reason: `job:${jobId}`, at: clock });
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: -1, reason: `job:${jobId}`, at: clock, draws: [{ n: 1 }] });
   });
   it('列に入れられなくても、仕事はできている（あとの入れ直しが拾う）', async () => {
     await userWith('u1', 2);
@@ -302,7 +302,7 @@ describe('生成を進める', () => {
   it('前の版で払い戻しの済んだ failed（refunded の印なし）は、二重に戻さず、印だけ付ける', async () => {
     await userWith('u1', 2);
     const { jobId } = await startJob(deps, 'u1', oneTop());
-    await store.refundOnce('u1', `${jobId}:0`, `refund:${jobId}:0`, clock);
+    await store.refundOnce('u1', `${jobId}:0`, 0, undefined, `refund:${jobId}:0`, clock);
     await setJob('u1', jobId, (job) => ({ ...job, done: true, tickets: 0, candidates: job.candidates.map((c) => ({ ...c, status: 'failed' as const })) }));
     expect((await signIn(deps, 'u1')).tickets).toBe(2);
     await settleRefunds(deps, 'u1', jobId);
@@ -514,6 +514,59 @@ describe('生成を進める', () => {
     const [item] = await listItems(deps, 'u1');
     expect(item.notes!.join(' ')).toMatch(/そでが みじかい/);
     expect((await candidateOf('u1', jobId)).notes).toEqual(item.notes);
+  }, 60_000);
+});
+
+describe('財布（配った分と、買った分）', () => {
+  const lot = (id: string, left: number, expiresAt: number) => ({ id, count: 3, left, boughtAt: 1, expiresAt });
+  const putWallet = (uid: string, free: number, lots: ReturnType<typeof lot>[]) => {
+    const user = store.users.get(uid)!;
+    const n = free + lots.reduce((sum, l) => sum + l.left, 0);
+    Object.assign(user, { free, lots, tickets: n, ticketsWritten: n });
+  };
+  it('signIn の返事に、free と lots（期限内で残りがあるものだけ、期限の早い順）が入り、tickets は使える枚数', async () => {
+    await userWith('u1', 0);
+    putWallet('u1', 1, [lot('b', 2, clock + 2000), lot('old', 3, clock - 1), lot('a', 1, clock + 1000), lot('empty', 0, clock + 500)]);
+    expect(await signIn(deps, 'u1')).toMatchObject({
+      tickets: 4,
+      free: 1,
+      lots: [
+        { count: 3, left: 1, expiresAt: clock + 1000 },
+        { count: 3, left: 2, expiresAt: clock + 2000 },
+      ],
+    });
+  });
+  it('古い形の利用者は、全部が配った分', async () => {
+    await userWith('u1', 0);
+    store.users.get('u1')!.tickets = 3;
+    expect(await signIn(deps, 'u1')).toMatchObject({ tickets: 3, free: 3, lots: [] });
+  });
+  it('買った分から先に引き、品目が失敗したら、その lot に戻る', async () => {
+    await userWith('u1', 1);
+    putWallet('u1', 1, [lot('p1', 1, clock + 1000)]);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    expect((await store.getJob('u1', jobId))!.draws).toEqual([{ lot: 'p1', n: 1 }]);
+    failImages = true;
+    await runJob(deps, 'u1', jobId);
+    expect(await store.getWallet('u1', clock)).toMatchObject({ free: 1, lots: [{ id: 'p1', left: 1 }] });
+    expect(refunds()).toEqual([expect.objectContaining({ to: 'p1' })]);
+  }, 60_000);
+  it('取り引きのやり直しでも: 引くのも戻すのも 1 回（lot に戻る）', async () => {
+    await userWith('u1', 0);
+    putWallet('u1', 0, [lot('p1', 2, clock + 1000)]);
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    const real = store.chargeAndCreateJob.bind(store);
+    expect(await real('u1', (await store.getJob('u1', jobId))!, 1, `job:${jobId}`, clock)).toBe(1); // 2 回めの呼び出し
+    expect(store.ledger.filter((l) => l.reason === `job:${jobId}`)).toHaveLength(1);
+    const update = store.updateJob.bind(store);
+    store.updateJob = async (uid, id, change) => {
+      await update(uid, id, change);
+      return update(uid, id, change);
+    };
+    failImages = true;
+    await runJob(deps, 'u1', jobId);
+    expect(await store.getWallet('u1', clock)).toMatchObject({ free: 0, lots: [{ id: 'p1', left: 2 }] });
+    expect(refunds()).toHaveLength(1);
   }, 60_000);
 });
 

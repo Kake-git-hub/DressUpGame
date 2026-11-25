@@ -90,13 +90,73 @@ describe('Firestore の置き場', () => {
   it('払い戻しは、同じ品目では 1 回だけ（同時に 6 回呼んでも、1 枚しか戻らない）。別の品目は、別に戻る', async () => {
     const u = uid();
     await store.createUser(u, () => `R${u}`.toUpperCase(), 1);
-    const results = await Promise.all(Array.from({ length: 6 }, () => store.refundOnce(u, 'job1:0', 'refund:job1:0', 2)));
+    const results = await Promise.all(Array.from({ length: 6 }, () => store.refundOnce(u, 'job1:0', 0, undefined, 'refund:job1:0', 2)));
     expect(results.filter(Boolean)).toHaveLength(1);
     expect((await store.getUser(u))!.tickets).toBe(1);
-    expect(await store.refundOnce(u, 'job1:0', 'refund:job1:0', 3)).toBe(false);
-    expect(await store.refundOnce(u, 'job1:1', 'refund:job1:1', 3)).toBe(true);
+    expect(await store.refundOnce(u, 'job1:0', 0, undefined, 'refund:job1:0', 3)).toBe(false);
+    expect(await store.refundOnce(u, 'job1:1', 1, undefined, 'refund:job1:1', 3)).toBe(true);
     expect((await store.getUser(u))!.tickets).toBe(2);
-    expect(code(await store.refundOnce('nobody', 'x', 'x', 1).catch((e) => e))).toBe('refused');
+    expect(code(await store.refundOnce('nobody', 'x', 0, undefined, 'x', 1).catch((e) => e))).toBe('refused');
+  });
+
+  describe('財布', () => {
+    const lot = (id: string, left: number, expiresAt: number) => ({ id, count: 3, left, boughtAt: 1, expiresAt });
+    const newUser = async (free: number, lots: ReturnType<typeof lot>[]) => {
+      const u = uid();
+      await store.createUser(u, () => `W${u}`.toUpperCase(), 1);
+      const n = free + lots.reduce((s, l) => s + l.left, 0);
+      await getFirestore(app).doc(`users/${u}`).update({ free, lots, tickets: n, ticketsWritten: n });
+      return u;
+    };
+    const ledgerOf = async (u: string) => (await getFirestore(app).collection(`users/${u}/ledger`).get()).docs.map((d) => d.data());
+
+    it('古い形（tickets だけ）の利用者は、引くと free になる', async () => {
+      const u = uid();
+      await store.createUser(u, () => `W${u}`.toUpperCase(), 1);
+      await getFirestore(app).doc(`users/${u}`).update({ tickets: 3 });
+      expect(await store.charge(u, 1, 'job:x', 5)).toBe(2);
+      expect(await store.getUser(u)).toMatchObject({ tickets: 2, free: 2, ticketsWritten: 2 });
+    });
+    it('手で tickets を書き換えた差は、財布に取り込む', async () => {
+      const u = await newUser(1, [lot('p1', 2, 100)]);
+      await getFirestore(app).doc(`users/${u}`).update({ tickets: 6 });
+      expect(await store.addTickets(u, 0, 'x', 5)).toBe(6);
+      expect(await store.getWallet(u, 5)).toMatchObject({ free: 4, lots: [{ id: 'p1', left: 2 }] });
+    });
+    it('chargeAndCreateJob: 期限の近い lot から引き、draws を残す。やり直しは二重に引かない', async () => {
+      const u = await newUser(1, [lot('late', 2, 200), lot('soon', 1, 100)]);
+      expect(await store.chargeAndCreateJob(u, job('jw', 5), 2, 'job:jw', 5)).toBe(2);
+      expect((await store.getJob(u, 'jw'))!.draws).toEqual([{ lot: 'soon', n: 1 }, { lot: 'late', n: 1 }]);
+      expect(await store.chargeAndCreateJob(u, job('jw', 5), 2, 'job:jw', 6)).toBe(2);
+      expect((await ledgerOf(u)).filter((r) => r.reason === 'job:jw')).toHaveLength(1);
+    });
+    it('切れた lot は、引く前に落とし、expire の行を残す', async () => {
+      const u = await newUser(1, [lot('gone', 2, 10)]);
+      expect(code(await store.charge(u, 2, 'job:x', 20).catch((e) => e))).toBe('no-tickets');
+      expect(await store.charge(u, 1, 'job:y', 20)).toBe(0);
+      expect(await ledgerOf(u)).toContainEqual({ count: -2, reason: 'expire:gone', at: 20 });
+      expect((await store.getUser(u))!.lots).toEqual([]);
+    });
+    it('refundOnce: lot に戻す（to を残す）。lot が切れていたら free へ', async () => {
+      const u = await newUser(0, [lot('p1', 2, 100)]);
+      await store.chargeAndCreateJob(u, job('jr', 5), 2, 'job:jr', 5);
+      const draws = (await store.getJob(u, 'jr'))!.draws;
+      expect(await store.refundOnce(u, 'jr:0', 0, draws, 'refund:jr:0', 6)).toBe(true);
+      expect(await store.refundOnce(u, 'jr:0', 0, draws, 'refund:jr:0', 7)).toBe(false);
+      expect(await store.getWallet(u, 8)).toMatchObject({ free: 0, lots: [{ id: 'p1', left: 1 }] });
+      expect(await ledgerOf(u)).toContainEqual({ count: 1, reason: 'refund:jr:0', at: 6, to: 'p1' });
+      expect(await store.refundOnce(u, 'jr:1', 1, draws, 'refund:jr:1', 200)).toBe(true); // p1 は切れた
+      expect(await store.getWallet(u, 200)).toEqual({ free: 1, lots: [] });
+      expect(await ledgerOf(u)).toContainEqual({ count: 1, reason: 'refund:jr:1', at: 200, to: 'free' });
+    });
+    it('moveTickets: 買った分は、期限のまま移る', async () => {
+      const from = await newUser(1, [lot('p1', 2, 100), lot('gone', 1, 10)]);
+      const to = await newUser(0, []);
+      expect(await store.moveTickets(from, to, 50)).toBe(3);
+      expect(await store.getWallet(to, 50)).toEqual({ free: 1, lots: [lot('p1', 2, 100)] });
+      expect(await store.getWallet(from, 50)).toEqual({ free: 0, lots: [] });
+      expect(await store.moveTickets(from, to, 51)).toBe(0);
+    });
   });
 
   it('チケットの数が壊れている（管理画面で、文字にしてしまった）利用者は、0 枚として扱う。足すと、数に直る', async () => {

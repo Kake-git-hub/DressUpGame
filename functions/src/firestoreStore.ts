@@ -14,16 +14,16 @@
  * アプリからは直接読めない（firestore.rules で全部断る）。ここは、管理者の権限で読み書きする。
  */
 import { FieldValue } from 'firebase-admin/firestore';
-import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
+import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
 import { ADOPTED_MAX, CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, TradeDoc, UserDoc } from '../../tools/cloud/store.ts';
+import type { CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, TradeDoc, UserDoc } from '../../tools/cloud/store.ts';
+import { draw, expire, merge, readWallet, refundTicket, usable, walletFields } from '../../tools/cloud/wallet.ts';
+import type { Wallet } from '../../tools/cloud/wallet.ts';
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
 const docId = (id: string) => encodeURIComponent(id).replace(/\./g, '%2E').replace(/^__/, '%5F%5F');
 // 仕事の一覧は、新しいものだけ（古い仕事は消さないので、開くたびに全部は読まない）
 const JOBS_MAX = 100;
-// チケットの数が壊れている（管理画面で文字にしてしまった、など）ときは、0 枚として扱う
-const have = (user: UserDoc) => (typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0);
 
 export class FirestoreStore implements CloudStore {
   private readonly db: Firestore;
@@ -71,37 +71,59 @@ export class FirestoreStore implements CloudStore {
     const uid = snap.exists ? (snap.data() as { uid?: unknown }).uid : null;
     return typeof uid === 'string' ? uid : null;
   }
-  private async changeTickets(uid: string, delta: number, reason: string, now: number): Promise<number> {
+  // 取り引きの中で、利用者の財布を読み、期限の切れた分を落とす（落とした分は、台帳に残す）。
+  // 書くのは、読んだあと（tx は、読むのを先に済ませる）
+  private async open(tx: Transaction, uid: string, now: number): Promise<{ ref: DocumentReference; wallet: Wallet; expired: { lot: string; n: number }[] }> {
+    const ref = this.user(uid);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+    const { wallet, expired } = expire(readWallet(snap.data() as UserDoc, now), now);
+    return { ref, wallet, expired };
+  }
+  private write(tx: Transaction, opened: { ref: DocumentReference; expired: { lot: string; n: number }[] }, wallet: Wallet, now: number): number {
+    const fields = walletFields(wallet, now);
+    tx.update(opened.ref, fields);
+    for (const e of opened.expired) tx.create(opened.ref.collection('ledger').doc(), { count: -e.n, reason: `expire:${e.lot}`, at: now });
+    return fields.tickets;
+  }
+  private lack(wallet: Wallet, cost: number, now: number): CloudError {
+    return new CloudError('no-tickets', `チケットが足りません（のこり ${usable(wallet, now)} 枚、必要 ${cost} 枚）`);
+  }
+  async charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
     return this.db.runTransaction(async (tx) => {
-      const ref = this.user(uid);
-      const snap = await tx.get(ref);
-      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
-      const user = snap.data() as UserDoc;
-      const tickets = have(user);
-      if (tickets + delta < 0) throw new CloudError('no-tickets', `チケットが足りません（のこり ${tickets} 枚、必要 ${-delta} 枚）`);
-      tx.update(ref, { tickets: tickets + delta });
-      tx.create(ref.collection('ledger').doc(), { count: delta, reason, at: now });
-      return tickets + delta;
+      const opened = await this.open(tx, uid, now);
+      const drawn = draw(opened.wallet, Math.abs(cost), now);
+      if (!drawn) throw this.lack(opened.wallet, Math.abs(cost), now);
+      tx.create(opened.ref.collection('ledger').doc(), { count: -Math.abs(cost), reason, at: now, draws: drawn.draws });
+      return this.write(tx, opened, drawn.wallet, now);
     });
   }
-  async refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean> {
+  async addTickets(uid: string, count: number, reason: string, now: number): Promise<number> {
+    return this.db.runTransaction(async (tx) => {
+      const opened = await this.open(tx, uid, now);
+      const n = Math.abs(count);
+      tx.create(opened.ref.collection('ledger').doc(), { count: n, reason, at: now });
+      return this.write(tx, opened, { free: opened.wallet.free + n, lots: opened.wallet.lots }, now);
+    });
+  }
+  async getWallet(uid: string, now: number): Promise<{ free: number; lots: Lot[] }> {
+    const snap = await this.user(uid).get();
+    if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+    return expire(readWallet(snap.data() as UserDoc, now), now).wallet;
+  }
+  async refundOnce(uid: string, key: string, index: number, draws: Draw[] | undefined, reason: string, now: number): Promise<boolean> {
     return this.db.runTransaction(async (tx) => {
       const ref = this.user(uid);
       // 台帳の行の名前を key から決める。もうあれば、戻し済み
       const row = ref.collection('ledger').doc(docId(`refund:${key}`));
       if ((await tx.get(row)).exists) return false;
-      const snap = await tx.get(ref);
-      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
-      tx.update(ref, { tickets: have(snap.data() as UserDoc) + 1 });
-      tx.create(row, { count: 1, reason, at: now });
+      const opened = await this.open(tx, uid, now);
+      const back = refundTicket(opened.wallet, draws, index, now);
+      const to = back.lots.find((l, i) => l.left !== opened.wallet.lots[i].left)?.id ?? 'free';
+      tx.create(row, { count: 1, reason, at: now, to });
+      this.write(tx, opened, back, now);
       return true;
     });
-  }
-  charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
-    return this.changeTickets(uid, -Math.abs(cost), reason, now);
-  }
-  addTickets(uid: string, count: number, reason: string, now: number): Promise<number> {
-    return this.changeTickets(uid, Math.abs(count), reason, now);
   }
   async note(uid: string, count: number, reason: string, now: number): Promise<void> {
     await this.user(uid).collection('ledger').doc().create({ count, reason, at: now });
@@ -129,18 +151,15 @@ export class FirestoreStore implements CloudStore {
   }
   async chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number> {
     return this.db.runTransaction(async (tx) => {
-      const ref = this.user(uid);
-      const snap = await tx.get(ref);
-      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
-      const tickets = have(snap.data() as UserDoc);
+      const opened = await this.open(tx, uid, now);
       // 取り引きは、確定の返事が届かなかったとき、もう一度呼ばれる。前の回が確定していたら（仕事が、もうある）、二重に引かない
       const jobRef = this.job(uid, job.id);
-      if ((await tx.get(jobRef)).exists) return tickets;
-      if (tickets < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${tickets} 枚、必要 ${cost} 枚）`);
-      tx.update(ref, { tickets: tickets - cost });
-      tx.create(ref.collection('ledger').doc(), { count: -cost, reason, at: now });
-      tx.create(jobRef, job);
-      return tickets - cost;
+      if ((await tx.get(jobRef)).exists) return usable(opened.wallet, now);
+      const drawn = draw(opened.wallet, cost, now);
+      if (!drawn) throw this.lack(opened.wallet, cost, now);
+      tx.create(opened.ref.collection('ledger').doc(), { count: -cost, reason, at: now, draws: drawn.draws });
+      tx.create(jobRef, { ...job, draws: drawn.draws });
+      return this.write(tx, opened, drawn.wallet, now);
     });
   }
   async getJob(uid: string, jobId: string): Promise<JobDoc | null> {
@@ -269,17 +288,17 @@ export class FirestoreStore implements CloudStore {
   async moveTickets(from: string, to: string, now: number): Promise<number> {
     return this.db.runTransaction(async (tx) => {
       const fromRef = this.user(from);
-      const toRef = this.user(to);
-      const [source, target] = [await tx.get(fromRef), await tx.get(toRef)];
-      if (!target.exists) throw new CloudError('refused', '利用者が見つかりません');
+      const [source, target] = [await tx.get(fromRef), await this.open(tx, to, now)];
       if (!source.exists || (source.data() as UserDoc).named) return 0;
-      // ここで読み直した残り（前の回が確定していれば 0）
-      const count = have(source.data() as UserDoc);
+      // ここで読み直した財布（前の回が確定していれば 0）
+      const { wallet: moving } = expire(readWallet(source.data() as UserDoc, now), now);
+      const count = usable(moving, now);
       if (count <= 0) return 0;
-      tx.update(fromRef, { tickets: 0 });
-      tx.update(toRef, { tickets: have(target.data() as UserDoc) + count });
+      tx.update(fromRef, walletFields({ free: 0, lots: [] }, now));
+      // 買った分は、期限も一緒に移る
+      this.write(tx, target, merge(target.wallet, moving), now);
       tx.create(fromRef.collection('ledger').doc(), { count: -count, reason: `adopt:out:${to}`, at: now });
-      tx.create(toRef.collection('ledger').doc(), { count, reason: `adopt:in:${from}`, at: now });
+      tx.create(target.ref.collection('ledger').doc(), { count, reason: `adopt:in:${from}`, at: now });
       return count;
     });
   }

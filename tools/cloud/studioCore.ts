@@ -17,6 +17,7 @@ import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
+import { readWallet, usable as usableCount } from './wallet.ts';
 import type { WireTrade, WireTradeItem, TradeRefusal } from '../../src/cloud/wire.ts';
 import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef, TradeDoc, TradeEndReason } from './store.ts';
 
@@ -45,7 +46,9 @@ export interface CoreDeps {
 
 export interface UserView {
   userCode: string;
-  tickets: number;
+  tickets: number; // 使える枚数（配った分と、期限内の買った分）
+  free: number; // 配った分
+  lots: { count: number; left: number; expiresAt: number }[]; // 買った分（期限内で、残りがあるものだけ。期限の早い順）
   admin: boolean;
 }
 export type Target = { kind: 'category'; categoryId: string } | { kind: 'set'; categoryIds: string[] };
@@ -104,9 +107,14 @@ const undecided = (c: CandidateDoc) => c.status === 'waiting' || c.status === 'w
 
 export async function signIn(deps: CoreDeps, uid: string): Promise<UserView> {
   const user = await deps.store.createUser(uid, makeCode, deps.now());
-  // チケットの数が壊れている（数でない）ときは、0 枚として扱う
-  const tickets = typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0;
-  return { userCode: user.userCode, tickets, admin: deps.adminCodes.includes(user.userCode) };
+  // 財布は、利用者の文書から読む（チケットの数が壊れていれば 0 枚、期限切れは数えない）
+  const now = deps.now();
+  const wallet = readWallet(user, now);
+  const lots = wallet.lots
+    .filter((l) => l.expiresAt > now && l.left > 0)
+    .sort((a, b) => a.expiresAt - b.expiresAt)
+    .map((l) => ({ count: l.count, left: l.left, expiresAt: l.expiresAt }));
+  return { userCode: user.userCode, tickets: usableCount(wallet, now), free: wallet.free, lots, admin: deps.adminCodes.includes(user.userCode) };
 }
 
 async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
@@ -252,7 +260,7 @@ export async function settleRefunds(deps: CoreDeps, uid: string, jobId: string):
   for (const c of owed) {
     // 管理者が始めた仕事は、もともと引いていない（台帳に残すだけ）
     if (job.free) await deps.store.note(uid, 1, `admin:refund:${jobId}:${c.index}`, deps.now());
-    else await deps.store.refundOnce(uid, `${jobId}:${c.index}`, `refund:${jobId}:${c.index}`, deps.now());
+    else await deps.store.refundOnce(uid, `${jobId}:${c.index}`, c.index, job.draws, `refund:${jobId}:${c.index}`, deps.now());
   }
   const settled = new Set(owed.map((c) => c.index));
   await deps.store.updateJob(uid, jobId, (current) => {

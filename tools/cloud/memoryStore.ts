@@ -2,17 +2,24 @@
  * メモリの中の置き場（テストと、手元の確認用）。本物（Firestore・Storage）と同じ形。
  */
 import { ADOPTED_MAX, CloudError } from './store.ts';
-import type { CloudFiles, CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, TradeDoc, UserDoc } from './store.ts';
+import type { CloudFiles, CloudStore, Draw, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, Lot, TradeDoc, UserDoc } from './store.ts';
+import { draw, expire, merge, readWallet, refundTicket, usable, walletFields } from './wallet.ts';
+import type { Wallet } from './wallet.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-// チケットの数が壊れている（数でない）ときは、0 枚として扱う
-const have = (user: UserDoc) => (typeof user.tickets === 'number' && Number.isFinite(user.tickets) ? user.tickets : 0);
+// 台帳の行（draws = 引いた所、to = 戻した所）
+interface LedgerRow {
+  uid: string;
+  count: number;
+  reason: string;
+  at: number;
+}
 
 export class MemoryStore implements CloudStore {
   readonly users = new Map<string, UserDoc>();
   readonly jobs = new Map<string, JobDoc>(); // `${uid}/${jobId}`
   readonly items = new Map<string, ItemDoc>(); // `${uid}/${itemId}`
-  readonly ledger: { uid: string; count: number; reason: string; at: number }[] = [];
+  readonly ledger: (LedgerRow & { draws?: Draw[]; to?: string })[] = [];
   readonly usage = new Map<string, number>();
   readonly refunds = new Set<string>();
   readonly handoffs = new Map<string, HandoffDoc>();
@@ -35,25 +42,45 @@ export class MemoryStore implements CloudStore {
     for (const [uid, user] of this.users) if (user.userCode === userCode) return uid;
     return null;
   }
-  async charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
+  // 利用者の財布を読み、期限の切れた分を落とす（落とした分は、台帳に残す）
+  private open(uid: string, now: number): { user: UserDoc; wallet: Wallet } {
     const user = this.users.get(uid);
     if (!user) throw new CloudError('refused', '利用者が見つかりません');
-    if (have(user) < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${have(user)} 枚、必要 ${cost} 枚）`);
-    user.tickets = have(user) - cost;
-    this.ledger.push({ uid, count: -cost, reason, at: now });
+    const { wallet, expired } = expire(readWallet(user, now), now);
+    for (const e of expired) this.ledger.push({ uid, count: -e.n, reason: `expire:${e.lot}`, at: now });
+    return { user, wallet };
+  }
+  private save(user: UserDoc, wallet: Wallet, now: number): number {
+    Object.assign(user, walletFields(wallet, now));
     return user.tickets;
+  }
+  private lack(wallet: Wallet, cost: number, now: number): CloudError {
+    return new CloudError('no-tickets', `チケットが足りません（のこり ${usable(wallet, now)} 枚、必要 ${cost} 枚）`);
+  }
+  async charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
+    const { user, wallet } = this.open(uid, now);
+    const drawn = draw(wallet, cost, now);
+    if (!drawn) throw this.lack(wallet, cost, now);
+    this.ledger.push({ uid, count: -cost, reason, at: now, draws: drawn.draws });
+    return this.save(user, drawn.wallet, now);
   }
   async addTickets(uid: string, count: number, reason: string, now: number): Promise<number> {
-    const user = this.users.get(uid);
-    if (!user) throw new CloudError('refused', '利用者が見つかりません');
-    user.tickets = have(user) + count;
+    const { user, wallet } = this.open(uid, now);
     this.ledger.push({ uid, count, reason, at: now });
-    return user.tickets;
+    return this.save(user, { free: wallet.free + count, lots: wallet.lots }, now);
   }
-  async refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean> {
+  async getWallet(uid: string, now: number): Promise<{ free: number; lots: Lot[] }> {
+    const { wallet } = expire(readWallet(this.mustUser(uid), now), now);
+    return clone(wallet);
+  }
+  async refundOnce(uid: string, key: string, index: number, draws: Draw[] | undefined, reason: string, now: number): Promise<boolean> {
     if (this.refunds.has(`${uid}/${key}`)) return false;
+    const { user, wallet } = this.open(uid, now);
     this.refunds.add(`${uid}/${key}`);
-    await this.addTickets(uid, 1, reason, now);
+    const back = refundTicket(wallet, draws, index, now);
+    const to = back.lots.find((l, i) => l.left !== wallet.lots[i].left)?.id ?? 'free';
+    this.ledger.push({ uid, count: 1, reason, at: now, to });
+    this.save(user, back, now);
     return true;
   }
   async note(uid: string, count: number, reason: string, now: number): Promise<void> {
@@ -69,15 +96,14 @@ export class MemoryStore implements CloudStore {
   }
   async chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number> {
     // 間に待ちを入れない（引くのと作るのが、片方だけにならない）
-    const user = this.users.get(uid);
-    if (!user) throw new CloudError('refused', '利用者が見つかりません');
+    const { user, wallet } = this.open(uid, now);
     // やり直し: 前の回で、もう引いて、作ってある
-    if (this.jobs.has(`${uid}/${job.id}`)) return have(user);
-    if (have(user) < cost) throw new CloudError('no-tickets', `チケットが足りません（のこり ${have(user)} 枚、必要 ${cost} 枚）`);
-    user.tickets = have(user) - cost;
-    this.ledger.push({ uid, count: -cost, reason, at: now });
-    this.jobs.set(`${uid}/${job.id}`, clone(job));
-    return user.tickets;
+    if (this.jobs.has(`${uid}/${job.id}`)) return usable(wallet, now);
+    const drawn = draw(wallet, cost, now);
+    if (!drawn) throw this.lack(wallet, cost, now);
+    this.ledger.push({ uid, count: -cost, reason, at: now, draws: drawn.draws });
+    this.jobs.set(`${uid}/${job.id}`, clone({ ...job, draws: drawn.draws }));
+    return this.save(user, drawn.wallet, now);
   }
   async getJob(uid: string, jobId: string): Promise<JobDoc | null> {
     const job = this.jobs.get(`${uid}/${jobId}`);
@@ -181,13 +207,15 @@ export class MemoryStore implements CloudStore {
     return { status: 'ok', uid: handoff.uid };
   }
   async moveTickets(from: string, to: string, now: number): Promise<number> {
-    const target = this.mustUser(to);
+    const target = this.open(to, now);
     const source = this.users.get(from);
     if (!source || source.named) return 0;
-    const count = have(source);
+    const { wallet: moving } = expire(readWallet(source, now), now);
+    const count = usable(moving, now);
     if (count <= 0) return 0;
-    source.tickets = 0;
-    target.tickets = have(target) + count;
+    this.save(source, { free: 0, lots: [] }, now);
+    // 買った分は、期限も一緒に移る
+    this.save(target.user, merge(target.wallet, moving), now);
     this.ledger.push({ uid: from, count: -count, reason: `adopt:out:${to}`, at: now });
     this.ledger.push({ uid: to, count, reason: `adopt:in:${from}`, at: now });
     return count;

@@ -43,7 +43,7 @@ interface Setup {
 }
 
 function setup(options: Setup = {}) {
-  let user: StudioUser = { userCode: 'AAAA', tickets: options.tickets ?? 0, admin: options.admin ?? false };
+  let user: StudioUser = { userCode: 'AAAA', tickets: options.tickets ?? 0, free: options.tickets ?? 0, lots: [], admin: options.admin ?? false };
   let state = { user: (options.noUser ? undefined : user) as StudioUser | undefined, jobs: [] as unknown[] };
   const listeners = new Set<() => void>();
   let info = options.info ?? GUEST;
@@ -86,13 +86,13 @@ function setup(options: Setup = {}) {
   render(<Account session={session} library={library} reload={reload} />);
   // つなぎ役が、チケットの数が変わったと知らせる（作者がチケットを配った、など）
   const setTickets = (tickets: number) => {
-    user = { ...user, tickets };
+    user = { ...user, tickets, free: tickets };
     state = { ...state, user };
     act(() => listeners.forEach((listener) => listener()));
   };
   // つなぎ役は知らせない（作者が、よそからチケットを配った）
   const setTicketsQuietly = (tickets: number) => {
-    user = { ...user, tickets };
+    user = { ...user, tickets, free: tickets };
   };
   return { account, backend, setInfo: (next: AccountInfo) => (info = next), setTickets, setTicketsQuietly };
 }

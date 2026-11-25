@@ -54,9 +54,11 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
 
   // 返事に利用者が入っていたら、覚えて、変わっていれば知らせる
   const took = <T extends { user?: WireUser }>(answer: T): T => {
-    const next = answer.user;
-    if (next && (!user || user.userCode !== next.userCode || user.tickets !== next.tickets || user.admin !== next.admin)) {
-      user = { userCode: next.userCode, tickets: next.tickets, admin: next.admin };
+    const wire = answer.user;
+    // 古いサーバーの返事には、free・lots が無い（全部、配った分として扱う）
+    const next = wire && { ...wire, free: wire.free ?? wire.tickets, lots: wire.lots ?? [] };
+    if (next && (!user || user.userCode !== next.userCode || user.tickets !== next.tickets || user.free !== next.free || JSON.stringify(user.lots) !== JSON.stringify(next.lots) || user.admin !== next.admin)) {
+      user = { userCode: next.userCode, tickets: next.tickets, free: next.free, lots: next.lots, admin: next.admin };
       const snapshot = user;
       userListeners.forEach((listener) => listener({ ...snapshot }));
     }

@@ -186,7 +186,7 @@ describe('サーバーの関数（エミュレーター）', () => {
     const db = getAdminFirestore(admin);
     await db.doc(`users/${boss.uid}`).set({ userCode: ADMIN_CODE, tickets: 0, createdAt: 1 });
     await db.doc(`userCodes/${ADMIN_CODE}`).set({ uid: boss.uid });
-    expect((await boss.call<{ user: UserView }>({ op: 'signIn' })).user).toEqual({ userCode: ADMIN_CODE, tickets: 0, admin: true });
+    expect((await boss.call<{ user: UserView }>({ op: 'signIn' })).user).toEqual({ userCode: ADMIN_CODE, tickets: 0, free: 0, lots: [], admin: true });
     const started = await boss.call<{ jobId: string; cost: number; user: UserView }>(top(fakes.dollId));
     expect(started).toMatchObject({ cost: 1, user: { tickets: 0 } });
     expect((await boss.finished(started.jobId)).candidates[0].status).toBe('kept');

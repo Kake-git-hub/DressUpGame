@@ -32,7 +32,7 @@ describe('chargeAndCreateJob', () => {
     expect(await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 5)).toBe(0);
     expect((await store.getUser('u1'))?.tickets).toBe(0);
     expect((await store.getJob('u1', 'j1'))?.id).toBe('j1');
-    expect(store.ledger).toContainEqual({ uid: 'u1', count: -2, reason: 'job:j1', at: 5 });
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: -2, reason: 'job:j1', at: 5, draws: [{ n: 2 }] });
   });
 });
 
@@ -257,5 +257,65 @@ describe('交換', () => {
     await expect(store.countTrade('u1', '2026-11-25', 2)).rejects.toMatchObject({ code: 'limit' });
     await store.countTrade('u1', '2026-11-26', 2);
     await store.countTrade('u2', '2026-11-25', 2);
+  });
+});
+
+describe('財布', () => {
+  const lot = (id: string, left: number, expiresAt: number) => ({ id, count: 3, left, boughtAt: 1, expiresAt });
+  const withLots = (uid: string, free: number, lots: ReturnType<typeof lot>[]) => {
+    const n = free + lots.reduce((s, l) => s + l.left, 0);
+    Object.assign(store.users.get(uid)!, { free, lots, tickets: n, ticketsWritten: n });
+  };
+  it('古い形（tickets だけ）の利用者から引くと、free になる', async () => {
+    await store.createUser('old', () => 'OLDOLDOL', 1);
+    store.users.get('old')!.tickets = 3;
+    expect(await store.charge('old', 1, 'job:x', 5)).toBe(2);
+    expect(await store.getUser('old')).toMatchObject({ tickets: 2, free: 2, ticketsWritten: 2 });
+  });
+  it('手で tickets を書き換えた差は、財布に取り込む', async () => {
+    withLots('u1', 1, [lot('p1', 2, 100)]);
+    store.users.get('u1')!.tickets = 6; // +3
+    expect(await store.addTickets('u1', 0, 'x', 5)).toBe(6);
+    expect(await store.getWallet('u1', 5)).toMatchObject({ free: 4, lots: [{ id: 'p1', left: 2 }] });
+  });
+  it('chargeAndCreateJob: 期限の近い lot から引き、job.draws に残す。台帳にも', async () => {
+    withLots('u1', 1, [lot('late', 2, 200), lot('soon', 1, 100)]);
+    expect(await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 5)).toBe(2);
+    expect((await store.getJob('u1', 'j1'))!.draws).toEqual([{ lot: 'soon', n: 1 }, { lot: 'late', n: 1 }]);
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: -2, reason: 'job:j1', at: 5, draws: [{ lot: 'soon', n: 1 }, { lot: 'late', n: 1 }] });
+    // やり直し: いまの残りを返し、二重に引かない
+    expect(await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 6)).toBe(2);
+  });
+  it('切れた lot は、引く前に落とし、台帳に expire の行を残す（足りなければ引かない）', async () => {
+    withLots('u1', 1, [lot('gone', 2, 10)]);
+    const error = await store.charge('u1', 2, 'job:x', 20).catch((e: unknown) => e);
+    expect((error as CloudError).code).toBe('no-tickets');
+    expect(await store.charge('u1', 1, 'job:y', 20)).toBe(0);
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: -2, reason: 'expire:gone', at: 20 });
+    expect((await store.getUser('u1'))!.lots).toEqual([]);
+  });
+  it('refundOnce: lot に戻す。同じ key は 1 回だけ。台帳に to', async () => {
+    withLots('u1', 0, [lot('p1', 2, 100)]);
+    await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 5);
+    const draws = (await store.getJob('u1', 'j1'))!.draws;
+    expect(await store.refundOnce('u1', 'j1:0', 0, draws, 'refund:j1:0', 6)).toBe(true);
+    expect(await store.refundOnce('u1', 'j1:0', 0, draws, 'refund:j1:0', 7)).toBe(false);
+    expect(await store.getWallet('u1', 8)).toMatchObject({ free: 0, lots: [{ id: 'p1', left: 1 }] });
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: 1, reason: 'refund:j1:0', at: 6, to: 'p1' });
+  });
+  it('refundOnce: lot が切れていたら free へ', async () => {
+    withLots('u1', 0, [lot('p1', 2, 100)]);
+    await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 5);
+    const draws = (await store.getJob('u1', 'j1'))!.draws;
+    expect(await store.refundOnce('u1', 'j1:0', 0, draws, 'refund:j1:0', 200)).toBe(true);
+    expect(await store.getWallet('u1', 200)).toEqual({ free: 1, lots: [] });
+    expect(store.ledger).toContainEqual({ uid: 'u1', count: 1, reason: 'refund:j1:0', at: 200, to: 'free' });
+  });
+  it('moveTickets: 買った分は、期限のまま移る。切れた分は移さない', async () => {
+    await store.createUser('u2', () => 'BBBBBBBB', 1);
+    withLots('u1', 1, [lot('p1', 2, 100), lot('gone', 1, 10)]);
+    expect(await store.moveTickets('u1', 'u2', 50)).toBe(3);
+    expect(await store.getWallet('u2', 50)).toEqual({ free: 1, lots: [lot('p1', 2, 100)] });
+    expect(await store.getWallet('u1', 50)).toEqual({ free: 0, lots: [] });
   });
 });

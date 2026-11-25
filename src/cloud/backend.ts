@@ -10,7 +10,9 @@ import type { TradeRefusal, WireTrade } from './wire';
 
 export interface StudioUser {
   userCode: string; // 作者に伝えると、チケットや服を届けてもらえる短い文字列
-  tickets: number;
+  tickets: number; // 使える枚数（配った分と、期限内の買った分）
+  free: number; // 配った分
+  lots: { count: number; left: number; expiresAt: number }[]; // 買った分（期限内で、残りがあるものだけ。期限の早い順）
   admin: boolean;
 }
 

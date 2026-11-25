@@ -139,12 +139,15 @@ export interface CloudStore {
   // 利用者を作る（もういれば、そのまま返す）。利用者コードは、ほかの利用者と重ならないものにする
   createUser(uid: string, makeCode: () => string, now: number): Promise<UserDoc>;
   findUidByCode(userCode: string): Promise<string | null>;
-  // チケットを引く。足りなければ CloudError('no-tickets')（引かない）。返り値は残り
+  // チケットを引く（期限の近い買った分から、足りなければ配った分から）。足りなければ CloudError('no-tickets')（引かない）。返り値は残り（使える枚数）
   charge(uid: string, cost: number, reason: string, now: number): Promise<number>;
-  // チケットを足す（戻す・配る）。返り値は残り
+  // チケットを配る（配った分に足す）。返り値は残り
   addTickets(uid: string, count: number, reason: string, now: number): Promise<number>;
-  // できなかった品目の分を 1 枚戻す。同じ key では、何度呼ばれても 1 回しか戻さない（戻したら true）
-  refundOnce(uid: string, key: string, reason: string, now: number): Promise<boolean>;
+  // 財布を読むだけ（期限切れを除いた lots）
+  getWallet(uid: string, now: number): Promise<{ free: number; lots: Lot[] }>;
+  // できなかった品目（index）の分を 1 枚戻す。draws は、その仕事が引いた所（無ければ配った分へ）。
+  // 同じ key では、何度呼ばれても 1 回しか戻さない（戻したら true）。台帳の行に、戻した所（to = lot の id か 'free'）を書く
+  refundOnce(uid: string, key: string, index: number, draws: Draw[] | undefined, reason: string, now: number): Promise<boolean>;
   // 台帳に書くだけ（管理者が使った分。残りは変えない）
   note(uid: string, count: number, reason: string, now: number): Promise<void>;
   // 画像を 1 枚作る前に呼ぶ。その日の上限に達していたら CloudError('limit')（数は増えない）
@@ -183,7 +186,7 @@ export interface CloudStore {
   // 合い言葉を、移す前に押さえる（1 つの取り引き）。無ければ unknown。ほかの人が押さえていれば used。
   // そうでなければ usedBy = by を書いて（もう by なら、書かない）、移す元の uid を返す。同じ人なら、何度呼んでも ok
   claimHandoff(word: string, by: string): Promise<HandoffClaim>;
-  // from の残りのチケットを全部、to へ移す（1 つの取り引き。中で from を読み直す）。台帳に、from へ -n・to へ +n
+  // from の使えるチケットを全部（買った分は期限のまま）、to へ移す（1 つの取り引き。中で from を読み直す）。台帳に、from へ -n・to へ +n
   // （理由 `adopt:out:{to}`・`adopt:in:{from}`）。返り値は、移した枚数。0 なら、何も書かない。
   // from が名前のある利用者（named）なら、移さない（0）。to がいなければ CloudError('refused')
   moveTickets(from: string, to: string, now: number): Promise<number>;

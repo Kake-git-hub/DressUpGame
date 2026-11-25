@@ -698,7 +698,7 @@ describe('readAdopt・intentFor（合わせる途中の覚え）', () => {
 describe('settleLogin（ログインの結果の仕上げ）', () => {
   const WORD = 'handoff-word-secret-0123456789';
   const HINT = 'google-sub-hint-555';
-  const BEFORE: StudioUser = { userCode: 'OLD1', tickets: 3, admin: false };
+  const BEFORE: StudioUser = { userCode: 'OLD1', tickets: 3, free: 3, lots: [], admin: false };
   const never = () => new Promise<LoginResult>(() => undefined);
   const answer = (status: AdoptAnswer['status'], tickets = 0, items = 0): AdoptAnswer => ({ status, tickets, items });
 
@@ -881,12 +881,12 @@ describe('settleLogin（ログインの結果の仕上げ）', () => {
       b.plant({ word: WORD_A, from: 'OLD1', stage: 'switched' });
       // ログアウトして匿名の D になり、また結び付ける → taken
       b.account.signInWithStashed.mockResolvedValue(false);
-      void settle(b, { outcome: 'taken' }, 'redirect', { userCode: 'DDDD', tickets: 1, admin: false });
+      void settle(b, { outcome: 'taken' }, 'redirect', { userCode: 'DDDD', tickets: 1, free: 1, lots: [], admin: false });
       await vi.waitFor(() => expect(b.account.startRedirect).toHaveBeenCalledTimes(1));
       expect(backlog(b)).toEqual([{ word: WORD_A, from: 'OLD1' }]);
       expect(b.record()).toMatchObject({ word: 'handoff-word-D-secret-dddd', from: 'DDDD', stage: 'offered' });
       // 画面なしの行き来が戻って、入れた → adopt（D の分と、A の積み残し）
-      expect(await settle(b, { outcome: 'switched', step: 'silent' }, 'redirect', { userCode: 'DDDD', tickets: 1, admin: false })).toBeNull();
+      expect(await settle(b, { outcome: 'switched', step: 'silent' }, 'redirect', { userCode: 'DDDD', tickets: 1, free: 1, lots: [], admin: false })).toBeNull();
       expect(b.backend.adopt).toHaveBeenCalledWith('handoff-word-D-secret-dddd');
       expect(b.backend.adopt).toHaveBeenCalledWith(WORD_A);
       expect(b.local.data.has(ADOPT_KEY)).toBe(false);

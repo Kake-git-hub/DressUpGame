@@ -16,7 +16,7 @@ const top = { dollId: 'doll', theme: 'うみ', styleId: 'anime', target: { kind:
 // 偽のサーバー: 呼び出しを覚え、決めた答えを返す
 // api: サーバーの版（null なら、返事に入れない = 前の版のサーバー）
 function fakeServer(api: number | null = 2) {
-  const user: StudioUser = { userCode: 'ABCD2345', tickets: 3, admin: false };
+  const user: StudioUser = { userCode: 'ABCD2345', tickets: 3, free: 3, lots: [], admin: false };
   const jobs = new Map<string, WireJob>();
   const calls: Record<string, unknown>[] = [];
   const state = { fail: null as BackendError | null };
@@ -130,7 +130,7 @@ describe('本物の裏側', () => {
     const backend = createRemoteBackend(server.transport);
     const seen: number[] = [];
     backend.onUser((u) => seen.push(u.tickets));
-    expect(await backend.signIn()).toEqual({ userCode: 'ABCD2345', tickets: 3, admin: false });
+    expect(await backend.signIn()).toEqual({ userCode: 'ABCD2345', tickets: 3, free: 3, lots: [], admin: false });
     await backend.startJob(top);
     expect(seen).toEqual([3, 2]);
   });

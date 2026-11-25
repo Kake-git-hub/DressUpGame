@@ -123,14 +123,14 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   const parseState = (raw: string | null): State | null => {
     try {
       const saved = JSON.parse(raw ?? 'null') as State | null;
-      if (saved && saved.user && Array.isArray(saved.jobs) && Array.isArray(saved.items)) return { ...saved, seen: Array.isArray(saved.seen) ? saved.seen : [] };
+      if (saved && saved.user && Array.isArray(saved.jobs) && Array.isArray(saved.items)) return { ...saved, user: { ...saved.user, free: saved.user.free ?? saved.user.tickets, lots: saved.user.lots ?? [] }, seen: Array.isArray(saved.seen) ? saved.seen : [] };
     } catch {
       // 読めなければ、最初から
     }
     return null;
   };
   const load = (): State =>
-    parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+    parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, free: options.tickets ?? 5, lots: [], admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
   const claimMs = options.partner?.claimAfterMs ?? 1500;
   const acceptMs = options.partner?.acceptAfterMs ?? 1000;
   const chooseMs = options.partner?.chooseMs ?? 0;
@@ -154,7 +154,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     if (job) jobListeners.get(id)?.forEach((l) => l(publicJob(job)));
   };
   const setTickets = (tickets: number) => {
-    state = { ...state, user: { ...state.user, tickets } };
+    state = { ...state, user: { ...state.user, tickets, free: tickets } };
     notifyUser();
   };
 
@@ -268,7 +268,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
         adopt(parked);
       } else if (readHandoff()) {
         // 合い言葉の写しがあるのに、置いてある世界が無い = 空のアカウント。写しの世界は、adopt が持ってくる
-        adopt({ user: { userCode: newCode(), tickets: 0, admin: false }, jobs: [], items: [], seen: [], counter: 0 });
+        adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false }, jobs: [], items: [], seen: [], counter: 0 });
       }
       setGoogle(true);
     },
@@ -279,7 +279,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
         // 置けなければ、ここで失敗にする（置かずに入れ替えると、世界が無くなる）
         throw { code: 'auth/network-request-failed' };
       }
-      adopt({ user: { userCode: newCode(), tickets: 0, admin: false }, jobs: [], items: [], seen: [], counter: 0 });
+      adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false }, jobs: [], items: [], seen: [], counter: 0 });
       setGoogle(false);
     },
     isGoogle: () => google,
