@@ -19,7 +19,8 @@ export const ADOPT_API = 3;
 // 交換に要るサーバーの版
 export const TRADE_API = 4;
 
-export type WireUser = StudioUser;
+// 古いサーバーの返事には、free・lots が無い（remoteBackend が、全部を配った分として補う）
+export type WireUser = Omit<StudioUser, 'free' | 'lots'> & Partial<Pick<StudioUser, 'free' | 'lots'>>;
 
 export interface WireCandidate {
   index: number;

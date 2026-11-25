@@ -294,6 +294,13 @@ describe('財布', () => {
     expect(store.ledger).toContainEqual({ uid: 'u1', count: -2, reason: 'expire:gone', at: 20 });
     expect((await store.getUser('u1'))!.lots).toEqual([]);
   });
+  it('引けずに終わったときは、expire の行を残さない（次に引けたとき、1 回だけ）', async () => {
+    withLots('u1', 1, [lot('gone', 2, 10)]);
+    await store.charge('u1', 5, 'job:x', 20).catch(() => undefined);
+    expect(store.ledger.filter((l) => l.reason === 'expire:gone')).toHaveLength(0);
+    await store.charge('u1', 1, 'job:y', 21);
+    expect(store.ledger.filter((l) => l.reason === 'expire:gone')).toHaveLength(1);
+  });
   it('refundOnce: lot に戻す。同じ key は 1 回だけ。台帳に to', async () => {
     withLots('u1', 0, [lot('p1', 2, 100)]);
     await store.chargeAndCreateJob('u1', job('j1', 5), 2, 'job:j1', 5);

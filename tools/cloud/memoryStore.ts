@@ -43,14 +43,16 @@ export class MemoryStore implements CloudStore {
     return null;
   }
   // 利用者の財布を読み、期限の切れた分を落とす（落とした分は、台帳に残す）
-  private open(uid: string, now: number): { user: UserDoc; wallet: Wallet } {
+  // （台帳に書くのは、save で保存するときだけ）
+  private open(uid: string, now: number): { uid: string; user: UserDoc; wallet: Wallet; expired: { lot: string; n: number }[] } {
     const user = this.users.get(uid);
     if (!user) throw new CloudError('refused', '利用者が見つかりません');
     const { wallet, expired } = expire(readWallet(user, now), now);
-    for (const e of expired) this.ledger.push({ uid, count: -e.n, reason: `expire:${e.lot}`, at: now });
-    return { user, wallet };
+    return { uid, user, wallet, expired };
   }
-  private save(user: UserDoc, wallet: Wallet, now: number): number {
+  private save(opened: { uid: string; user: UserDoc; expired: { lot: string; n: number }[] }, wallet: Wallet, now: number): number {
+    const { uid, user, expired } = opened;
+    for (const e of expired) this.ledger.push({ uid, count: -e.n, reason: `expire:${e.lot}`, at: now });
     Object.assign(user, walletFields(wallet, now));
     return user.tickets;
   }
@@ -58,16 +60,18 @@ export class MemoryStore implements CloudStore {
     return new CloudError('no-tickets', `チケットが足りません（のこり ${usable(wallet, now)} 枚、必要 ${cost} 枚）`);
   }
   async charge(uid: string, cost: number, reason: string, now: number): Promise<number> {
-    const { user, wallet } = this.open(uid, now);
+    const opened = this.open(uid, now);
+    const { wallet } = opened;
     const drawn = draw(wallet, cost, now);
     if (!drawn) throw this.lack(wallet, cost, now);
     this.ledger.push({ uid, count: -cost, reason, at: now, draws: drawn.draws });
-    return this.save(user, drawn.wallet, now);
+    return this.save(opened, drawn.wallet, now);
   }
   async addTickets(uid: string, count: number, reason: string, now: number): Promise<number> {
-    const { user, wallet } = this.open(uid, now);
+    const opened = this.open(uid, now);
+    const { wallet } = opened;
     this.ledger.push({ uid, count, reason, at: now });
-    return this.save(user, { free: wallet.free + count, lots: wallet.lots }, now);
+    return this.save(opened, { free: wallet.free + count, lots: wallet.lots }, now);
   }
   async getWallet(uid: string, now: number): Promise<{ free: number; lots: Lot[] }> {
     const { wallet } = expire(readWallet(this.mustUser(uid), now), now);
@@ -75,12 +79,13 @@ export class MemoryStore implements CloudStore {
   }
   async refundOnce(uid: string, key: string, index: number, draws: Draw[] | undefined, reason: string, now: number): Promise<boolean> {
     if (this.refunds.has(`${uid}/${key}`)) return false;
-    const { user, wallet } = this.open(uid, now);
+    const opened = this.open(uid, now);
+    const { wallet } = opened;
     this.refunds.add(`${uid}/${key}`);
     const back = refundTicket(wallet, draws, index, now);
     const to = back.lots.find((l, i) => l.left !== wallet.lots[i].left)?.id ?? 'free';
     this.ledger.push({ uid, count: 1, reason, at: now, to });
-    this.save(user, back, now);
+    this.save(opened, back, now);
     return true;
   }
   async note(uid: string, count: number, reason: string, now: number): Promise<void> {
@@ -96,14 +101,15 @@ export class MemoryStore implements CloudStore {
   }
   async chargeAndCreateJob(uid: string, job: JobDoc, cost: number, reason: string, now: number): Promise<number> {
     // 間に待ちを入れない（引くのと作るのが、片方だけにならない）
-    const { user, wallet } = this.open(uid, now);
+    const opened = this.open(uid, now);
+    const { wallet } = opened;
     // やり直し: 前の回で、もう引いて、作ってある
     if (this.jobs.has(`${uid}/${job.id}`)) return usable(wallet, now);
     const drawn = draw(wallet, cost, now);
     if (!drawn) throw this.lack(wallet, cost, now);
     this.ledger.push({ uid, count: -cost, reason, at: now, draws: drawn.draws });
     this.jobs.set(`${uid}/${job.id}`, clone({ ...job, draws: drawn.draws }));
-    return this.save(user, drawn.wallet, now);
+    return this.save(opened, drawn.wallet, now);
   }
   async getJob(uid: string, jobId: string): Promise<JobDoc | null> {
     const job = this.jobs.get(`${uid}/${jobId}`);
@@ -213,9 +219,9 @@ export class MemoryStore implements CloudStore {
     const { wallet: moving } = expire(readWallet(source, now), now);
     const count = usable(moving, now);
     if (count <= 0) return 0;
-    this.save(source, { free: 0, lots: [] }, now);
+    this.save({ uid: from, user: source, expired: [] }, { free: 0, lots: [] }, now);
     // 買った分は、期限も一緒に移る
-    this.save(target.user, merge(target.wallet, moving), now);
+    this.save(target, merge(target.wallet, moving), now);
     this.ledger.push({ uid: from, count: -count, reason: `adopt:out:${to}`, at: now });
     this.ledger.push({ uid: to, count, reason: `adopt:in:${from}`, at: now });
     return count;
