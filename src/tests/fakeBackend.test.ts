@@ -494,6 +494,19 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect((await backend.trade(tradeId)).status).toBe('cancelled');
     });
 
+    it('partner.chooseMs: あいてが読んでから服を出すまで、claimed（あいての服は見えない）', async () => {
+      const { backend, itemId } = await withItem({ partner: { claimAfterMs: 100, chooseMs: 400, acceptAfterMs: 50 } });
+      const { tradeId } = await backend.tradeOpen(itemId);
+      await vi.advanceTimersByTimeAsync(50);
+      expect((await backend.trade(tradeId)).status).toBe('open');
+      await vi.advanceTimersByTimeAsync(200);
+      const choosing = await backend.trade(tradeId);
+      expect(choosing.status).toBe('claimed');
+      expect(choosing.theirs).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(await backend.trade(tradeId)).toMatchObject({ status: 'joined', theirs: { name: 'にせの ふく' } });
+    });
+
     it('noTrade: どれも old-server。canTrade は false', async () => {
       const backend = make({ noTrade: true });
       expect(await backend.canTrade()).toBe(false);

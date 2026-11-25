@@ -13,9 +13,9 @@
 
 | 項目 | 状態 |
 |---|---|
-| ゲームの版 | **v0.40.0（メニューの「セット」の位置を、ならべかえで動かせる）と v0.39.1（調整画面の一覧の直し）。公開済み**（2026-11-25、作者がカードで「公開する」）。**v0.39.0（素材スタジオの「ならべかえ」= 段階 ④）。公開済み**（2026-11-25、作者がカードで「公開する」。作業ブランチ `claude/sleepy-noether-kqf755`）。 ゲームとサーバーは変えていない（載せ直し不要）。その前の v0.38.0（2 台めの端末を、アカウントに合わせる）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.37.0（ログインの試し版）も同じ日に公開済み（作者がカードで「公開する」）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
+| ゲームの版 | **v0.41.0（交換。作業ブランチ `claude/ecstatic-wright-0m73uz`。公開・載せ直し待ち）。** その前: **v0.40.0（メニューの「セット」の位置を、ならべかえで動かせる）と v0.39.1（調整画面の一覧の直し）。公開済み**（2026-11-25、作者がカードで「公開する」）。**v0.39.0（素材スタジオの「ならべかえ」= 段階 ④）。公開済み**（2026-11-25、作者がカードで「公開する」。作業ブランチ `claude/sleepy-noether-kqf755`）。 ゲームとサーバーは変えていない（載せ直し不要）。その前の v0.38.0（2 台めの端末を、アカウントに合わせる）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.37.0（ログインの試し版）も同じ日に公開済み（作者がカードで「公開する」）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `2b876a5`）。ゲームに出るドールは「おんなのこ」（ID は `アニメ　その２`。147 点）と「おとこのこ」（20 点）。「アニメ」「リアル」は非表示 |
-| サーバー | 作者の Firebase（`dressup-game-89f6e`、東京）に、**v0.38.0 の版が載っている**（2026-11-24、作者が PC で `npm run firebase:deploy`。`Deploy complete!`。合い言葉・移す = `offer`・`adopt` が入った版）。その前は、**v0.35.0 の版が載っていた**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
+| サーバー | **v0.41.0 の版（交換 = `SERVER_API` 4）は、まだ載せていない**（作者の載せ直し待ち。手順は `docs/firebase-setup.md` の 2-12）。それまで載っているのは、↓ 作者の Firebase（`dressup-game-89f6e`、東京）に、**v0.38.0 の版が載っている**（2026-11-24、作者が PC で `npm run firebase:deploy`。`Deploy complete!`。合い言葉・移す = `offer`・`adopt` が入った版）。その前は、**v0.35.0 の版が載っていた**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
 | テスト | 0-4 を見る |
 
 ### 0-A. 次のセッションが、最初にすること
@@ -75,7 +75,7 @@
 | ② 縦画面（v0.36.0） | 服の絵を大きく・2 段まで、色のスライダーを「その服がなる色」の太い帯に、編集の枠をいちばん手前に・角のつまみを外側へ | **公開済み。実機（iPad・スマホ）での確認待ち**。設計: `specs/2026-11-23-portrait-rework-design.md`、計画: `plans/2026-11-23-stage2-portrait.md` |
 | ③ ログイン | Google のアカウントと結び付け（Apple は、Apple Developer の登録が済んでから）。複数の端末で同じアカウント | **③-a 試し版（v0.37.0）・③-b 合わせる（v0.38.0）とも、公開済み。サーバーも載せ直し済み。2 台めのスマホで「合わせる」が通った（2026-11-25、Issue 9）。** 設計: `specs/2026-11-23-login-design.md`（7 章 = ③-a、8 章 = ③-b）、計画: `plans/2026-11-23-stage3a-login-trial.md`・`plans/2026-11-24-stage3b-login-merge.md` |
 | ④ 並び順（v0.39.0） | 管理者だけが、カテゴリとアイテムの既定の並び順を変える → 作者の判断で **PC スタジオの「一覧」に「ならべかえ」**（つかんで動かすだけ。数字なし。絵 64px） | **公開済み（2026-11-25）**。作者の PC での「並べる → 公開 → ゲームのメニュー」の確かめ待ち |
-| ⑤ 交換 | 端末を持ち寄ったときだけできる、1 対 1 の入れ替え（互いの画面の QR コードを読み合う方式を軸に） | 未着手 |
+| ⑤ 交換（v0.41.0） | 端末を持ち寄ったときだけできる、1 対 1 の入れ替え（互いの画面の QR コードを読み合う方式を軸に） | v0.41.0 として作った。公開・載せ直し待ち（設計 `specs/2026-11-25-stage5-trade-design.md`、決めたこと・残したこと `specs/2026-11-25-stage5-ledger.md`） |
 | ⑥ 支払い | Web アプリのまま、Stripe でチケットを売る。期限は 6 か月（作者の決定） | 計画書の下書きだけ |
 
 作者への質問は、**カード形式（選択肢つき）で出す**（作者の指示、2026-11-23）。
@@ -109,6 +109,15 @@
 - **版の数**（`src/cloud/wire.ts`）: `SERVER_API = 3`（サーバーが返す）・`MIN_API = 2`（アプリが要る最低）・`ADOPT_API = 3`（合わせるのに要る）。サーバーの中身を変えて、古いアプリが困るようにしない限り、`MIN_API` は上げない。
 - **きろく**: `login` の行は、別の保存（`dressup_diag_login`、30 行）にも残り、報告の「--- ログイン ---」に出る（`src/services/diag.ts`）。
 - **偽物の裏側**: `dressup_fake_options` に `noAdopt`（古いサーバー）・`adoptFail`（数。その回数だけ落とす）・`stashed`（false で、(1) を通らない）・`silentFail`（(2) を断る）。合い言葉と世界の写しは `dressup_fake_handoff`。
+
+### 0-1e. 段階 ⑤ の作り（次に触る人へ）
+
+- **サーバー**（`tools/cloud/studioCore.ts`）: `tradeOpen`・`tradeCode`・`tradeClaim`・`tradeJoin`・`trade`・`tradeAccept`・`tradeCancel`。入れ替えは `swapTrade`（1 つの取り引き。2 回めの「はい」が入れ替える。後から着いた呼び出しは `done` を返す）。時間（合い言葉 90 秒・open 10 分・claimed 5 分・joined 3 分）と 1 日 30 回の上限（`countTrade`）も同じ所。
+- **置き場**: `trades/{id}` は `functions/src/firestoreStore.ts`（Firestore）と、メモリ版の `tools/cloud/memoryStore.ts`（形は `store.ts`）。合い言葉は、交換が終わったら二度と使えない。
+- **アプリ**: `src/trade/`（`Trade.tsx` が画面・`QrShow.tsx`・`QrScan.tsx`（jsqr）・`tradeFlow.ts` が段階の決め方と断りの文）。クローゼットの「こうかん」から開く（`closet-trade`）。裏側の口は `src/cloud/backend.ts` の `canTrade`・`trade*`。サーバーの版は `wire.ts` の `TRADE_API = 4`。
+- **偽の裏側**（`?studio=fake`）: `dressup_fake_options` に `noTrade`（古いサーバー）・`partner`（`claimAfterMs`・`chooseMs`・`acceptAfterMs`・`refuse`・`cancelAfterMs`）。`FAKE` を「よむ」の確認用の入力に入れると、にせの あいての交換に入れる。`createBackend.ts` の `fakeOptions()` が読む項目を足し忘れないこと。
+- **きろく**（`diag`）: `trade open|code|join …|accept|result done|cancelled reason=…|camera …`。服の名前・利用者コードは入れない。
+- **E2E**: `e2e/trade.spec.ts`（7 件）。写真: `specs/2026-11-25-stage5-trade/`（iPad・スマホの縦）。
 
 ### 0-2. 段階 ① の作り（次に触る人へ）
 

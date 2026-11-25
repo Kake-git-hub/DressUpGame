@@ -26,6 +26,8 @@ export interface FakeOptions {
   admin?: boolean;
   loginFail?: string;
   googleTaken?: boolean;
+  noTrade?: boolean;
+  partner?: { claimAfterMs?: number; chooseMs?: number; acceptAfterMs?: number; refuse?: string; cancelAfterMs?: number };
 }
 
 export async function pixel(page: Page, x: number, y: number): Promise<number[]> {

@@ -31,6 +31,7 @@ export interface FakeOptions {
   // 交換の「にせの あいて」
   partner?: {
     claimAfterMs?: number; // こちらが始めてから、あいてが読んで服を出すまで（既定 1500）
+    chooseMs?: number; // あいてが読んでから、服を出すまで（この間、始めた側は「あいてが えらんでいるよ」。既定 0）
     acceptAfterMs?: number; // あいてが服を出してから、「はい」を押すまで（既定 1000）
     refuse?: TradeRefusal; // こちらが FAKE を読んだとき、この語で断る
     cancelAfterMs?: number; // 交換が始まってから、あいてが「やめる」を押すまで
@@ -132,6 +133,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
   const claimMs = options.partner?.claimAfterMs ?? 1500;
   const acceptMs = options.partner?.acceptAfterMs ?? 1000;
+  const chooseMs = options.partner?.chooseMs ?? 0;
   const trades = new Map<string, FakeTrade>();
   let state = load();
   const save = () => {
@@ -341,7 +343,8 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       Object.assign(trade, { status: 'cancelled', reason: 'cancel' });
       return;
     }
-    if (trade.status === 'open' && now >= trade.joinedAt) trade.status = 'joined';
+    if (trade.status === 'open' && chooseMs > 0 && now >= trade.joinedAt - chooseMs && now < trade.joinedAt) trade.status = 'claimed';
+    if ((trade.status === 'open' || (trade.status === 'claimed' && trade.me === 'a')) && now >= trade.joinedAt) trade.status = 'joined';
     if (trade.status === 'joined' && now >= trade.joinedAt + acceptMs) trade.theirAccepted = true;
     if (trade.status === 'joined' && trade.myAccepted && trade.theirAccepted && trade.mine) {
       // 入れ替え: こちらの服を外し、にせの服を、自分の服として足す
@@ -361,7 +364,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   });
   const tradeView = async (trade: FakeTrade): Promise<TradeState> => {
     advanceTrade(trade);
-    const showTheirs = trade.me === 'b' || trade.status !== 'open'; // 始めた側は、あいてが読むまで、あいての服が見えない
+    const showTheirs = trade.me === 'b' || (trade.status !== 'open' && trade.status !== 'claimed'); // 始めた側は、あいてが読むまで、あいての服が見えない
     return {
       id: trade.id,
       status: trade.status,
@@ -529,7 +532,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
         mine,
         theirs: partnerItem(mine.dollId, mine.categoryId),
         startedAt: now,
-        joinedAt: now + claimMs,
+        joinedAt: now + claimMs + chooseMs,
         myAccepted: false,
         theirAccepted: false,
       });
