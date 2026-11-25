@@ -74,3 +74,4 @@
 
 - 公開の組み立て（GitHub Pages）が、`stripe` を見つけられずに止まっていた（functions の部品を入れないため）。根の開発用にも同じ版（23.2.0）を入れた。
 - 作者の Stripe のアカウントで **Managed Payments（Stripe が売り手を引き受ける仕組み）が最初からオン**だった。カードだけの指定と一緒に使えず、支払いページを作れなかった（`StripeInvalidRequestError`）。**作者の決定: 使わない**（売り手は作者のまま）。支払いページを作るたびに `managed_payments: { enabled: false }` を渡す。
+- **本物の Stripe（試し用の環境）で、1 回買えた**（2026-11-25、作者の iPad。試しのカードで 10 枚 300 円 → チケットが 10 枚ふえた）。Managed Payments をオフにしたあと。
