@@ -80,7 +80,7 @@ describe('引き継ぎ（エミュレーター）', () => {
 
     const b = await client(`b-${Date.now()}@example.com`);
     const before = await b.call<{ user: UserView; api: number }>({ op: 'signIn' });
-    expect(before).toMatchObject({ api: 5, user: { tickets: 0 } });
+    expect(before).toMatchObject({ api: 6, user: { tickets: 0 } });
     expect((await getAdminFirestore(admin).doc(`users/${b.uid}`).get()).data()).toMatchObject({ named: true });
     // 匿名でない利用者は、合い言葉をもらえない
     expect(failure(await b.call({ op: 'offer' }).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });
@@ -128,7 +128,7 @@ describe('引き継ぎ（エミュレーター）', () => {
     expect(claims.firebase?.identities?.['google.com']).toHaveLength(1);
 
     expect(failure(await first.call({ op: 'offer' }).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });
-    expect((await first.call<{ api: number }>({ op: 'signIn' })).api).toBe(5);
+    expect((await first.call<{ api: number }>({ op: 'signIn' })).api).toBe(6);
     expect((await getAdminFirestore(admin).doc(`users/${first.uid}`).get()).data()).toMatchObject({ named: true });
 
     const second = await client();

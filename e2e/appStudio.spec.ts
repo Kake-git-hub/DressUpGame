@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
-import { APP, DOLL_X, dismissReveal, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear } from './helpers';
+import { APP, DOLL_X, dismissReveal, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear, chooseTarget, chooseSet, themeAndCheck } from './helpers';
 
 const jobs = (page: import('@playwright/test').Page) => page.getByTestId('studio-job');
 test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 減る）→ 作りかけ。できた服は、メニューの先頭に出て着せられる。読み込み直しても残る', async ({ page }) => {
@@ -19,11 +19,14 @@ test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 �
   // 写真のボタンと、色のテーマの欄は無い
   await expect(page.getByTestId('studio-photo-button')).toHaveCount(0);
   await expect(page.getByTestId('studio-color-0')).toHaveCount(0);
-  // ドールが 1 体なら、ドールを選ぶ欄は出ない
+  // ドールが 1 体なら、ドールを選ぶ段は無い。最初は「なにを作る？」で、カテゴリは絵（先頭の服のサムネイル）で選ぶ
   await expect(page.getByTestId('studio-doll')).toHaveCount(0);
-  await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
-  await expect(page.getByTestId('studio-make')).toBeDisabled(); // テーマがまだ
-  await page.getByTestId('studio-theme').fill('うみ');
+  await expect(page.getByTestId('studio-step')).toHaveAttribute('data-step', 'what');
+  await expect(page.getByTestId('studio-target').getByRole('button', { name: 'トップス', exact: true }).locator('img')).toHaveAttribute('src', /.+/);
+  await chooseTarget(page, 'トップス');
+  await expect(page.getByTestId('studio-next')).toBeDisabled(); // テーマがまだ
+  await expect(page.getByTestId('studio-hint')).toHaveText('テーマを入れてください。');
+  await themeAndCheck(page, 'うみ');
   await expect(page.getByTestId('studio-make')).toContainText('チケット 1 枚');
   await page.getByTestId('studio-make').click();
 
@@ -68,8 +71,8 @@ test('注文の演出の間は、後ろのボタンを押せない。連打し�
   await openHome(page, { delayMs: 60_000, planMs: 1500 });
   await openStudio(page);
   await expect(page.getByTestId('studio-tickets')).toContainText('枚');
-  await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
-  await page.getByTestId('studio-theme').fill('うみ');
+  await chooseTarget(page, 'トップス');
+  await themeAndCheck(page, 'うみ');
   const make = (await page.getByTestId('studio-make').boundingBox())!;
   const close = (await page.getByTestId('studio-close').boundingBox())!;
   await page.getByTestId('studio-make').click();
@@ -90,15 +93,13 @@ test('注文の演出の間は、後ろのボタンを押せない。連打し�
 test('セット: 入れるものを選ぶと、その数だけチケットを使い、全部できると、ゲームの先頭のセットになる', async ({ page }) => {
   await openHome(page);
   await openStudio(page);
-  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
-  const checks = page.getByTestId('studio-set-categories').locator('input[type=checkbox]');
-  // いったん全部外して、トップスとボトムスだけにする
-  for (let i = 0; i < (await checks.count()); i++) await checks.nth(i).uncheck();
-  await page.getByTestId('studio-theme').fill('うみ');
+  // いったん全部外す: 進めず、理由が出る。そのあと、トップスとボトムスだけにする
+  await chooseSet(page, []);
   await expect(page.getByTestId('studio-hint')).toContainText('2〜6 個');
-  await expect(page.getByTestId('studio-make')).toBeDisabled();
-  await page.getByTestId('studio-set-categories').getByText('トップス').click();
-  await page.getByTestId('studio-set-categories').getByText('ボトムス').click();
+  await expect(page.getByTestId('studio-next')).toBeDisabled();
+  await chooseSet(page, ['トップス', 'ボトムス']);
+  await page.getByTestId('studio-next').click();
+  await themeAndCheck(page, 'うみ');
   await expect(page.getByTestId('studio-make')).toContainText('チケット 2 枚');
   await page.getByTestId('studio-make').click();
   await expect(page.getByTestId('order-slip')).toContainText('セット（2 てん） ・ アニメ');
@@ -126,8 +127,9 @@ test('セット: 入れるものを選ぶと、その数だけチケットを使
 test('チケットが足りないときは作れず、理由が出る。できなかった品目の分は、チケットが戻る', async ({ page }) => {
   await openHome(page, { tickets: 1, failCategories: ['トップス'], delayMs: 2500 });
   await openStudio(page);
-  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
-  await page.getByTestId('studio-theme').fill('うみ');
+  await chooseTarget(page, 'セット');
+  await page.getByTestId('studio-next').click();
+  await themeAndCheck(page, 'うみ');
   await expect(page.getByTestId('studio-make')).toBeDisabled();
   await expect(page.getByTestId('studio-hint')).toContainText('チケットが足りません');
   // 1 点なら作れるが、できない品目（テスト用）なので、チケットが戻る

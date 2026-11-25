@@ -8,9 +8,9 @@
  */
 import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
-import { BackendError, OLD_SERVER_MESSAGE } from './backend';
-import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
-import { ADOPT_API, MIN_API, PAY_API, TRADE_API } from './wire';
+import { BackendError, normalizeUserCode, OLD_SERVER_MESSAGE } from './backend';
+import type { AdoptAnswer, GiftAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
+import { ADOPT_API, GIFT_API, MIN_API, PAY_API, TRADE_API } from './wire';
 import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
 
 export interface StudioTransport {
@@ -321,6 +321,13 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     onWelcome(listener) {
       welcomeListeners.add(listener);
       return () => welcomeListeners.delete(listener);
+    },
+    async giveTickets(userCode, count) {
+      if (serverApi === null) await backend.signIn();
+      // 古いサーバーは、giveTickets を知らない
+      if ((serverApi ?? 0) < GIFT_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      const { gift } = took(await transport.call<{ gift: GiftAnswer; user: WireUser }>({ op: 'giveTickets', userCode: normalizeUserCode(userCode), count }));
+      return gift;
     },
   };
   return backend;

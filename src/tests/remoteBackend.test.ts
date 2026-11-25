@@ -250,6 +250,28 @@ describe('本物の裏側', () => {
     expect((error as BackendError).message).toMatch(/のこり 0 枚/);
   });
 
+  describe('チケットを配る', () => {
+    it('api が 5 なら、op: giveTickets を、書き方をそろえたコードで呼ぶ。返事の gift を返す', async () => {
+      const server = fakeServer(5);
+      const call = server.transport.call.bind(server.transport);
+      const gifts: Record<string, unknown>[] = [];
+      server.transport.call = (async (data: Record<string, unknown>) => {
+        if (data.op !== 'giveTickets') return call(data);
+        gifts.push(data);
+        return { gift: { userCode: 'WXYZ2345', tickets: 8 }, user: { userCode: 'ABCD2345', tickets: 3, admin: true } } as never;
+      }) as typeof server.transport.call;
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.giveTickets(' wxyz-2345 ', 5)).toEqual({ userCode: 'WXYZ2345', tickets: 8 });
+      expect(gifts).toEqual([{ op: 'giveTickets', userCode: 'WXYZ2345', count: 5 }]);
+    });
+    it('api が 4 のサーバー（交換まで）では、呼ばずに old-server', async () => {
+      const server = fakeServer(4);
+      const error = await createRemoteBackend(server.transport).giveTickets('WXYZ2345', 1).catch((e: unknown) => e);
+      expect((error as BackendError).code).toBe('old-server');
+      expect(server.count('giveTickets')).toBe(0);
+    });
+  });
+
   describe('引き継ぎ（合い言葉）', () => {
     it('offerHandoff: api が 3 なら、op: offer を呼んで、合い言葉を返す。まだ signIn していなければ、先に signIn する', async () => {
       const server = fakeServer(3);
@@ -513,7 +535,7 @@ describe('本物の裏側', () => {
     }
 
     it('op の名前と引数どおりに呼び、答えを返す。買った分は onUser に出る', async () => {
-      const server = payServer(5);
+      const server = payServer(6);
       const backend = createRemoteBackend(server.transport);
       expect(await backend.canPay()).toBe(true);
       expect((await backend.shop()).packs).toEqual([{ id: '10-300', tickets: 10, price: 300 }]);
@@ -526,8 +548,8 @@ describe('本物の裏側', () => {
       expect(seen.at(-1)).toMatchObject({ tickets: 13, free: 3, lots: [{ count: 10, left: 10, expiresAt: 5 }] });
     });
 
-    it('古いサーバー（api が 5 より小さい）では、呼ばずに old-server。canPay は false', async () => {
-      const server = payServer(4);
+    it('古いサーバー（api が 6 より小さい。5 = 配るまで）では、呼ばずに old-server。canPay は false', async () => {
+      const server = payServer(5);
       const backend = createRemoteBackend(server.transport);
       expect(await backend.canPay()).toBe(false);
       for (const run of [() => backend.shop(), () => backend.checkout('p', 1, 2), () => backend.purchase('s'), () => backend.shopAck('s')]) {
@@ -537,9 +559,9 @@ describe('本物の裏側', () => {
     });
 
     it('断りの語（pay:理由 日本語）が payRefusal に出る。メッセージは、日本語の部分だけ。知らない語は payRefusal なし', async () => {
-      const refused = (await createRemoteBackend(payServer(5, {}, 'pay:login Google でログインすると、買えます').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
+      const refused = (await createRemoteBackend(payServer(6, {}, 'pay:login Google でログインすると、買えます').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
       expect(refused).toMatchObject({ code: 'refused', payRefusal: 'login', message: 'Google でログインすると、買えます' });
-      const unknown = (await createRemoteBackend(payServer(5, {}, 'pay:newthing なにか').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
+      const unknown = (await createRemoteBackend(payServer(6, {}, 'pay:newthing なにか').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
       expect(unknown.code).toBe('refused');
       expect(unknown.payRefusal).toBeUndefined();
       expect(unknown.message).toBe('なにか');
@@ -547,11 +569,11 @@ describe('本物の裏側', () => {
 
     it('signIn の返事の welcome は、onWelcome に 1 回出る（無ければ出ない）', async () => {
       const got: number[] = [];
-      const withWelcome = createRemoteBackend(payServer(5, { welcome: 5 }).transport);
+      const withWelcome = createRemoteBackend(payServer(6, { welcome: 5 }).transport);
       withWelcome.onWelcome((n) => got.push(n));
       await withWelcome.signIn();
       expect(got).toEqual([5]);
-      const without = createRemoteBackend(payServer(5).transport);
+      const without = createRemoteBackend(payServer(6).transport);
       without.onWelcome((n) => got.push(n));
       await without.signIn();
       expect(got).toEqual([5]);

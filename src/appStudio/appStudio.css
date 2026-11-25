@@ -277,3 +277,296 @@
   font-weight: bold;
   color: #5a3a86;
 }
+
+/* 注文の段（1 段ずつ、絵をタップして選ぶ） */
+.studio-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, #fbf5ff 0%, #fff 100%);
+  border: 1px solid #eadff2;
+  border-radius: 16px;
+}
+.studio-steps {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.studio-steps li {
+  display: flex;
+  align-items: center;
+}
+.studio-steps li + li::before {
+  content: '';
+  width: 18px;
+  height: 2px;
+  margin-right: 8px;
+  background: #e2d4ec;
+}
+.studio-panel .studio-steps button {
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-weight: bold;
+  font-size: 13px;
+  background: #fff;
+  color: #a58fb8;
+}
+.studio-panel .studio-steps li[data-done] button {
+  background: #e9dcf6;
+  color: #7a4fb0;
+  border-color: #c7aee0;
+  cursor: pointer;
+}
+.studio-panel .studio-steps li[data-on] button {
+  background: #7a4fb0;
+  border-color: #7a4fb0;
+  color: #fff;
+  opacity: 1;
+  transform: scale(1.12);
+}
+.studio-panel .studio-steps button:disabled {
+  opacity: 1;
+}
+.studio-panel h3.studio-step-title {
+  margin: 0;
+  text-align: center;
+  font-size: 20px;
+  color: #5a3a86;
+}
+.studio-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.studio-tiles-small {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+}
+.studio-panel button.studio-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-height: 0;
+  padding: 8px 6px 6px;
+  border: 2px solid #eadff2;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  color: #4a3560;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.studio-panel button.studio-tile:active {
+  transform: scale(0.96);
+}
+.studio-panel button.studio-tile[aria-pressed='true'] {
+  border-color: #7a4fb0;
+  background: #f5ecfd;
+  box-shadow: 0 0 0 3px rgba(122, 79, 176, 0.18);
+}
+.studio-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #faf6fd;
+}
+.studio-tiles-small .studio-thumb {
+  width: 64px;
+  height: 64px;
+}
+.studio-thumb-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: #b9a3cc;
+}
+.studio-tile-doll img {
+  width: 96px;
+  height: 140px;
+  object-fit: contain;
+}
+.studio-tile-collage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  width: 84px;
+  height: 84px;
+  padding: 2px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffe3f1, #e8dcff);
+}
+.studio-tile-collage img {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.studio-tile-check {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #7a4fb0;
+  color: #fff;
+  font-style: normal;
+  font-size: 13px;
+  line-height: 22px;
+}
+.studio-tile-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  border-radius: 10px;
+  font-size: 44px;
+  background: #faf6fd;
+}
+.studio-tile-emoji[data-style='anime'] { background: linear-gradient(135deg, #ffd6e8, #d6e4ff); }
+.studio-tile-emoji[data-style='manga'] { background: repeating-radial-gradient(circle at 30% 30%, #eee 0 2px, #fff 2px 6px); }
+.studio-tile-emoji[data-style='real'] { background: linear-gradient(135deg, #e9dccb, #c9b8a6); }
+.studio-tile-emoji[data-style='pastel'] { background: linear-gradient(135deg, #ffe0f4, #e0f4ff, #f4ffe0); }
+.studio-tile-emoji[data-style='picturebook'] { background: linear-gradient(135deg, #fff1d6, #d9efe6); }
+.studio-tile-emoji[data-style='pop'] { background: linear-gradient(135deg, #ffea4d, #ff6fb0); }
+.studio-panel input.studio-theme-input {
+  font-size: 20px;
+  min-height: 52px;
+  text-align: center;
+}
+.studio-ideas {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.studio-panel button.studio-idea {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 15px;
+}
+.studio-idea span {
+  font-size: 20px;
+}
+.studio-panel button.studio-idea[aria-pressed='true'] {
+  background: #efe4fa;
+  border-color: #7a4fb0;
+  font-weight: bold;
+}
+.studio-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.studio-panel button.studio-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: bold;
+  white-space: normal;
+}
+.studio-summary .studio-tile-emoji,
+.studio-summary .studio-thumb {
+  width: 56px;
+  height: 56px;
+  font-size: 30px;
+  flex: none;
+}
+.studio-summary-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: none;
+  max-width: 50%;
+}
+.studio-summary-doll {
+  width: 40px;
+  height: 64px;
+  object-fit: contain;
+}
+.studio-nav {
+  justify-content: space-between;
+}
+.studio-nav button.primary {
+  margin-left: auto;
+  min-height: 48px;
+  padding: 8px 22px;
+  font-size: 16px;
+  border-radius: 999px;
+}
+.studio-panel button.studio-make {
+  font-size: 18px;
+  background: linear-gradient(135deg, #ff7fb8, #9b5de5);
+  border: none;
+}
+
+/* アカウントの欄（たたんで、小さく） */
+details.studio-account {
+  display: block;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+details.studio-account > * + * {
+  margin-top: 8px;
+}
+.studio-account-summary {
+  cursor: pointer;
+  color: #6c5a7c;
+  font-size: 13px;
+}
+
+/* チケットを配る（管理者だけ） */
+.studio-gift {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #fffaf0;
+  border: 1px solid #f0dfb0;
+  border-radius: 12px;
+}
+.studio-gift h3,
+.studio-gift p {
+  margin: 0;
+}
+.studio-panel input.studio-gift-code {
+  flex: 1 1 160px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.studio-panel input.studio-gift-count {
+  width: 72px;
+}
+
+/* 見出しは 1 行のまま。せまい画面では、チケットの文を小さく折り返す */
+.studio-header h2 {
+  white-space: nowrap;
+}
+.studio-tickets {
+  white-space: normal;
+  text-align: right;
+  font-size: 13px;
+}

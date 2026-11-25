@@ -44,7 +44,7 @@ test('売っていなくても、管理者には、買うボタンが出る', as
   await openStudio(page);
   await expect(page.getByTestId('studio-buy')).toBeVisible();
   // 管理者にも、試しに買った結果（枚数）が見える
-  await expect(tickets(page)).toContainText('管理者（チケットの制限なし）・🎫 のこり 5 枚');
+  await expect(tickets(page)).toContainText('管理者（制限なし）・🎫 のこり 5 枚');
 });
 
 test('ログインしていないと、押してすぐ、ログインの案内が出る（保護者の確認の前）', async ({ page }) => {
@@ -56,6 +56,8 @@ test('ログインしていないと、押してすぐ、ログインの案内�
   await page.getByTestId('shop-login-go').click();
   await expect(page.getByTestId('shop-login-guide')).toHaveCount(0);
   await expect(page.getByTestId('account-section')).toBeVisible();
+  // たたんであるアカウントの欄が、開いて見える
+  await expect(page.getByTestId('account-section')).toHaveAttribute('open', '');
   await expect(tickets(page)).toContainText('のこり 5 枚');
 });
 

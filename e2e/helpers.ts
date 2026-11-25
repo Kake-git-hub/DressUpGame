@@ -74,15 +74,41 @@ export async function openStudio(page: Page) {
   await page.getByTestId('home-create').click();
   await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
 }
-// 何を作るか・テーマを入れて「作る」を押す（注文の演出が出る所まで）
-export async function pressMake(page: Page, target: string | { label: string }, theme = 'うみ') {
+// 「つくる」の段: 何を作るか（カテゴリの絵をタップ。テーマの段へ進む）。ドールの段にいれば、先に進める
+export async function chooseTarget(page: Page, label: string) {
   await expect(page.getByTestId('studio-tickets')).toContainText(/枚|管理者/);
-  await page.getByTestId('studio-target').selectOption(target);
+  const step = page.getByTestId('studio-step');
+  if ((await step.getAttribute('data-step')) !== 'what') {
+    // 最初の段（ドール）から、なにを の段へ
+    while ((await step.getAttribute('data-step')) !== 'what' && (await page.getByTestId('studio-back').count()) > 0) await page.getByTestId('studio-back').click();
+    if ((await step.getAttribute('data-step')) === 'doll') await page.getByTestId('studio-next').click();
+  }
+  await page.getByTestId('studio-target').getByRole('button', { name: label, exact: true }).click();
+}
+// セットにして、入れるものを labels だけにする（なにを の段のまま）
+export async function chooseSet(page: Page, labels: string[]) {
+  await chooseTarget(page, 'セット');
+  const box = page.getByTestId('studio-set-categories');
+  const on = box.locator('button[aria-pressed="true"]');
+  while ((await on.count()) > 0) await on.first().click();
+  for (const label of labels) await box.getByRole('button', { name: label, exact: true }).click();
+}
+// テーマを入れて、絵柄の段（そのまま）を通って、さいごの段へ
+export async function themeAndCheck(page: Page, theme = 'うみ') {
+  await expect(page.getByTestId('studio-step')).toHaveAttribute('data-step', 'theme');
   await page.getByTestId('studio-theme').fill(theme);
+  await page.getByTestId('studio-next').click();
+  await page.getByTestId('studio-next').click();
+  await expect(page.getByTestId('studio-step')).toHaveAttribute('data-step', 'check');
+}
+// 何を作るか・テーマを入れて「作る」を押す（注文の演出が出る所まで）
+export async function pressMake(page: Page, target: { label: string }, theme = 'うみ') {
+  await chooseTarget(page, target.label);
+  await themeAndCheck(page, theme);
   await page.getByTestId('studio-make').click();
 }
 // 注文して、チケットの演出の OK まで
-export async function order(page: Page, target: string | { label: string } = { label: 'トップス' }, theme = 'うみ') {
+export async function order(page: Page, target: { label: string } = { label: 'トップス' }, theme = 'うみ') {
   await pressMake(page, target, theme);
   await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'ticket', { timeout: 15_000 });
   await page.getByTestId('order-ok').click();

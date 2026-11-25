@@ -215,7 +215,7 @@ describe('偽物の裏側（開発とテスト用）', () => {
       const before = await backend.signIn();
       expect(await backend.account.prepare()).toEqual({ kind: 'guest' });
       expect(await backend.account.loginWithPopup('link')).toEqual({ outcome: 'linked' });
-      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com', name: 'ためし はなこ' });
       expect(await backend.signIn()).toEqual(before);
       expect(await backend.listMyItems()).toHaveLength(1);
     });
@@ -236,7 +236,7 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(await backend.account.loginWithPopup('signin')).toEqual({ outcome: 'switched' });
       expect(await backend.signIn()).toEqual(before);
       expect(await backend.listMyItems()).toHaveLength(1);
-      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com', name: 'ためし はなこ' });
       // 次に開いても（読み込み直しても）同じ
       const reopened = await make().signIn();
       expect(reopened).toEqual(before);
@@ -623,6 +623,20 @@ describe('偽物の裏側（開発とテスト用）', () => {
       anon.onWelcome((n) => got.push(n));
       await anon.signIn();
       expect(got).toEqual([5]);
+    });
+
+    it('giveTickets（管理者が配る）: 配った分（無料・期限なし）に足す。買った分はそのまま。読み込み直しても同じ', async () => {
+      const backend = make({ admin: true, tickets: 1, fakeLots: [{ count: 5, daysLeft: 10 }] });
+      const me = await backend.signIn();
+      expect(await backend.giveTickets(me.userCode.toLowerCase(), 3)).toEqual({ userCode: me.userCode, tickets: 9 });
+      const user = await backend.signIn();
+      expect(user).toMatchObject({ tickets: 9, free: 4 });
+      expect(user.lots.map((l) => l.left)).toEqual([5]);
+      const saved = JSON.parse(localStorage.getItem('dressup_fake_backend')!) as { user: { tickets: number; ticketsWritten: number } };
+      expect(saved.user.ticketsWritten).toBe(saved.user.tickets);
+      expect(await make().signIn()).toMatchObject({ tickets: 9, free: 4 });
+      localStorage.clear();
+      expect(codeOf(await make({ admin: false }).giveTickets(me.userCode, 1).catch((e: unknown) => e))).toBe('refused');
     });
 
     it('古いサーバー（oldServer）では、canPay が false で、ほかは old-server', async () => {

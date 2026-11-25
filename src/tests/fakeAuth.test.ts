@@ -2,7 +2,7 @@
  * 口の偽物（?studio=fake）のテスト: 入れ替えの本体は fakeBackend 側。ここは、口の動きと、にせの「画面を移る」。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createFakeAuthPort, FAKE_EMAIL, fakeGoTo } from '../cloud/fakeAuth';
+import { createFakeAuthPort, FAKE_EMAIL, FAKE_NAME, fakeGoTo } from '../cloud/fakeAuth';
 import { buildAuthUrl, nonceOf, parseReturn, subOf } from '../cloud/googleRedirect';
 
 const world = (google = false) => ({ link: vi.fn(), signin: vi.fn(), signOut: vi.fn(), isGoogle: vi.fn(() => google) });
@@ -10,7 +10,7 @@ const world = (google = false) => ({ link: vi.fn(), signin: vi.fn(), signOut: vi
 describe('createFakeAuthPort', () => {
   it('current: Google に結び付いていれば、にせのメールアドレス', () => {
     expect(createFakeAuthPort(world(false), {}).current()).toEqual({ kind: 'guest' });
-    expect(createFakeAuthPort(world(true), {}).current()).toEqual({ kind: 'google', email: FAKE_EMAIL });
+    expect(createFakeAuthPort(world(true), {}).current()).toEqual({ kind: 'google', email: FAKE_EMAIL, name: FAKE_NAME });
   });
   it('popup・withToken: link は world.link、signin は world.signin', async () => {
     const w = world();

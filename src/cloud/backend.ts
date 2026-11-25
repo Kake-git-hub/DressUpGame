@@ -170,7 +170,19 @@ export interface StudioBackend {
   shopAck(session: string): Promise<void>;
   // 初めてログインしたときの、ようこそのチケットの枚数を知らせる（1 回だけ）。返り値を呼ぶと、知らせを止める
   onWelcome(listener: (tickets: number) => void): () => void;
+  // 管理者だけ: 利用者コードの人に、チケットを count 枚配る（無料）。サーバーが古ければ BackendError('old-server')
+  giveTickets(userCode: string, count: number): Promise<GiftAnswer>;
 }
+
+// 配った結果: 相手の利用者コード（アカウントへ移った人なら、移った先）と、配ったあとの枚数
+export interface GiftAnswer {
+  userCode: string;
+  tickets: number;
+}
+// 1 回に配れる枚数の上限（サーバーと同じ）
+export const GIFT_MAX = 100;
+// 利用者コードの書き方をそろえる（大文字に。空白と - は取る）
+export const normalizeUserCode = (code: string): string => code.trim().toUpperCase().replace(/[\s-]/g, '');
 
 // 自分の服の並び順: order の大きい順（同じなら、新しい順 → ID）
 export function byClosetOrder(a: { order: number; createdAt: number; id: string }, b: { order: number; createdAt: number; id: string }): number {

@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const m = vi.hoisted(() => {
-  const auth = { currentUser: null as null | { uid: string; providerData: { providerId: string; email: string | null }[] }, authStateReady: vi.fn(async () => undefined) };
+  const auth = { currentUser: null as null | { uid: string; displayName?: string | null; providerData: { providerId: string; email: string | null; displayName?: string | null }[] }, authStateReady: vi.fn(async () => undefined) };
   const credentialCalls: unknown[] = [];
   const customParams: unknown[] = [];
   const credentialFromError = vi.fn((error: unknown): unknown => ({ fake: 'stashed', from: error }));
@@ -260,10 +260,13 @@ describe('口の本物', () => {
   it('current は、providerData の Google を読む', async () => {
     const port = await portOf();
     expect(port.current()).toEqual({ kind: 'guest' });
-    m.auth.currentUser = { uid: 'u1', providerData: [{ providerId: 'google.com', email: 'a@example.com' }] };
-    expect(port.current()).toEqual({ kind: 'google', email: 'a@example.com' });
+    m.auth.currentUser = { uid: 'u1', providerData: [{ providerId: 'google.com', email: 'a@example.com', displayName: 'エー' }] };
+    expect(port.current()).toEqual({ kind: 'google', email: 'a@example.com', name: 'エー' });
+    // Google の名前が無ければ、利用者の名前。どちらも無ければ空
+    m.auth.currentUser = { uid: 'u1', displayName: 'ビー', providerData: [{ providerId: 'google.com', email: 'a@example.com' }] };
+    expect(port.current()).toEqual({ kind: 'google', email: 'a@example.com', name: 'ビー' });
     m.auth.currentUser = { uid: 'u1', providerData: [{ providerId: 'google.com', email: null }] };
-    expect(port.current()).toEqual({ kind: 'google', email: '' });
+    expect(port.current()).toEqual({ kind: 'google', email: '', name: '' });
     m.auth.currentUser = null;
     expect(port.current()).toEqual({ kind: 'guest' });
   });

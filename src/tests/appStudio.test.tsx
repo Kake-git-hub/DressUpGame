@@ -1,7 +1,7 @@
 /**
  * 「つくる」の画面のテスト（裏側は偽物）。ドールの切り替えと、押せない理由
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppStudio } from '../appStudio/AppStudio';
 import { BackendError } from '../cloud/backend';
@@ -21,49 +21,140 @@ function open(options: Parameters<typeof createFakeBackend>[0] = {}, props: Part
   render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} {...props} />);
   return session;
 }
-const options = (testId: string) => Array.from(screen.getByTestId(testId).querySelectorAll('option')).map((o) => o.textContent);
+const tiles = (testId: string) => Array.from(screen.getByTestId(testId).querySelectorAll(':scope > button')).map((b) => b.getAttribute('aria-label'));
+const pressed = (testId: string) => Array.from(screen.getByTestId(testId).querySelectorAll('button[aria-pressed="true"]')).map((b) => b.getAttribute('aria-label'));
+const stepOf = () => screen.getByTestId('studio-step').dataset.step;
+const tap = (testId: string, label: string) => fireEvent.click(within(screen.getByTestId(testId)).getByRole('button', { name: label }));
+const next = () => fireEvent.click(screen.getByTestId('studio-next'));
 
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 describe('つくる', () => {
-  it('最初は、最後に遊んだドール。カテゴリは、メニューの順（セットは最後）。写真と色の欄は無い', async () => {
+  it('最初は、ドールを選ぶ段（最後に遊んだドール）。次は、カテゴリを絵で選ぶ（メニューの順。セットは最後）', async () => {
     open();
     await waitFor(() => expect(screen.getByTestId('studio-tickets').textContent).toContain('のこり 5 枚'));
-    expect((screen.getByTestId('studio-doll') as HTMLSelectElement).value).toBe('girl');
-    expect(options('studio-target')).toEqual(['トップス', 'ドレス', 'かお', 'セット']);
+    expect(stepOf()).toBe('doll');
+    expect(pressed('studio-doll')).toEqual(['おんなのこ']);
+    next();
+    expect(stepOf()).toBe('what');
+    expect(tiles('studio-target')).toEqual(['トップス', 'ドレス', 'かお', 'セット']);
+    expect(pressed('studio-target')).toEqual(['トップス']);
     expect(screen.queryByTestId('studio-photo-button')).toBeNull();
-    expect(screen.queryByTestId('studio-color-0')).toBeNull();
   });
 
-  it('ドールを替えると、カテゴリが替わり、先頭が選ばれる。セットに入れるものも、そのドールのもの', async () => {
+  it('カテゴリの絵は、そのカテゴリの先頭の服のサムネイル（公開の服を先に。ほかのドールの服は使わない）。無ければ名前の 1 文字め', async () => {
+    const clothing = [
+      { id: 'my:1', name: '自分', type: 'トップス', imageUrl: 'my.png', thumbnailUrl: 'my-thumb.png', dollId: 'girl' },
+      { id: 't1', name: 'シャツ', type: 'トップス', imageUrl: 't1.png', thumbnailUrl: 't1-thumb.png', dollId: 'girl' },
+      { id: 't2', name: 'シャツ2', type: 'トップス', imageUrl: 't2.png', thumbnailUrl: 't2-thumb.png', dollId: 'girl' },
+      { id: 'd1', name: 'ドレス', type: 'ドレス', imageUrl: 'd1.png', thumbnailUrl: 'd1-thumb.png', dollId: 'boy' },
+      { id: 'k1', name: 'かお', type: 'かお', imageUrl: 'k1.png', dollId: 'girl' },
+    ] as Parameters<typeof AppStudio>[0]['clothing'];
+    open({}, { clothing });
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    next();
+    const src = (label: string) => within(screen.getByTestId('studio-target')).getByRole('button', { name: label }).querySelector('img')?.getAttribute('src') ?? null;
+    expect(src('トップス')).toBe('t1-thumb.png');
+    expect(src('ドレス')).toBeNull();
+    expect(within(screen.getByTestId('studio-target')).getByRole('button', { name: 'ドレス' }).textContent).toContain('ド');
+    expect(src('かお')).toBe('k1.png');
+  });
+
+  it('カテゴリの絵をタップすると選ばれて、テーマの段へ進む。もどると、選んだものに印', async () => {
     open();
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
-    fireEvent.change(screen.getByTestId('studio-target'), { target: { value: 'ドレス' } });
-    fireEvent.change(screen.getByTestId('studio-doll'), { target: { value: 'boy' } });
-    expect(options('studio-target')).toEqual(['ズボン', 'くつ', 'セット']);
-    expect((screen.getByTestId('studio-target') as HTMLSelectElement).value).toBe('ズボン');
-    fireEvent.change(screen.getByTestId('studio-target'), { target: { value: '__set' } });
-    const checks = Array.from(screen.getByTestId('studio-set-categories').querySelectorAll('label')).map((l) => [l.textContent?.trim(), (l.querySelector('input') as HTMLInputElement).checked]);
-    expect(checks).toEqual([['ズボン', true], ['くつ', true]]);
+    next();
+    tap('studio-target', 'ドレス');
+    expect(stepOf()).toBe('theme');
+    fireEvent.click(screen.getByTestId('studio-back'));
+    expect(pressed('studio-target')).toEqual(['ドレス']);
+  });
+
+  it('ドールの絵をタップすると、そのドールのカテゴリに替わり、先頭が選ばれる。セットに入れるものも、そのドールのもの', async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    tap('studio-doll', 'おとこのこ');
+    expect(stepOf()).toBe('what');
+    expect(tiles('studio-target')).toEqual(['ズボン', 'くつ', 'セット']);
+    expect(pressed('studio-target')).toEqual(['ズボン']);
+    tap('studio-target', 'セット');
+    expect(stepOf()).toBe('what'); // セットは、入れるものを選んでから進む
+    expect(pressed('studio-set-categories')).toEqual(['ズボン', 'くつ']);
   });
 
   it('選んであったドールが、いまは無ければ、先頭のドール', async () => {
     open({}, { initialDollId: 'gone' });
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
-    expect((screen.getByTestId('studio-doll') as HTMLSelectElement).value).toBe('girl');
+    expect(pressed('studio-doll')).toEqual(['おんなのこ']);
   });
 
-  it('テーマが空・チケットが足りない間は、作るを押せず、理由が出る', async () => {
+  it('ドールが 1 体なら、ドールの段は無い', async () => {
+    open({}, { dolls: [dolls[0]] });
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    expect(stepOf()).toBe('what');
+    expect(screen.queryByTestId('studio-back')).toBeNull();
+  });
+
+  it('セットに入れるものが 2 個より少ない・テーマが空の間は、つぎへを押せず、理由が出る。テーマの例をタップすると入る', async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    next();
+    tap('studio-target', 'セット');
+    tap('studio-set-categories', 'トップス');
+    tap('studio-set-categories', 'ドレス');
+    expect((screen.getByTestId('studio-next') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('studio-hint').textContent).toBe('セットに入れるものを 2〜6 個選んでください（いま 0 個）。');
+    tap('studio-set-categories', 'かお');
+    tap('studio-set-categories', 'ドレス');
+    next();
+    expect(stepOf()).toBe('theme');
+    expect((screen.getByTestId('studio-next') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('studio-hint').textContent).toBe('テーマを入れてください。');
+    fireEvent.click(screen.getAllByTestId('studio-theme-idea')[0]);
+    expect((screen.getByTestId('studio-theme') as HTMLInputElement).value).toBe('うみ');
+    next();
+    expect(stepOf()).toBe('style');
+    expect(pressed('studio-style')).toEqual(['アニメ']);
+    tap('studio-style', 'ポップ');
+    expect(stepOf()).toBe('check');
+    expect(screen.getByTestId('studio-summary').textContent).toContain('セット（ドレス・かお）');
+    expect(screen.getByTestId('studio-summary').textContent).toContain('「うみ」');
+    expect(screen.getByTestId('studio-summary').textContent).toContain('ポップ');
+    expect(screen.getByTestId('studio-make').textContent).toContain('作る（チケット 2 枚）');
+  });
+
+  it('チケットが足りないと、さいごの段で作るを押せず、理由が出る', async () => {
     open({ tickets: 1 });
     await waitFor(() => expect(screen.getByTestId('studio-tickets').textContent).toContain('のこり 1 枚'));
-    expect((screen.getByTestId('studio-make') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('studio-hint').textContent).toBe('テーマを入れてください。');
+    next();
+    tap('studio-target', 'セット');
+    next();
     fireEvent.change(screen.getByTestId('studio-theme'), { target: { value: 'うみ' } });
-    expect((screen.getByTestId('studio-make') as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.change(screen.getByTestId('studio-target'), { target: { value: '__set' } });
+    next();
+    next();
+    expect((screen.getByTestId('studio-make') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('studio-hint').textContent).toBe('チケットが足りません（のこり 1 枚、必要 2 枚）。');
-    expect(screen.getByTestId('studio-make').textContent).toBe('作る（チケット 2 枚）');
+  });
+
+  it('管理者でなければ、チケットを配る欄は出ない。管理者なら出て、自分のコードに配れる（偽物の世界）', async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    expect(screen.queryByTestId('gift-section')).toBeNull();
+    cleanup();
+    localStorage.clear();
+    const session = open({ admin: true, tickets: 0 });
+    await waitFor(() => expect(screen.getByTestId('gift-section')).toBeTruthy());
+    const code = session.getState().user!.userCode;
+    fireEvent.change(screen.getByTestId('gift-code'), { target: { value: code.toLowerCase() } });
+    fireEvent.change(screen.getByTestId('gift-count'), { target: { value: '3' } });
+    fireEvent.click(screen.getByTestId('gift-give'));
+    await waitFor(() => expect(screen.getByTestId('gift-message').textContent).toContain(`${code} さんに 3 枚 配りました（いま 3 枚）`));
+    fireEvent.change(screen.getByTestId('gift-code'), { target: { value: 'ZZZZZZZZ' } });
+    fireEvent.click(screen.getByTestId('gift-give'));
+    await waitFor(() => expect(screen.getByTestId('gift-message').textContent).toContain('見つかりません'));
+    fireEvent.change(screen.getByTestId('gift-count'), { target: { value: '0' } });
+    expect((screen.getByTestId('gift-give') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('古いサーバーのときは、知らせを出して、作る欄を出さない', async () => {
@@ -91,7 +182,11 @@ describe('つくる', () => {
     };
     render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('studio-next')); // ドール
+    fireEvent.click(screen.getByTestId('studio-next')); // なにを
     fireEvent.change(screen.getByTestId('studio-theme'), { target: { value: 'うみ' } });
+    fireEvent.click(screen.getByTestId('studio-next')); // テーマ
+    fireEvent.click(screen.getByTestId('studio-next')); // 絵柄
     fireEvent.click(screen.getByTestId('studio-make'));
     await waitFor(() => expect(screen.getByTestId('order-show').dataset.phase).not.toBe('ordering'), { timeout: 4000 });
     return { phase: screen.getByTestId('order-show').dataset.phase, text: screen.getByTestId('order-show').textContent ?? '', refreshed: () => refreshed };

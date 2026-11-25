@@ -120,7 +120,7 @@ Stripe の支払いページ（同じ画面のまま移る）
 - アプリを開いたとき（`shop` を呼んだとき）、サーバーは、まだアプリに伝えていない `paid` の支払いを返す（`announce`）。アプリは「チケットが 10 枚 ふえました」を 1 回出し、`ack` で伝えた印を付ける。覚えた番号が無い端末（Safari で戻った・別の端末）でも、増えたことが分かる。
 - 戻ってきた `?pay=…` は、読んだら URL から消す（`history.replaceState`。③ のログインの戻りと同じやり方）。
 
-### 5-2. サーバーの呼び出し（`op` を足す。サーバーの版 5 = `PAY_API`）
+### 5-2. サーバーの呼び出し（`op` を足す。サーバーの版 6 = `PAY_API`。5 は、main の「配る」）
 - `shop` → `{ open: boolean, packs: [{ id, tickets, price }], lots, free, announce: [{ session, tickets }] }`。`open` = 売る設定 on か管理者。`shopAck { session }` で伝えた印。
 - `checkout { pack, adultAt, agreedAt }` → 匿名なら断る（`refused` `pay:login`）。売っていなければ断る（`pay:closed`）。パックが無ければ断る（`pay:pack`）。1 人 1 日 10 回まで（`pay:limit`。**こちらの判断**: いたずらで支払いページを作り続けるのを止める）。Stripe に Checkout Session を作り（`mode: payment`、`price_data` で値段と名前、`client_reference_id: uid`、`metadata: { uid, pack, tickets }`、`success_url`・`cancel_url`、`expires_at` 30 分）、`purchases/{sessionId}`（`uid`・`pack`・`tickets`・`price`・`status: 'open'`・`adultAt`・`agreedAt`・`createdAt`）を書いて、`url` を返す。
 - `purchase { session }` → 別の人の支払いなら断る（`pay:other`）。その人の `purchases/{session}` を見て、`open` なら Stripe に聞き直し、支払い済みなら足す（下の 5-3 と同じ関数）。`{ status: 'open' | 'paid' | 'expired', tickets, added }` を返す。

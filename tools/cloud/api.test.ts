@@ -95,7 +95,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(5); // 5 = 支払いもできるサーバー（4 = 交換、3 = 引き継ぎ）
+    expect(api).toBe(6); // 6 = 支払いもできるサーバー（5 = チケットを配る、4 = 交換、3 = 引き継ぎ）
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -186,12 +186,12 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
   const anon = { anonymous: true };
   const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
 
-  it('signIn の返事の api は 3。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
-    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(5);
-    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(5);
+  it('signIn の返事の api は 6。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(6);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(6);
     expect((await store.getUser('a1'))!.named).toBeUndefined();
     const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
-    expect(answer).toMatchObject({ api: 5, user: { tickets: 0, admin: false } });
+    expect(answer).toMatchObject({ api: 6, user: { tickets: 0, admin: false } });
     expect((await store.getUser('g1'))!.named).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     store.moveTickets = async () => {
       throw new Error('store is down');
     };
-    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(5);
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(6);
   });
 
   it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {
@@ -339,3 +339,50 @@ describe('支払いの op', () => {
   });
 });
 
+describe('チケットを配る（giveTickets）', () => {
+  type Gift = { gift: { userCode: string; tickets: number }; user: UserView };
+  const setup = async () => {
+    const admin = (await call<{ user: UserView }>('admin', { op: 'signIn' })).user;
+    const kid = (await call<{ user: UserView }>('kid', { op: 'signIn' })).user;
+    deps.adminCodes = [admin.userCode];
+    return { admin, kid };
+  };
+  it('管理者は、利用者コードで指した人に配れる（台帳に gift:{管理者のコード}）。小文字・空白・- は無視', async () => {
+    const { admin, kid } = await setup();
+    const spaced = ` ${kid.userCode.slice(0, 4).toLowerCase()}-${kid.userCode.slice(4)} `;
+    const answer = await call<Gift>('admin', { op: 'giveTickets', userCode: spaced, count: 5 });
+    expect(answer.gift).toEqual({ userCode: kid.userCode, tickets: 5 });
+    expect(answer.user.admin).toBe(true);
+    expect((await store.getUser('kid'))!.tickets).toBe(5);
+    expect(store.ledger.filter((l) => l.uid === 'kid')).toEqual([{ uid: 'kid', count: 5, reason: `gift:${admin.userCode}`, at: clock }]);
+    // 配った分は、無料のチケット（期限なし）として財布に入る
+    expect(await store.getWallet('kid', clock)).toEqual({ free: 5, lots: [] });
+    expect((await call<Gift>('admin', { op: 'giveTickets', userCode: kid.userCode, count: 2 })).gift.tickets).toBe(7);
+  });
+  it('管理者でなければ断る（チケットは変わらない）', async () => {
+    const { kid } = await setup();
+    const other = (await call<{ user: UserView }>('other', { op: 'signIn' })).user;
+    await expect(call('kid', { op: 'giveTickets', userCode: other.userCode, count: 3 })).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    expect((await store.getUser('other'))!.tickets).toBe(0);
+    expect(kid.admin).toBe(false);
+  });
+  it('枚数が 1〜100 の整数でない・知らないコード・形の違う呼び出しは断る', async () => {
+    const { kid } = await setup();
+    for (const count of [0, -1, 1.5, 101, Number.NaN]) {
+      await expect(call('admin', { op: 'giveTickets', userCode: kid.userCode, count })).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    }
+    await expect(call('admin', { op: 'giveTickets', userCode: kid.userCode, count: '3' })).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    await expect(call('admin', { op: 'giveTickets', userCode: 'ZZZZZZZZ', count: 3 })).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    await expect(call('admin', { op: 'giveTickets', count: 3 })).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    expect((await store.getUser('kid'))!.tickets).toBe(0);
+  });
+  it('アカウントへ移った（合わせた）利用者のコードなら、移った先に配る', async () => {
+    const { kid } = await setup();
+    const account = (await call<{ user: UserView }>('account', { op: 'signIn' })).user;
+    await store.markUser('kid', { movedTo: 'account' });
+    const answer = await call<Gift>('admin', { op: 'giveTickets', userCode: kid.userCode, count: 4 });
+    expect(answer.gift).toEqual({ userCode: account.userCode, tickets: 4 });
+    expect((await store.getUser('account'))!.tickets).toBe(4);
+    expect((await store.getUser('kid'))!.tickets).toBe(0);
+  });
+});

@@ -11,16 +11,19 @@ import type { SetRef, StudioUser } from './backend';
 //   2 = 生成を、サーバーの列で進める（アプリが「進める」を呼ばなくてよい）
 //   3 = 引き継ぎ（op: 'offer'・'adopt'。2 台めの端末のチケットと服を、アカウントに合わせる）
 //   4 = 交換（op: 'tradeOpen' など。2 台で、服を 1 点ずつ入れ替える）
-//   5 = 支払い（op: 'shop'・'checkout'・'purchase'・'shopAck'。チケットを買う）と、ようこそのチケット
-export const SERVER_API = 5;
+//   5 = チケットを配る（op: 'giveTickets'。管理者だけ）
+//   6 = 支払い（op: 'shop'・'checkout'・'purchase'・'shopAck'。チケットを買う）と、ようこそのチケット
+export const SERVER_API = 6;
 // アプリが要る、いちばん古いサーバーの版（これより古いと、「サーバーが古い版です」で、作れない）
 export const MIN_API = 2;
 // 引き継ぎに要るサーバーの版（これより古いサーバーでは、合わせることだけが、できない）
 export const ADOPT_API = 3;
 // 交換に要るサーバーの版
 export const TRADE_API = 4;
+// チケットを配るのに要るサーバーの版
+export const GIFT_API = 5;
 // 支払い（チケットを買う）に要るサーバーの版
-export const PAY_API = 5;
+export const PAY_API = 6;
 
 // 古いサーバーの返事には、free・lots が無い（remoteBackend が、全部を配った分として補う）
 export type WireUser = Omit<StudioUser, 'free' | 'lots'> & Partial<Pick<StudioUser, 'free' | 'lots'>>;

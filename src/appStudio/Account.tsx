@@ -8,7 +8,7 @@
  * 文は、設計書 7.1・7.2・7.4・8.8 のとおり（大人向け）。メールアドレスは、きろく・console には出さない（画面にだけ出す）。
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { browserSettleDeps, deviceEmpty, forgetAccount, intentFor, LOGIN_MESSAGES, settleLogin } from '../cloud/account';
+import { accountLabel, browserSettleDeps, deviceEmpty, forgetAccount, intentFor, LOGIN_MESSAGES, settleLogin } from '../cloud/account';
 import type { AccountInfo, LoginResult } from '../cloud/account';
 import type { StudioUser } from '../cloud/backend';
 import type { LoginIntent } from '../cloud/googleRedirect';
@@ -54,6 +54,7 @@ export function Account({ session, library, reload = () => window.location.reloa
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [open, setOpen] = useState(false); // 小さくたたんでおく（知らせ・確かめ・待ちの間は、開く）
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -200,13 +201,15 @@ export function Account({ session, library, reload = () => window.location.reloa
   const note = unavailable ? TEXT.unavailable : message;
 
   return (
-    <section className="studio-account" data-testid="account-section">
-      <h3>{TEXT.heading}</h3>
+    <details className="studio-account" data-testid="account-section" open={open || busy || confirming || note !== null} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="studio-account-summary" data-testid="account-summary">
+        {info?.kind === 'google' ? `👤 ${accountLabel(info)}` : `${TEXT.heading}（Google でログイン）`}
+      </summary>
       {info?.kind === 'google' ? (
         <>
           <div className="studio-row studio-account-row">
             <span className="studio-account-email" data-testid="account-email">
-              {info.email ? `ログイン中: ${info.email}` : 'ログイン中'}
+              {info.name.trim() ? `${info.name.trim()} でログイン中` : 'ログイン中'}
             </span>
             {!confirming && (
               <button type="button" onClick={() => setConfirming(true)} disabled={busy} data-testid="account-logout">
@@ -255,6 +258,6 @@ export function Account({ session, library, reload = () => window.location.reloa
           {note}
         </p>
       )}
-    </section>
+    </details>
   );
 }
