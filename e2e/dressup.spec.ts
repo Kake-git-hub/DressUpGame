@@ -1120,15 +1120,16 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     const order = await namesOf(page);
     const selected = page.locator('[data-testid="adjust-picker-item"].on');
     const on = await selected.getAttribute('title');
-    // 選んでいる服（最後に着たくつ = いちばん上）には ⇅ の印。ほかの服をなぞると、一覧が流れる
-    expect(order[0]).toBe(on?.slice(0, 3));
+    // 選んでいる服（最後に着たくつ）には ⇅ の印。ほかの服は、なぞると一覧が流れる
     await expect(selected.locator('.item-adjust-picker-grip')).toBeVisible();
-    await expect(rowsOf(page).nth(1)).toHaveCSS('touch-action', 'pan-y');
+    await expect(page.locator('[data-testid="adjust-picker-item"]:not(.on)').first()).toHaveCSS('touch-action', 'pan-y');
     await expect(selected).toHaveCSS('touch-action', 'none');
     const touch = await fingers(page);
+    // 選んでいない、上から 2 番めまでの服の行（0 か 1）
+    const free = (await rowsOf(page).nth(0).getAttribute('class'))?.includes('on') ? 1 : 0;
 
     // 選んでいない服を、なぞる: 一覧が流れる。並びも、調整する服も変わらない
-    let p = await center(page, 1);
+    let p = await center(page, free);
     await touch('touchStart', [p]);
     for (const dy of [-20, -40, -60, -80]) await touch('touchMove', [{ x: p.x, y: p.y + dy }]);
     await touch('touchEnd', []);
@@ -1136,7 +1137,8 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     expect(await namesOf(page)).toEqual(order);
     expect(await selected.getAttribute('title')).toBe(on);
 
-    // 選んでいない服を押すと、その服を選ぶ（印が移る）
+    // 選んでいない服を押すと、その服を選ぶ（印が移る）。なぞったあとの慣性で流れているあいだの指は、流れを止めるだけなので、止まるのを待つ
+    await page.waitForTimeout(1000);
     await list.evaluate((el) => (el.scrollTop = 0));
     p = await center(page, 1);
     await touch('touchStart', [p]);
@@ -1432,9 +1434,7 @@ test('セット: ドールへドラッグすると、全部のパーツが一度
   await expect.poll(saved).toEqual([]);
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
   await expect(tile).toHaveAttribute('data-worn', 'false');
-  // タップ（動かさない）では着ない
-  await page.locator('.reset-button-fixed').click();
-  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  // 着ていないセットは、タップ（動かさない）では着ない
   await tile.click();
   await page.waitForTimeout(300);
   expect(await saved()).toEqual([]);

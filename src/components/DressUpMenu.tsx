@@ -216,7 +216,7 @@ export function DressUpMenu({
           <ScrollList>
             <div style={styles.scrollContent}>
               {sets.map((set) => (
-                <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={dropSet} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} />
+                <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={dropSet} onRemove={onItemRemove} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} />
               ))}
             </div>
           </ScrollList>
