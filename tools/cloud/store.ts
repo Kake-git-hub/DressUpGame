@@ -25,6 +25,7 @@ export interface UserDoc {
   adopted?: string[]; // この利用者が、もらった元の uid（古い順。20 件まで）
   named?: boolean; // 匿名でない利用者として、1 回でも呼んだ（移す元には、できない）
   handoff?: string; // この利用者の、いまの合い言葉
+  trade?: string; // この利用者の、いまの交換（ひとつだけ）の ID
 }
 // 引き継ぎの合い言葉（handoffs/{合い言葉}）。uid = 移す元（合い言葉をもらった匿名の利用者）、usedBy = 使った人（移す先）
 export interface HandoffDoc {
@@ -93,6 +94,28 @@ export interface ItemDoc {
   notes?: string[]; // 検品で気づいたこと（注意あり）
 }
 
+// 交換（trades/{id}）。a = 出した人、b = 読み取った人。code = 読み取りの印、codeAt = 印を出した時刻
+export type TradeStatus = 'open' | 'claimed' | 'joined' | 'done' | 'cancelled';
+export type TradeEndReason = 'cancel' | 'expired' | 'gone' | 'conflict' | 'replaced';
+export interface TradeSide {
+  uid: string;
+  itemId?: string;
+  accepted?: boolean;
+}
+export interface TradeDoc {
+  id: string;
+  status: TradeStatus;
+  a: TradeSide;
+  b?: TradeSide;
+  code: string;
+  codeAt: number;
+  createdAt: number;
+  claimedAt?: number;
+  joinedAt?: number;
+  endedAt?: number;
+  reason?: TradeEndReason;
+}
+
 export interface CloudStore {
   getUser(uid: string): Promise<UserDoc | null>;
   // 利用者を作る（もういれば、そのまま返す）。利用者コードは、ほかの利用者と重ならないものにする
@@ -147,6 +170,23 @@ export interface CloudStore {
   moveTickets(from: string, to: string, now: number): Promise<number>;
   // 服 1 点を、from から to へ移す（1 つの取り引き。中で読み直す）。from に無ければ false。to に同じ ID があれば、書かずに from から消す（true）
   moveItem(from: string, to: string, itemId: string): Promise<boolean>;
+
+  // ── 交換（2 台で、服を 1 点ずつ入れ替える）──
+  putTrade(trade: TradeDoc): Promise<void>;
+  getTrade(id: string): Promise<TradeDoc | null>;
+  // 読み取りの印から探す（無ければ null）
+  findTradeByCode(code: string): Promise<TradeDoc | null>;
+  // 交換を、読んで書き換える（割り込まれない）。無ければ CloudError('refused')。change が null を返したら、書かない。
+  // updateJob と同じく、change は 2 回以上呼ばれることがある
+  updateTrade(id: string, change: (trade: TradeDoc) => TradeDoc | null): Promise<TradeDoc>;
+  // a.itemId を b.uid へ、b.itemId を a.uid へ（1 つの取り引き。中で、交換と 2 点の服と、受け取る側の同じ ID を読み直す）。
+  // まだ status=joined・両方 accepted・両方の服がそれぞれの持ち主にある・受け取る側に同じ ID が無い、ときだけ動かして done にする。
+  // 服が無ければ cancelled（reason 'gone'）、受け取る側に同じ ID があれば cancelled（'conflict'）で、何も動かさない。
+  // もう done（や cancelled）、まだ joined でない・両方 accepted でないときは、何も変えずに、そのまま返す。
+  // 動かした服は、set を外し、order と updatedAt を now にする（名前・色・絵・ID はそのまま）
+  swapTrade(id: string, now: number): Promise<TradeDoc>;
+  // 利用者のいまの交換の ID を書く（null で消す）。利用者がいなければ CloudError('refused')
+  setUserTrade(uid: string, tradeId: string | null): Promise<void>;
 }
 
 // 絵の置き場
