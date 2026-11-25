@@ -250,6 +250,28 @@ describe('本物の裏側', () => {
     expect((error as BackendError).message).toMatch(/のこり 0 枚/);
   });
 
+  describe('チケットを配る', () => {
+    it('api が 4 なら、op: giveTickets を、書き方をそろえたコードで呼ぶ。返事の gift を返す', async () => {
+      const server = fakeServer(4);
+      const call = server.transport.call.bind(server.transport);
+      const gifts: Record<string, unknown>[] = [];
+      server.transport.call = (async (data: Record<string, unknown>) => {
+        if (data.op !== 'giveTickets') return call(data);
+        gifts.push(data);
+        return { gift: { userCode: 'WXYZ2345', tickets: 8 }, user: { userCode: 'ABCD2345', tickets: 3, admin: true } } as never;
+      }) as typeof server.transport.call;
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.giveTickets(' wxyz-2345 ', 5)).toEqual({ userCode: 'WXYZ2345', tickets: 8 });
+      expect(gifts).toEqual([{ op: 'giveTickets', userCode: 'WXYZ2345', count: 5 }]);
+    });
+    it('api が 3 のサーバーでは、呼ばずに old-server', async () => {
+      const server = fakeServer(3);
+      const error = await createRemoteBackend(server.transport).giveTickets('WXYZ2345', 1).catch((e: unknown) => e);
+      expect((error as BackendError).code).toBe('old-server');
+      expect(server.count('giveTickets')).toBe(0);
+    });
+  });
+
   describe('引き継ぎ（合い言葉）', () => {
     it('offerHandoff: api が 3 なら、op: offer を呼んで、合い言葉を返す。まだ signIn していなければ、先に signIn する', async () => {
       const server = fakeServer(3);

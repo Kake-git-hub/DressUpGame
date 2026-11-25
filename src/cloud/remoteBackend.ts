@@ -8,9 +8,9 @@
  */
 import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
-import { BackendError, OLD_SERVER_MESSAGE } from './backend';
-import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
-import { ADOPT_API, MIN_API } from './wire';
+import { BackendError, normalizeUserCode, OLD_SERVER_MESSAGE } from './backend';
+import type { AdoptAnswer, GiftAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
+import { ADOPT_API, GIFT_API, MIN_API } from './wire';
 import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
 
 export interface StudioTransport {
@@ -197,6 +197,13 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     async adopt(word): Promise<AdoptAnswer> {
       const { status, tickets, items } = took(await transport.call<AdoptAnswer & { user?: WireUser }>({ op: 'adopt', word }));
       return { status, tickets, items };
+    },
+    async giveTickets(userCode, count) {
+      if (serverApi === null) await backend.signIn();
+      // 古いサーバーは、giveTickets を知らない
+      if ((serverApi ?? 0) < GIFT_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      const { gift } = took(await transport.call<{ gift: GiftAnswer; user: WireUser }>({ op: 'giveTickets', userCode: normalizeUserCode(userCode), count }));
+      return gift;
     },
   };
   return backend;

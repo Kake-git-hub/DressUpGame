@@ -8,6 +8,7 @@
 import sharp from 'sharp';
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { GOOGLE_CLIENT_ID } from '../src/cloud/firebaseConfig';
+import { chooseTarget, themeAndCheck } from './helpers';
 
 const REAL = '/DressUpGame/?content=e2e-content/&studio=1';
 const FUNCTIONS = 'https://asia-northeast1-dressup-game-89f6e.cloudfunctions.net';
@@ -128,8 +129,8 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     expect(fake.calls[0].auth).toMatch(/^Bearer ey/);
 
     // サーバーが理由つきで断ったら、注文を受けられなかったと出て、その文章を出す
-    await page.getByTestId('studio-target').selectOption({ label: 'トップス' });
-    await page.getByTestId('studio-theme').fill('だめ');
+    await chooseTarget(page, 'トップス');
+    await themeAndCheck(page, 'だめ');
     await page.getByTestId('studio-make').click();
     await expect(page.getByTestId('order-show')).toHaveAttribute('data-phase', 'refused', { timeout: 10_000 });
     await expect(page.getByTestId('order-show')).toContainText('チケットは つかっていません。');
@@ -137,7 +138,9 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await page.getByTestId('order-back').click();
     await expect(page.getByTestId('studio-tickets')).toContainText('のこり 2 枚');
 
-    await page.getByTestId('studio-theme').fill('うみ');
+    // さいごの段のまま: テーマの段へもどって、入れ直す
+    await page.getByTestId('studio-summary').getByText('「だめ」').click();
+    await themeAndCheck(page, 'うみ');
     await page.getByTestId('studio-make').click();
     await expect(page.getByTestId('order-ticket-count')).toHaveText('チケット 1 まい つかいました（のこり 1 まい）', { timeout: 10_000 });
     await page.getByTestId('order-ok').click();
@@ -206,6 +209,7 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     });
     await openStudio(page);
     await expect(page.getByTestId('account-section')).toBeVisible();
+    await page.getByTestId('account-summary').click(); // たたんであるのを開く
     await expect(page.getByTestId('account-login-popup')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('account-login-redirect')).toBeEnabled();
     await expect(page.getByTestId('account-email')).toHaveCount(0);

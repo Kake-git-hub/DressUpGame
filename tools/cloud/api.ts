@@ -8,7 +8,7 @@ import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { SERVER_API } from '../../src/cloud/wire.ts';
-import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drainAdopted, giveTickets, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -164,6 +164,11 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown, cal
     case 'deleteItem':
       await deleteItem(deps, uid, str(d.id, 100));
       return { ok: true };
+    case 'giveTickets': {
+      // 管理者だけ（giveTickets の中で確かめる）
+      if (typeof d.count !== 'number') throw refused();
+      return { gift: await giveTickets(deps, uid, { userCode: str(d.userCode, 40), count: d.count }), user: await user() };
+    }
     default:
       throw refused();
   }

@@ -17,7 +17,10 @@ import { ACKED_KEY, NEW_KEY } from './session';
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-export type AccountInfo = { kind: 'guest' } | { kind: 'google'; email: string };
+// name = Google のアカウントの名前（表示名。無ければ空）。画面には、メールアドレスではなく名前を出す
+export type AccountInfo = { kind: 'guest' } | { kind: 'google'; email: string; name: string };
+// 画面に出す名前（名前が無いときは「ログイン中」）
+export const accountLabel = (info: AccountInfo | null): string | null => (info?.kind === 'google' ? info.name.trim() || 'ログイン中' : null);
 export type LoginOutcome = 'linked' | 'switched' | 'taken' | 'cancelled' | 'not-ready' | 'no-popup' | 'failed' | 'merged' | 'merge-later' | 'taken-old-server' | 'press-again';
 export interface LoginResult {
   outcome: LoginOutcome;

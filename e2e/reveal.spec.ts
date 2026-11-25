@@ -2,13 +2,13 @@
  * E2Eテスト: 服が届いた演出（クローゼットが開く）。裏側は、端末の中だけで動く偽物
  */
 import { test, expect, type Page } from '@playwright/test';
-import { APP, DOLL_X, FIRST, FIRST_Y, SECOND, SECOND_Y, VIEW_H, expectPixel, fakeState, gameReady, openHome, openStudio, order, play } from './helpers';
+import { APP, DOLL_X, FIRST, FIRST_Y, SECOND, SECOND_Y, VIEW_H, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, chooseSet, themeAndCheck } from './helpers';
 
 const reveal = (page: Page) => page.getByTestId('reveal');
 // ホームやゲームの画面では、進み具合を聞くのは 30 秒おき（つくる・クローゼットを開いている間は 3 秒おき）
 const ARRIVE = { timeout: 45_000 };
 // 「つくる」で注文して、ホームにもどる（できあがる前に）
-async function orderAndGoHome(page: Page, target: string | { label: string } = { label: 'トップス' }, theme = 'うみ') {
+async function orderAndGoHome(page: Page, target: { label: string } = { label: 'トップス' }, theme = 'うみ') {
   await openStudio(page);
   await order(page, target, theme);
   await page.getByTestId('studio-close').click();
@@ -97,12 +97,9 @@ test('クローゼットをみる: クローゼットが開き、届いた服に
 test('セット: 全部そろってから 1 回だけ出て、全部を着た絵。きせてみるで、全部着る', async ({ page }) => {
   await openHome(page, { delayMs: 1200 });
   await openStudio(page);
-  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
-  const checks = page.getByTestId('studio-set-categories').locator('input[type=checkbox]');
-  for (let i = 0; i < (await checks.count()); i++) await checks.nth(i).uncheck();
-  await page.getByTestId('studio-set-categories').getByText('トップス').click();
-  await page.getByTestId('studio-set-categories').getByText('ボトムス').click();
-  await page.getByTestId('studio-theme').fill('うみ');
+  await chooseSet(page, ['トップス', 'ボトムス']);
+  await page.getByTestId('studio-next').click();
+  await themeAndCheck(page, 'うみ');
   await page.getByTestId('studio-make').click();
   await page.getByTestId('order-ok').click({ timeout: 15_000 });
   // 1 点目ができても、まだ出ない
@@ -123,12 +120,9 @@ test('セット: 全部そろってから 1 回だけ出て、全部を着た絵
 test('セットの一部ができなかったら、同じ画面に知らせが出る。全部できなかったら、とびらは出ず、知らせだけ（1 回だけ）', async ({ page }) => {
   await openHome(page, { delayMs: 800, failCategories: ['ボトムス'] });
   await openStudio(page);
-  await page.getByTestId('studio-target').selectOption({ label: 'セット' });
-  const checks = page.getByTestId('studio-set-categories').locator('input[type=checkbox]');
-  for (let i = 0; i < (await checks.count()); i++) await checks.nth(i).uncheck();
-  await page.getByTestId('studio-set-categories').getByText('トップス').click();
-  await page.getByTestId('studio-set-categories').getByText('ボトムス').click();
-  await page.getByTestId('studio-theme').fill('うみ');
+  await chooseSet(page, ['トップス', 'ボトムス']);
+  await page.getByTestId('studio-next').click();
+  await themeAndCheck(page, 'うみ');
   await page.getByTestId('studio-make').click();
   await page.getByTestId('order-ok').click({ timeout: 15_000 });
   await expect(reveal(page)).toBeVisible(ARRIVE);

@@ -374,6 +374,22 @@ function App() {
       cancelled = true;
     };
   }, [refreshMyItems]);
+  // ログインしている Google のアカウントの名前（右上に薄く出す。メールアドレスは出さない）。
+  // 「つくる」を閉じたときにも聞き直す（中でログイン・ログアウトしたかもしれない）
+  const [accountName, setAccountName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session || studioOpen) return;
+    let alive = true;
+    session.backend.account
+      .prepare()
+      .then((info) => {
+        if (alive) setAccountName(info.kind === 'google' ? info.name.trim() || 'ログイン中' : null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [session, studioOpen]);
   // 前に「つくる」「クローゼット」を使った端末では、素材が読めたあと、裏でつなぐ（服を合わせ、作りかけの仕事を見る）。
   // ゲームの起動は待たせない。つながらなくても、何も出さない
   useEffect(() => {
@@ -740,6 +756,11 @@ function App() {
   const versionBadge = (
     <>
       <div className={`version-badge${onHome ? ' on-home' : ''}`} onClick={handleBadgeTap}>
+        {accountName && (
+          <span className="account-badge" data-testid="account-badge">
+            👤 {accountName}
+          </span>
+        )}
         v{APP_VERSION}
       </div>
       {diagText !== null && (
@@ -1085,6 +1106,7 @@ function App() {
                 library={library}
                 dolls={allDolls}
                 categoriesByDoll={categoriesByDoll}
+                clothing={allClothing}
                 initialDollId={currentDoll.id}
                 onClose={closeStudio}
                 onOpenCloset={() => {

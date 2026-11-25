@@ -18,6 +18,13 @@
 | サーバー | 作者の Firebase（`dressup-game-89f6e`、東京）に、**v0.38.0 の版が載っている**（2026-11-24、作者が PC で `npm run firebase:deploy`。`Deploy complete!`。合い言葉・移す = `offer`・`adopt` が入った版）。その前は、**v0.35.0 の版が載っていた**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
 | テスト | 0-4 を見る |
 
+### 0-0a. v0.41.0（2026-11-25、作者の指示。作業ブランチ `claude/zen-bell-wrr24t`。**まだ公開していない**）
+
+- **つくるの画面**: 1 段ずつ、絵をタップして進む（`src/appStudio/AppStudio.tsx` の `step`: doll → what → theme → style → check。ドールが 1 体なら doll なし）。カテゴリの絵は「そのカテゴリの先頭の服のサムネイル」（公開の服を先に。`clothing` を App から渡す）。作者の言葉: 「カテゴリを文字ではなく先頭のサムネを使って選ぶ」。絵柄・テーマの例は絵文字（画像生成は使っていない = 0 枚）。
+- **チケットを配る**（管理者だけ）: サーバーに `op: 'giveTickets'`（`tools/cloud/studioCore.ts` の `giveTickets`。1〜100 枚。`movedTo` をたどる。台帳 `gift:{管理者のコード}`）。`SERVER_API = 4`・`GIFT_API = 4`。画面は `src/appStudio/GiftTickets.tsx`。**作者の PC での載せ直しが要る**（`docs/firebase-setup.md` の 2-12）。冪等ではない（返事が届かなかったら、画面が「相手の枚数を確かめて」と出す）。
+- **ログインの表示**: つくるの中の欄は `<details>` でたたむ。ログイン中は、版数の左に Google の名前（`AccountInfo.name` = providerData の displayName）を薄く出す（`account-badge`。メールアドレスは出さない）。
+- テスト: ユニット 1201・エミュレーター 31 通過。E2E は下の 0-4 に書く。
+
 ### 0-A. 次のセッションが、最初にすること
 
 段階 ①②③は、公開まで済んだ（③ は、③-a 試し版 v0.37.0 → ③-b 合わせる v0.38.0）。**③-b は、実機で通った**（2026-11-25、Issue 9。Android のスマホを 2 台めとして合わせた。`login switch stashed` → `login adopt ok tickets=0 items=8` → `login result merged`。記録: `docs/reports/2026-11-25-android-v0.38.0-merge.md`）。**③ は終わり。** ④ 並び順は、作者と話して **PC スタジオで並べる形**にした（v0.39.0。設計 `specs/2026-11-25-stage4-order-design.md`、計画 `plans/2026-11-25-stage4-sort-view.md`）。 残りは ④ 並び順 → ⑤ 交換 → ⑥ 支払い（0-1 の表。1 段階ずつ、1 つの版として出す）。

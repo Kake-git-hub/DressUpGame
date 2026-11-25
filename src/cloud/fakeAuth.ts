@@ -7,6 +7,7 @@ import type { AccountInfo, AuthPort } from './account';
 import type { LoginIntent } from './googleRedirect';
 
 export const FAKE_EMAIL = 'tameshi@example.com';
+export const FAKE_NAME = 'ためし はなこ';
 
 // 利用者の入れ替え（fakeBackend.ts が実装する）。link は「もう使われている」ときに、{ code: 'auth/credential-already-in-use' } を投げる
 export interface FakeWorld {
@@ -30,7 +31,7 @@ export function createFakeAuthPort(world: FakeWorld, options: { loginFail?: stri
     }
   };
   return {
-    current: (): AccountInfo => (world.isGoogle() ? { kind: 'google', email: FAKE_EMAIL } : { kind: 'guest' }),
+    current: (): AccountInfo => (world.isGoogle() ? { kind: 'google', email: FAKE_EMAIL, name: FAKE_NAME } : { kind: 'guest' }),
     popup: (intent) => run(intent),
     withToken: (intent) => run(intent),
     // 断りと一緒に返る証明で入る、のまね。stashed が false なら、証明が返らなかったことにする

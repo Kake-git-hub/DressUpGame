@@ -13,7 +13,8 @@ import type { CloudSession } from '../cloud/session';
 import type { ManifestCategory } from '../content/manifest';
 import { isBackHairCategory } from '../pipeline/hairSplit';
 import { DEFAULT_STYLE_ID, STYLE_PRESETS } from '../studio/stylePresets';
-import type { DollData } from '../types';
+import type { ClothingItemData, DollData } from '../types';
+import { GiftTickets } from './GiftTickets';
 import { Account } from './Account';
 import { jobNotice } from './jobNotice';
 import { OrderShow } from './OrderShow';
@@ -24,6 +25,7 @@ interface Props {
   library: Library; // 端末の中の自分の服（ログアウトのとき、このアカウントの服を外す）
   dolls: DollData[]; // ゲームに出ているドール
   categoriesByDoll: Record<string, ManifestCategory[]>;
+  clothing?: ClothingItemData[]; // 服の一覧（カテゴリの絵に、先頭の服のサムネイルを使う）
   initialDollId: string; // 最初に選んでおくドール（最後に遊んだドール）
   onClose: () => void;
   onOpenCloset: () => void;
@@ -35,15 +37,43 @@ const SET = '__set';
 // 注文の演出を出しておく、いちばん短い時間（返事が早くても、何が起きたかが分かるように）
 const ORDER_MIN_MS = 1500;
 const NO_CATEGORIES: ManifestCategory[] = [];
+const NO_CLOTHING: ClothingItemData[] = [];
+const clock = () => Date.now();
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
+type Step = 'doll' | 'what' | 'theme' | 'style' | 'check';
+const STEP_TITLE: Record<Step, string> = {
+  doll: 'どの子の 服を作る？',
+  what: 'なにを 作る？',
+  theme: 'どんな テーマ？',
+  style: 'どんな 絵に する？',
+  check: 'これで 作る？',
+};
+// テーマの例（タップで入る）
+const THEME_IDEAS = [
+  { emoji: '🌊', word: 'うみ' },
+  { emoji: '👑', word: 'おひめさま' },
+  { emoji: '🍰', word: 'おかし' },
+  { emoji: '🌸', word: 'さくら' },
+  { emoji: '⭐', word: 'ほし' },
+  { emoji: '❄️', word: 'ゆき' },
+  { emoji: '🐰', word: 'うさぎ' },
+  { emoji: '🎃', word: 'ハロウィン' },
+  { emoji: '🎄', word: 'クリスマス' },
+  { emoji: '🦄', word: 'ユニコーン' },
+];
+const STYLE_EMOJI: Record<string, string> = { anime: '✨', manga: '✒️', real: '📷', pastel: '🦄', picturebook: '🎨', pop: '🍭' };
+// カテゴリの絵（そのカテゴリの先頭の服のサムネイル）。無ければ、名前の 1 文字め
+function Thumb({ src, label }: { src: string | undefined; label: string }) {
+  return src ? <img className="studio-thumb" src={src} alt="" draggable={false} /> : <span className="studio-thumb studio-thumb-none" aria-hidden="true">{label.slice(0, 1)}</span>;
+}
 const NOTICE = {
   waiting: '順番を待っています…',
   working: '作っています…（1 分くらい）',
   crowded: 'こみあっています。できたら、クローゼットに入ります。',
 };
 
-export function AppStudio({ session, library, dolls, categoriesByDoll, initialDollId, onClose, onOpenCloset, demo = false, art }: Props) {
+export function AppStudio({ session, library, dolls, categoriesByDoll, clothing = NO_CLOTHING, initialDollId, onClose, onOpenCloset, demo = false, art }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { user } = state;
   const [dollId, setDollId] = useState(() => (dolls.some((d) => d.id === initialDollId) ? initialDollId : (dolls[0]?.id ?? '')));
@@ -59,6 +89,21 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
   const [setCats, setSetCats] = useState<string[]>(() => defaultSet(targets));
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
+  const steps: Step[] = dolls.length > 1 ? ['doll', 'what', 'theme', 'style', 'check'] : ['what', 'theme', 'style', 'check'];
+  const [step, setStep] = useState<Step>(steps[0]);
+  const stepIndex = Math.max(0, steps.indexOf(step));
+  // カテゴリの ID → 先頭の服のサムネイル（公開の服を先に。自分の服しか無いカテゴリは、自分の服）
+  const thumbs = useMemo(() => {
+    const map: Record<string, string> = {};
+    const idOf = new Map(targets.map((c) => [c.label, c.id]));
+    const mine = (item: ClothingItemData) => item.id.startsWith('my:');
+    for (const item of [...clothing.filter((i) => !mine(i)), ...clothing.filter(mine)]) {
+      if (item.dollId && item.dollId !== doll?.id) continue;
+      const id = idOf.get(item.type);
+      if (id && !map[id] && (item.thumbnailUrl || item.imageUrl)) map[id] = item.thumbnailUrl || item.imageUrl;
+    }
+    return map;
+  }, [clothing, targets, doll]);
   const [phase, setPhase] = useState<OrderPhase | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   // 「こみあっています」に切り替えるために、ときどき描き直す
@@ -103,14 +148,28 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
             ? `チケットが足りません（のこり ${user.tickets} 枚、必要 ${cost} 枚）。`
             : null;
 
+  // この段から先へ進めない理由（進めるなら null）
+  const stepBlocked =
+    step === 'what'
+      ? targets.length === 0
+        ? 'このドールには、作れるものがありません。'
+        : isSet && (chosen.length < SET_MIN || chosen.length > SET_MAX)
+          ? `セットに入れるものを ${SET_MIN}〜${SET_MAX} 個選んでください（いま ${chosen.length} 個）。`
+          : null
+      : step === 'theme' && !text
+        ? 'テーマを入れてください。'
+        : null;
+  const goNext = () => setStep((now) => steps[Math.min(steps.length - 1, steps.indexOf(now) + 1)] ?? now);
+  const goBack = () => setStep((now) => steps[Math.max(0, steps.indexOf(now) - 1)] ?? now);
+
   const labelOf = (forDoll: string, id: string) => categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id;
   const make = async () => {
     if (blocked || phase || !doll) return;
     const style = STYLE_PRESETS.find((s) => s.id === styleId)?.label ?? '';
     setLines([`${isSet ? `セット（${chosen.length} てん）` : labelOf(doll.id, target)} ・ ${style}`, `「${text}」`]);
     setPhase({ kind: 'ordering' });
-    const started = Date.now();
-    const shown = () => new Promise((resolve) => setTimeout(resolve, Math.max(0, ORDER_MIN_MS - (Date.now() - started))));
+    const started = clock();
+    const shown = () => new Promise((resolve) => setTimeout(resolve, Math.max(0, ORDER_MIN_MS - (clock() - started))));
     try {
       const { jobId, cost: used } = await session.backend.startJob({ dollId: doll.id, theme: text, styleId, target: current });
       // ここからは、閉じても、サーバーが最後まで作る
@@ -139,7 +198,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
           <h2>✨ 服を作る</h2>
           {user && (
             <span className="studio-tickets" data-testid="studio-tickets">
-              {user.admin ? '管理者（チケットの制限なし）' : `🎫 のこり ${user.tickets} 枚`}
+              {user.admin ? '管理者（制限なし）' : `🎫 のこり ${user.tickets} 枚`}
             </span>
           )}
           <button type="button" onClick={onClose} aria-label="とじる" data-testid="studio-close">
@@ -159,74 +218,150 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
               </p>
             )}
             <p className="studio-note">
-              テーマを書いて注文すると、AI が服を作ります。できた服は、クローゼットに入ります（1〜2 分。アプリを閉じていても届きます）。服 1 点につき、チケットを 1 枚使います。
+              絵をえらんで注文すると、AI が服を作ります。できた服は、1〜2 分でクローゼットに届きます（アプリを閉じていても）。服 1 点 = チケット 1 枚。
             </p>
 
-            <section className="studio-form">
-              {dolls.length > 1 && (
-                <label className="studio-group">
-                  <span className="studio-label">ドール</span>
-                  <select className="studio-select" value={doll?.id ?? ''} onChange={(e) => changeDoll(e.target.value)} data-testid="studio-doll">
-                    {dolls.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="studio-group">
-                <span className="studio-label">① 何を作る？</span>
-                <select className="studio-select" value={target} onChange={(e) => setTarget(e.target.value)} data-testid="studio-target">
-                  {targets.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
+            <section className="studio-wizard" data-testid="studio-step" data-step={step}>
+              <ol className="studio-steps" aria-label="すすみぐあい">
+                {steps.map((id, i) => (
+                  <li key={id} data-on={id === step ? 'true' : undefined} data-done={i < stepIndex ? 'true' : undefined}>
+                    <button type="button" onClick={() => i < stepIndex && setStep(id)} disabled={i >= stepIndex} aria-label={STEP_TITLE[id]}>
+                      {i + 1}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <h3 className="studio-step-title">{STEP_TITLE[step]}</h3>
+
+              {step === 'doll' && (
+                <div className="studio-tiles" data-testid="studio-doll">
+                  {dolls.map((d) => (
+                    <button type="button" key={d.id} className="studio-tile studio-tile-doll" data-value={d.id} aria-pressed={d.id === doll?.id} aria-label={d.name} onClick={() => { changeDoll(d.id); goNext(); }}>
+                      <img src={d.bodyImageUrl} alt="" draggable={false} />
+                      <span>{d.name}</span>
+                    </button>
                   ))}
-                  {targets.length >= SET_MIN && <option value={SET}>セット</option>}
-                </select>
-              </label>
-              {isSet && (
-                <div className="studio-set" data-testid="studio-set-categories">
-                  <span>
-                    セットに入れるもの（{SET_MIN}〜{SET_MAX} 個。選んだものごとに 1 点、色と飾りをそろえて作ります）
-                  </span>
-                  <div className="studio-checks">
+                </div>
+              )}
+
+              {step === 'what' && (
+                <>
+                  <div className="studio-tiles" data-testid="studio-target">
                     {targets.map((c) => (
-                      <label key={c.id}>
-                        <input type="checkbox" checked={setCats.includes(c.id)} onChange={(e) => setSetCats((list) => (e.target.checked ? [...list, c.id] : list.filter((x) => x !== c.id)))} /> {c.label}
-                      </label>
+                      <button type="button" key={c.id} className="studio-tile" data-value={c.id} aria-pressed={target === c.id} aria-label={c.label} onClick={() => { setTarget(c.id); goNext(); }}>
+                        <Thumb src={thumbs[c.id]} label={c.label} />
+                        <span>{c.label}</span>
+                      </button>
+                    ))}
+                    {targets.length >= SET_MIN && (
+                      <button type="button" className="studio-tile studio-tile-set" data-value={SET} aria-pressed={isSet} aria-label="セット" onClick={() => setTarget(SET)}>
+                        <span className="studio-tile-collage" aria-hidden="true">
+                          {targets.filter((c) => thumbs[c.id]).slice(0, 4).map((c) => (
+                            <img key={c.id} src={thumbs[c.id]} alt="" draggable={false} />
+                          ))}
+                        </span>
+                        <span>セット</span>
+                      </button>
+                    )}
+                  </div>
+                  {isSet && (
+                    <div className="studio-set" data-testid="studio-set-categories">
+                      <span>
+                        セットに入れるものを、タップで えらんでね（{SET_MIN}〜{SET_MAX} 個。色と飾りをそろえて、1 点ずつ作ります）
+                      </span>
+                      <div className="studio-tiles studio-tiles-small">
+                        {targets.map((c) => {
+                          const on = setCats.includes(c.id);
+                          return (
+                            <button type="button" key={c.id} className="studio-tile" data-value={c.id} aria-pressed={on} aria-label={c.label} onClick={() => setSetCats((list) => (on ? list.filter((x) => x !== c.id) : [...list, c.id]))}>
+                              <Thumb src={thumbs[c.id]} label={c.label} />
+                              <span>{c.label}</span>
+                              {on && <i className="studio-tile-check" aria-hidden="true">✓</i>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {step === 'theme' && (
+                <div className="studio-group">
+                  <input className="studio-theme-input" value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" aria-label="テーマ" data-testid="studio-theme" />
+                  <span className="studio-hint">すきな ことばを 書いてね。下から えらんでも いいよ</span>
+                  <div className="studio-ideas">
+                    {THEME_IDEAS.map((idea) => (
+                      <button type="button" key={idea.word} className="studio-idea" aria-pressed={text === idea.word} onClick={() => setTheme(idea.word)} data-testid="studio-theme-idea">
+                        <span aria-hidden="true">{idea.emoji}</span>
+                        {idea.word}
+                      </button>
                     ))}
                   </div>
                 </div>
               )}
 
-              <label className="studio-group">
-                <span className="studio-label">② テーマ</span>
-                <input value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" aria-label="テーマ" data-testid="studio-theme" />
-              </label>
-
-              <label className="studio-group">
-                <span className="studio-label">③ 絵柄</span>
-                <select className="studio-select" value={styleId} onChange={(e) => setStyleId(e.target.value)} data-testid="studio-style">
-                  {STYLE_PRESETS.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
+              {step === 'style' && (
+                <div className="studio-tiles" data-testid="studio-style">
+                  {STYLE_PRESETS.map((st) => (
+                    <button type="button" key={st.id} className="studio-tile studio-tile-style" data-value={st.id} aria-pressed={styleId === st.id} aria-label={st.label} onClick={() => { setStyleId(st.id); goNext(); }}>
+                      <span className="studio-tile-emoji" data-style={st.id} aria-hidden="true">
+                        {STYLE_EMOJI[st.id] ?? '🎨'}
+                      </span>
+                      <span>{st.label}</span>
+                    </button>
                   ))}
-                </select>
-              </label>
+                </div>
+              )}
 
-              <div className="studio-row">
-                <button type="button" className="primary" onClick={() => void make()} disabled={phase !== null || blocked !== null} data-testid="studio-make">
-                  {phase?.kind === 'ordering' ? '準備中…' : `作る（チケット ${cost} 枚）`}
-                </button>
-                {blocked && (
-                  <span className="studio-hint" data-testid="studio-hint">
-                    {blocked}
-                  </span>
+              {step === 'check' && (
+                <div className="studio-check-list" data-testid="studio-summary">
+                  {dolls.length > 1 && doll && (
+                    <button type="button" className="studio-summary" onClick={() => setStep('doll')}>
+                      <img src={doll.bodyImageUrl} alt="" className="studio-summary-doll" />
+                      <span>{doll.name}</span>
+                    </button>
+                  )}
+                  <button type="button" className="studio-summary" onClick={() => setStep('what')}>
+                    <span className="studio-summary-thumbs">
+                      {(isSet ? chosen : [target]).map((id) => (
+                        <Thumb key={id} src={thumbs[id]} label={labelOf(doll?.id ?? '', id)} />
+                      ))}
+                    </span>
+                    <span>{isSet ? `セット（${chosen.map((id) => labelOf(doll?.id ?? '', id)).join('・')}）` : labelOf(doll?.id ?? '', target)}</span>
+                  </button>
+                  <button type="button" className="studio-summary" onClick={() => setStep('theme')}>
+                    <span className="studio-tile-emoji" aria-hidden="true">💭</span>
+                    <span>「{text}」</span>
+                  </button>
+                  <button type="button" className="studio-summary" onClick={() => setStep('style')}>
+                    <span className="studio-tile-emoji" aria-hidden="true">{STYLE_EMOJI[styleId] ?? '🎨'}</span>
+                    <span>{STYLE_PRESETS.find((st) => st.id === styleId)?.label}</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="studio-row studio-nav">
+                {stepIndex > 0 && (
+                  <button type="button" onClick={goBack} data-testid="studio-back">
+                    ← もどる
+                  </button>
+                )}
+                {step === 'check' ? (
+                  <button type="button" className="primary studio-make" onClick={() => void make()} disabled={phase !== null || blocked !== null} data-testid="studio-make">
+                    {phase?.kind === 'ordering' ? '準備中…' : `✨ 作る（チケット ${cost} 枚）`}
+                  </button>
+                ) : (
+                  <button type="button" className="primary" onClick={goNext} disabled={stepBlocked !== null} data-testid="studio-next">
+                    つぎへ →
+                  </button>
                 )}
               </div>
+              {(step === 'check' ? blocked : stepBlocked) && (
+                <span className="studio-hint" data-testid="studio-hint">
+                  {step === 'check' ? blocked : stepBlocked}
+                </span>
+              )}
             </section>
 
             {making.length > 0 && (
@@ -263,6 +398,8 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
             </div>
 
             <Account session={session} library={library} />
+
+            {user?.admin && <GiftTickets session={session} />}
 
             {user && (
               <p className="studio-hint">

@@ -214,7 +214,7 @@ describe('偽物の裏側（開発とテスト用）', () => {
       const before = await backend.signIn();
       expect(await backend.account.prepare()).toEqual({ kind: 'guest' });
       expect(await backend.account.loginWithPopup('link')).toEqual({ outcome: 'linked' });
-      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com', name: 'ためし はなこ' });
       expect(await backend.signIn()).toEqual(before);
       expect(await backend.listMyItems()).toHaveLength(1);
     });
@@ -235,7 +235,7 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(await backend.account.loginWithPopup('signin')).toEqual({ outcome: 'switched' });
       expect(await backend.signIn()).toEqual(before);
       expect(await backend.listMyItems()).toHaveLength(1);
-      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com' });
+      expect(await backend.account.prepare()).toEqual({ kind: 'google', email: 'tameshi@example.com', name: 'ためし はなこ' });
       // 次に開いても（読み込み直しても）同じ
       const reopened = await make().signIn();
       expect(reopened).toEqual(before);

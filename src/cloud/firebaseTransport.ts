@@ -111,7 +111,7 @@ export function createAuthPort(deps: AuthPortDeps): AuthPort {
   return {
     current(): AccountInfo {
       const google = auth.currentUser?.providerData.find((p) => p.providerId === 'google.com');
-      return google ? { kind: 'google', email: google.email ?? '' } : { kind: 'guest' };
+      return google ? { kind: 'google', email: google.email ?? '', name: google.displayName ?? auth.currentUser?.displayName ?? '' } : { kind: 'guest' };
     },
     // async にしない: ボタンの押下の中で、その場で窓を開く（何かを待ってからだと、ブラウザが窓を止める）
     popup(intent: LoginIntent): Promise<void> {

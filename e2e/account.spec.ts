@@ -6,6 +6,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { APP, dismissReveal, FAKE, fakeState, openHome, openStudio, order } from './helpers';
 
+const NAME = 'ためし はなこ';
 const EMAIL = 'tameshi@example.com';
 const MSG = {
   done: 'Google のアカウントでログインしました',
@@ -24,6 +25,7 @@ const redirectButton = (page: Page) => page.getByTestId('account-login-redirect'
 // 準備が済む（ボタンが押せる）まで待つ
 async function sectionReady(page: Page) {
   await expect(page.getByTestId('account-section')).toBeVisible();
+  await openDetails(page);
   await expect(popupButton(page)).toBeEnabled({ timeout: 30_000 });
   await expect(redirectButton(page)).toBeEnabled();
 }
@@ -31,6 +33,12 @@ async function sectionReady(page: Page) {
 async function openAccount(page: Page) {
   await openStudio(page);
   await page.getByTestId('account-section').scrollIntoViewIfNeeded();
+  await openDetails(page);
+}
+// アカウントの欄は、たたんである。開いていなければ開く
+async function openDetails(page: Page) {
+  const section = page.getByTestId('account-section');
+  if (!(await section.evaluate((el) => (el as HTMLDetailsElement).open))) await page.getByTestId('account-summary').click();
 }
 // 1 点作って、できあがるまで待つ（チケット 1 枚）
 async function makeOne(page: Page, theme = 'うみ') {
@@ -122,14 +130,21 @@ test('方法 1 で結び付ける: 「ログイン中」になり、読み込み
   await expect(page.getByTestId('account-email')).toHaveCount(0); // ログイン前
   await sectionReady(page);
   await popupButton(page).click();
-  await expect(page.getByTestId('account-email')).toHaveText(`ログイン中: ${EMAIL}`);
+  await expect(page.getByTestId('account-email')).toHaveText(`${NAME} でログイン中`);
   await expect(page.getByTestId('account-message')).toHaveText(MSG.done);
   await expect(page.getByTestId('studio-tickets')).toContainText('のこり 4 枚');
 
+  // 右上に、名前だけを薄く出す（メールアドレスは出さない）
+  await expect(page.getByTestId('account-badge')).toHaveCount(0); // 「つくる」を開いている間は、聞き直さない
+  await page.getByTestId('studio-close').click();
+  await expect(page.getByTestId('account-badge')).toHaveText('👤 ためし はなこ');
+  await expect(page.locator('.version-badge')).not.toContainText(EMAIL);
+
   await page.reload();
   await expect(page.getByTestId('home-screen')).toBeVisible();
+  await expect(page.getByTestId('account-badge')).toHaveText('👤 ためし はなこ');
   await openAccount(page);
-  await expect(page.getByTestId('account-email')).toHaveText(`ログイン中: ${EMAIL}`);
+  await expect(page.getByTestId('account-email')).toHaveText(`${NAME} でログイン中`);
   await expect(page.getByTestId('studio-tickets')).toContainText('のこり 4 枚');
   const after = (await fakeState(page))!;
   expect(after.user).toEqual(before.user);

@@ -15,7 +15,7 @@ import { ACKED_KEY, NEW_KEY } from '../cloud/session';
 import { LoginNotice } from '../home/LoginNotice';
 
 const EMAIL = 'tameshi@example.com';
-const GOOGLE: AccountInfo = { kind: 'google', email: EMAIL };
+const GOOGLE: AccountInfo = { kind: 'google', email: EMAIL, name: 'ためし はなこ' };
 const GUEST: AccountInfo = { kind: 'guest' };
 
 let items: MyItem[];
@@ -231,7 +231,7 @@ describe('「アカウント」の欄', () => {
     expect(redirectButton().disabled).toBe(true);
     setInfo(GOOGLE);
     await act(async () => done({ outcome: 'linked' }));
-    await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe(`ログイン中: ${EMAIL}`));
+    await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe('ためし はなこ でログイン中'));
     expect(message()).toBe(LOGIN_MESSAGES.linked);
     expect(screen.queryByTestId('account-login-popup')).toBeNull();
     expect(screen.queryByTestId('account-busy')).toBeNull();
@@ -399,8 +399,8 @@ describe('「アカウント」の欄', () => {
     expect(screen.queryByTestId('account-email')).toBeNull();
   });
 
-  it('ログイン中: メールアドレスと「ログアウト」。メールアドレスが空なら「ログイン中」だけ', async () => {
-    setup({ info: { kind: 'google', email: '' } });
+  it('ログイン中: 名前（メールアドレスではない）と「ログアウト」。名前が空なら「ログイン中」だけ', async () => {
+    setup({ info: { kind: 'google', email: '', name: '' } });
     await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe('ログイン中'));
     expect(screen.getByTestId('account-logout').textContent).toBe('ログアウト');
     expect(screen.queryByTestId('account-login-popup')).toBeNull();
@@ -408,7 +408,7 @@ describe('「アカウント」の欄', () => {
 
   it('ログアウト: 押すと確かめ。「やめる」で何も起きない', async () => {
     const { account } = setup({ info: GOOGLE });
-    await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe(`ログイン中: ${EMAIL}`));
+    await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe('ためし はなこ でログイン中'));
     expect(screen.queryByTestId('account-logout-confirm')).toBeNull();
     fireEvent.click(screen.getByTestId('account-logout'));
     expect(screen.getByTestId('account-logout-confirm').textContent).toContain('ログアウトすると、この端末では、チケットと作った服が見えなくなります。アカウントには残っていて、同じ Google でログインすると戻ります。');

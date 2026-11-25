@@ -7,7 +7,7 @@
  * `?studio=fake` で開いたときと、E2E で使う。本物（Firebase）と同じ形（StudioBackend）。
  */
 import { browserAccountEnv, createAccount } from './account';
-import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
+import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, GIFT_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
 import type { FakeWorld } from './fakeAuth';
 import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
@@ -412,6 +412,17 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       setTickets(state.user.tickets + tickets);
       save();
       return { status: 'done', tickets, items: added.length };
+    },
+    async giveTickets(userCode, count) {
+      online();
+      if (!state.user.admin) throw new BackendError('refused', 'チケットを配れるのは、管理者だけです');
+      if (!Number.isInteger(count) || count < 1 || count > GIFT_MAX) throw new BackendError('refused', `配る枚数は 1〜${GIFT_MAX} 枚にしてください`);
+      const code = normalizeUserCode(userCode);
+      // 偽物の世界には、この端末の利用者しかいない（自分のコードにだけ配れる）
+      if (code !== state.user.userCode) throw new BackendError('refused', `利用者コード「${code}」の人が見つかりません`);
+      setTickets(state.user.tickets + count);
+      save();
+      return { userCode: code, tickets: state.user.tickets };
     },
   };
 }

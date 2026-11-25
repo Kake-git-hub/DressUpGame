@@ -767,3 +767,32 @@ export async function drainAdopted(deps: CoreDeps, uid: string): Promise<void> {
     await drain(deps, from, uid).catch(() => undefined);
   }
 }
+
+// ── チケットを配る（管理者だけ。テストの利用者などに、無料で）──
+export const GIFT_MAX = 100; // 1 回に配れる枚数の上限（打ち間違いで、大きな数を配らないように）
+/**
+ * 管理者が、利用者コードで指した人に、チケットを count 枚配る。台帳の理由は `gift:{配った人の利用者コード}`。
+ * 相手が、ほかのアカウントへ移った（2 台めの端末として合わせた）利用者なら、移った先に配る。
+ * 返り値は、相手の利用者コード（移った先）と、配ったあとの枚数
+ */
+export async function giveTickets(deps: CoreDeps, uid: string, input: { userCode: string; count: number }): Promise<{ userCode: string; tickets: number }> {
+  const me = await signIn(deps, uid);
+  if (!me.admin) throw new CloudError('refused', 'チケットを配れるのは、管理者だけです');
+  const count = input.count;
+  if (!Number.isInteger(count) || count < 1 || count > GIFT_MAX) throw new CloudError('refused', `配る枚数は 1〜${GIFT_MAX} 枚にしてください`);
+  const code = String(input.userCode ?? '').trim().toUpperCase().replace(/[\s-]/g, '');
+  const found = code ? await deps.store.findUidByCode(code) : null;
+  if (!found) throw new CloudError('refused', `利用者コード「${code}」の人が見つかりません`);
+  let to = found;
+  let user = await deps.store.getUser(to);
+  // 移った先をたどる（念のため、3 回まで）
+  for (let i = 0; i < 3 && user?.movedTo; i++) {
+    const next = await deps.store.getUser(user.movedTo);
+    if (!next) break;
+    to = user.movedTo;
+    user = next;
+  }
+  if (!user) throw new CloudError('refused', `利用者コード「${code}」の人が見つかりません`);
+  const tickets = await deps.store.addTickets(to, count, `gift:${me.userCode}`, deps.now());
+  return { userCode: user.userCode, tickets };
+}

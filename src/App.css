@@ -244,6 +244,17 @@ textarea {
   cursor: default;
   -webkit-tap-highlight-color: transparent;
 }
+/* ログインしている人の名前（版数の左に、薄く） */
+.account-badge {
+  margin-right: 6px;
+  font-family: 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  max-width: 40vw;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 /* ホーム画面の上でも見えて、押せるように（ホームは、画面いっぱいに重なる） */
 .version-badge.on-home {
   z-index: 910;

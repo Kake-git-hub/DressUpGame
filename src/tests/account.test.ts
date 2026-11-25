@@ -128,8 +128,8 @@ describe('outcomeOf（結果の分け方）', () => {
 describe('prepare・logout', () => {
   it('prepare は、いまの利用者を返す。失敗は、そのまま投げる（次に、もう一度できる）', async () => {
     const s = setup();
-    s.port.current.mockReturnValue({ kind: 'google', email: 'a@example.com' });
-    expect(await s.account.prepare()).toEqual({ kind: 'google', email: 'a@example.com' });
+    s.port.current.mockReturnValue({ kind: 'google', email: 'a@example.com', name: 'エー' });
+    expect(await s.account.prepare()).toEqual({ kind: 'google', email: 'a@example.com', name: 'エー' });
     const failing = vi.fn().mockRejectedValueOnce(new BackendError('offline', 'つながりません')).mockResolvedValue(fakePort());
     const account = createAccount(failing, s.env);
     await expect(account.prepare()).rejects.toBeInstanceOf(BackendError);
