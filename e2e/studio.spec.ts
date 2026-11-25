@@ -413,7 +413,7 @@ test.describe('スタジオ', () => {
     });
   });
   test.describe('一覧での並べ替え・位置の直し、ドールの設定、作りかけの候補', () => {
-    const manifestNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')) as { dolls: { id: string; name: string; hidden?: boolean; items: Item[]; categories: { id: string; menuOrder: number }[]; sets?: { id: string }[] }[] };
+    const manifestNow = () => JSON.parse(fs.readFileSync(path.join(CONTENT, 'manifest.json'), 'utf8')) as { dolls: { id: string; name: string; hidden?: boolean; items: Item[]; categories: { id: string; menuOrder: number }[]; sets?: { id: string }[]; setsOrder?: number }[] };
     const tops = () => manifestNow().dolls[0].items.filter((i) => i.category === 'トップス');
 
     test('一覧: ◀ ▶ でメニューでの順番が変わり、「位置・大きさ」で動かして保存すると、位置が変わる', async ({ page }) => {
@@ -463,10 +463,28 @@ test.describe('スタジオ', () => {
       const ids = await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')));
       expect(ids.length).toBeGreaterThanOrEqual(2);
       await chips.last().dragTo(chips.first(), { targetPosition: { x: 2, y: 5 } });
+      // セットがあるので、帯には「セット」（data-id が __sets）も入っている。位置を決めていなければ先頭
+      expect(ids[0]).toBe('__sets');
       const cats = () => [...manifestNow().dolls[0].categories].sort((a, b) => a.menuOrder - b.menuOrder).map((c) => c.id);
-      await expect.poll(cats).toEqual([ids.at(-1), ...ids.slice(0, -1)]);
-      expect(manifestNow().dolls[0].categories.map((c) => c.menuOrder).sort((a, b) => a - b)).toEqual(ids.map((_, i) => i));
-      await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual([ids.at(-1), ...ids.slice(0, -1)]);
+      const moved = [ids.at(-1), ...ids.slice(0, -1)];
+      await expect.poll(cats).toEqual(moved.filter((x) => x !== '__sets'));
+      // カテゴリとセットを合わせて 0, 1, 2… と振り直す（セットは 1 番め）
+      expect(manifestNow().dolls[0].categories.map((c) => c.menuOrder).sort((a, b) => a - b)).toEqual(moved.flatMap((x, i) => (x === '__sets' ? [] : [i])));
+      expect(manifestNow().dolls[0].setsOrder).toBe(1);
+      await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual(moved);
+      // 「セット」をいちばん後ろへ: セットの段も、いちばん下になる
+      {
+        const src = (await chips.nth(1).boundingBox())!;
+        const dst = (await chips.last().boundingBox())!;
+        await page.mouse.move(src.x + src.width / 2, src.y + src.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(dst.x + dst.width / 2, dst.y + dst.height / 2, { steps: 5 });
+        await page.mouse.move(dst.x + dst.width - 2, dst.y + dst.height / 2, { steps: 3 });
+        await page.mouse.up();
+      }
+      await expect.poll(() => manifestNow().dolls[0].setsOrder).toBe(ids.length - 1);
+      await expect.poll(() => page.locator('[data-testid^="sort-row-"]').evaluateAll((els) => els.at(-1)?.getAttribute('data-testid'))).toBe('sort-row-__sets');
+      await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')).at(-1))).toBe('__sets');
       // 服: トップスの 1 点めを、2 点めの右半分へ
       const row = page.getByTestId('sort-row-トップス').getByTestId('sort-item');
       const before = tops().map((i) => i.id);
@@ -530,9 +548,10 @@ test.describe('スタジオ', () => {
       await chips.nth(1).dragTo(chips.first(), { targetPosition: { x: 2, y: 5 } });
       const cats = () => [...manifestNow().dolls[0].categories].sort((a, b) => a.menuOrder - b.menuOrder).map((c) => c.id);
       const first = [ids.at(-1), ...ids.slice(0, -1)];
-      await expect.poll(cats).toEqual(first);
+      const firstCats = first.filter((x) => x !== '__sets');
+      await expect.poll(cats).toEqual(firstCats);
       await page.waitForTimeout(2500);
-      expect(cats()).toEqual(first);
+      expect(cats()).toEqual(firstCats);
       await expect.poll(() => chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-id')))).toEqual(first);
       await page.unroute('**/api/categories/order');
       await page.getByTestId('library-view-detail').click();

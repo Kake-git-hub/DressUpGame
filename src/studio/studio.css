@@ -97,3 +97,4 @@ details.form > summary { cursor: pointer; font-weight: bold; width: 100%; }
 .sort-view .drop-before { box-shadow: -3px 0 0 #6a4fd0; }
 .sort-view .drop-after { box-shadow: 3px 0 0 #6a4fd0; }
 .sort-view.saving { cursor: progress; }
+.sort-chip-sets { background: #fff4fa; border-color: #f2b5d4; }

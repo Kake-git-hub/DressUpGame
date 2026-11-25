@@ -7,7 +7,7 @@ import type { DragEvent } from 'react';
 import type { ManifestDoll } from '../content/manifest';
 import { itemSetIds } from '../content/manifest';
 import { ApiError, api, contentUrl } from './api';
-import { dropIndex, moveInList, renumberCategories, sortCategories } from './order';
+import { dropIndex, menuEntries, moveInList, renumberMenu, sortCategories } from './order';
 
 interface Props {
   doll: ManifestDoll;
@@ -85,7 +85,13 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
   const markClass = (group: string, id: string) =>
     [dragged?.group === group && dragged.id === id ? 'dragging' : '', mark?.group === group && mark.id === id ? (mark.after ? 'drop-after' : 'drop-before') : ''].filter(Boolean).join(' ') || undefined;
 
-  const categoryIds = categories.map((c) => c.id);
+  // カテゴリの帯: カテゴリと、セットがあれば「セット」（ゲームのメニューと同じ並び）
+  const entries = menuEntries(categories, sets.length > 0, doll.setsOrder);
+  const entryIds = entries.map((e) => e.id);
+  const saveEntries = (next: string[]) => {
+    const { order, setsOrder } = renumberMenu(next.map((id) => entries.find((e) => e.id === id)!));
+    return api.reorderCategories(doll.id, order, setsOrder);
+  };
   const setIds = sets.map((s) => s.id);
   return (
     <section className={busy ? 'sort-view saving' : 'sort-view'} data-testid="sort-view" aria-busy={busy}>
@@ -93,23 +99,23 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
       <p className="hint">カテゴリも服もセットも、つかんで動かすと、その順番がゲームのメニューの順番になります。服を押すと「くわしく」でその服が開きます。</p>
       <div className="sort-box sort-categories">
         <span className="hint">カテゴリの順番:</span>
-        {categories.map((c) => (
+        {entries.map((e) => (
           <span
-            key={c.id}
-            className={['sort-chip', markClass('categories', c.id)].filter(Boolean).join(' ')}
+            key={e.id}
+            className={['sort-chip', e.kind === 'sets' ? 'sort-chip-sets' : '', markClass('categories', e.id)].filter(Boolean).join(' ')}
             data-testid="sort-category"
-            data-id={c.id}
-            {...draggable('categories', c.id, categoryIds, (next) =>
-              api.reorderCategories(doll.id, renumberCategories(next.map((id) => categories.find((x) => x.id === id)!))),
-            )}
+            data-id={e.id}
+            {...draggable('categories', e.id, entryIds, saveEntries)}
           >
-            ≡ {c.label}
-            <span className="hint">{doll.items.filter((i) => i.category === c.id).length}</span>
+            ≡ {e.kind === 'sets' ? 'セット' : e.category.label}
+            <span className="hint">{e.kind === 'sets' ? sets.length : doll.items.filter((i) => i.category === e.id).length}</span>
           </span>
         ))}
       </div>
-      {sets.length > 0 && (
-        <div className="sort-box">
+      {entries.map((e) => {
+        if (e.kind === 'sets')
+          return (
+        <div key={e.id} className="sort-box" data-testid={`sort-row-${e.id}`}>
           <h3>
             セット <span className="hint">{sets.length} 組</span>
           </h3>
@@ -133,8 +139,8 @@ export function SortView({ doll, onChanged, onOpenItem }: Props) {
             ))}
           </div>
         </div>
-      )}
-      {categories.map((c) => {
+          );
+        const c = e.category;
         const items = doll.items.filter((i) => i.category === c.id);
         const ids = items.map((i) => i.id);
         const group = `items:${c.id}`;
