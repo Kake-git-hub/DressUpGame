@@ -134,6 +134,23 @@ test('タップだけでは着ない（現状の動作）', async ({ page }) => 
   expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
 });
 
+test('着ている服のタイルをタップすると脱げる（着ていない服は、タップしても着ない）', async ({ page }) => {
+  await openApp(page);
+  await dragItemToDoll(page, 'トップス', 'red');
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await openCategory(page, 'トップス');
+  const at = await itemCenter(page, 'red');
+  await page.mouse.click(at.x, at.y);
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await page.waitForTimeout(300);
+  const saved = await page.evaluate(() => (JSON.parse(localStorage.getItem('dressup_outfit') ?? '[]') as unknown[]).length);
+  expect(saved).toBe(0);
+  // もう一度タップしても、着ない
+  await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(800);
+  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+});
+
 test('服のメニューに「なし」は無く、上下の ▲▼ がある', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
@@ -809,12 +826,13 @@ test('髪は 1 点: 前の分と後ろの分が一緒に付き、位置と色は
   await expectPixel(page, SIDE_X, TOP_Y, PURPLE);
   // メニューのカテゴリは 1 つ（うしろがみのカテゴリは無い）
   await expect(page.locator('.palette-section button', { hasText: 'うしろがみ' })).toHaveCount(0);
-  // 調整: 一覧は上から「前の分 → ドール → 後ろの分」の 2 枚。最初は前の分を選んでいる
+  // 調整: 一覧には前の分だけ（後ろの分は出さない）。上から「前の分 → ドール」。前の分を選んでいる
   await page.locator('.tool-button').first().click();
   const rows = page.locator('[data-testid="adjust-picker-items"] > *');
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(2);
   await expect(rows.nth(1)).toHaveAttribute('data-testid', 'adjust-picker-doll');
   const pickerItems = page.getByTestId('adjust-picker-item');
+  await expect(pickerItems).toHaveCount(1);
   await expect(pickerItems.nth(0)).toHaveClass(/on/);
   // 前の分を下へ動かすと、後ろの分も、その場で一緒に動く
   const before = (await page.getByTestId('adjust-partner').boundingBox())!;
@@ -839,28 +857,28 @@ test('髪は 1 点: 前の分と後ろの分が一緒に付き、位置と色は
   await page.reload();
   await expectPixel(page, DOLL_X, BOTTOM_Y, RED);
   await expectPixel(page, SIDE_X, BOTTOM_Y, ORANGE);
-  // 後ろの分を選んで動かしても、前の分が一緒に動く（上へ戻す）
+  // 上へ戻す: 後ろの分も一緒に戻る
   await page.locator('.tool-button').first().click();
-  await pickerItems.nth(1).click();
-  await expect(pickerItems.nth(1)).toHaveClass(/on/);
   await expect(page.locator('.hue-slider-vertical')).toHaveValue('120');
-  await page.mouse.move(SIDE_X, BOTTOM_Y);
+  await page.mouse.move(DOLL_X, BOTTOM_Y);
   await page.mouse.down();
-  await page.mouse.move(SIDE_X, BOTTOM_Y - DROP, { steps: 6 });
+  await page.mouse.move(DOLL_X, BOTTOM_Y - DROP, { steps: 6 });
   await page.mouse.up();
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await expectPixel(page, SIDE_X, TOP_Y, ORANGE);
-  // 重なりは 1 枚ずつ: 後ろの分だけを、ドールの前へ出せる（前の分より下なので、まん中は前の分のまま）
+  // 前の分をドールの後ろへ回しても、後ろの分は動かない（一覧は「ドール → 前の分」、後ろの分はそのままドールの後ろ）
   await page.locator('.tool-button').first().click();
-  await pickerItems.nth(1).click();
+  await page.getByTestId('layer-back').click();
+  await expect(rows.nth(0)).toHaveAttribute('data-testid', 'adjust-picker-doll');
+  await expect(page.getByTestId('layer-back')).toBeDisabled();
   await page.getByTestId('layer-front').click();
-  await expect(rows.nth(2)).toHaveAttribute('data-testid', 'adjust-picker-doll');
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'adjust-picker-doll');
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, TOP_Y, RED);
-  // × で脱がせると、前の分も後ろの分も脱げる（どちらを選んでいても）
+  await expectPixel(page, SIDE_X, TOP_Y, ORANGE);
+  // × で脱がせると、前の分も後ろの分も脱げる
   await page.locator('.tool-button').first().click();
-  await pickerItems.nth(1).click();
   await page.getByTestId('sticker-remove').click();
   await expect(page.locator('.item-adjust-overlay')).toHaveCount(0);
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
@@ -1085,7 +1103,7 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     expect(Math.abs(after.y - before.y)).toBeLessThan(1);
   });
 
-  test('一覧が画面に収まらないとき: すばやくなぞると流れ、長く押してから動かすと並べ替わり、端で止めていても流れ続ける', async ({ page }) => {
+  test('一覧が画面に収まらないとき: 選んでいない服をなぞると流れ、選んでいる服（⇅）はつかんですぐ並べ替わり、端で止めていても流れ続ける', async ({ page }) => {
     await openApp(page);
     await dragItemToDoll(page, 'トップス', 'red');
     await dragItemToDoll(page, 'ボトムス', 'green');
@@ -1097,36 +1115,49 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     await page.setViewportSize({ width: VIEW_W, height: 300 });
     const list = page.getByTestId('adjust-picker-items');
     await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(60);
+    await expect(list).toHaveAttribute('data-overflow', 'true');
     const maxScroll = await list.evaluate((el) => el.scrollHeight - el.clientHeight);
     const order = await namesOf(page);
-    const on = await page.locator('[data-testid="adjust-picker-item"].on').getAttribute('title');
+    const selected = page.locator('[data-testid="adjust-picker-item"].on');
+    const on = await selected.getAttribute('title');
+    // 選んでいる服（最後に着たくつ = いちばん上）には ⇅ の印。ほかの服をなぞると、一覧が流れる
+    expect(order[0]).toBe(on?.slice(0, 3));
+    await expect(selected.locator('.item-adjust-picker-grip')).toBeVisible();
+    await expect(rowsOf(page).nth(1)).toHaveCSS('touch-action', 'pan-y');
+    await expect(selected).toHaveCSS('touch-action', 'none');
     const touch = await fingers(page);
 
-    // すばやくなぞる: 一覧が流れる。並びも、調整する服も変わらない
+    // 選んでいない服を、なぞる: 一覧が流れる。並びも、調整する服も変わらない
     let p = await center(page, 1);
     await touch('touchStart', [p]);
-    for (const dy of [-20, -40, -60]) await touch('touchMove', [{ x: p.x, y: p.y + dy }]);
+    for (const dy of [-20, -40, -60, -80]) await touch('touchMove', [{ x: p.x, y: p.y + dy }]);
     await touch('touchEnd', []);
-    await expect.poll(() => scrollTop(page)).toBeGreaterThanOrEqual(50);
+    await expect.poll(() => scrollTop(page)).toBeGreaterThanOrEqual(30);
     expect(await namesOf(page)).toEqual(order);
-    expect(await page.locator('[data-testid="adjust-picker-item"].on').getAttribute('title')).toBe(on);
+    expect(await selected.getAttribute('title')).toBe(on);
 
-    // 長く押してから動かす: 行が浮いて、並べ替わる
+    // 選んでいない服を押すと、その服を選ぶ（印が移る）
     await list.evaluate((el) => (el.scrollTop = 0));
-    p = await center(page, 0);
-    const next = await center(page, 1);
+    p = await center(page, 1);
     await touch('touchStart', [p]);
-    await expect(page.locator('[data-dragging="true"]')).toHaveCount(1); // 押し続けると浮く
-    for (const f of [0.3, 0.6, 0.9]) await touch('touchMove', [{ x: p.x, y: p.y + (next.y - p.y) * f }]);
+    await touch('touchEnd', []);
+    await expect(rowsOf(page).nth(1)).toHaveClass(/on/);
+    await expect(rowsOf(page).nth(1)).toHaveCSS('touch-action', 'none');
+    await expect(rowsOf(page).nth(0)).toHaveCSS('touch-action', 'pan-y');
+
+    // 選んでいる服は、つかんですぐ動かせば並べ替わる（長く押さなくてよい）
+    p = await center(page, 1);
+    const prev = await center(page, 0);
+    await touch('touchStart', [p]);
+    for (const f of [0.3, 0.6, 0.9]) await touch('touchMove', [{ x: p.x, y: p.y + (prev.y - p.y) * f }]);
     await touch('touchEnd', []);
     await expect.poll(() => namesOf(page)).toEqual([order[1], order[0], ...order.slice(2)]);
 
-    // 浮かせた行を一覧の下の端へ持っていき、指を止める: 一覧は下まで流れ続ける
+    // つかんだ行を一覧の下の端へ持っていき、指を止める: 一覧は下まで流れ続ける
     await list.evaluate((el) => (el.scrollTop = 0));
     p = await center(page, 0);
     const box = (await list.boundingBox())!;
     await touch('touchStart', [p]);
-    await expect(page.locator('[data-dragging="true"]')).toHaveCount(1);
     await touch('touchMove', [{ x: p.x, y: p.y + 10 }]);
     await touch('touchMove', [{ x: p.x, y: box.y + box.height - 8 }]);
     await expect.poll(() => scrollTop(page), { timeout: 5000 }).toBe(maxScroll);
@@ -1316,13 +1347,13 @@ test('スマホで、画面の端に近い服（くつ）でも、つまみを�
   await expect(page.locator('.app')).toHaveAttribute('data-orientation', 'portrait');
   await page.getByTestId('portrait-tools').locator('.tool-button').click();
   await expect(page.getByTestId('sticker-frame')).toBeVisible();
-  const picker = (await page.getByTestId('adjust-picker').boundingBox())!;
+  const bar = (await page.locator('.item-adjust-top-buttons').boundingBox())!;
   for (const id of ['sticker-remove', 'sticker-reset', 'sticker-rotate']) {
     const box = (await page.getByTestId(id).boundingBox())!;
     expect(box.x, `${id} の左`).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, `${id} の右`).toBeLessThanOrEqual(390);
     expect(box.y, `${id} の上`).toBeGreaterThanOrEqual(0);
-    expect(box.y + box.height, `${id} の下`).toBeLessThanOrEqual(picker.y);
+    expect(box.y + box.height, `${id} の下`).toBeLessThanOrEqual(bar.y);
     // その場所のいちばん上にあるのが、つまみ（押せる）
     const c = centerOf(box);
     expect(await page.evaluate(([x, y, testId]) => document.elementFromPoint(x as number, y as number)?.closest(`[data-testid="${testId}"]`) !== null, [c.x, c.y, id] as const), `${id} を押せる`).toBe(true);
@@ -1396,6 +1427,11 @@ test('セット: ドールへドラッグすると、全部のパーツが一度
   await expect(tile).toHaveAttribute('data-worn', 'true');
   const saved = () => page.evaluate(() => (JSON.parse(localStorage.getItem('dressup_outfit') ?? '[]') as { id: string }[]).map((e) => e.id.split('/').pop()));
   await expect.poll(saved).toEqual(['green', 'red']); // 重なりの小さい順（ボトムス → トップス）に着せる
+  // 全部着ているセットをタップすると、パーツが全部脱げる
+  await tile.click();
+  await expect.poll(saved).toEqual([]);
+  await expectPixel(page, DOLL_X, TOP_Y, SKIN);
+  await expect(tile).toHaveAttribute('data-worn', 'false');
   // タップ（動かさない）では着ない
   await page.locator('.reset-button-fixed').click();
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
@@ -1677,7 +1713,7 @@ test.describe('縦画面', () => {
     });
   }
 
-  test('調整画面: 一覧と色・ボタンは下にあり、一覧は左右に動かして並べ替える。持ち替えても、服はドールに対して同じ位置', async ({ page }) => {
+  test('調整画面: 色・ボタンは下、一覧は左に縦並びで、上下に動かして並べ替える。持ち替えても、服はドールに対して同じ位置', async ({ page }) => {
     await openPortrait(page);
     for (const [category, name] of [['トップス', 'red'], ['ボトムス', 'green']] as const) {
       await selectCategory(page, category);
@@ -1689,15 +1725,18 @@ test.describe('縦画面', () => {
     }
     await expectPixel(page, P_DOLL_X, pY(660), GREEN);
     await page.getByTestId('portrait-tools').locator('.tool-button').click();
-    // 一覧は、キャンバスの下に横並び（左が手前）
+    // 一覧は、画面の左に縦並び（上が手前）。下の色・ボタンの帯より上
     const rows = page.locator('[data-testid="adjust-picker-items"] > *');
     const names = () => rows.evaluateAll((els) => els.map((el) => (el.getAttribute('title') ?? '').slice(0, 3)));
     await expect.poll(names).toEqual(['red', 'gre', 'ドール']);
     const r0 = (await rows.nth(0).boundingBox())!;
     const r1 = (await rows.nth(1).boundingBox())!;
-    expect(Math.abs(r0.y - r1.y)).toBeLessThan(1);
-    expect(r1.x).toBeGreaterThan(r0.x + r0.width - 1);
-    expect(r0.y).toBeGreaterThanOrEqual(PS); // 正方形より下
+    expect(Math.abs(r0.x - r1.x)).toBeLessThan(1);
+    expect(r1.y).toBeGreaterThan(r0.y + r0.height - 1);
+    const picker = (await page.getByTestId('adjust-picker').boundingBox())!;
+    expect(picker.x).toBeLessThan(20);
+    expect(picker.x + picker.width).toBeLessThan(PW / 4);
+    expect(picker.y + picker.height).toBeLessThanOrEqual((await page.locator('.item-adjust-top-buttons').boundingBox())!.y);
     // 色のスライダーと ✓ ↺ も、キャンバスより下
     for (const selector of ['.item-adjust-done-btn-small', '.item-adjust-reset-btn-small', '.hue-slider-vertical']) {
       const box = (await page.locator(selector).boundingBox())!;
@@ -1708,10 +1747,10 @@ test.describe('縦画面', () => {
     }
     const slider = (await page.locator('.hue-slider-vertical').boundingBox())!;
     expect(slider.width).toBeGreaterThan(slider.height * 2); // 横向きのスライダー
-    // 行を右へ動かして、となりと入れ替える
+    // 行を下へ動かして、となりと入れ替える
     await page.mouse.move(r0.x + r0.width / 2, r0.y + r0.height / 2);
     await page.mouse.down();
-    await page.mouse.move(r0.x + r0.width / 2 + (r1.x - r0.x) * 0.7, r0.y + r0.height / 2, { steps: 5 });
+    await page.mouse.move(r0.x + r0.width / 2, r0.y + r0.height / 2 + (r1.y - r0.y) * 0.7, { steps: 5 });
     await page.mouse.up();
     await expect.poll(names).toEqual(['gre', 'red', 'ドール']);
     // 調整中の服（ボトムス）を右へ動かして確定

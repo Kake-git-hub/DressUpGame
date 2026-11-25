@@ -45,3 +45,14 @@ export function adjustBaseId(items: EquippedItem[], adjustingId: string): string
   const at = (id: string) => order.findIndex((s) => s.kind === 'item' && s.item.id === id);
   return at(partner.id) < at(adjustingId) ? partner.id : adjustingId;
 }
+
+// 対になったうしろがみ（前髪と一緒に着ている）。調整画面の重なりの一覧には出さない（前髪だけを動かす）
+export function isPairedBack<T extends Paired>(items: readonly T[], id: string): boolean {
+  const item = items.find((i) => i.id === id);
+  return !!item?.frontItemId && partnerOf(items, id) !== null;
+}
+
+// 調整する服: 対のうしろがみなら、前髪にする
+export function adjustTargetId<T extends Paired>(items: readonly T[], id: string): string {
+  return isPairedBack(items, id) ? (partnerOf(items, id)?.id ?? id) : id;
+}

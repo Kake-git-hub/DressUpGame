@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { drawOrder, isBehindDoll, moveLayer, reorderLayer, sheetsAbove } from '../engine/layers';
+import { drawOrder, isBehindDoll, moveLayer, reorderLayer, reorderShown, sheetsAbove } from '../engine/layers';
+import { adjustTargetId, isPairedBack } from '../engine/pairs';
 import type { EquippedItem } from '../types';
 
 const make = (id: string, layer: number, extra: Partial<EquippedItem> = {}): EquippedItem =>
@@ -111,5 +112,39 @@ describe('重なりの並べ替え（ドラッグ）', () => {
     let items = base();
     items = items.map((i) => (i.id === 'socks' ? { ...i, layerAdjust: moveLayer(items, 'socks', 1)! } : i)); // DOLL, dress, socks, hair
     expect(names(reorder(items, 'hair', 1))).toEqual(['DOLL', 'hair:front', 'dress:front', 'socks:front']);
+  });
+});
+
+describe('重なりの並べ替え（一覧に出さない、対のうしろがみを数えない）', () => {
+  // 下から: backhair（見えない）, DOLL, socks, dress, hair
+  const items = () => [make('socks', 1), make('dress', 4), make('hair', 11, { backItemId: 'backhair' }), make('backhair', -1, { frontItemId: 'hair' })];
+  const hidden = new Set(['backhair']);
+  const shownReorder = (list: EquippedItem[], id: string, to: number) => {
+    const changes = reorderShown(list, id, to, hidden)!;
+    return list.map((i) => {
+      const c = changes.find((x) => x.id === i.id);
+      return c ? { ...i, layerAdjust: c.layerAdjust } : i;
+    });
+  };
+
+  it('見えている並び（上から hair, dress, socks, DOLL）の番号で入れる', () => {
+    // socks を、見えている行（socks を抜くと hair, dress, DOLL）の 0 番目 = いちばん手前へ
+    expect(names(shownReorder(items(), 'socks', 0))).toEqual(['backhair:front', 'DOLL', 'dress:front', 'hair:front', 'socks:front']);
+    // dress を、見えている行のいちばん下（DOLL の下）へ: ドールのすぐ後ろ。うしろがみより手前
+    expect(names(shownReorder(items(), 'dress', 3))).toEqual(['backhair:front', 'dress:front', 'DOLL', 'socks:front', 'hair:front']);
+    // 同じ位置なら、何も変えない
+    expect(reorderShown(items(), 'dress', 1, hidden)).toEqual([]);
+    expect(reorderShown(items(), 'nope', 0, hidden)).toBeNull();
+  });
+
+  it('対のうしろがみを見分け、調整する服は前髪にする', () => {
+    expect(isPairedBack(items(), 'backhair')).toBe(true);
+    expect(isPairedBack(items(), 'hair')).toBe(false);
+    expect(adjustTargetId(items(), 'backhair')).toBe('hair');
+    expect(adjustTargetId(items(), 'dress')).toBe('dress');
+    // 対でないうしろがみ（前髪を着ていない）は、ふつうの服と同じ
+    const alone = [make('backhair', -1, { frontItemId: 'hair' })];
+    expect(isPairedBack(alone, 'backhair')).toBe(false);
+    expect(adjustTargetId(alone, 'backhair')).toBe('backhair');
   });
 });
