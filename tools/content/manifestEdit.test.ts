@@ -185,6 +185,17 @@ describe('ContentStore', () => {
     await store.reorderCategories(dollId, [{ id: 'トップス', layer: 4, menuOrder: 2 }]);
     expect((await store.read()).dolls[0].setsOrder).toBe(1);
   });
+  it('最後のセットが無くなったら、メニューでの「セット」の位置（setsOrder）も消す', async () => {
+    await store.addItem(dollId, item('ぼうし'));
+    const added = (await store.read()).dolls[0].items.find((i) => i.name === 'ぼうし')!;
+    await store.updateItem(added.id, { set: { name: 'ためし' } });
+    await store.reorderCategories(dollId, [], 3);
+    expect((await store.read()).dolls[0].setsOrder).toBe(3);
+    await store.updateItem(added.id, { set: null });
+    const doll = (await store.read()).dolls[0];
+    expect(doll.sets).toBeUndefined();
+    expect(doll).not.toHaveProperty('setsOrder');
+  });
   it('服の残るカテゴリは削除できない', async () => {
     await store.addItem(dollId, item('ふく'));
     await expect(store.deleteCategory(dollId, 'トップス')).rejects.toThrow(/1 点/);

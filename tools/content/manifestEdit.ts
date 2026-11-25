@@ -110,7 +110,10 @@ function pruneSets(manifest: Manifest): void {
       for (const id of Object.keys(set.layers)) if (!doll.items.some((i) => i.id === id && itemSetIds(i).includes(set.id))) delete set.layers[id];
       if (Object.keys(set.layers).length === 0) delete set.layers;
     }
-    if (doll.sets.length === 0) delete doll.sets;
+    if (doll.sets.length === 0) {
+      delete doll.sets;
+      delete doll.setsOrder; // メニューの「セット」が無くなったので、位置も捨てる（次に作ったセットは先頭から）
+    }
   }
 }
 
