@@ -7,7 +7,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fakeState, openHome, openStudio } from './helpers';
 
-const KANJI: Record<string, number> = { 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const KANJI: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 // 保護者の確認（漢数字の掛け算）を解く: 「十七 かける 三 は？」
 async function passGate(page: Page) {
   const text = (await page.getByTestId('adult-question').textContent()) ?? '';
@@ -149,6 +149,19 @@ test('なかなか足されない（slow）: 30 秒で「じかんが かかっ�
   await openStudio(page);
   await expect(page.getByTestId('pay-notice')).toContainText('チケットが 10 枚 ふえました', { timeout: 30_000 });
   await expect(tickets(page)).toContainText('のこり 15 枚');
+});
+
+test('最終確認の 3 つのリンクが、開ける（200）', async ({ page }) => {
+  await loggedIn(page);
+  await openHome(page);
+  await openStudio(page);
+  await toConfirm(page);
+  for (const id of ['tokushoho', 'terms', 'privacy']) {
+    const href = await page.getByTestId(`shop-link-${id}`).evaluate((a) => (a as HTMLAnchorElement).href);
+    const res = await page.request.get(href);
+    expect(res.status(), href).toBe(200);
+    expect(await res.text()).toContain('<h1>');
+  }
 });
 
 test('期限まで 14 日いないの分は、お知らせが 1 回だけ出る。ようこそも 1 回', async ({ page }) => {

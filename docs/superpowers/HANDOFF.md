@@ -1,4 +1,4 @@
-# 引き継ぎ（2026-11-25 時点、v0.39.0）
+# 引き継ぎ（2026-11-25 時点、v0.42.0）
 
 **0 章が、いまの状態。** 1 章から下は、v0.28.0（2026-11-20）までの記録で、0 章と食い違う所は 0 章が正しい。
 
@@ -9,13 +9,13 @@
 - 版ごとの設計と結果: `docs/superpowers/specs/`、計画: `docs/superpowers/plans/`
 - 使い方と更新履歴: `README.md`
 
-## 0. いまの状態（2026-11-25、v0.39.0）
+## 0. いまの状態（2026-11-25、v0.42.0）
 
 | 項目 | 状態 |
 |---|---|
-| ゲームの版 | **v0.41.0（交換。作業ブランチ `claude/ecstatic-wright-0m73uz`。**公開済み**（2026-11-25、作者がカードで「公開する」）。**サーバーの載せ直し待ち**）。** その前: **v0.40.0（メニューの「セット」の位置を、ならべかえで動かせる）と v0.39.1（調整画面の一覧の直し）。公開済み**（2026-11-25、作者がカードで「公開する」）。**v0.39.0（素材スタジオの「ならべかえ」= 段階 ④）。公開済み**（2026-11-25、作者がカードで「公開する」。作業ブランチ `claude/sleepy-noether-kqf755`）。 ゲームとサーバーは変えていない（載せ直し不要）。その前の v0.38.0（2 台めの端末を、アカウントに合わせる）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.37.0（ログインの試し版）も同じ日に公開済み（作者がカードで「公開する」）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
+| ゲームの版 | **v0.42.0（支払い = 段階 ⑥。Stripe でチケットを売る。作業ブランチ `claude/intelligent-fermi-jihgpn`。**まだ公開していない（作者の確認待ち）。売る入口は隠してある**: `salesOpen` が false のあいだは管理者にしか「チケットを買う」が出ない）。** その前: **v0.41.0（交換。作業ブランチ `claude/ecstatic-wright-0m73uz`。**公開済み**（2026-11-25、作者がカードで「公開する」）。**サーバーの載せ直し待ち**）。** その前: **v0.40.0（メニューの「セット」の位置を、ならべかえで動かせる）と v0.39.1（調整画面の一覧の直し）。公開済み**（2026-11-25、作者がカードで「公開する」）。**v0.39.0（素材スタジオの「ならべかえ」= 段階 ④）。公開済み**（2026-11-25、作者がカードで「公開する」。作業ブランチ `claude/sleepy-noether-kqf755`）。 ゲームとサーバーは変えていない（載せ直し不要）。その前の v0.38.0（2 台めの端末を、アカウントに合わせる）。**公開済み**（2026-11-24、作者がカードで「公開する」。作業ブランチ `claude/quirky-cori-3yr6ov`）。v0.37.0（ログインの試し版）も同じ日に公開済み（作者がカードで「公開する」）。v0.36.1（Issue 7 の直し）も同じブランチから公開済み（2026-11-23）。v0.36.0 も **公開済み**（2026-11-23、作者の指示「main に入れて公開する」）。v0.35.1・v0.35.0 も **公開済み**（作業ブランチ `ccr-199c91d7-fwiyfg` から、作者の指示「main に入れて公開する」で取り込んだ、2026-11-23）。https://kake-git-hub.github.io/DressUpGame/ |
 | 素材 | 別リポジトリ `Kake-git-hub/DressUpGame-content`（`main`、コミット `2b876a5`）。ゲームに出るドールは「おんなのこ」（ID は `アニメ　その２`。147 点）と「おとこのこ」（20 点）。「アニメ」「リアル」は非表示 |
-| サーバー | 作者の Firebase（`dressup-game-89f6e`、東京）には、**v0.38.0 の版が載っている**。**v0.41.0 の版（交換 = `SERVER_API` 4）は、まだ載せていない。載せ直すまで、交換は使えない**（作者の載せ直し待ち。手順は `docs/firebase-setup.md` の 2-12）。v0.38.0 の版は（2026-11-24、作者が PC で `npm run firebase:deploy`。`Deploy complete!`。合い言葉・移す = `offer`・`adopt` が入った版）。その前は、**v0.35.0 の版が載っていた**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
+| サーバー | 作者の Firebase（`dressup-game-89f6e`、東京）には、**v0.38.0 の版が載っている**。**v0.42.0 の版（支払い = `SERVER_API` 5・`PAY_API`。関数 `stripeHook` が増え、`studio` の中身が変わる）も、まだ載せていない。載せ直す前でも、公開したアプリは困らない**（古いサーバーには「チケットを買う」を出さない。手順は `docs/firebase-setup.md` の 2-13）。**v0.41.0 の版（交換 = `SERVER_API` 4）は、まだ載せていない。載せ直すまで、交換は使えない**（作者の載せ直し待ち。手順は `docs/firebase-setup.md` の 2-12）。v0.38.0 の版は（2026-11-24、作者が PC で `npm run firebase:deploy`。`Deploy complete!`。合い言葉・移す = `offer`・`adopt` が入った版）。その前は、**v0.35.0 の版が載っていた**（2026-11-23、作者が PC で `npm run firebase:deploy`。`Deploy complete!`）。関数は `studio`・`studioWork`（列が呼ぶ）・`studioSweep`（1 時間ごとの見回り）。**作者が本物の「つくる」を試して「うまくいった」**（2026-11-23。何点作ったか・すぐ閉じたか・セットも試したかは、聞いていない）。サーバーの中身（`functions/`・`tools/cloud/`）を変えたら、作者に載せ直してもらう（手順は `docs/firebase-setup.md` の 2-9 と同じ） |
 | テスト | 0-4 を見る |
 
 ### 0-A. 次のセッションが、最初にすること
@@ -33,6 +33,7 @@
 4. ③ は、実機で通った（2026-11-25）。④ は v0.39.0 として作った（PC スタジオの「ならべかえ」。2026-11-25 のセッション）。**公開済み（2026-11-25）。** 次は、**段階 ⑤（交換）の設計に進む**（進め方は、いままでと同じ）。④ を「アプリの中で管理者が並べる」形にする話は、作者が「PC でもいい」としたので、しない（`specs/2026-11-25-stage4-order-design.md` の 1 章）。
 5. ③ でまだ通していない道（画面なしの行き来・選ぶ画面つき・小さい窓での合わせる、チケットのある 2 台め、管理者の端末）で困ったと報告が来たら: きろくを見て、直す（設計書 `specs/2026-11-23-login-design.md` の 8 章と 12 章）。
 6. ③ で残したこと（急がない）: `specs/2026-11-23-stage3a-ledger.md`・`specs/2026-11-24-stage3b-ledger.md` の「残したこと」。Apple のログインは、Apple Developer の登録が済んでから。
+8. **段階 ⑥（v0.42.0）で、作者がすること**（順番どおり。詳しくは `docs/firebase-setup.md` の 2-13）: (1) Stripe のアカウントを作る（本人確認・銀行口座）。(2) 試し用の鍵と知らせの署名の鍵を `firebase functions:secrets:set STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` で入れる。(3) 載せ直す（`npm run firebase:deploy`）。(4) Stripe の管理画面で、`stripeHook` の URL を送り先に登録する（API バージョン `2026-11-18.endive`、イベント 5 つ）。(5) `system/config` に `packs`（例 `10:300,30:800`）を書く。(6) 管理者の端末で、試しのカード `4242 4242 4242 4242` で買う → チケットが増える。iPad のホーム画面のアプリでも（**Stripe のページから戻ってこられるか、こちらは未確認**）。(7) `public/legal/` の 3 ページの `【作者が記入】`（名前・住所・電話・メール）を埋める。**ページは、こちらの下書きで、法律の専門家の確認ではない**ので、公開前に専門家に見てもらうことをすすめる。(8) 値段を決める。**`salesOpen` は、(1)〜(8) が済むまで false のまま**（true にすると、「つくる」を開ける端末の全員に買うボタンが出る）。記録に「【要手当て】」が出たら、払われたのにチケットが付いていない: 手で配る（2-6）か、Stripe で返金する。本物の Stripe（`sk_test_`）には、こちらは 1 回もつなげていない。
 7. ⑤⑥ で決まっていることは、`specs/2026-11-23-closet-and-unstoppable-generation-design.md` の 9 章と、`plans/2026-11-23-payment-plan.md`（⑥ の「作者に決めてもらうこと」: 値段とパック・特商法の表記に出す名前と連絡先・最初の無料のチケット・配ったチケットの扱い。期限は 6 か月に決定）。
 
 **試し版（③-a）の実機の結果**（`docs/reports/2026-11-24-ipad-v0.37.0-login.md`）: iPad のホーム画面アプリで、小さい窓も、画面を移る方法も、できた。Android は「次の版で」と出た（2 台めとして正しい）。
@@ -76,7 +77,7 @@
 | ③ ログイン | Google のアカウントと結び付け（Apple は、Apple Developer の登録が済んでから）。複数の端末で同じアカウント | **③-a 試し版（v0.37.0）・③-b 合わせる（v0.38.0）とも、公開済み。サーバーも載せ直し済み。2 台めのスマホで「合わせる」が通った（2026-11-25、Issue 9）。** 設計: `specs/2026-11-23-login-design.md`（7 章 = ③-a、8 章 = ③-b）、計画: `plans/2026-11-23-stage3a-login-trial.md`・`plans/2026-11-24-stage3b-login-merge.md` |
 | ④ 並び順（v0.39.0） | 管理者だけが、カテゴリとアイテムの既定の並び順を変える → 作者の判断で **PC スタジオの「一覧」に「ならべかえ」**（つかんで動かすだけ。数字なし。絵 64px） | **公開済み（2026-11-25）**。作者の PC での「並べる → 公開 → ゲームのメニュー」の確かめ待ち |
 | ⑤ 交換（v0.41.0） | 端末を持ち寄ったときだけできる、1 対 1 の入れ替え（片方が QR コードを出し、もう片方がカメラで読む方式。作者が決めた） | v0.41.0 として作った。**公開済み（2026-11-25）。サーバーの載せ直しと、実機 2 台での試し待ち**（設計 `specs/2026-11-25-stage5-trade-design.md`、決めたこと・残したこと `specs/2026-11-25-stage5-ledger.md`） |
-| ⑥ 支払い | Web アプリのまま、Stripe でチケットを売る。期限は 6 か月（作者の決定） | 計画書の下書きだけ |
+| ⑥ 支払い（v0.42.0） | Web アプリのまま、Stripe でチケットを売る。期限は 6 か月（作者の決定） | v0.42.0 として作った。**売る入口は隠してある（`salesOpen` false）。公開と、作者の Stripe の準備・載せ直し・試しの購入待ち**（設計 `specs/2026-11-25-stage6-payment-design.md`、決めたこと・残したこと `specs/2026-11-25-stage6-ledger.md`） |
 
 作者への質問は、**カード形式（選択肢つき）で出す**（作者の指示、2026-11-23）。
 
@@ -119,6 +120,20 @@
 - **きろく**（`diag`）: `trade open|code|join …|accept|result done|cancelled reason=…|camera …`。服の名前・利用者コードは入れない。
 - **E2E**: `e2e/trade.spec.ts`（7 件）。写真: `specs/2026-11-25-stage5-trade/`（iPad・スマホの縦）。
 
+### 0-1f. 段階 ⑥ の作り（次に触る人へ）
+
+- **チケットの数え方**（`tools/cloud/wallet.ts`。足し引きだけの純粋な関数）: 利用者は `free`（期限なし）と `lots`（買った分。`{id, left, expiresAt}`）を持つ。使う順は、期限が近い lot から、最後に free（`draw`）。戻すときは引いた lot へ（`refundTicket`）。期限切れは `expire`。`tickets` は「使える合計」。手で `tickets` を書いたときは、その差を `free` に入れる（`ticketsWritten`）。`addMonthsJst` は `src/cloud/expiry.ts`（アプリ側。wallet.ts が再公開）。台帳（ledger）には、`draws`・`expire:{lot}`・`welcome`・購入のたびの行が 1 つの取り引きで残る。
+- **支払い**（`tools/cloud/payment.ts`）: `PaymentGateway`（`createCheckout`・`getSession`・`parseEvent`）。`checkout`（1 日 10 回まで・設定の `packs` のパックだけ・ログインした人だけ）→ `purchases/{id}` を `open` で作る → Stripe の URL を返す。知らせ（`handlePayEvent`）: completed / async_payment_succeeded → `fulfill`（何度呼んでも 1 回。lot を足す）、expired、refunded / disputed（返金の割合だけ lot を減らす）。購入の記録が無くても、知らせの `metadata`（uid・pack・tickets・expiresAt）が正しければ作り直して足す（払われたのに足せない、を避ける。判断は ledger）。足せなかったときは `'orphan'`（記録も meta も無い）か `'no-user'`（利用者がいない）を返し、`stripeHook` が `【要手当て】` をログに出す。
+- **Stripe の口**（`functions/src/stripeGateway.ts`）: `createStripeGateway(secretKey, webhookSecret)`。ライブラリは `stripe` 23.2.0（API バージョン `2026-11-18.endive`）。Checkout の期限は `max(30 分, now+31 分)`（Stripe の下限）。署名の失敗だけ `BadSignatureError`（hook は 400）、ほかの失敗は 500（Stripe が送り直す）。通信のテストは、にせのクライアントを差し込んで通信なし（`stripeGateway.test.ts`）。**本物には、1 回もつないでいない。**
+- **`stripeHook`**（`functions/src/index.ts`）: POST 以外 405・署名不正 400・処理失敗 500・ほか 200。設定は `system/config` の `salesOpen`・`packs`・`welcomeTickets`・`payReturnUrl`（https のみ）。秘密は `STRIPE_SECRET_KEY`・`STRIPE_WEBHOOK_SECRET`（空なら `checkout` は `pay:closed`）。エミュレーターは `STUDIO_TEST_FAKE_PAY=1`（`functions/test/prepare.mjs` が書く）でにせの口を使う。
+- **にせの口**（`tools/cloud/fakeGateway.ts`）: 署名は本文の HMAC-SHA256（16 進、鍵 `whsec_test`）。`sign(body)`。
+- **アプリ**: `src/appStudio/Shop.tsx`（保護者の確認 → パック → 最終確認の画面。同意の印が無いと進めない。規約へのリンク 3 つ `shop-link-*`）、`usePay.ts`（戻り・結果の取り込み・遅いとき）、`payReturn.ts`（戻りの URL `?pay=` の読み・消し）、`FakePayPage.tsx`（`?studio=fake` のにせの支払いページ）、`PayNotice.tsx`（「ふえました」・期限のお知らせ・ようこそ）。ようこそのチケットは `src/cloud/session.ts` が signIn のときに受け取り、`AppStudio` が出す。**買うボタンは、`salesOpen` が true か管理者のときだけ、かつ「つくる」が開いている端末だけ。**「つくる」を出さない端末に `?pay=` で戻ったときは、小さなお知らせだけ（つくるは開けない）。古いサーバー（`SERVER_API` が足りない）には、買うボタンを出さない。
+- **偽の裏側**（`?studio=fake`）: `dressup_fake_options` に `shop`（`{open, packs}`）・`payResult`（`paid`・`cancel`・`slow` = 足すのが遅れる）・`paySlowMs`・`welcome`（ようこその枚数）・`anonymous`・`fakeLots`（`[{count, daysLeft}]`）。`createBackend.ts` の `fakeOptions()` が読む項目を足し忘れないこと。
+- **きろく**（`diag`）: `pay shop open=… packs=N`・`pay checkout ok|refused reason=…|failed`・`pay return done|cancel`・`pay result paid added=N|slow|…`・`welcome added=N`。支払いの番号・金額・メールは入れない。
+- **ページ**: `public/legal/tokushoho.html`・`terms.html`・`privacy.html`（外の読み込みの無い素の HTML。`【作者が記入】` を残してある。専門家の確認ではない下書き）。
+- **E2E**: `e2e/pay.spec.ts`（売っていない・管理者・ログインなし・同意・支払い・やめる・遅い・期限・リンクが 200）。**保護者の確認の問いは「十一 かける …」も出る**（`一` を漢数字の表に入れ忘れて、9 回に 1 回落ちていた。直した）。
+- 画像生成（Gemini）は、この段階では 0 枚。
+
 ### 0-2. 段階 ① の作り（次に触る人へ）
 
 - **生成の流れ**: アプリ →（関数 `studio` の `startJob`）→ チケットを引くのと仕事を作るのを 1 つの取り引きで → 列（Cloud Tasks）に入れる → 列が関数 `studioWork` を呼ぶ → `tools/cloud/studioCore.ts` の `workJob` → `runJob` が 1 点ずつ作り、**できたらその場で自分の服として保存**（候補は `kept`、服の ID は `my:{仕事}-{番号}-{取りかかった回数}`）。アプリは「進める」を呼ばない（聞くだけ）。
@@ -147,6 +162,7 @@
 
 ### 0-4. テストと、この作業環境の注意
 
+- v0.42.0 の結果（2026-11-25）: ユニット 1361 件中 1360 件（`processSwap.test.ts` の 1 件が、5 秒の時間切れ。前からある）・エミュレーター 52 件・E2E 164 件、通過。型・ESLint エラー 0（前からある警告 1）。本物の Stripe には、つなげていない。
 - v0.40.0 の結果（2026-11-25）: ユニット 1189 件（+ スタジオの記録の 1 件）・エミュレーター 31 件・E2E 147 件、全部通過。型・ESLint エラー 0（前からある警告 1）。最後の別の目のレビュー（Opus）: 重大・重要 0 件。小さいもの 3 件のうち「最後のセットを消しても `setsOrder` が残る」は直した。残した 2 件: 「セット」をいちばん後ろにしたあとで新しいカテゴリを作ると、セットの後ろに入る／カテゴリの名前が `__set` だとメニューのキーがぶつかる（まず無い）。
 - v0.39.0 の結果（2026-11-25）: ユニット 1183 件・エミュレーター 31 件が通過。E2E は 146 件中 145 件が通過。`e2e/dressup.spec.ts` の「一覧が画面に収まるとき…」の 1 件が落ちていたのは、v0.39.1 で直した（調整画面の一覧のドールの行の絵が文字の行として並び、フォントによって下に 2px のすき間ができて、一覧が「収まらない」と見なされていた。この作業環境の既定のフォントが変わって表に出た。実機でも、フォントによっては同じことが起きうる。`src/App.css` の `.item-adjust-picker img` を `display: block` に）。型・ESLint エラー 0（前からある警告 1）。
 - v0.38.0 の結果: ユニット 1179 件中 1178 件（下の 1 件を除く）、エミュレーター 31 件、E2E 144 件が通過。型・ESLint エラー 0（前からある警告 1）。**サーバーに関わる所を変えていなくても、エミュレーターのテストは走らせること**（v0.37.0 で、アプリの側の変更が、エミュレーターのテスト 3 件を落としていた。走らせていなくて、気づかなかった）。
