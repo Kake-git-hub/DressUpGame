@@ -106,4 +106,11 @@ describe('交換（Firestore）', () => {
     await store.setUserTrade(a, null);
     expect((await store.getUser(a))?.trade).toBeUndefined();
   });
+  it('countTrade: 上限に達したら limit（同時でも超えない）', async () => {
+    const { a } = await setup();
+    const results = await Promise.all(Array.from({ length: 6 }, () => store.countTrade(a, '2026-11-25', 4).then(() => 'ok', (e: { code?: string }) => e.code)));
+    expect(results.filter((r) => r === 'ok')).toHaveLength(4);
+    expect(results.filter((r) => r === 'limit')).toHaveLength(2);
+    await store.countTrade(a, '2026-11-26', 4);
+  });
 });

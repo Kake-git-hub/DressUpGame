@@ -251,4 +251,11 @@ describe('交換', () => {
     await store.setUserTrade('u1', null);
     expect((await store.getUser('u1'))?.trade).toBeUndefined();
   });
+  it('countTrade: 上限で limit（日が変われば数え直す）', async () => {
+    await store.countTrade('u1', '2026-11-25', 2);
+    await store.countTrade('u1', '2026-11-25', 2);
+    await expect(store.countTrade('u1', '2026-11-25', 2)).rejects.toMatchObject({ code: 'limit' });
+    await store.countTrade('u1', '2026-11-26', 2);
+    await store.countTrade('u2', '2026-11-25', 2);
+  });
 });

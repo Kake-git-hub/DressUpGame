@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, updateItem, workJob } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, TRADE_CODE_MS, TRADE_CLAIMED_MS, TRADE_JOINED_MS, TRADE_OPEN_MS, TRADE_PER_DAY, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 import type { CandidateDoc, ItemDoc, JobDoc } from './store.ts';
 
@@ -1262,5 +1262,254 @@ describe('引き継ぎ（③-b）: 合い言葉で、匿名の利用者のチケ
     for (const path of Object.values(mine[1].paths)) expect(await files.get(path)).not.toBeNull();
     expect([...files.files.keys()].filter((k) => k.includes('my_old1-0-12/'))).toHaveLength(2);
     expect([...files.files.keys()].filter((k) => k.startsWith('users/B/'))).toHaveLength(2);
+  });
+});
+
+describe('交換', () => {
+  // 利用者 u（服 id）を作る。絵（サムネイル）は置き場に置く
+  async function giver(uid: string, id: string, over: Partial<ItemDoc> = {}) {
+    await signIn(deps, uid);
+    const thumbPath = `users/${uid}/items/${id.replace(/[^A-Za-z0-9_-]/g, '_')}/thumb.webp`;
+    await files.put(thumbPath, Buffer.from(`thumb-${id}`), 'image/webp');
+    await store.putItem(uid, {
+      id,
+      dollId: 'doll',
+      item: { id, name: `ふく-${id}`, category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/thumb.webp' },
+      paths: { 'files/thumb.webp': thumbPath },
+      set: { id: 's1', name: 'セット' },
+      hue: 20,
+      createdAt: 1,
+      ...over,
+    });
+  }
+  const refusal = async (p: Promise<unknown>) => {
+    const e = await p.then(() => null, (x: unknown) => x);
+    expect(e).toBeInstanceOf(CloudError);
+    expect((e as CloudError).code).toBe('refused');
+    return /^trade:(\S+)/.exec((e as CloudError).message)?.[1];
+  };
+  // a が出して、b が読み取って、b が服を決めた
+  async function joined() {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', code);
+    await tradeJoin(deps, 'ub', tradeId, 'my:y-0-1');
+    return tradeId;
+  }
+
+  it('trade swaps when both accept', async () => {
+    const id = await joined();
+    clock += 1000;
+    expect((await tradeAccept(deps, 'ua', id)).myAccepted).toBe(true);
+    const doneB = await tradeAccept(deps, 'ub', id);
+    expect(doneB).toMatchObject({ status: 'done', me: 'b', receivedId: 'my:x-0-1' });
+    expect(await tradeView(deps, 'ua', id)).toMatchObject({ status: 'done', receivedId: 'my:y-0-1' });
+    expect(await store.getItem('ua', 'my:x-0-1')).toBeNull();
+    expect(await store.getItem('ub', 'my:x-0-1')).toMatchObject({ order: clock, hue: 20 });
+    expect((await store.getItem('ua', 'my:y-0-1'))?.set).toBeUndefined();
+  });
+  it('one accept does not move', async () => {
+    const id = await joined();
+    const view = await tradeAccept(deps, 'ua', id);
+    expect(view).toMatchObject({ status: 'joined', myAccepted: true, theirAccepted: false });
+    expect(await tradeView(deps, 'ub', id)).toMatchObject({ myAccepted: false, theirAccepted: true });
+    expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
+  });
+  it('accept twice concurrently swaps once', async () => {
+    const id = await joined();
+    const [x, y] = await Promise.all([tradeAccept(deps, 'ua', id), tradeAccept(deps, 'ub', id)]);
+    // 先に立てたほうは、まだ「そろっていない」と返ることがある。どちらも、次に見れば done
+    expect([x.status, y.status]).toContain('done');
+    expect((await tradeView(deps, 'ua', id)).status).toBe('done');
+    expect((await tradeView(deps, 'ub', id)).status).toBe('done');
+    expect(await store.getItem('ua', 'my:y-0-1')).not.toBeNull();
+    expect(await store.getItem('ub', 'my:x-0-1')).not.toBeNull();
+    expect(await store.getItem('ua', 'my:x-0-1')).toBeNull();
+    expect(await store.getItem('ub', 'my:y-0-1')).toBeNull();
+  });
+  it('accept before joined is refused', async () => {
+    await giver('ua', 'my:x-0-1');
+    const { tradeId } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    expect(await refusal(tradeAccept(deps, 'ua', tradeId))).toBe('unknown');
+  });
+  it('claim refuses expired code', async () => {
+    await giver('ua', 'my:x-0-1');
+    await signIn(deps, 'ub');
+    const { code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    clock += TRADE_CODE_MS + 1000;
+    expect(await refusal(tradeClaim(deps, 'ub', code))).toBe('expired');
+  });
+  it('code refresh invalidates old code', async () => {
+    await giver('ua', 'my:x-0-1');
+    await signIn(deps, 'ub');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    clock += 60_000;
+    const fresh = await tradeCode(deps, 'ua', tradeId);
+    expect(fresh.code).not.toBe(code);
+    expect(await refusal(tradeClaim(deps, 'ub', code))).toBe('unknown');
+    clock += 60_000; // 新しい印は、出してから 60 秒（古い印なら 120 秒）
+    expect(await tradeClaim(deps, 'ub', fresh.code)).toEqual({ tradeId });
+  });
+  it('old code of an ended trade never resolves', async () => {
+    await giver('ua', 'my:x-0-1');
+    await signIn(deps, 'ub');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeCancel(deps, 'ua', tradeId);
+    expect(await refusal(tradeClaim(deps, 'ub', code))).toBe('expired');
+    expect((await tradeView(deps, 'ua', tradeId)).status).toBe('cancelled');
+  });
+  it('claim refuses self', async () => {
+    await giver('ua', 'my:x-0-1');
+    const { code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    expect(await refusal(tradeClaim(deps, 'ua', code))).toBe('self');
+  });
+  it('claim refuses unknown code', async () => {
+    await signIn(deps, 'ub');
+    expect(await refusal(tradeClaim(deps, 'ub', 'nothing'))).toBe('unknown');
+  });
+  it('third person is busy', async () => {
+    await giver('ua', 'my:x-0-1');
+    await signIn(deps, 'ub');
+    await signIn(deps, 'uc');
+    const { code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', code);
+    expect(await refusal(tradeClaim(deps, 'uc', code))).toBe('busy');
+  });
+  it('claim survives code refresh while choosing', async () => {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', code);
+    clock += 60_000;
+    await tradeCode(deps, 'ua', tradeId);
+    clock += 60_000;
+    await tradeJoin(deps, 'ub', tradeId, 'my:y-0-1');
+    await tradeAccept(deps, 'ua', tradeId);
+    expect((await tradeAccept(deps, 'ub', tradeId)).status).toBe('done');
+  });
+  it('cannot offer item of unfinished job', async () => {
+    await giver('ua', 'my:j9-0-1');
+    await store.createJob('ua', { id: 'j9', dollId: 'doll', theme: '', styleId: '', done: false, tickets: 1, createdAt: 1, heartbeat: 1, candidates: [] });
+    expect(await refusal(tradeOpen(deps, 'ua', 'my:j9-0-1'))).toBe('not-movable');
+    expect(await refusal(tradeOpen(deps, 'ua', 'my:nothing'))).toBe('unknown');
+  });
+  it('join refuses an unfinished item and a stranger', async () => {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:j9-0-1');
+    await giver('uc', 'my:z-0-1');
+    await store.createJob('ub', { id: 'j9', dollId: 'doll', theme: '', styleId: '', done: false, tickets: 1, createdAt: 1, heartbeat: 1, candidates: [] });
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', code);
+    expect(await refusal(tradeJoin(deps, 'ub', tradeId, 'my:j9-0-1'))).toBe('not-movable');
+    expect(await refusal(tradeJoin(deps, 'uc', tradeId, 'my:z-0-1'))).toBe('unknown');
+    expect(await refusal(tradeJoin(deps, 'ub', tradeId, 'my:z-0-1'))).toBe('unknown'); // 自分の服でない
+  });
+  it('cannot delete item in live trade', async () => {
+    const id = await joined();
+    await expect(deleteItem(deps, 'ua', 'my:x-0-1')).rejects.toMatchObject({ code: 'refused' });
+    await expect(deleteItem(deps, 'ub', 'my:y-0-1')).rejects.toMatchObject({ code: 'refused' });
+    expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
+    await tradeCancel(deps, 'ua', id);
+    await deleteItem(deps, 'ua', 'my:x-0-1');
+    expect(await store.getItem('ua', 'my:x-0-1')).toBeNull();
+  });
+  it('force delete ignores trades', async () => {
+    await joined();
+    await deleteItem(deps, 'ua', 'my:x-0-1', true);
+    expect(await store.getItem('ua', 'my:x-0-1')).toBeNull();
+  });
+  it('new open cancels previous', async () => {
+    const id = await joined();
+    await giver('ua', 'my:w-0-1');
+    await tradeOpen(deps, 'ua', 'my:w-0-1');
+    expect(await tradeView(deps, 'ub', id)).toMatchObject({ status: 'cancelled', reason: 'replaced' });
+  });
+  it('claim cancels the claimer\'s previous trade', async () => {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    await giver('uc', 'my:z-0-1');
+    const first = await tradeOpen(deps, 'ub', 'my:y-0-1');
+    const { code } = await tradeOpen(deps, 'uc', 'my:z-0-1');
+    await tradeClaim(deps, 'ub', code);
+    expect(await tradeView(deps, 'ub', first.tradeId)).toMatchObject({ status: 'cancelled', reason: 'replaced' });
+  });
+  it('timeouts', async () => {
+    // open のまま 10 分
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    const t1 = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    clock += TRADE_OPEN_MS - 1000;
+    expect((await tradeView(deps, 'ua', t1.tradeId)).status).toBe('open');
+    clock += 2000;
+    expect(await tradeView(deps, 'ua', t1.tradeId)).toMatchObject({ status: 'cancelled', reason: 'expired' });
+    // claimed から 5 分
+    const t2 = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', t2.code);
+    clock += TRADE_CLAIMED_MS + 1000;
+    expect(await refusal(tradeJoin(deps, 'ub', t2.tradeId, 'my:y-0-1'))).toBe('expired');
+    expect(await tradeView(deps, 'ua', t2.tradeId)).toMatchObject({ status: 'cancelled', reason: 'expired' });
+    // joined から 3 分
+    const t3 = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', t3.code);
+    await tradeJoin(deps, 'ub', t3.tradeId, 'my:y-0-1');
+    clock += TRADE_JOINED_MS + 1000;
+    expect(await tradeAccept(deps, 'ua', t3.tradeId)).toMatchObject({ status: 'cancelled', reason: 'expired' });
+    expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
+    // 時間切れの交換の服は、消せる
+    await deleteItem(deps, 'ua', 'my:x-0-1');
+  });
+  it('daily limit', async () => {
+    await giver('ua', 'my:x-0-1');
+    for (let i = 0; i < TRADE_PER_DAY; i++) await tradeOpen(deps, 'ua', 'my:x-0-1');
+    expect(await refusal(tradeOpen(deps, 'ua', 'my:x-0-1'))).toBe('limit');
+    // 読み取るほうも数える
+    await giver('ub', 'my:y-0-1');
+    const { code } = await tradeOpen(deps, 'ub', 'my:y-0-1');
+    expect(await refusal(tradeClaim(deps, 'ua', code))).toBe('limit');
+    clock += 86_400_000;
+    await tradeOpen(deps, 'ua', 'my:x-0-1');
+  });
+  it('view hides the other side until claimed, and carries thumbs', async () => {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    const open = await tradeView(deps, 'ua', tradeId);
+    expect(open).toMatchObject({ status: 'open', me: 'a', mine: { id: 'my:x-0-1', name: 'ふく-my:x-0-1', categoryId: 'トップス', hue: 20, thumbType: 'image/webp' } });
+    expect(Buffer.from(open.mine!.thumb, 'base64').toString()).toBe('thumb-my:x-0-1');
+    expect(open.theirs).toBeUndefined();
+    await tradeClaim(deps, 'ub', code);
+    const b = await tradeView(deps, 'ub', tradeId);
+    expect(b).toMatchObject({ me: 'b', theirs: { id: 'my:x-0-1' } });
+    expect(b.mine).toBeUndefined();
+    await tradeJoin(deps, 'ub', tradeId, 'my:y-0-1');
+    expect(await tradeView(deps, 'ua', tradeId)).toMatchObject({ theirs: { id: 'my:y-0-1' } });
+    await signIn(deps, 'uc');
+    expect(await refusal(tradeView(deps, 'uc', tradeId))).toBe('unknown');
+  });
+  it('swap aborts when an item vanished', async () => {
+    const id = await joined();
+    await store.deleteItem('ub', 'my:y-0-1');
+    await tradeAccept(deps, 'ua', id);
+    expect(await tradeAccept(deps, 'ub', id)).toMatchObject({ status: 'cancelled', reason: 'gone' });
+    expect(await store.getItem('ua', 'my:x-0-1')).not.toBeNull();
+  });
+  it('cancel by a participant only', async () => {
+    const id = await joined();
+    await signIn(deps, 'uc');
+    expect(await refusal(tradeCancel(deps, 'uc', id))).toBe('unknown');
+    await tradeCancel(deps, 'ub', id);
+    expect(await tradeView(deps, 'ua', id)).toMatchObject({ status: 'cancelled', reason: 'cancel' });
+    await tradeCancel(deps, 'ub', id); // 終わったあとは、何も起きない
+  });
+  it('received item delete removes original files', async () => {
+    const id = await joined();
+    await tradeAccept(deps, 'ua', id);
+    await tradeAccept(deps, 'ub', id);
+    // ub がもらった my:x-0-1 の絵は、ua の置き場のまま
+    expect(await files.get('users/ua/items/my_x-0-1/thumb.webp')).not.toBeNull();
+    await deleteItem(deps, 'ub', 'my:x-0-1');
+    expect(await files.get('users/ua/items/my_x-0-1/thumb.webp')).toBeNull();
+    expect(await store.getItem('ub', 'my:x-0-1')).toBeNull();
   });
 });

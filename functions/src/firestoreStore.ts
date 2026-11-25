@@ -7,6 +7,7 @@
  *   users/{uid}/items/{itemId}  自分の服
  *   userCodes/{利用者コード}    利用者コード → uid（重ならないようにするため）
  *   system/usage-{日付}         その日に作った画像の枚数
+ *   system/trade-{日付}-{uid}   その人がその日に始めた交換の回数
  *   handoffs/{合い言葉}         引き継ぎの合い言葉（元の uid・時刻・使った人）
  *   trades/{id}                 交換（双方の uid・服・状態・読み取りの印）
  *
@@ -111,6 +112,15 @@ export class FirestoreStore implements CloudStore {
       const snap = await tx.get(ref);
       const used = snap.exists ? Number((snap.data() as { count?: unknown }).count) || 0 : 0;
       if (used >= perDay) throw new CloudError('limit', '今日は、作れる枚数の上限に達しました。あした、もう一度ためしてください');
+      tx.set(ref, { count: used + 1 });
+    });
+  }
+  async countTrade(uid: string, day: string, perDay: number): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.db.collection('system').doc(`trade-${docId(day)}-${docId(uid)}`);
+      const snap = await tx.get(ref);
+      const used = snap.exists ? Number((snap.data() as { count?: unknown }).count) || 0 : 0;
+      if (used >= perDay) throw new CloudError('limit', '今日は、こうかんできる回数の上限に達しました。あした、もう一度ためしてください');
       tx.set(ref, { count: used + 1 });
     });
   }

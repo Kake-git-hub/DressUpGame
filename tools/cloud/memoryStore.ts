@@ -252,6 +252,12 @@ export class MemoryStore implements CloudStore {
     trade.endedAt = now;
     return clone(trade);
   }
+  async countTrade(uid: string, day: string, perDay: number): Promise<void> {
+    const key = `trade:${day}:${uid}`;
+    const used = this.usage.get(key) ?? 0;
+    if (used >= perDay) throw new CloudError('limit', '今日は、こうかんできる回数の上限に達しました。あした、もう一度ためしてください');
+    this.usage.set(key, used + 1);
+  }
   async setUserTrade(uid: string, tradeId: string | null): Promise<void> {
     const user = this.mustUser(uid);
     if (tradeId === null) delete user.trade;

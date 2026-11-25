@@ -185,6 +185,8 @@ export interface CloudStore {
   // もう done（や cancelled）、まだ joined でない・両方 accepted でないときは、何も変えずに、そのまま返す。
   // 動かした服は、set を外し、order と updatedAt を now にする（名前・色・絵・ID はそのまま）
   swapTrade(id: string, now: number): Promise<TradeDoc>;
+  // 交換を 1 回始めた（出した・読み取った）と数える。その日（day）の上限（perDay）に達していたら CloudError('limit')（数は増えない）
+  countTrade(uid: string, day: string, perDay: number): Promise<void>;
   // 利用者のいまの交換の ID を書く（null で消す）。利用者がいなければ CloudError('refused')
   setUserTrade(uid: string, tradeId: string | null): Promise<void>;
 }

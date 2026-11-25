@@ -8,7 +8,7 @@ import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { SERVER_API } from '../../src/cloud/wire.ts';
-import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, updateItem } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
 
 
@@ -163,6 +163,23 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown, cal
     }
     case 'deleteItem':
       await deleteItem(deps, uid, str(d.id, 100));
+      return { ok: true };
+    // 交換（2 台で、服を 1 点ずつ入れ替える）
+    case 'tradeOpen':
+      return await tradeOpen(deps, uid, str(d.itemId, 100));
+    case 'tradeCode':
+      return await tradeCode(deps, uid, str(d.tradeId, 100));
+    case 'tradeClaim':
+      return await tradeClaim(deps, uid, str(d.code, 200));
+    case 'tradeJoin':
+      await tradeJoin(deps, uid, str(d.tradeId, 100), str(d.itemId, 100));
+      return { ok: true };
+    case 'trade':
+      return { trade: await tradeView(deps, uid, str(d.tradeId, 100)) };
+    case 'tradeAccept':
+      return { trade: await tradeAccept(deps, uid, str(d.tradeId, 100)) };
+    case 'tradeCancel':
+      await tradeCancel(deps, uid, str(d.tradeId, 100));
       return { ok: true };
     default:
       throw refused();

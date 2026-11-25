@@ -17,7 +17,8 @@ import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
-import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef } from './store.ts';
+import type { WireTrade, WireTradeItem, TradeRefusal } from '../../src/cloud/wire.ts';
+import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef, TradeDoc, TradeEndReason } from './store.ts';
 
 // 公開されている素材（一覧と、ドールの型）
 export interface PublicContent {
@@ -661,6 +662,7 @@ export function listItems(deps: CoreDeps, uid: string): Promise<ItemDoc[]> {
 export async function deleteItem(deps: CoreDeps, uid: string, itemId: string, force = false): Promise<void> {
   const item = force ? null : await deps.store.getItem(uid, itemId);
   if (!force && !item) return;
+  if (!force && (await inLiveTrade(deps, uid, itemId))) throw new CloudError('refused', 'この服は、こうかんに だしているので、けせません');
   await deps.store.deleteItem(uid, itemId);
   const own = itemPrefix(uid, itemId);
   await deps.files.removeAll(own);
@@ -766,4 +768,215 @@ export async function drainAdopted(deps: CoreDeps, uid: string): Promise<void> {
     if (source?.movedTo !== uid) continue;
     await drain(deps, from, uid).catch(() => undefined);
   }
+}
+
+// ── 交換（2 台で、服を 1 点ずつ入れ替える。設計書 3・5・6 章）──
+// 読み取りの印の命（アプリは、QR を出している間、60 秒おきに新しくする）
+export const TRADE_CODE_MS = 90_000;
+// 時間切れ: open のまま・読み取ってから（claimed）・服がそろってから（joined）
+export const TRADE_OPEN_MS = 600_000;
+export const TRADE_CLAIMED_MS = 300_000;
+export const TRADE_JOINED_MS = 180_000;
+// 1 人 1 日の回数（tradeOpen + tradeClaim）
+export const TRADE_PER_DAY = 30;
+
+// 断る。message の先頭の `trade:{理由}` を、アプリが見分ける
+const tradeRefuse = (reason: TradeRefusal, message: string) => new CloudError('refused', `trade:${reason} ${message}`);
+const TRADE_MESSAGES: Record<TradeRefusal, string> = {
+  unknown: 'この こうかんは みつかりません',
+  expired: 'じかんが きれました。もういちど やりなおしてね',
+  self: 'じぶんの コードは よめません',
+  busy: 'この こうかんは、ほかの ひとと すすんでいます',
+  'not-movable': 'この ふくは、まだ こうかんに だせません',
+  limit: 'きょうは こうかんできる かいすうが いっぱいです。あした また ためしてね',
+};
+const refuseTrade = (reason: TradeRefusal) => tradeRefuse(reason, TRADE_MESSAGES[reason]);
+
+const isLive = (t: TradeDoc) => t.status === 'open' || t.status === 'claimed' || t.status === 'joined';
+function timedOut(t: TradeDoc, now: number): boolean {
+  if (t.status === 'open') return now - t.createdAt > TRADE_OPEN_MS;
+  if (t.status === 'claimed') return now - (t.claimedAt ?? t.createdAt) > TRADE_CLAIMED_MS;
+  if (t.status === 'joined') return now - (t.joinedAt ?? t.claimedAt ?? t.createdAt) > TRADE_JOINED_MS;
+  return false;
+}
+const sideOf = (t: TradeDoc, uid: string): 'a' | 'b' | null => (t.a.uid === uid ? 'a' : t.b?.uid === uid ? 'b' : null);
+
+// 生きている交換を、やめにする（中で読み直す。もう終わっていれば、何もしない）
+async function endTrade(deps: CoreDeps, id: string, reason: TradeEndReason): Promise<TradeDoc> {
+  const now = deps.now();
+  return deps.store.updateTrade(id, (t) => (isLive(t) ? { ...t, status: 'cancelled', reason, endedAt: now } : null));
+}
+// 時間切れなら、ここで cancelled にする
+async function settleTrade(deps: CoreDeps, t: TradeDoc): Promise<TradeDoc> {
+  if (!isLive(t) || !timedOut(t, deps.now())) return t;
+  const now = deps.now();
+  return deps.store.updateTrade(t.id, (cur) => (isLive(cur) && timedOut(cur, now) ? { ...cur, status: 'cancelled', reason: 'expired', endedAt: now } : null));
+}
+async function loadTrade(deps: CoreDeps, uid: string, tradeId: string): Promise<TradeDoc> {
+  const t = await deps.store.getTrade(tradeId);
+  if (!t || !sideOf(t, uid)) throw refuseTrade('unknown');
+  return settleTrade(deps, t);
+}
+// その人の、前の交換（生きていれば）をやめにする
+async function replacePrevious(deps: CoreDeps, uid: string, except?: string): Promise<void> {
+  const prev = (await deps.store.getUser(uid))?.trade;
+  if (prev && prev !== except) await endTrade(deps, prev, 'replaced').catch(() => undefined);
+}
+// その服が、その人の生きている（時間切れでない）交換に出ているか
+async function inLiveTrade(deps: CoreDeps, uid: string, itemId: string): Promise<boolean> {
+  const id = (await deps.store.getUser(uid))?.trade;
+  const t = id ? await deps.store.getTrade(id) : null;
+  if (!t || !isLive(t) || timedOut(t, deps.now())) return false;
+  const side = sideOf(t, uid);
+  return side !== null && t[side]?.itemId === itemId;
+}
+// 交換に出せる、自分の服
+async function offerable(deps: CoreDeps, uid: string, itemId: string): Promise<ItemDoc> {
+  const item = itemId.startsWith('my:') ? await deps.store.getItem(uid, itemId) : null;
+  if (!item) throw refuseTrade('unknown');
+  if (!(await movable(deps, uid, item))) throw refuseTrade('not-movable');
+  return item;
+}
+async function countTrade(deps: CoreDeps, uid: string): Promise<void> {
+  try {
+    await deps.store.countTrade(uid, dayOf(deps.now()), TRADE_PER_DAY);
+  } catch (e) {
+    if (e instanceof CloudError && e.code === 'limit') throw refuseTrade('limit');
+    throw e;
+  }
+}
+
+// 交換を出す: 服を決めて、読み取りの印を作る。前の自分の交換は、やめにする
+export async function tradeOpen(deps: CoreDeps, uid: string, itemId: string): Promise<{ tradeId: string; code: string }> {
+  await signIn(deps, uid);
+  await offerable(deps, uid, itemId);
+  await countTrade(deps, uid);
+  await replacePrevious(deps, uid);
+  const now = deps.now();
+  const trade: TradeDoc = { id: deps.newId(), status: 'open', a: { uid, itemId }, code: deps.newWord(), codeAt: now, createdAt: now };
+  await deps.store.putTrade(trade);
+  await deps.store.setUserTrade(uid, trade.id);
+  return { tradeId: trade.id, code: trade.code };
+}
+
+// 読み取りの印を、新しくする（前の印は、使えなくなる）。読み取られたあとでも、できる
+export async function tradeCode(deps: CoreDeps, uid: string, tradeId: string): Promise<{ code: string }> {
+  const t = await loadTrade(deps, uid, tradeId);
+  if (t.a.uid !== uid) throw refuseTrade('unknown');
+  if (t.status !== 'open' && t.status !== 'claimed') throw refuseTrade('expired');
+  const now = deps.now();
+  const next = await deps.store.updateTrade(tradeId, (cur) => (cur.status === 'open' || cur.status === 'claimed' ? { ...cur, code: deps.newWord(), codeAt: now } : null));
+  if (next.status !== 'open' && next.status !== 'claimed') throw refuseTrade('expired');
+  return { code: next.code };
+}
+
+// 印を読み取る。相手の交換の B になる
+export async function tradeClaim(deps: CoreDeps, uid: string, code: string): Promise<{ tradeId: string }> {
+  await signIn(deps, uid);
+  const found = await deps.store.findTradeByCode(code);
+  if (!found) throw refuseTrade('unknown');
+  if (found.a.uid === uid) throw refuseTrade('self');
+  // 古い印は、交換の文書から消えている。終わった交換の印は、生きた交換には、つながらない
+  const t = await settleTrade(deps, found);
+  if (!isLive(t)) throw refuseTrade('expired');
+  if (t.status !== 'open') throw refuseTrade('busy');
+  if (deps.now() - t.codeAt > TRADE_CODE_MS) throw refuseTrade('expired');
+  await countTrade(deps, uid);
+  const now = deps.now();
+  // 読み直して決める（割り込まれたら、やり直し）。change は、2 回以上呼ばれることがある
+  let verdict = null as TradeRefusal | null;
+  const claimed = await deps.store.updateTrade(t.id, (cur) => {
+    verdict = null;
+    if (cur.code !== code) verdict = 'unknown';
+    else if (!isLive(cur) || timedOut(cur, now)) verdict = 'expired';
+    else if (cur.status !== 'open') verdict = 'busy';
+    else if (now - cur.codeAt > TRADE_CODE_MS) verdict = 'expired';
+    if (verdict) return null;
+    return { ...cur, status: 'claimed', b: { uid }, claimedAt: now };
+  });
+  if (verdict) throw refuseTrade(verdict);
+  await replacePrevious(deps, uid, claimed.id);
+  await deps.store.setUserTrade(uid, claimed.id);
+  return { tradeId: claimed.id };
+}
+
+// B が、自分の服を決める
+export async function tradeJoin(deps: CoreDeps, uid: string, tradeId: string, itemId: string): Promise<void> {
+  const t = await loadTrade(deps, uid, tradeId);
+  if (t.b?.uid !== uid) throw refuseTrade('unknown');
+  if (!isLive(t)) throw refuseTrade('expired');
+  if (t.status !== 'claimed') throw refuseTrade('busy');
+  await offerable(deps, uid, itemId);
+  const now = deps.now();
+  const next = await deps.store.updateTrade(tradeId, (cur) => (cur.status === 'claimed' && cur.b?.uid === uid && !timedOut(cur, now) ? { ...cur, status: 'joined', b: { uid, itemId }, joinedAt: now } : null));
+  if (next.status !== 'joined') throw refuseTrade('expired');
+}
+
+// 絵（サムネイル）つきの、交換の服。持ち主が変わっていても（入れ替えたあと）見つかるように、両方の持ち主を探す
+const THUMB_TYPES: Record<string, string> = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+async function tradeItem(deps: CoreDeps, owners: string[], itemId: string | undefined): Promise<WireTradeItem | undefined> {
+  if (!itemId) return undefined;
+  for (const owner of owners) {
+    const doc = await deps.store.getItem(owner, itemId);
+    if (!doc) continue;
+    const path = doc.paths[doc.item.thumb];
+    const data = path ? await deps.files.get(path) : null;
+    return {
+      id: doc.id,
+      dollId: doc.dollId,
+      name: doc.item.name,
+      categoryId: doc.item.category,
+      hue: doc.hue ?? 0,
+      thumb: data ? data.toString('base64') : '',
+      thumbType: THUMB_TYPES[doc.item.thumb.split('.').pop()?.toLowerCase() ?? ''] ?? 'image/webp',
+    };
+  }
+  return undefined;
+}
+async function wireTrade(deps: CoreDeps, uid: string, t: TradeDoc): Promise<WireTrade> {
+  const me = sideOf(t, uid);
+  if (!me) throw refuseTrade('unknown');
+  const other = me === 'a' ? 'b' : 'a';
+  const mine = t[me];
+  const theirs = t[other];
+  const owners = [t.a.uid, ...(t.b ? [t.b.uid] : [])];
+  const myItem = await tradeItem(deps, owners, mine?.itemId);
+  // 相手の服は、読み取ったあと（claimed 以降）から
+  const theirItem = t.status === 'open' ? undefined : await tradeItem(deps, owners, theirs?.itemId);
+  return {
+    id: t.id,
+    status: t.status,
+    me,
+    ...(myItem ? { mine: myItem } : {}),
+    ...(theirItem ? { theirs: theirItem } : {}),
+    myAccepted: !!mine?.accepted,
+    theirAccepted: !!theirs?.accepted,
+    ...(t.reason ? { reason: t.reason } : {}),
+    ...(t.status === 'done' && theirs?.itemId ? { receivedId: theirs.itemId } : {}),
+  };
+}
+
+export async function tradeView(deps: CoreDeps, uid: string, tradeId: string): Promise<WireTrade> {
+  return wireTrade(deps, uid, await loadTrade(deps, uid, tradeId));
+}
+
+// 「こうかんする」: 自分の分を立て、両方立ったら入れ替える。2 人が同時に押しても、入れ替えは 1 回（swapTrade が決める）
+export async function tradeAccept(deps: CoreDeps, uid: string, tradeId: string): Promise<WireTrade> {
+  const t = await loadTrade(deps, uid, tradeId);
+  if (t.status === 'done' || t.status === 'cancelled') return wireTrade(deps, uid, t);
+  if (t.status !== 'joined') throw refuseTrade('unknown');
+  const me = sideOf(t, uid)!;
+  const marked = await deps.store.updateTrade(tradeId, (cur) => {
+    if (cur.status !== 'joined' || cur[me]?.accepted) return null;
+    return { ...cur, [me]: { ...cur[me]!, accepted: true } };
+  });
+  // 自分の分を立てたあとの交換を読み直して、両方立っていれば入れ替える（相手が先に立てていても、あとでも）
+  let latest = (await deps.store.getTrade(tradeId)) ?? marked;
+  if (latest.status === 'joined' && latest.a.accepted && latest.b?.accepted) latest = await deps.store.swapTrade(tradeId, deps.now());
+  return wireTrade(deps, uid, latest);
+}
+
+export async function tradeCancel(deps: CoreDeps, uid: string, tradeId: string): Promise<void> {
+  const t = await loadTrade(deps, uid, tradeId);
+  if (isLive(t)) await endTrade(deps, tradeId, 'cancel');
 }

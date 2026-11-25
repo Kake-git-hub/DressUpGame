@@ -93,7 +93,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(3); // 3 = 引き継ぎ（offer・adopt）もできるサーバー
+    expect(api).toBe(4); // 4 = 交換もできるサーバー（3 = 引き継ぎ）
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -185,11 +185,11 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
   const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
 
   it('signIn の返事の api は 3。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
-    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(3);
-    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(3);
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(4);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(4);
     expect((await store.getUser('a1'))!.named).toBeUndefined();
     const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
-    expect(answer).toMatchObject({ api: 3, user: { tickets: 0, admin: false } });
+    expect(answer).toMatchObject({ api: 4, user: { tickets: 0, admin: false } });
     expect((await store.getUser('g1'))!.named).toBe(true);
   });
 
@@ -230,7 +230,7 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     store.moveTickets = async () => {
       throw new Error('store is down');
     };
-    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(3);
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(4);
   });
 
   it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {
@@ -261,6 +261,37 @@ describe('呼んだ人が匿名か（Firebase の証明から）', () => {
     expect(callerOfToken({ firebase: { sign_in_provider: 'google.com', identities: { 'google.com': ['123'] } } })).toEqual({ anonymous: false });
     expect(callerOfToken({ firebase: { sign_in_provider: 'password', identities: { email: ['b@example.com'] } } })).toEqual({ anonymous: false });
     expect(callerOfToken({ firebase: { sign_in_provider: 'password' } })).toEqual({ anonymous: false });
+  });
+});
+
+describe('交換の呼び出し', () => {
+  const myItem = async (uid: string, id: string) => {
+    await call(uid, { op: 'signIn' });
+    await store.putItem(uid, { id, dollId, item: { id, name: 'ふく', category: 'トップス', image: { file: 'files/a.webp', canvasW: 10, canvasH: 10, box: { x: 0, y: 0, w: 1, h: 1 } }, thumb: 'files/t.webp' }, paths: {}, createdAt: clock });
+  };
+  it('7 つの op で、交換が最後まで通る', async () => {
+    await myItem('a1', 'my:x-0-1');
+    await myItem('b1', 'my:y-0-1');
+    const opened = await call<{ tradeId: string; code: string }>('a1', { op: 'tradeOpen', itemId: 'my:x-0-1' });
+    const fresh = await call<{ code: string }>('a1', { op: 'tradeCode', tradeId: opened.tradeId });
+    expect(fresh.code).not.toBe(opened.code);
+    expect(await call('b1', { op: 'tradeClaim', code: fresh.code })).toEqual({ tradeId: opened.tradeId });
+    expect(await call('b1', { op: 'tradeJoin', tradeId: opened.tradeId, itemId: 'my:y-0-1' })).toEqual({ ok: true });
+    expect((await call<{ trade: { status: string; me: string } }>('a1', { op: 'trade', tradeId: opened.tradeId })).trade).toMatchObject({ status: 'joined', me: 'a' });
+    await call('a1', { op: 'tradeAccept', tradeId: opened.tradeId });
+    expect((await call<{ trade: { status: string; receivedId: string } }>('b1', { op: 'tradeAccept', tradeId: opened.tradeId })).trade).toMatchObject({ status: 'done', receivedId: 'my:x-0-1' });
+    // 取り消し
+    await myItem('a1', 'my:z-0-1');
+    const again = await call<{ tradeId: string }>('a1', { op: 'tradeOpen', itemId: 'my:z-0-1' });
+    expect(await call('a1', { op: 'tradeCancel', tradeId: again.tradeId })).toEqual({ ok: true });
+  });
+  it('引数の型が違えば refused。断りには trade:理由 が付く', async () => {
+    await myItem('a1', 'my:x-0-1');
+    for (const bad of [{ op: 'tradeOpen' }, { op: 'tradeOpen', itemId: 5 }, { op: 'tradeCode', tradeId: '' }, { op: 'tradeClaim', code: {} }, { op: 'tradeJoin', tradeId: 't' }, { op: 'trade' }, { op: 'tradeAccept', tradeId: 1 }, { op: 'tradeCancel' }]) {
+      await expect(call('a1', bad), JSON.stringify(bad)).rejects.toSatisfy((e) => codeOf(e) === 'refused');
+    }
+    await expect(call('a1', { op: 'tradeClaim', code: 'nothing' })).rejects.toThrow(/^trade:unknown /);
+    await expect(call('a1', { op: 'trade', tradeId: 'nothing' })).rejects.toThrow(/^trade:unknown /);
   });
 });
 
