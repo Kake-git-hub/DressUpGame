@@ -9,7 +9,7 @@ import { ApiError, api, contentUrl } from './api';
 import type { Job, PlannedItem, SetRef, Status, TemplateData } from './api';
 import { ItemCard } from './ItemCard';
 import { ItemPlacer } from './ItemPlacer';
-import { dropIndex, moveInList } from './order';
+import { dropIndex, moveInList, sortCategories } from './order';
 import { forgetParts } from './partsCache';
 import { STYLE_PRESETS, findStyle } from './stylePresets';
 import { useUnsaved } from './unsaved';
@@ -158,7 +158,7 @@ interface StartedJob {
 }
 
 export function Generate({ doll, status, onChanged }: Common & { status: Status }) {
-  const categories = [...doll.categories].sort((a, b) => a.menuOrder - b.menuOrder);
+  const categories = sortCategories(doll.categories);
   const [theme, setTheme] = useState('');
   const [styleId, setStyleId] = useState(() => findStyle(remember.get('style')).id);
   const [target, setTarget] = useState(() => {
@@ -564,7 +564,7 @@ export function Library({ doll, onChanged }: Common) {
       setError(message(e));
     }
   };
-  const categories = [...doll.categories].sort((a, b) => a.menuOrder - b.menuOrder);
+  const categories = sortCategories(doll.categories);
   return (
     <section>
       {error && <p className="error">{error}</p>}

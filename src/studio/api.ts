@@ -109,6 +109,8 @@ export const api = {
   deleteItem: (id: string) => request('DELETE', `/items?${q({ id })}`),
   saveCategory: (dollId: string, category: Omit<ManifestCategory, 'id'> & { id?: string }) => send<ManifestCategory>('PUT', '/categories', { dollId, category }),
   updateCategory: (dollId: string, id: string, change: Partial<Omit<ManifestCategory, 'id'>>) => send<ManifestCategory>('PATCH', '/categories', { dollId, id, change }),
+  // カテゴリの重ね順と並び順を、まとめて書く（並べ替えでは、全部のカテゴリの menuOrder を振り直して送る）
+  reorderCategories: (dollId: string, order: { id: string; layer: number; menuOrder: number }[]) => send<{ ok: true }>('POST', '/categories/order', { dollId, order }),
   deleteCategory: (dollId: string, id: string) => request('DELETE', `/categories?${q({ doll: dollId, id })}`),
   addBackground: async (dollId: string | null, name: string, file: Blob) =>
     (await (await request('POST', `/backgrounds?${q({ doll: dollId, name })}`, file)).json()) as ManifestBackground,

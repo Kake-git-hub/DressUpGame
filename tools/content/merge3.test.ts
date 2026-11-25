@@ -127,4 +127,16 @@ describe('mergeManifest（一覧ファイルを重ねたあと、セットの印
     const remote = manifest(doll('アニメ', [item('a', { set: 'S1' }), item('b', { set: 'S1' })], { sets: [S1] }));
     expect(dollOf(mergeManifest(base, local, remote)).sets).toEqual([{ id: 'S1', name: 'なつのうみ' }]);
   });
+
+  it('手元で振り直したカテゴリの menuOrder は、公開が変えていなければ残る', () => {
+    const cat = (id: string, menuOrder: number): Obj => ({ id, label: id, layer: 1, menuOrder, overlap: false, movable: false });
+    const base2 = manifest(doll('アニメ', [item('a')], { categories: [cat('てぶくろ', 3), cat('ソックス', 3)] }));
+    const local = manifest(doll('アニメ', [item('a')], { categories: [cat('てぶくろ', 1), cat('ソックス', 0)] }));
+    const merged = mergeManifest(base2, local, base2) as { dolls: { categories: { id: string; menuOrder: number }[] }[] };
+    expect(merged.dolls[0].categories.map((c) => [c.id, c.menuOrder])).toEqual([['てぶくろ', 1], ['ソックス', 0]]);
+    // 公開の側が別のドールを足していても、手元の振り直しは残る
+    const remote = manifest(...base2.dolls, doll('あたらしい', [item('n')]));
+    const merged2 = mergeManifest(base2, local, remote) as typeof merged;
+    expect(merged2.dolls[0].categories.map((c) => [c.id, c.menuOrder])).toEqual([['てぶくろ', 1], ['ソックス', 0]]);
+  });
 });
