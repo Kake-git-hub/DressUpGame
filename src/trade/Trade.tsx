@@ -2,7 +2,7 @@
  * 交換の画面: えらぶ → だす／よむ → えらぶ → こうかんする？ → できた／やめ
  * 子どもも使う画面なので、ひらがな中心。きろくには、名前・合い言葉・印を入れない
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { BackendError } from '../cloud/backend';
 import type { MyItem, TradeItem, TradeState } from '../cloud/backend';
 import type { Library } from '../cloud/library';
@@ -15,7 +15,7 @@ import { diag } from '../services/diag';
 import type { DollData } from '../types';
 import { QrScan } from './QrScan';
 import { QrShow } from './QrShow';
-import { isFinished, refusalText, stageOf } from './tradeFlow';
+import { OLD_SERVER_TEXT, isFinished, refusalText, stageOf } from './tradeFlow';
 import type { LocalStep } from './tradeFlow';
 
 export interface TradeProps {
@@ -30,6 +30,8 @@ export interface TradeProps {
 const POLL_MS = 1500;
 const CODE_MS = 60_000;
 const NO_CATEGORIES: ManifestCategory[] = [];
+// 交換の様子は、前へ戻さない（遅れて届いた返事で、終わった交換が「こうかんする？」に戻らないように）
+const RANK: Record<TradeState['status'], number> = { open: 0, claimed: 1, joined: 2, done: 3, cancelled: 3 };
 
 function errorText(error: unknown): string {
   if (error instanceof BackendError) {
@@ -43,6 +45,9 @@ function errorText(error: unknown): string {
 export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLibraryChanged }: TradeProps) {
   const backend = session.backend;
   const [supported, setSupported] = useState<boolean | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [notMovable, setNotMovable] = useState<ReadonlySet<string>>(new Set());
   const [items, setItems] = useState<MyItem[] | null>(null);
   const [local, setLocal] = useState<LocalStep>('menu');
   const [tradeId, setTradeId] = useState<string | null>(null);
@@ -50,6 +55,9 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   const [code, setCode] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const latestRef = useRef<TradeState | null>(null);
   const [scanKey, setScanKey] = useState(0);
   const stage = stageOf(trade, local);
 
@@ -65,21 +73,33 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
 
   useEffect(() => {
     let alive = true;
+    setLoadError(null);
     void backend.canTrade().then(
       (ok) => alive && setSupported(ok),
-      () => alive && setSupported(false),
+      (error: unknown) => {
+        if (!alive) return;
+        if (error instanceof BackendError && error.code === 'old-server') setSupported(false);
+        else setLoadError(errorText(error));
+      },
     );
     void library.all().then((all) => alive && setItems(all));
     return () => {
       alive = false;
     };
-  }, [backend, library]);
+  }, [backend, library, attempt]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // 作っている途中の仕事の服は、出さない
-  const state = session.getState();
+  const state = useSyncExternalStore(session.subscribe, session.getState);
   const makingIds = useMemo(() => new Set(state.jobs.filter((job) => !job.done).flatMap((job) => job.candidates.map((c) => c.itemId).filter((id): id is string => !!id))), [state.jobs]);
   const hasMaking = state.jobs.some((job) => !job.done);
-  const choosable = useMemo(() => (items ?? []).filter((item) => !makingIds.has(item.id)), [items, makingIds]);
+  const choosable = useMemo(() => (items ?? []).filter((item) => !makingIds.has(item.id) && !notMovable.has(item.id)), [items, makingIds, notMovable]);
 
   const finish = useCallback(async (next: TradeState) => {
     if (resultRef.current) return;
@@ -102,8 +122,13 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
 
   const apply = useCallback(
     (next: TradeState) => {
-      setTrade(next);
-      if (next.status === 'done' || next.status === 'cancelled') void finish(next);
+      if (finishedRef.current) return; // 終わったあとに届いた返事は、使わない
+      const prev = latestRef.current;
+      if (prev && prev.id === next.id && RANK[next.status] < RANK[prev.status]) return;
+      const merged = prev && prev.id === next.id && prev.myAccepted && !next.myAccepted ? { ...next, myAccepted: true } : next;
+      latestRef.current = merged;
+      setTrade(merged);
+      if (merged.status === 'done' || merged.status === 'cancelled') void finish(merged);
     },
     [finish],
   );
@@ -125,6 +150,7 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   const begin = useCallback(
     (id: string) => {
       idRef.current = id;
+      latestRef.current = null;
       finishedRef.current = false;
       resultRef.current = false;
       setTradeId(id);
@@ -176,22 +202,37 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   }, [backend]);
 
   const guard = async (work: () => Promise<void>) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setMessage(null);
     try {
       await work();
     } catch (error) {
+      if (!mountedRef.current) return;
       if (error instanceof BackendError && error.code === 'old-server') setSupported(false);
-      setMessage(errorText(error));
+      else setMessage(errorText(error));
     } finally {
-      setBusy(false);
+      busyRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
+  };
+
+  // 動かせない服と断られたら、その服は、もう出さない
+  const markNotMovable = (error: unknown, itemId: string): unknown => {
+    if (error instanceof BackendError && error.tradeRefusal === 'not-movable' && mountedRef.current) setNotMovable((set) => new Set(set).add(itemId));
+    return error;
   };
 
   const showWith = (item: MyItem) =>
     guard(async () => {
-      const opened = await backend.tradeOpen(item.id);
+      const opened = await backend.tradeOpen(item.id).catch((error: unknown) => {
+        throw markNotMovable(error, item.id);
+      });
+      if (!mountedRef.current) {
+        backend.tradeCancel(opened.tradeId).catch(() => undefined); // 閉じたあとに始まった交換は、やめる
+        return;
+      }
       diag.note('trade', 'open');
       setCode(opened.code);
       setTrade(null);
@@ -203,6 +244,10 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
     guard(async () => {
       try {
         const claimed = await backend.tradeClaim(text);
+        if (!mountedRef.current) {
+          backend.tradeCancel(claimed.tradeId).catch(() => undefined);
+          return;
+        }
         diag.note('trade', 'join ok');
         begin(claimed.tradeId);
         await poll();
@@ -216,7 +261,9 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   const joinWith = (item: MyItem) =>
     guard(async () => {
       if (!tradeId) return;
-      await backend.tradeJoin(tradeId, item.id);
+      await backend.tradeJoin(tradeId, item.id).catch((error: unknown) => {
+        throw markNotMovable(error, item.id);
+      });
       await poll();
     });
 
@@ -234,7 +281,7 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
       await poll();
     });
 
-  const choose = (onPick: (item: MyItem) => void) => <Picker items={choosable} dolls={dolls} categoriesByDoll={categoriesByDoll} onPick={onPick} hasMaking={hasMaking} disabled={busy} />;
+  const choose = (onPick: (item: MyItem) => void) => <Picker items={choosable} dolls={dolls} categoriesByDoll={categoriesByDoll} onPick={onPick} hasMaking={hasMaking || notMovable.size > 0} disabled={busy} />;
   const cancelButton = (
     <button type="button" className="trade-btn plain" onClick={() => void cancel()} disabled={busy} data-testid="trade-cancel">
       やめる
@@ -242,12 +289,23 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   );
 
   let body;
-  if (supported === null || items === null) {
+  if (loadError) {
+    body = (
+      <>
+        <p className="trade-big" data-testid="trade-message">
+          {loadError}
+        </p>
+        <button type="button" className="trade-btn" onClick={() => setAttempt((n) => n + 1)} data-testid="trade-retry">
+          もういちど
+        </button>
+      </>
+    );
+  } else if (supported === null || items === null) {
     body = <p className="trade-big">よみこみちゅう…</p>;
   } else if (!supported) {
     body = (
       <p className="trade-big" data-testid="trade-old-server">
-        サーバーが ふるいので、まだ こうかんできないよ
+        {OLD_SERVER_TEXT}
       </p>
     );
   } else if (items.length === 0) {
@@ -350,6 +408,9 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
             <div className="trade-received">
               <Card item={trade?.theirs} isNew />
             </div>
+            <button type="button" className="trade-btn" onClick={onClose} data-testid="trade-to-closet">
+              クローゼットで みる
+            </button>
           </div>
         );
         break;

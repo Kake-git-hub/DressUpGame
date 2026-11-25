@@ -47,3 +47,6 @@ export function cameraProblemOf(error: unknown): CameraProblem {
   return 'error';
 }
 
+
+// 古いサーバーのときの文
+export const OLD_SERVER_TEXT = 'こうかんは まだ つかえません（サーバーが ふるい はんです）';
