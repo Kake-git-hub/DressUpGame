@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "firebase": "^13.4.0",
+    "jsqr": "^1.4.0",
     "pixi.js": "^8.14.3",
     "qrcode-generator": "^1.4.4",
     "react": "^19.2.0",

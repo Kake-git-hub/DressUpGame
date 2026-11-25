@@ -1,0 +1,251 @@
+/* 交換の画面。クローゼットの上に重ねる。大きく・やさしい見た目 */
+.trade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(var(--top-inset, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #fff6e9 0%, #f3ecff 100%);
+  touch-action: pan-y;
+  font-family: 'Hiragino Maru Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', sans-serif;
+  color: #4a4050;
+}
+.trade-panel {
+  width: 100%;
+  max-width: 860px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.trade-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.trade-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: clamp(22px, 5.4vmin, 32px);
+  color: #d9822b;
+  letter-spacing: 0.06em;
+}
+.trade-close {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  font-size: 22px;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #f0dcc0;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.trade-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+.trade-big {
+  margin: 0;
+  font-size: clamp(18px, 4.4vmin, 26px);
+  font-weight: bold;
+}
+.trade-small {
+  margin: 0;
+  font-size: 14px;
+}
+.trade-message {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 16px;
+  color: #b3261e;
+  background: #fff0ee;
+  border-radius: 12px;
+}
+.trade-ok {
+  margin: 0;
+  padding: 4px 14px;
+  font-weight: bold;
+  color: #2f7d4f;
+  background: #e3f7ea;
+  border-radius: 999px;
+}
+.trade-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+.trade-btn {
+  min-width: 160px;
+  min-height: 64px;
+  padding: 10px 24px;
+  font-size: 20px;
+  font-weight: bold;
+  color: #fff;
+  background: #9370db;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.trade-btn.plain {
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #d9c8f5;
+  min-height: 52px;
+}
+.trade-btn:disabled {
+  opacity: 0.5;
+}
+/* QR・カメラ */
+.trade-qr {
+  width: min(70vmin, 360px);
+  padding: 12px;
+  background: #fff;
+  border-radius: 16px;
+}
+.trade-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.trade-scan {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.trade-video {
+  width: min(80vmin, 420px);
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: #222;
+  border-radius: 16px;
+}
+.trade-camera-error {
+  padding: 12px 16px;
+  background: #fff8e6;
+  border: 1px solid #f2dfa8;
+  border-radius: 12px;
+}
+.trade-camera-error p {
+  margin: 6px 0;
+}
+.trade-test {
+  display: flex;
+  gap: 8px;
+}
+/* 服 */
+.trade-picker {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+.trade-picker h3 {
+  margin: 4px 0;
+  font-size: 17px;
+  color: #d9822b;
+}
+.trade-dolls {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+.trade-dolls button {
+  flex: none;
+  min-height: 44px;
+  padding: 6px 16px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #6d6275;
+  background: #fff;
+  border: 2px solid #d9c8f5;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.trade-dolls button[aria-selected='true'] {
+  color: #fff;
+  background: #9370db;
+  border-color: #9370db;
+}
+.trade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.trade-item,
+.trade-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  background: #fff;
+  border: 2px solid #f0dcc0;
+  border-radius: 16px;
+  font: inherit;
+  color: inherit;
+}
+.trade-item {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.trade-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.trade-thumb img,
+.trade-thumb canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.trade-name {
+  font-size: 13px;
+  line-height: 1.3;
+  word-break: break-all;
+}
+.trade-swap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.trade-swap .trade-card {
+  width: min(36vmin, 180px);
+}
+.trade-arrow {
+  font-size: 32px;
+  color: #d9822b;
+}
+.trade-received .trade-card {
+  width: min(48vmin, 220px);
+}
+.trade-new {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #fff;
+  background: #ff6b8a;
+  border-radius: 999px;
+}
