@@ -26,6 +26,23 @@ export interface UserDoc {
   named?: boolean; // 匿名でない利用者として、1 回でも呼んだ（移す元には、できない）
   handoff?: string; // この利用者の、いまの合い言葉
   trade?: string; // この利用者の、いまの交換（ひとつだけ）の ID
+  free?: number; // 配った分のチケット
+  lots?: Lot[]; // 買った分のチケット（期限つき）
+  ticketsWritten?: number; // 最後に書いた tickets（手で書き換えた差を見分ける）
+  welcomed?: true; // 最初に配る分を、もう配った
+}
+// 買ったチケットのまとまり（id = 支払いの番号）
+export interface Lot {
+  id: string;
+  count: number;
+  left: number;
+  boughtAt: number;
+  expiresAt: number;
+}
+// 仕事が引いた所（lot 無し = 配った分）
+export interface Draw {
+  lot?: string;
+  n: number;
 }
 // 引き継ぎの合い言葉（handoffs/{合い言葉}）。uid = 移す元（合い言葉をもらった匿名の利用者）、usedBy = 使った人（移す先）
 export interface HandoffDoc {
@@ -69,6 +86,7 @@ export interface JobDoc {
   set?: SetRef;
   done: boolean;
   tickets: number; // 使った枚数（戻した分を引いたあと）
+  draws?: Draw[]; // どこから何枚引いたか
   createdAt: number;
   heartbeat: number; // 最後に進めた時刻（止まっている仕事を見分ける）
   runner?: string; // いま進めている呼び出しの印（追い越された古い呼び出しが、あとから書き込まないように）
