@@ -482,4 +482,79 @@ describe('本物の裏側', () => {
       expect((error as BackendError).tradeRefusal).toBeUndefined();
     });
   });
+
+  describe('支払い（買う）', () => {
+    // api の版を決めたサーバー + 支払いの op に答える運び役
+    function payServer(api: number, extra: Record<string, unknown> = {}, refuse?: string) {
+      const server = fakeServer(api);
+      const call = server.transport.call.bind(server.transport);
+      const paid: Record<string, unknown>[] = [];
+      server.transport.call = (async (data: Record<string, unknown>) => {
+        if (['shop', 'checkout', 'purchase', 'shopAck'].includes(String(data.op))) {
+          paid.push(data);
+          if (refuse) throw new BackendError('refused', refuse);
+        }
+        switch (data.op) {
+          case 'signIn':
+            return { ...((await call(data)) as object), ...extra };
+          case 'shop':
+            return { open: true, packs: [{ id: '10-300', tickets: 10, price: 300 }], announce: [{ session: 's0', tickets: 10 }] };
+          case 'checkout':
+            return { session: 's1', url: 'https://pay.example/s1', expiresAt: 99 };
+          case 'purchase':
+            return { status: 'paid', added: 10, tickets: 10, user: { userCode: 'ABCD2345', tickets: 13, free: 3, lots: [{ count: 10, left: 10, expiresAt: 5 }], admin: false } };
+          case 'shopAck':
+            return { ok: true };
+          default:
+            return call(data);
+        }
+      }) as typeof server.transport.call;
+      return { ...server, paid };
+    }
+
+    it('op の名前と引数どおりに呼び、答えを返す。買った分は onUser に出る', async () => {
+      const server = payServer(5);
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.canPay()).toBe(true);
+      expect((await backend.shop()).packs).toEqual([{ id: '10-300', tickets: 10, price: 300 }]);
+      expect(await backend.checkout('10-300', 1, 2)).toEqual({ session: 's1', url: 'https://pay.example/s1', expiresAt: 99 });
+      const seen: StudioUser[] = [];
+      backend.onUser((u) => seen.push(u));
+      expect(await backend.purchase('s1')).toEqual({ status: 'paid', added: 10, tickets: 10 });
+      await backend.shopAck('s1');
+      expect(server.paid).toEqual([{ op: 'shop' }, { op: 'checkout', pack: '10-300', adultAt: 1, agreedAt: 2 }, { op: 'purchase', session: 's1' }, { op: 'shopAck', session: 's1' }]);
+      expect(seen.at(-1)).toMatchObject({ tickets: 13, free: 3, lots: [{ count: 10, left: 10, expiresAt: 5 }] });
+    });
+
+    it('古いサーバー（api が 5 より小さい）では、呼ばずに old-server。canPay は false', async () => {
+      const server = payServer(4);
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.canPay()).toBe(false);
+      for (const run of [() => backend.shop(), () => backend.checkout('p', 1, 2), () => backend.purchase('s'), () => backend.shopAck('s')]) {
+        expect(((await run().catch((e: unknown) => e)) as BackendError).code).toBe('old-server');
+      }
+      expect(server.paid).toEqual([]);
+    });
+
+    it('断りの語（pay:理由 日本語）が payRefusal に出る。メッセージは、日本語の部分だけ。知らない語は payRefusal なし', async () => {
+      const refused = (await createRemoteBackend(payServer(5, {}, 'pay:login Google でログインすると、買えます').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
+      expect(refused).toMatchObject({ code: 'refused', payRefusal: 'login', message: 'Google でログインすると、買えます' });
+      const unknown = (await createRemoteBackend(payServer(5, {}, 'pay:newthing なにか').transport).checkout('p', 1, 2).catch((e: unknown) => e)) as BackendError;
+      expect(unknown.code).toBe('refused');
+      expect(unknown.payRefusal).toBeUndefined();
+      expect(unknown.message).toBe('なにか');
+    });
+
+    it('signIn の返事の welcome は、onWelcome に 1 回出る（無ければ出ない）', async () => {
+      const got: number[] = [];
+      const withWelcome = createRemoteBackend(payServer(5, { welcome: 5 }).transport);
+      withWelcome.onWelcome((n) => got.push(n));
+      await withWelcome.signIn();
+      expect(got).toEqual([5]);
+      const without = createRemoteBackend(payServer(5).transport);
+      without.onWelcome((n) => got.push(n));
+      await without.signIn();
+      expect(got).toEqual([5]);
+    });
+  });
 });

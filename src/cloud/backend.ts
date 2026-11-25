@@ -6,7 +6,7 @@
  */
 import type { ManifestItem } from '../content/manifest';
 import type { StudioAccount } from './account';
-import type { TradeRefusal, WireTrade } from './wire';
+import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireTrade } from './wire';
 
 export interface StudioUser {
   userCode: string; // 作者に伝えると、チケットや服を届けてもらえる短い文字列
@@ -74,11 +74,14 @@ export class BackendError extends Error {
   readonly uncertain: boolean;
   // 交換を断られたときの理由（サーバーが `trade:{理由}` で返したもの）
   readonly tradeRefusal?: TradeRefusal;
-  constructor(code: BackendErrorCode, message: string, options: { uncertain?: boolean; tradeRefusal?: TradeRefusal } = {}) {
+  // 支払いを断られたときの理由（サーバーが `pay:{理由}` で返したもの）
+  readonly payRefusal?: PayRefusal;
+  constructor(code: BackendErrorCode, message: string, options: { uncertain?: boolean; tradeRefusal?: TradeRefusal; payRefusal?: PayRefusal } = {}) {
     super(message);
     this.code = code;
     this.uncertain = options.uncertain ?? false;
     if (options.tradeRefusal) this.tradeRefusal = options.tradeRefusal;
+    if (options.payRefusal) this.payRefusal = options.payRefusal;
   }
 }
 export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';
@@ -153,6 +156,20 @@ export interface StudioBackend {
   tradeCancel(tradeId: string): Promise<void>;
   // 交換を使えるか（つないだサーバーの版が TRADE_API 以上か）
   canTrade(): Promise<boolean>;
+  // ---- 支払い（チケットを買う）。サーバーが PAY_API 未満なら、どれも BackendError('old-server')。
+  // 断られたときは BackendError('refused') で、payRefusal に理由が入る ----
+  // 買えるか（つないだサーバーの版が PAY_API 以上か）
+  canPay(): Promise<boolean>;
+  // お店の様子（買えるか・パック・まだ伝えていない支払い）
+  shop(): Promise<WireShop>;
+  // 支払いのページを作る。url へ移ると、支払える
+  checkout(pack: string, adultAt: number, agreedAt: number): Promise<{ session: string; url: string; expiresAt: number }>;
+  // 支払いの様子を聞く（済んでいれば、サーバーがチケットを足す。足した分は added）
+  purchase(session: string): Promise<WirePurchase>;
+  // 足されたことを伝えた、の印を付ける（次からは shop の announce に出ない）
+  shopAck(session: string): Promise<void>;
+  // 初めてログインしたときの、ようこそのチケットの枚数を知らせる（1 回だけ）。返り値を呼ぶと、知らせを止める
+  onWelcome(listener: (tickets: number) => void): () => void;
 }
 
 // 自分の服の並び順: order の大きい順（同じなら、新しい順 → ID）

@@ -190,7 +190,7 @@ export function createSession(deps: {
   };
 
   backend.onUser((user) => {
-    if (state.user && (state.user.tickets !== user.tickets || state.user.admin !== user.admin || state.user.userCode !== user.userCode)) set({ user });
+    if (state.user && (state.user.tickets !== user.tickets || state.user.free !== user.free || JSON.stringify(state.user.lots) !== JSON.stringify(user.lots) || state.user.admin !== user.admin || state.user.userCode !== user.userCode)) set({ user });
   });
   // つなごうとして、つながらなかった（起動のときにオフラインだった、など）ら、つながったとき・画面にもどってきたときに、つなぎ直す
   const reconnect = () => {

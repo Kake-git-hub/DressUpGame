@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendError } from '../cloud/backend';
 import type { StudioJob } from '../cloud/backend';
+import { addMonthsJst } from '../cloud/expiry';
 import { createFakeBackend } from '../cloud/fakeBackend';
 
 const image = async () => new Blob(['png'], { type: 'image/png' });
@@ -514,6 +515,120 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(codeOf(await backend.tradeClaim('FAKE').catch((e: unknown) => e))).toBe('old-server');
       expect(codeOf(await backend.trade('t').catch((e: unknown) => e))).toBe('old-server');
       expect(await make().canTrade()).toBe(true);
+    });
+  });
+
+  describe('支払い（にせ）', () => {
+    const buy = async (backend: ReturnType<typeof make>, pack = '10-300') => (await backend.checkout(pack, 1, 2)).session;
+    const refusal = async (run: () => Promise<unknown>) => ((await run().catch((e: unknown) => e)) as BackendError).payRefusal;
+
+    it('お店: 既定は開いていて、10:300 と 30:800。shop 設定で閉じる・変える', async () => {
+      expect(await make().canPay()).toBe(true);
+      expect(await make().shop()).toEqual({ open: true, packs: [{ id: '10-300', tickets: 10, price: 300 }, { id: '30-800', tickets: 30, price: 800 }], announce: [] });
+      expect((await make({ shop: { open: false } }).shop()).open).toBe(false);
+      expect((await make({ shop: { packs: '5:100' } }).shop()).packs).toEqual([{ id: '5-100', tickets: 5, price: 100 }]);
+    });
+
+    it('checkout: url は、同じアプリの ?pay=fake&session=（いまの query は残る）。閉店は pay:closed、知らないパックは pay:pack', async () => {
+      window.history.replaceState({}, '', '/?studio=fake');
+      const backend = make();
+      const { session, url } = await backend.checkout('10-300', 1, 2);
+      expect(url).toBe(`?studio=fake&pay=fake&session=${session}`);
+      expect(await refusal(() => backend.checkout('nope', 1, 2))).toBe('pack');
+      expect(await refusal(() => make({ shop: { open: false } }).checkout('10-300', 1, 2))).toBe('closed');
+      window.history.replaceState({}, '', '/');
+    });
+
+    it('anonymous: ログインしていない扱いで、pay:login', async () => {
+      expect(await refusal(() => make({ anonymous: true }).checkout('10-300', 1, 2))).toBe('login');
+    });
+
+    it('払うまでは open。paid にすると、足されて（lot、6 か月後）、次からは added 0', async () => {
+      const backend = make({ tickets: 2 });
+      const session = await buy(backend);
+      expect(await backend.purchase(session)).toEqual({ status: 'open', added: 0, tickets: 10 });
+      backend.fakePay(session, 'paid');
+      expect(await backend.purchase(session)).toEqual({ status: 'paid', added: 10, tickets: 10 });
+      expect(await backend.purchase(session)).toEqual({ status: 'paid', added: 0, tickets: 10 });
+      const user = await backend.signIn();
+      expect(user).toMatchObject({ tickets: 12, free: 2 });
+      expect(user.lots).toEqual([{ count: 10, left: 10, expiresAt: addMonthsJst(Date.now(), 6) }]);
+    });
+
+    it('cancel にすると expired で、足されない', async () => {
+      const backend = make({ tickets: 2 });
+      const session = await buy(backend);
+      backend.fakePay(session, 'cancel');
+      expect(await backend.purchase(session)).toEqual({ status: 'expired', added: 0, tickets: 10 });
+      expect((await backend.signIn()).tickets).toBe(2);
+    });
+
+    it('payResult slow: 払っても 40 秒は open、そのあと paid で足される', async () => {
+      const backend = make({ tickets: 0, payResult: 'slow' });
+      const session = await buy(backend);
+      backend.fakePay(session, 'paid');
+      vi.advanceTimersByTime(39_000);
+      expect((await backend.purchase(session)).status).toBe('open');
+      vi.advanceTimersByTime(1_000);
+      expect(await backend.purchase(session)).toEqual({ status: 'paid', added: 10, tickets: 10 });
+    });
+
+    it('shopAck まで、announce に出る。知らない支払いの purchase は pay:other', async () => {
+      const backend = make();
+      const session = await buy(backend);
+      backend.fakePay(session, 'paid');
+      await backend.purchase(session);
+      expect((await backend.shop()).announce).toEqual([{ session, tickets: 10 }]);
+      await backend.shopAck(session);
+      expect((await backend.shop()).announce).toEqual([]);
+      expect(await refusal(() => backend.purchase('ない'))).toBe('other');
+    });
+
+    it('使う順: 期限の早い買った分 → 配った分。tickets は合計', async () => {
+      const backend = make({ tickets: 3, fakeLots: [{ count: 4, daysLeft: 30 }, { count: 2, daysLeft: 5 }] });
+      expect(await backend.signIn()).toMatchObject({ tickets: 9, free: 3 });
+      await backend.startJob(top);
+      await backend.startJob({ ...top });
+      await backend.startJob({ ...top });
+      const user = await backend.signIn();
+      expect(user.free).toBe(3);
+      expect(user.lots.map((l) => l.left)).toEqual([3]); // 2 枚の分（先に切れる）を使い切り、あと 1 枚は 4 枚の分から
+      expect(user.tickets).toBe(6);
+      await backend.startJob({ ...set });
+      await backend.startJob({ ...set });
+      const after = await backend.signIn();
+      expect(after.lots).toEqual([]);
+      expect(after).toMatchObject({ free: 2, tickets: 2 });
+    });
+
+    it('期限が切れた買った分は、数えない', async () => {
+      const backend = make({ tickets: 1, fakeLots: [{ count: 5, daysLeft: 1 }] });
+      expect((await backend.signIn()).tickets).toBe(6);
+      vi.advanceTimersByTime(2 * 24 * 3600 * 1000);
+      expect(await backend.signIn()).toMatchObject({ tickets: 1, lots: [] });
+    });
+
+    it('welcome: ログインで 1 回だけ知らせ、配った分に足す。次の読み込みでは出ない。anonymous では出ない', async () => {
+      const got: number[] = [];
+      const first = make({ tickets: 1, welcome: 5 });
+      first.onWelcome((n) => got.push(n));
+      expect(await first.signIn()).toMatchObject({ tickets: 6, free: 6 });
+      await first.signIn();
+      const second = make({ welcome: 5 });
+      second.onWelcome((n) => got.push(n));
+      await second.signIn();
+      expect(got).toEqual([5]);
+      localStorage.clear();
+      const anon = make({ welcome: 5, anonymous: true });
+      anon.onWelcome((n) => got.push(n));
+      await anon.signIn();
+      expect(got).toEqual([5]);
+    });
+
+    it('古いサーバー（oldServer）では、canPay が false で、ほかは old-server', async () => {
+      const backend = make({ oldServer: true });
+      expect(await backend.canPay()).toBe(false);
+      expect(codeOf(await backend.shop().catch((e: unknown) => e))).toBe('old-server');
     });
   });
 });

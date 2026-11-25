@@ -11,7 +11,8 @@ import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, OLD_SERVER_MESSAGE, SET_MAX, 
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
 import type { FakeWorld } from './fakeAuth';
 import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
-import type { TradeRefusal } from './wire';
+import { addMonthsJst } from './expiry';
+import type { TradeRefusal, WirePurchase, WireShop } from './wire';
 
 export interface FakeOptions {
   tickets?: number; // 最初のチケット（保存されている利用者がいれば、そちらが優先）
@@ -36,6 +37,12 @@ export interface FakeOptions {
     refuse?: TradeRefusal; // こちらが FAKE を読んだとき、この語で断る
     cancelAfterMs?: number; // 交換が始まってから、あいてが「やめる」を押すまで
   };
+  // 支払い（チケットを買う）
+  shop?: { open?: boolean; packs?: string }; // お店の設定（既定は open: true、packs: '10:300,30:800'。packs は「枚数:値段」をコンマでつなぐ）
+  payResult?: 'paid' | 'cancel' | 'slow'; // にせの支払いページの、標準の結果（既定 paid）。slow = 払ったあと、チケットが足されるのが 40 秒あと。cancel = ページの標準のボタンが「やめる」
+  welcome?: number; // 最初のログインで、ようこその枚数を知らせる（1 回だけ。この端末の利用者ごと）
+  anonymous?: boolean; // ログインしていない扱い（買うのは pay:login で断る）
+  fakeLots?: { count: number; daysLeft: number }[]; // 最初から持っている、買った分（あと何日で切れるか）。保存されている利用者がいれば、そちらが優先
   // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角）。テストでは差し替える
   image?: (color: string) => Promise<Blob>;
 }
@@ -79,6 +86,27 @@ interface FakeTrade {
 const FAKE_CODE = 'FAKE';
 const FAKE_INDEX = 3;
 
+// にせの支払い 1 件。status は、にせの支払いページが決める（open → paid / cancel）
+interface FakePurchase {
+  id: string;
+  tickets: number;
+  expiresAt: number; // 買ったチケットの期限（始めた時刻の 6 か月あと）
+  status: 'open' | 'paid' | 'cancel';
+  paidAt?: number;
+  credited?: boolean; // チケットを足した
+  announced?: boolean; // アプリに伝えた（shopAck）
+}
+const SLOW_MS = 40_000;
+const DAY_MS = 24 * 3600 * 1000;
+const PAY_PARAM = 'fake';
+
+// にせの裏側。StudioBackend のほかに、にせの支払いページが使う口を持つ
+export interface FakeBackend extends StudioBackend {
+  readonly payResult: 'paid' | 'cancel' | 'slow';
+  // にせの支払いページが、支払いの結果を決める（paid = 払った、cancel = やめた）。すでに決まっていれば、何もしない
+  fakePay(session: string, result: 'paid' | 'cancel'): void;
+}
+
 // dueAt: 作成中の品目が、できあがる時刻
 type FakeJob = StudioJob & { dueAt: number };
 interface State {
@@ -87,6 +115,8 @@ interface State {
   items: SavedItem[];
   seen: string[]; // 結果を見た仕事
   counter: number;
+  purchases?: FakePurchase[];
+  welcomed?: boolean; // ようこその枚数を、もう知らせた
 }
 
 async function defaultImage(color: string): Promise<Blob> {
@@ -112,12 +142,13 @@ const publicJob = (job: FakeJob): StudioJob => {
   return rest;
 };
 
-export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
+export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const delay = options.delayMs ?? 1500;
   const planMs = options.planMs ?? 800;
   const makeImage = options.image ?? defaultImage;
   const fail = new Set(options.failCategories ?? []);
   const userListeners = new Set<(user: StudioUser) => void>();
+  const welcomeListeners = new Set<(tickets: number) => void>();
   const jobListeners = new Map<string, Set<(job: StudioJob) => void>>();
 
   const parseState = (raw: string | null): State | null => {
@@ -129,8 +160,14 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     }
     return null;
   };
-  const load = (): State =>
-    parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, free: options.tickets ?? 5, lots: [], admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+  const load = (): State => {
+    const saved = parseState(localStorage.getItem(KEY));
+    if (saved) return saved;
+    const free = options.tickets ?? 5;
+    const now = Date.now();
+    const lots = (options.fakeLots ?? []).map((l) => ({ count: l.count, left: l.count, expiresAt: now + l.daysLeft * DAY_MS }));
+    return { user: { userCode: newCode(), tickets: free + lots.reduce((n, l) => n + l.left, 0), free, lots, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+  };
   const claimMs = options.partner?.claimAfterMs ?? 1500;
   const acceptMs = options.partner?.acceptAfterMs ?? 1000;
   const chooseMs = options.partner?.chooseMs ?? 0;
@@ -153,10 +190,30 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     const job = jobOf(id);
     if (job) jobListeners.get(id)?.forEach((l) => l(publicJob(job)));
   };
-  const setTickets = (tickets: number) => {
-    state = { ...state, user: { ...state.user, tickets, free: tickets } };
+  // 財布: 期限が切れた・使い切った買った分を落とし、使える枚数を数え直す（サーバーの wallet.ts と同じ決まり）
+  const refresh = () => {
+    const lots = state.user.lots.filter((l) => l.left > 0 && l.expiresAt > Date.now()).sort((a, b) => a.expiresAt - b.expiresAt);
+    const tickets = state.user.free + lots.reduce((n, l) => n + l.left, 0);
+    if (tickets !== state.user.tickets || lots.length !== state.user.lots.length) state = { ...state, user: { ...state.user, lots, tickets } };
+  };
+  const wallet = (free: number, lots: StudioUser['lots']) => {
+    state = { ...state, user: { ...state.user, free, lots } };
+    refresh();
     notifyUser();
   };
+  // 使う: 期限の早い買った分から、足りなければ配った分から
+  const spend = (cost: number) => {
+    refresh();
+    let need = cost;
+    const lots = state.user.lots.map((l) => {
+      const n = Math.min(l.left, need);
+      need -= n;
+      return { ...l, left: l.left - n };
+    });
+    wallet(state.user.free - need, lots);
+  };
+  // 配った分を足す（できなかった品目の分の戻しは、配った分に戻す。本物は、引いた買った分に戻す）
+  const addFree = (n: number) => wallet(state.user.free + n, state.user.lots);
 
   // 時刻を過ぎた品目を仕上げて、次の品目に進む（過ぎた分が続いていれば、まとめて進む）。変わったら true
   const advance = (job: FakeJob, now: number): boolean => {
@@ -169,7 +226,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
         current.status = 'failed';
         current.notes = ['絵を作れませんでした。チケットは戻しました'];
         job.tickets -= 1;
-        if (!state.user.admin) setTickets(state.user.tickets + 1);
+        if (!state.user.admin) addFree(1);
       } else {
         const id = `my:${job.id}-${current.index}-1`;
         current.status = 'kept';
@@ -378,11 +435,43 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     };
   };
 
-  return {
+  // ---- 支払い ----
+  const packs = (options.shop?.packs ?? '10:300,30:800')
+    .split(',')
+    .map((part) => /^\s*(\d+)\s*:\s*(\d+)\s*$/.exec(part))
+    .flatMap((m) => (m ? [{ id: `${m[1]}-${m[2]}`, tickets: Number(m[1]), price: Number(m[2]) }] : []));
+  const payOld = () => {
+    if (options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+  };
+  const payRefuse = (payRefusal: 'login' | 'closed' | 'pack' | 'other', message: string) => new BackendError('refused', message, { payRefusal });
+  const purchaseOf = (id: string): FakePurchase => {
+    const found = (state.purchases ?? []).find((p) => p.id === id);
+    if (!found) throw payRefuse('other', 'この支払いは、あなたのものではありません');
+    return found;
+  };
+  // 払い終わった支払いのチケットを、足す（slow は、払って 40 秒あと）。足した枚数を返す
+  const credit = (purchase: FakePurchase): number => {
+    if (purchase.status !== 'paid' || purchase.credited || Date.now() < (purchase.paidAt ?? 0) + (options.payResult === 'slow' ? SLOW_MS : 0)) return 0;
+    purchase.credited = true;
+    wallet(state.user.free, [...state.user.lots, { count: purchase.tickets, left: purchase.tickets, expiresAt: purchase.expiresAt }]);
+    save();
+    return purchase.tickets;
+  };
+
+  const backend: FakeBackend = {
     account,
+    payResult: options.payResult ?? 'paid',
     async signIn() {
       online();
       if (options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      refresh();
+      // ようこその枚数（ログインしている利用者に、1 回だけ）
+      if (options.welcome && options.welcome > 0 && options.anonymous !== true && !state.welcomed) {
+        state = { ...state, welcomed: true };
+        addFree(options.welcome);
+        save();
+        welcomeListeners.forEach((l) => l(options.welcome!));
+      }
       return { ...state.user };
     },
     onUser(listener) {
@@ -391,6 +480,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     },
     async startJob({ dollId, theme, target }) {
       online();
+      refresh();
       const text = theme.trim();
       if (!text || text.length > THEME_MAX) throw new BackendError('refused', `テーマは 1〜${THEME_MAX} 文字で入力してください`);
       if (target.kind === 'set' && (target.categoryIds.length < SET_MIN || target.categoryIds.length > SET_MAX)) {
@@ -416,7 +506,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
         dueAt: now + delay,
       };
       state.jobs = [job, ...state.jobs];
-      if (!state.user.admin) setTickets(state.user.tickets - cost);
+      if (!state.user.admin) spend(cost);
       save();
       schedule(id);
       return { jobId: id, cost };
@@ -509,7 +599,7 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       } catch {
         // 消せなくても進む
       }
-      setTickets(state.user.tickets + tickets);
+      addFree(tickets);
       save();
       return { status: 'done', tickets, items: added.length };
     },
@@ -596,5 +686,68 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       advanceTrade(trade);
       if (trade.status !== 'done' && trade.status !== 'cancelled') Object.assign(trade, { status: 'cancelled', reason: 'cancel' });
     },
+    async canPay() {
+      online();
+      return !options.oldServer;
+    },
+    async shop(): Promise<WireShop> {
+      online();
+      payOld();
+      const open = (options.shop?.open ?? true) || state.user.admin;
+      return {
+        open: open && packs.length > 0,
+        packs: open ? packs : [],
+        announce: (state.purchases ?? [])
+          .filter((p) => {
+            credit(p);
+            return p.credited && !p.announced;
+          })
+          .map((p) => ({ session: p.id, tickets: p.tickets })),
+      };
+    },
+    async checkout(packId) {
+      online();
+      payOld();
+      if (options.anonymous) throw payRefuse('login', 'Google でログインすると、チケットを買えます');
+      if (!((options.shop?.open ?? true) || state.user.admin) || packs.length === 0) throw payRefuse('closed', 'いまは、チケットを買えません');
+      const pack = packs.find((p) => p.id === packId);
+      if (!pack) throw payRefuse('pack', 'このパックは、いまは買えません');
+      const now = Date.now();
+      const id = `fake-pay-${++state.counter}`;
+      state.purchases = [...(state.purchases ?? []), { id, tickets: pack.tickets, expiresAt: addMonthsJst(now, 6), status: 'open' }];
+      save();
+      // 同じアプリの、にせの支払いページ。いまのページの query は残す
+      const query = new URLSearchParams(window.location.search);
+      query.set('pay', PAY_PARAM);
+      query.set('session', id);
+      return { session: id, url: `?${query.toString()}`, expiresAt: now + 30 * 60 * 1000 };
+    },
+    async purchase(session): Promise<WirePurchase> {
+      online();
+      payOld();
+      const found = purchaseOf(session);
+      const added = credit(found);
+      return { status: found.status === 'open' ? 'open' : found.status === 'cancel' ? 'expired' : found.credited ? 'paid' : 'open', added, tickets: found.tickets };
+    },
+    async shopAck(session) {
+      online();
+      payOld();
+      const found = purchaseOf(session);
+      if (!found.announced) {
+        found.announced = true;
+        save();
+      }
+    },
+    onWelcome(listener) {
+      welcomeListeners.add(listener);
+      return () => welcomeListeners.delete(listener);
+    },
+    fakePay(session, result) {
+      const found = (state.purchases ?? []).find((p) => p.id === session);
+      if (!found || found.status !== 'open') return;
+      Object.assign(found, result === 'paid' ? { status: 'paid', paidAt: Date.now() } : { status: 'cancel' });
+      save();
+    },
   };
+  return backend;
 }

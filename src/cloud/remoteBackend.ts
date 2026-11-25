@@ -10,8 +10,8 @@ import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
 import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
-import { ADOPT_API, MIN_API, TRADE_API } from './wire';
-import type { TradeRefusal, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
+import { ADOPT_API, MIN_API, PAY_API, TRADE_API } from './wire';
+import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
 
 export interface StudioTransport {
   // サーバーの関数 studio を呼ぶ。失敗は BackendError
@@ -49,6 +49,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
   let user: StudioUser | null = null;
   let serverApi: number | null = null; // signIn の返事の api（合わせるのに要る版かを見る）
   const userListeners = new Set<(user: StudioUser) => void>();
+  const welcomeListeners = new Set<(tickets: number) => void>();
   const known = new Map<string, StudioJob>(); // 最後に分かった進み具合
   const watches = new Map<string, Watch>();
 
@@ -159,13 +160,31 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     }
   };
 
+  // 支払いの呼び出し。古いサーバーは呼ばずに断り、断りの理由（`pay:{理由} 日本語`）は payRefusal に出す
+  const PAY_REFUSALS: readonly string[] = ['login', 'closed', 'pack', 'limit', 'other'] satisfies PayRefusal[];
+  const payCall = async <T>(data: Record<string, unknown>): Promise<T> => {
+    if (!(await backend.canPay())) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+    try {
+      return await transport.call<T>(data);
+    } catch (error) {
+      if (!(error instanceof BackendError) || error.code !== 'refused') throw error;
+      const match = /^pay:(\S+)\s*/.exec(error.message);
+      if (!match) throw error;
+      const text = error.message.slice(match[0].length);
+      if (!PAY_REFUSALS.includes(match[1] as PayRefusal)) throw new BackendError('refused', text, { uncertain: error.uncertain });
+      throw new BackendError('refused', text, { uncertain: error.uncertain, payRefusal: match[1] as PayRefusal });
+    }
+  };
+
   const backend: StudioBackend = {
     get account() {
       return getAccount();
     },
     async signIn() {
-      const answer = took(await transport.call<{ user: WireUser; api?: number }>({ op: 'signIn' }));
+      const answer = took(await transport.call<{ user: WireUser; api?: number; welcome?: number }>({ op: 'signIn' }));
       if (typeof answer.api === 'number') serverApi = answer.api;
+      // ようこそのチケット（サーバーは、最初の 1 回しか返さない）
+      if (typeof answer.welcome === 'number' && answer.welcome > 0) welcomeListeners.forEach((listener) => listener(answer.welcome!));
       // 古いサーバーは、生成を列で進めない（アプリが呼ばないと、だれも進めない）ので、作らせない
       if (typeof answer.api !== 'number' || answer.api < MIN_API) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       return { ...user! };
@@ -272,6 +291,36 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     },
     async tradeCancel(tradeId) {
       await tradeCall({ op: 'tradeCancel', tradeId });
+    },
+    async canPay() {
+      if (serverApi === null) {
+        try {
+          await backend.signIn();
+        } catch (error) {
+          if (error instanceof BackendError && error.code === 'old-server') return false;
+          throw error;
+        }
+      }
+      return (serverApi ?? 0) >= PAY_API;
+    },
+    async shop() {
+      const { open, packs, announce } = took(await payCall<WireShop & { user?: WireUser }>({ op: 'shop' }));
+      return { open, packs, announce };
+    },
+    async checkout(pack, adultAt, agreedAt) {
+      const { session, url, expiresAt } = took(await payCall<{ session: string; url: string; expiresAt: number; user?: WireUser }>({ op: 'checkout', pack, adultAt, agreedAt }));
+      return { session, url, expiresAt };
+    },
+    async purchase(session) {
+      const { status, added, tickets } = took(await payCall<WirePurchase & { user?: WireUser }>({ op: 'purchase', session }));
+      return { status, added, tickets };
+    },
+    async shopAck(session) {
+      await payCall({ op: 'shopAck', session });
+    },
+    onWelcome(listener) {
+      welcomeListeners.add(listener);
+      return () => welcomeListeners.delete(listener);
     },
   };
   return backend;
