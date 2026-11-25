@@ -1344,6 +1344,40 @@ test('横の色の帯も、その服がなる色になる（大きさは今の�
   await expect(page.locator('.hue-value')).toBeVisible();
 });
 
+// 素材の一覧を差し替える（サービスワーカー経由の通信は差し替えられないので、無効にして実行する）
+test.describe('メニューの「セット」の位置', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  test('メニューの「セット」は、素材の一覧で決めた位置（setsOrder）に出る。無ければ先頭（横・縦とも）', async ({ page }) => {
+    const labels = () => page.locator('.palette-section button').evaluateAll((els) => els.map((e) => e.textContent?.trim() ?? ''));
+    const portraitLabels = () => page.locator('[data-testid="portrait-categories"] .portrait-category-label').evaluateAll((els) => els.map((e) => e.textContent?.trim() ?? ''));
+    await page.goto(APP_URL);
+    await openApp(page);
+    // 無ければ、服のカテゴリより先
+    const before = await labels();
+    const firstCategory = before.findIndex((x) => x.includes('トップス') || x.includes('ボトムス'));
+    expect(before.findIndex((x) => x.includes('セット'))).toBeLessThan(firstCategory);
+    // ドールの setsOrder を大きくすると、いちばん後ろ
+    await page.route('**/e2e-content/manifest.json', async (route) => {
+      const response = await route.fetch();
+      const manifest = (await response.json()) as { dolls: { setsOrder?: number }[] };
+      for (const doll of manifest.dolls) doll.setsOrder = 999;
+      await route.fulfill({ response, json: manifest });
+    });
+    await page.reload();
+    await openApp(page);
+    const after = await labels();
+    const setAt = after.findIndex((x) => x.includes('セット'));
+    expect(setAt).toBeGreaterThan(after.findIndex((x) => x.includes('トップス')));
+    expect(setAt).toBeGreaterThan(after.findIndex((x) => x.includes('ボトムス')));
+    // 縦でも同じ
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await expect(page.getByTestId('portrait-categories')).toBeVisible();
+    const portrait = await portraitLabels();
+    expect(portrait.at(-1)).toBe('セット');
+  });
+});
+
 test('セット: ドールへドラッグすると、全部のパーツが一度に着く。パーツは、ふつうの服として 1 点ずつ着替えられる', async ({ page }) => {
   await openApp(page);
   await openCategory(page, 'セット');

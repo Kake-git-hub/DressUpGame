@@ -179,6 +179,12 @@ describe('ContentStore', () => {
     await store.deleteCategory(dollId, 'かばん');
     expect((await store.read()).dolls[0].categories.some((c) => c.id === 'かばん')).toBe(false);
   });
+  it('カテゴリの並び替えで、メニューでの「セット」の位置も書ける。渡さなければ、そのまま', async () => {
+    await store.reorderCategories(dollId, [{ id: 'トップス', layer: 4, menuOrder: 0 }], 1);
+    expect((await store.read()).dolls[0].setsOrder).toBe(1);
+    await store.reorderCategories(dollId, [{ id: 'トップス', layer: 4, menuOrder: 2 }]);
+    expect((await store.read()).dolls[0].setsOrder).toBe(1);
+  });
   it('服の残るカテゴリは削除できない', async () => {
     await store.addItem(dollId, item('ふく'));
     await expect(store.deleteCategory(dollId, 'トップス')).rejects.toThrow(/1 点/);

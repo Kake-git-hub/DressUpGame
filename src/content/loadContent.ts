@@ -152,6 +152,7 @@ export async function loadContent(baseUrl: string, fetchImpl: typeof fetch = fet
       canvasW: doll.image.canvasW,
       canvasH: doll.image.canvasH,
       box: doll.image.box,
+      ...(doll.setsOrder !== undefined ? { setsOrder: doll.setsOrder } : {}),
     });
     const categories = new Map(doll.categories.map((c) => [c.id, c]));
     const setNames = new Map((doll.sets ?? []).map((x, order) => [x.id, { name: x.name, order, layers: x.layers }]));

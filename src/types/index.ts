@@ -308,6 +308,7 @@ export interface BackgroundData {
 export interface DollData {
   id: string;
   name: string;
+  setsOrder?: number; // メニューでの「セット」の位置（無ければ先頭）
   bodyImageUrl: string; // 体の画像URL
   faceImageUrl?: string; // 顔の画像URL（オプション）
   skinTone?: string; // 肌の色

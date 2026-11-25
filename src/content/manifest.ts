@@ -81,6 +81,8 @@ export interface ManifestDoll {
   backgrounds: ManifestBackground[]; // このドール専用の背景
   sets?: ManifestSet[]; // このドールのセット（無ければ項目ごと無い）
   hidden?: true; // ゲームに出さない（スタジオには出る。無ければ出す）
+  // メニューでの「セット」の位置（カテゴリの menuOrder と同じ数え方。同じ数ならセットが先）。無ければ先頭
+  setsOrder?: number;
 }
 
 export interface Manifest {
@@ -219,6 +221,7 @@ function doll(v: unknown, path: string): ManifestDoll {
     backgrounds,
     ...(sets.length > 0 ? { sets } : {}),
     ...(o.hidden === true ? { hidden: true as const } : {}),
+    ...(o.setsOrder !== undefined ? { setsOrder: num(o.setsOrder, `${path}.setsOrder`) } : {}),
   };
 }
 

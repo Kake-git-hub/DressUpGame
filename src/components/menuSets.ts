@@ -31,3 +31,8 @@ export function menuSets(items: ClothingItemData[]): MenuSet[] {
     .sort((a, b) => a.order - b.order || a.index - b.index)
     .map(({ set }) => ({ ...set, items: [...set.items].sort((a, b) => layer(a) - layer(b)) }));
 }
+
+// メニューで「セット」を、並べたカテゴリの何番めの前に置くか。categoryOrders: 並べたカテゴリの並び順。
+// 位置が無ければ先頭。あれば、それより小さい並び順のカテゴリの後ろ（同じなら、セットが先）
+export const setsIndex = (categoryOrders: number[], setsOrder?: number): number =>
+  setsOrder === undefined ? 0 : categoryOrders.filter((order) => order < setsOrder).length;

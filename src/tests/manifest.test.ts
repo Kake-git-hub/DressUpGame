@@ -69,6 +69,11 @@ describe('parseManifest', () => {
     expect(() => parseManifest(mutate((c) => (c.dolls[0].items[0].backThumb = '')))).toThrow();
     expect(parseManifest(valid()).dolls[0].items[0].backThumb).toBeUndefined();
   });
+  it('メニューでの「セット」の位置（setsOrder）を保つ。無ければ項目ごと無く、数でなければ Error', () => {
+    expect(parseManifest(mutate((c) => (c.dolls[0].setsOrder = 2.5))).dolls[0].setsOrder).toBe(2.5);
+    expect('setsOrder' in parseManifest(mutate(() => {})).dolls[0]).toBe(false);
+    expect(() => parseManifest(mutate((c) => (c.dolls[0].setsOrder = 'x')))).toThrow(/setsOrder/);
+  });
   it('ドールの非表示（hidden: true）を保つ。true 以外は無視する', () => {
     expect(parseManifest(mutate((c) => (c.dolls[0].hidden = true))).dolls[0].hidden).toBe(true);
     expect('hidden' in parseManifest(mutate((c) => (c.dolls[0].hidden = false))).dolls[0]).toBe(false);

@@ -440,9 +440,11 @@ export class ContentStore {
     return this.upsertCategory(dollId, category);
   }
 
-  reorderCategories(dollId: string, order: { id: string; layer: number; menuOrder: number }[]): Promise<void> {
+  // setsOrder: メニューでの「セット」の位置（渡さなければ、そのまま）
+  reorderCategories(dollId: string, order: { id: string; layer: number; menuOrder: number }[], setsOrder?: number): Promise<void> {
     return this.change((manifest) => {
       const doll = ContentStore.doll(manifest, dollId);
+      if (setsOrder !== undefined) doll.setsOrder = setsOrder;
       for (const o of order) {
         const category = doll.categories.find((c) => c.id === o.id);
         if (!category) throw new ContentError(`カテゴリ「${o.id}」がありません`, 404);

@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ClothingItemData, ClothingType, DollData, BackgroundData, Position } from '../types';
-import { menuSets } from './menuSets';
+import { menuSets, setsIndex } from './menuSets';
 import type { MenuSet } from './menuSets';
 
 interface DressUpMenuProps {
@@ -30,6 +30,8 @@ interface DressUpMenuProps {
   itemTile?: number; // 縦画面の、服の絵の一辺（px）
   // セット（同じテーマで一度に作った服の集まり）をドールへ運んだとき。パーツを全部着せる
   onSetDrop?: (items: ClothingItemData[]) => void;
+  // メニューでの「セット」の位置（素材の一覧のドールの setsOrder。カテゴリの並び順と同じ数え方）。無ければ先頭
+  setsOrder?: number;
 }
 
 // メニューの「セット」。カテゴリの名前とは別物（同じ名前のカテゴリがあっても混ざらない）
@@ -56,6 +58,7 @@ export function DressUpMenu({
   itemRows = 1,
   itemTile = DEFAULT_PORTRAIT_TILE,
   onSetDrop,
+  setsOrder,
 }: DressUpMenuProps) {
   // 背景選択画面の表示状態
   const [showBackgrounds, setShowBackgrounds] = useState(false);
@@ -106,6 +109,10 @@ export function DressUpMenu({
 
   // セット: 入っているセットごとにまとめる（1 点がいくつものセットに入っていてもよい）
   const sets = useMemo(() => menuSets(items), [items]);
+  // 「セット」を、並べたカテゴリの何番めの前に出すか
+  const setsAt = useMemo(() => setsIndex(categories.map((c) => groupedItems.get(c)?.[0]?.categoryOrder ?? 999), setsOrder), [categories, groupedItems, setsOrder]);
+  // カテゴリの並びに「セット」を入れたもの（セットがあるときだけ）
+  const menuOrder = useMemo(() => (sets.length > 0 ? [...categories.slice(0, setsAt), SET_CATEGORY, ...categories.slice(setsAt)] : categories), [categories, sets.length, setsAt]);
   const isSetWorn = (set: MenuSet) => set.items.every((i) => equippedIds.has(i.id));
   const dropSet = onSetDrop ?? (() => {});
   
@@ -120,6 +127,7 @@ export function DressUpMenu({
     return (
       <PortraitMenu
         groupedItems={groupedItems}
+        menuOrder={menuOrder}
         sets={sets}
         onSetDrop={dropSet}
         equippedIds={equippedIds}
@@ -293,9 +301,11 @@ export function DressUpMenu({
               </button>
             )}
 
-            {/* セット（あるドールだけ。服のカテゴリより前） */}
-            {sets.length > 0 && (
+            {/* セット（あるドールだけ。位置は素材の一覧で決める。無ければ服のカテゴリより前） */}
+            {menuOrder.map(category => {
+              if (category === SET_CATEGORY) return (
               <button
+                key={SET_CATEGORY}
                 style={{ ...styles.categoryButton, ...(sets.some(isSetWorn) ? styles.categoryButtonEquipped : {}) }}
                 onClick={() => setSelectedCategoryLandscape(SET_CATEGORY)}
               >
@@ -309,9 +319,7 @@ export function DressUpMenu({
                 </div>
                 <span style={styles.categoryButtonLabel}>{SET_LABEL}</span>
               </button>
-            )}
-
-            {categories.map(category => {
+              );
               const categoryItems = groupedItems.get(category) ?? [];
               const firstItem = categoryItems[0];
               const hasEquipped = equippedTypes.has(category as ClothingType);
@@ -365,6 +373,7 @@ const PORTRAIT_BACKGROUND = '__background';
 
 interface PortraitMenuProps {
   groupedItems: Map<string, ClothingItemData[]>;
+  menuOrder: string[]; // カテゴリの並びに「セット」（SET_CATEGORY）を入れたもの
   sets: MenuSet[];
   onSetDrop: (items: ClothingItemData[]) => void;
   equippedIds: Set<string>;
@@ -387,6 +396,7 @@ interface PortraitMenuProps {
 
 function PortraitMenu({
   groupedItems,
+  menuOrder,
   sets,
   onSetDrop,
   equippedIds,
@@ -448,8 +458,10 @@ function PortraitMenu({
             <span className="portrait-category-label">はいけい</span>
           </button>
         )}
-        {sets.length > 0 && (
+        {menuOrder.map((category) => {
+          if (category === SET_CATEGORY) return (
           <button
+            key={SET_CATEGORY}
             type="button"
             className={`portrait-category${sets.some(isSetWorn) ? ' worn' : ''}`}
             aria-pressed={selected === SET_CATEGORY}
@@ -460,8 +472,7 @@ function PortraitMenu({
             </span>
             <span className="portrait-category-label">{SET_LABEL}</span>
           </button>
-        )}
-        {categories.map((category) => {
+          );
           const first = groupedItems.get(category)?.[0];
           return (
             <button

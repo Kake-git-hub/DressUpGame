@@ -2,7 +2,7 @@
  * メニューの「セット」: 服を、入っているセットごとにまとめる
  */
 import { describe, expect, it } from 'vitest';
-import { menuSets } from '../components/menuSets';
+import { menuSets, setsIndex } from '../components/menuSets';
 import type { ClothingItemData } from '../types';
 
 const item = (id: string, layer: number, sets?: ClothingItemData['sets'], extra: Partial<ClothingItemData> = {}): ClothingItemData => ({
@@ -46,5 +46,14 @@ describe('menuSets', () => {
     const newer = { id: 'my:set-2', name: 'あたらしい', order: -200 };
     const sets = menuSets([item('a', 1, [UMI]), item('b', 1, [older]), item('c', 1, [newer]), item('d', 1, [YAMA])]);
     expect(sets.map((s) => s.id)).toEqual(['my:set-2', 'my:set-1', 'yama', 'umi']);
+  });
+});
+
+describe('setsIndex（メニューで「セット」をカテゴリの何番めの前に置くか）', () => {
+  it('位置が無ければ先頭。あれば、それより小さい並び順のカテゴリの後ろ（同じなら、セットが先）', () => {
+    expect(setsIndex([0, 1, 2, 3])).toBe(0);
+    expect(setsIndex([0, 2, 3], 1)).toBe(1);
+    expect(setsIndex([0, 1, 2], 1)).toBe(1);
+    expect(setsIndex([0, 1, 2], 9)).toBe(3);
   });
 });

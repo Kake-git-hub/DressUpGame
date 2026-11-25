@@ -1021,6 +1021,7 @@ function App() {
               itemRows={layout.itemRows}
               itemTile={layout.itemTile}
               onSetDrop={handleSetDrop}
+              setsOrder={currentDoll?.setsOrder}
             />
             {portrait && (
               <div className="portrait-tools" data-testid="portrait-tools">

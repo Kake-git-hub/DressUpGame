@@ -475,9 +475,10 @@ export class StudioApi {
         return json(await this.store.updateCategory(b.dollId, b.id, b.change));
       }
       case 'POST /api/categories/order': {
-        const b = this.body<{ dollId: string; order: { id: string; layer: number; menuOrder: number }[] }>(req);
+        const b = this.body<{ dollId: string; order: { id: string; layer: number; menuOrder: number }[]; setsOrder?: number }>(req);
         if (!Array.isArray(b.order)) throw new HttpError(400, 'order を指定してください');
-        await this.store.reorderCategories(b.dollId, b.order);
+        if (b.setsOrder !== undefined && !Number.isFinite(b.setsOrder)) throw new HttpError(400, 'setsOrder は数にしてください');
+        await this.store.reorderCategories(b.dollId, b.order, b.setsOrder);
         return json({ ok: true });
       }
       case 'DELETE /api/categories':

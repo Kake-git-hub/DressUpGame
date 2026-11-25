@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dropIndex, moveInList, renumberCategories, sortCategories } from '../studio/order';
+import { SETS_ENTRY, dropIndex, menuEntries, moveInList, renumberCategories, renumberMenu, sortCategories } from '../studio/order';
 
 describe('スタジオの一覧での並べ替え', () => {
   it('moveInList: 前へ・後ろへ・端を越えない', () => {
@@ -58,5 +58,31 @@ describe('sortCategories（ゲームと同じ、同じ menuOrder の決め方）
     const glovesFirst = [{ id: 't1', category: 'てぶくろ' }, { id: 's1', category: 'ソックス' }];
     expect(sortCategories(cats.slice(0, 2), glovesFirst).map((c) => c.id)).toEqual(['てぶくろ', 'ソックス']);
     expect(sortCategories(cats.slice(0, 2), [...glovesFirst].reverse()).map((c) => c.id)).toEqual(['ソックス', 'てぶくろ']);
+  });
+});
+
+describe('menuEntries / renumberMenu（カテゴリの帯に「セット」も入れる）', () => {
+  const cats = [
+    { id: 'かお', menuOrder: 0, layer: 6 },
+    { id: 'ドレス', menuOrder: 2, layer: 4 },
+    { id: 'くつ', menuOrder: 7, layer: 2 },
+  ];
+  it('セットがあれば、位置が無いときは先頭、あるときはその並び順の所（同じならセットが先）。無ければ入れない', () => {
+    expect(menuEntries(cats, true).map((e) => e.id)).toEqual([SETS_ENTRY, 'かお', 'ドレス', 'くつ']);
+    expect(menuEntries(cats, true, 2).map((e) => e.id)).toEqual(['かお', SETS_ENTRY, 'ドレス', 'くつ']);
+    expect(menuEntries(cats, true, 99).map((e) => e.id)).toEqual(['かお', 'ドレス', 'くつ', SETS_ENTRY]);
+    expect(menuEntries(cats, false, 2).map((e) => e.id)).toEqual(['かお', 'ドレス', 'くつ']);
+  });
+  it('並べた順に 0 から振り直し、セットの位置も返す（セットが無ければ undefined）', () => {
+    const entries = menuEntries(cats, true, 2);
+    expect(renumberMenu(moveInList(entries, 1, 3))).toEqual({
+      order: [
+        { id: 'かお', layer: 6, menuOrder: 0 },
+        { id: 'ドレス', layer: 4, menuOrder: 1 },
+        { id: 'くつ', layer: 2, menuOrder: 2 },
+      ],
+      setsOrder: 3,
+    });
+    expect(renumberMenu(menuEntries(cats, false)).setsOrder).toBeUndefined();
   });
 });

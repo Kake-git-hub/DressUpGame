@@ -275,6 +275,15 @@ describe('resolveContentUrl', () => {
     expect(resolveContentUrl('?content=../other/', PAGE)).toBe('https://kake-git-hub.github.io/other/');
   });
 
+  it('ドールに、メニューでの「セット」の位置（setsOrder）が付く。無ければ付かない', async () => {
+    const m: Manifest = structuredClone(manifest);
+    m.dolls[0].setsOrder = 3;
+    const { dolls } = await loadContent(BASE, okFetch(m));
+    expect(dolls[0].setsOrder).toBe(3);
+    const plain = await loadContent(BASE, okFetch(manifest));
+    expect(plain.dolls[0]).not.toHaveProperty('setsOrder');
+  });
+
   it('セットの印（set）のある服には、セットの ID と名前が付く。うしろがみの分には付かない', async () => {
     const m: Manifest = structuredClone(manifest);
     m.dolls[0].sets = [{ id: 'アニメ/セット/うみ', name: 'うみ' }];
