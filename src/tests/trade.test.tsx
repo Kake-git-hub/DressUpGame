@@ -10,8 +10,9 @@ import type { CloudSession, SessionState } from '../cloud/session';
 import { Trade } from '../trade/Trade';
 import { OLD_SERVER_TEXT } from '../trade/tradeFlow';
 
-const item = (id: string): MyItem => ({
+const item = (id: string, owner = 'me'): MyItem => ({
   id,
+  owner,
   dollId: 'd',
   item: { id, name: `ふく ${id}`, category: 'top', image: { file: 'image', canvasW: 1024, canvasH: 1024, box: { x: 0, y: 0, w: 10, h: 10 } }, thumb: 'thumb' },
   files: { thumb: new Blob(['x'], { type: 'image/png' }) },
@@ -24,14 +25,14 @@ const item = (id: string): MyItem => ({
 const tradeItem = (id: string): TradeItem => ({ id, dollId: 'd', name: `ふく ${id}`, categoryId: 'top', hue: 0, thumb: new Blob(['x']) });
 const view = (status: TradeState['status'], extra: Partial<TradeState> = {}): TradeState => ({ id: 't1', status, me: 'b', mine: tradeItem('a'), theirs: tradeItem('z'), myAccepted: false, theirAccepted: false, ...extra });
 
-const sessionState: SessionState = { status: 'ready', user: null, problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: [], storeFailed: false };
+const sessionState: SessionState = { status: 'ready', user: { userCode: 'me' } as SessionState['user'], problem: null, problemCode: null, jobs: [], arrivals: [], newItemIds: [], storeFailed: false };
 const library: Library = { all: async () => [item('a'), item('b')], put: async () => undefined, remove: async () => undefined };
 
-function setup(backend: Partial<StudioBackend>) {
+function setup(backend: Partial<StudioBackend>, over: { library?: Library; refresh?: () => Promise<void>; onLibraryChanged?: () => Promise<void> } = {}) {
   const full = { canTrade: async () => true, tradeCancel: async () => undefined, ...backend } as StudioBackend;
-  const session = { backend: full, getState: () => sessionState, subscribe: () => () => undefined, markNew: vi.fn(), refresh: async () => undefined } as unknown as CloudSession;
+  const session = { backend: full, getState: () => sessionState, subscribe: () => () => undefined, markNew: vi.fn(), refresh: over.refresh ?? (async () => undefined) } as unknown as CloudSession;
   const onClose = vi.fn();
-  render(<Trade session={session} library={library} dolls={[]} categoriesByDoll={{}} onClose={onClose} onLibraryChanged={async () => undefined} />);
+  render(<Trade session={session} library={over.library ?? library} dolls={[]} categoriesByDoll={{}} onClose={onClose} onLibraryChanged={over.onLibraryChanged ?? (async () => undefined)} />);
   return { session, onClose };
 }
 
@@ -121,5 +122,63 @@ describe('交換の画面', () => {
     cleanup(); // 閉じた
     await act(async () => resolve({ tradeId: 'late', code: 'C' }));
     expect(tradeCancel).toHaveBeenCalledWith('late');
+  });
+
+  it('前の利用者の服は、出す服の一覧に出さない（なければ、服が無い表示）', async () => {
+    setup({}, { library: { ...library, all: async () => [item('a'), item('old', 'someone-else')] } });
+    fireEvent.click(await screen.findByTestId('trade-show'));
+    expect(await screen.findAllByTestId('trade-pick-item')).toHaveLength(1);
+    cleanup();
+    setup({}, { library: { ...library, all: async () => [item('old', 'someone-else')] } });
+    expect(await screen.findByTestId('trade-no-items')).toBeTruthy();
+  });
+
+  it('あいてが えらんでいる間は、自分の服の絵を出す', async () => {
+    setup({
+      tradeOpen: async () => ({ tradeId: 't1', code: 'C' }),
+      trade: async () => view('claimed', { me: 'a', mine: tradeItem('a'), theirs: undefined }),
+    });
+    fireEvent.click(await screen.findByTestId('trade-show'));
+    fireEvent.click((await screen.findAllByTestId('trade-pick-item'))[0]);
+    const text = await screen.findByTestId('trade-partner-choosing');
+    expect(text.closest('.trade-body')?.querySelector('.trade-card .trade-name')?.textContent).toBe('ふく a');
+  });
+
+  it('「はい」を押したあとで、結果を見ないまま閉じたら、一覧を同期し直す', async () => {
+    const refresh = vi.fn(async () => undefined);
+    const onLibraryChanged = vi.fn(async () => undefined);
+    let joinedAlready = false;
+    setup(
+      {
+        tradeClaim: async () => ({ tradeId: 't1' }),
+        tradeJoin: async () => {
+          joinedAlready = true;
+        },
+        trade: async () => view(joinedAlready ? 'joined' : 'claimed'),
+        tradeAccept: async () => view('joined', { myAccepted: true }),
+      },
+      { refresh, onLibraryChanged },
+    );
+    fireEvent.click(await screen.findByTestId('trade-scan'));
+    fireEvent.change(await screen.findByTestId('trade-scan-test'), { target: { value: 'ABC' } });
+    fireEvent.submit(screen.getByTestId('trade-scan-test').closest('form')!);
+    fireEvent.click((await screen.findAllByTestId('trade-pick-item'))[0]);
+    await screen.findByTestId('trade-confirm');
+    fireEvent.click(screen.getByTestId('trade-accept'));
+    await waitFor(() => expect(screen.queryByTestId('trade-accept')).toBeNull());
+    cleanup();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    await waitFor(() => expect(onLibraryChanged).toHaveBeenCalled());
+  });
+
+  it('「はい」を押していなければ、閉じても同期し直さない', async () => {
+    const refresh = vi.fn(async () => undefined);
+    setup({ tradeOpen: async () => ({ tradeId: 't1', code: 'C' }), trade: async () => view('open', { me: 'a' }) }, { refresh });
+    fireEvent.click(await screen.findByTestId('trade-show'));
+    fireEvent.click((await screen.findAllByTestId('trade-pick-item'))[0]);
+    await screen.findByTestId('trade-cancel');
+    cleanup();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

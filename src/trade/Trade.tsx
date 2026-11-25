@@ -99,7 +99,10 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const makingIds = useMemo(() => new Set(state.jobs.filter((job) => !job.done).flatMap((job) => job.candidates.map((c) => c.itemId).filter((id): id is string => !!id))), [state.jobs]);
   const hasMaking = state.jobs.some((job) => !job.done);
-  const choosable = useMemo(() => (items ?? []).filter((item) => !makingIds.has(item.id) && !notMovable.has(item.id)), [items, makingIds, notMovable]);
+  // 前の利用者の服（端末に残してあるだけ）は、出さない
+  const userCode = state.user?.userCode;
+  const mine = useMemo(() => (items ?? []).filter((item) => item.owner === userCode), [items, userCode]);
+  const choosable = useMemo(() => mine.filter((item) => !makingIds.has(item.id) && !notMovable.has(item.id)), [mine, makingIds, notMovable]);
 
   const finish = useCallback(async (next: TradeState) => {
     if (resultRef.current) return;
@@ -197,7 +200,16 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
     window.addEventListener('pagehide', cancel);
     return () => {
       window.removeEventListener('pagehide', cancel);
+      // 「はい」を押したあと、結果を見ないまま閉じた: 入れ替わったかもしれないので、一覧を合わせ直す（失敗は無視）
+      const unseen = !!latestRef.current?.myAccepted && !resultRef.current;
       cancel();
+      if (unseen) {
+        const { session: s, onLibraryChanged: changed } = callbacks.current;
+        void s
+          .refresh()
+          .then(() => changed())
+          .catch(() => undefined);
+      }
     };
   }, [backend]);
 
@@ -308,7 +320,7 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
         {OLD_SERVER_TEXT}
       </p>
     );
-  } else if (items.length === 0) {
+  } else if (mine.length === 0) {
     body = (
       <p className="trade-big" data-testid="trade-no-items">
         こうかんできる ふくが ないよ
@@ -357,6 +369,7 @@ export function Trade({ session, library, dolls, categoriesByDoll, onClose, onLi
             <p className="trade-big" data-testid="trade-partner-choosing">
               あいてが ふくを えらんでいるよ
             </p>
+            <Card item={trade?.mine} />
             {cancelButton}
           </>
         );

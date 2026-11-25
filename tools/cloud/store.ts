@@ -149,7 +149,8 @@ export interface CloudStore {
   // updateJob と同じく、change は 2 回以上呼ばれることがある
   updateItem(uid: string, itemId: string, change: (item: ItemDoc) => ItemDoc | null): Promise<ItemDoc>;
   listItems(uid: string): Promise<ItemDoc[]>; // 作った順
-  deleteItem(uid: string, itemId: string): Promise<void>;
+  // 消せたら true（もう無ければ false。交換で別の人へ動いた服の絵を、うっかり消さないため）
+  deleteItem(uid: string, itemId: string): Promise<boolean>;
 
   // ── 引き継ぎ（2 台めの端末の、匿名の利用者のチケットと服を、アカウントへ移す）──
   // どれも、確定の返事が届かずに、もう一度呼ばれてよい（2 回めは、何も変えない）

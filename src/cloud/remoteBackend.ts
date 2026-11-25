@@ -141,6 +141,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     };
   };
   // 交換の呼び出し。古いサーバーは呼ばずに断り、断りの理由（`trade:{理由} 日本語`）は tradeRefusal に出す
+  const TRADE_REFUSALS: readonly string[] = ['unknown', 'expired', 'self', 'busy', 'not-movable', 'limit'] satisfies TradeRefusal[];
   const tradeCall = async <T>(data: Record<string, unknown>): Promise<T> => {
     if (!(await backend.canTrade())) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
     try {
@@ -149,10 +150,10 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       if (!(error instanceof BackendError) || error.code !== 'refused') throw error;
       const match = /^trade:(\S+)\s*/.exec(error.message);
       if (!match) throw error;
-      throw new BackendError('refused', error.message.slice(match[0].length), {
-        uncertain: error.uncertain,
-        tradeRefusal: match[1] as TradeRefusal,
-      });
+      const text = error.message.slice(match[0].length);
+      // 知らない語（新しいサーバーの理由）は、tradeRefusal にせず、サーバーの文をそのまま出す
+      if (!TRADE_REFUSALS.includes(match[1] as TradeRefusal)) throw new BackendError('refused', text, { uncertain: error.uncertain });
+      throw new BackendError('refused', text, { uncertain: error.uncertain, tradeRefusal: match[1] as TradeRefusal });
     }
   };
 

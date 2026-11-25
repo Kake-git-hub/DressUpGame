@@ -665,7 +665,9 @@ export async function deleteItem(deps: CoreDeps, uid: string, itemId: string, fo
   const item = force ? null : await deps.store.getItem(uid, itemId);
   if (!force && !item) return;
   if (!force && (await inLiveTrade(deps, uid, itemId))) throw new CloudError('refused', 'この服は、こうかんに だしているので、けせません');
-  await deps.store.deleteItem(uid, itemId);
+  const deleted = await deps.store.deleteItem(uid, itemId);
+  // 読んだあとで、交換で別の人へ動いていた服は、絵を消さない（動いた先で使っている）
+  if (!force && !deleted) return;
   const own = itemPrefix(uid, itemId);
   await deps.files.removeAll(own);
   // 引き継いだ服は、絵が元の利用者の置き場にある（移すときに、絵は動かさない）。服が持っているパスのフォルダも消す。
@@ -887,6 +889,8 @@ export async function tradeClaim(deps: CoreDeps, uid: string, code: string): Pro
   // 古い印は、交換の文書から消えている。終わった交換の印は、生きた交換には、つながらない
   const t = await settleTrade(deps, found);
   if (!isLive(t)) throw refuseTrade('expired');
+  // 返事が届かず、同じ人がもう一度読み取った: 同じ交換のまま（回数も、前の交換のやめも、しない）
+  if (t.status === 'claimed' && t.b?.uid === uid && t.code === code) return { tradeId: t.id };
   if (t.status !== 'open') throw refuseTrade('busy');
   if (deps.now() - t.codeAt > TRADE_CODE_MS) throw refuseTrade('expired');
   await countTrade(deps, uid);
@@ -899,6 +903,7 @@ export async function tradeClaim(deps: CoreDeps, uid: string, code: string): Pro
     verdict = null;
     if (cur.code !== code) verdict = 'unknown';
     else if (!isLive(cur) || timedOut(cur, now)) verdict = 'expired';
+    else if (cur.status === 'claimed' && cur.b?.uid === uid) return null; // 同じ人の、2 回め（書かない）
     else if (cur.status !== 'open') verdict = 'busy';
     else if (now - cur.codeAt > TRADE_CODE_MS) verdict = 'expired';
     if (verdict) return null;

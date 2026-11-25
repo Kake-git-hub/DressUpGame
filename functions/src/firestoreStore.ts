@@ -195,8 +195,14 @@ export class FirestoreStore implements CloudStore {
     const snap = await this.user(uid).collection('items').orderBy('createdAt', 'asc').get(); // 全部（途中で切ると、アプリが「消えた」とみなして端末の控えを消してしまう）
     return snap.docs.map((doc) => doc.data() as ItemDoc);
   }
-  async deleteItem(uid: string, itemId: string): Promise<void> {
-    await this.item(uid, itemId).delete();
+  async deleteItem(uid: string, itemId: string): Promise<boolean> {
+    try {
+      await this.item(uid, itemId).delete({ exists: true }); // 無ければ NOT_FOUND（5）
+      return true;
+    } catch (e) {
+      if ((e as { code?: unknown }).code === 5) return false;
+      throw e;
+    }
   }
 
   // ── 引き継ぎ。どれも、取り引きの中で読み直すので、確定の返事が届かずにもう一度呼ばれても、2 回めは何も変えない ──

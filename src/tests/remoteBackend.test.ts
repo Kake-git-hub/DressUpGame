@@ -464,6 +464,15 @@ describe('本物の裏側', () => {
       expect((error as BackendError).message).toBe('この合い言葉は、もう使えません');
     });
 
+    it('知らない断りの語は、tradeRefusal にせず、サーバーの文を出す', async () => {
+      const server = tradeServer(4, 'trade:future-reason あたらしい理由');
+      const error = await createRemoteBackend(server.transport)
+        .tradeClaim('ABCD')
+        .catch((e: unknown) => e);
+      expect((error as BackendError).tradeRefusal).toBeUndefined();
+      expect((error as BackendError).message).toBe('あたらしい理由');
+    });
+
     it('trade: で始まらない断りは、そのまま（tradeRefusal なし）', async () => {
       const server = tradeServer(4, 'ほかの理由');
       const error = await createRemoteBackend(server.transport)

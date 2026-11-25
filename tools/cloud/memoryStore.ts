@@ -139,8 +139,8 @@ export class MemoryStore implements CloudStore {
       .map(([, item]) => clone(item))
       .sort((a, b) => a.createdAt - b.createdAt);
   }
-  async deleteItem(uid: string, itemId: string): Promise<void> {
-    this.items.delete(`${uid}/${itemId}`);
+  async deleteItem(uid: string, itemId: string): Promise<boolean> {
+    return this.items.delete(`${uid}/${itemId}`);
   }
   // 引き継ぎの操作は、どれも、間に待ちを入れない（読んで書くまでが、割り込まれない = 本物の 1 つの取り引き）
   private mustUser(uid: string): UserDoc {

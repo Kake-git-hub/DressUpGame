@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContentStore } from '../content/manifestEdit.ts';
 import type { ImageAi, TextAi } from '../studio/ai.ts';
 import { AiError } from '../studio/ai.ts';
@@ -1556,6 +1556,32 @@ describe('交換', () => {
     await tradeCancel(deps, 'ub', id);
     expect(await tradeView(deps, 'ua', id)).toMatchObject({ status: 'cancelled', reason: 'cancel' });
     await tradeCancel(deps, 'ub', id); // 終わったあとは、何も起きない
+  });
+  it('claim again by the same claimer returns the same trade', async () => {
+    await giver('ua', 'my:x-0-1');
+    await giver('ub', 'my:y-0-1');
+    const { tradeId, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    const first = await tradeClaim(deps, 'ub', code);
+    const count = vi.spyOn(store, 'countTrade');
+    const second = await tradeClaim(deps, 'ub', code);
+    expect(second.tradeId).toBe(first.tradeId);
+    expect(second.tradeId).toBe(tradeId);
+    expect(count).not.toHaveBeenCalled(); // 1 日の回数を使わない
+    expect(await tradeView(deps, 'ub', tradeId)).toMatchObject({ status: 'claimed', me: 'b' });
+    // 自分の交換を、やめにしていない（続きの服えらびができる）
+    await tradeJoin(deps, 'ub', tradeId, 'my:y-0-1');
+    expect(await tradeView(deps, 'ua', tradeId)).toMatchObject({ status: 'joined' });
+  });
+  it('deleteItem keeps files when the item was already moved away', async () => {
+    const id = await joined();
+    const before = await store.getItem('ua', 'my:x-0-1');
+    await tradeAccept(deps, 'ua', id);
+    await tradeAccept(deps, 'ub', id);
+    // 入れ替えの直前に読んだ（古い）服を返す = 読んだあとで、服が動いた
+    vi.spyOn(store, 'getItem').mockResolvedValueOnce(before);
+    await deleteItem(deps, 'ua', 'my:x-0-1');
+    expect(await files.get('users/ua/items/my_x-0-1/thumb.webp')).not.toBeNull();
+    expect(await store.getItem('ub', 'my:x-0-1')).not.toBeNull();
   });
   it('received item delete removes original files', async () => {
     const id = await joined();
