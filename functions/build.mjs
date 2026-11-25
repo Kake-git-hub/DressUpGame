@@ -14,7 +14,7 @@ await build({
   target: 'node22',
   sourcemap: true,
   // サーバーに入れてもらうもの（functions/package.json の dependencies）
-  external: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*', 'sharp'],
+  external: ['firebase-admin', 'firebase-admin/*', 'firebase-functions', 'firebase-functions/*', 'sharp', 'stripe'],
   // 文章の AI は Gemini を使う。Claude の部品は載せない
   alias: { '@anthropic-ai/sdk': here('src/stubs/anthropic.ts') },
   logLevel: 'warning',

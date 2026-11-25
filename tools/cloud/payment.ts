@@ -21,8 +21,17 @@ export interface CheckoutInput {
   cancelUrl: string;
   sessionExpiresAt: number; // 支払いページの期限
 }
+export interface PayMeta {
+  uid: string;
+  pack: string;
+  tickets: number;
+  price: number;
+  expiresAt: number;
+  createdAt: number;
+}
 export type PayEvent =
-  | { kind: 'completed'; session: string; paid: boolean; paidAt: number }
+  // meta = 支払いページに入れておいた中身。purchases が無いときの作り直しに使う
+  | { kind: 'completed'; session: string; paid: boolean; paidAt: number; meta?: PayMeta }
   | { kind: 'expired'; session: string }
   // amount = 元の代金（円）、refunded = 返金の累計（円）
   | { kind: 'refunded'; session: string; amount: number; refunded: number }
@@ -32,8 +41,8 @@ export type PayEvent =
 export interface PaymentGateway {
   createCheckout(input: CheckoutInput): Promise<{ id: string; url: string }>;
   getSession(id: string): Promise<{ id: string; paid: boolean; paidAt: number | null; expired: boolean; uid: string | null }>;
-  // 署名が違えば投げる
-  parseEvent(body: Buffer, signature: string): PayEvent;
+  // 署名が違えば投げる（返金・取り消しは、Stripe に聞いて session を引くので、非同期）
+  parseEvent(body: Buffer, signature: string): Promise<PayEvent>;
 }
 
 export interface PayDeps {
@@ -144,6 +153,7 @@ export async function purchase(deps: CoreDeps, uid: string, session: string): Pr
   const gateway = deps.pay?.gateway;
   if (p.status === 'open' && gateway) {
     const asked = await gateway.getSession(session);
+    if (asked.uid !== uid) throw refuse('other'); // 念のため: Stripe 側の持ち主も確かめる
     if (asked.paid) added = await fulfill(deps, session, asked.paidAt ?? deps.now());
     else if (asked.expired) await deps.store.expirePurchase(session);
     p = (await deps.store.getPurchase(session)) ?? p;
@@ -157,10 +167,33 @@ export async function shopAck(deps: CoreDeps, uid: string, session: string): Pro
   await deps.store.markAnnounced(session);
 }
 
+const positive = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+
+// 払われたのに purchases が無い（作る途中で書き損ねた）とき、支払いページに入れておいた中身から作り直す。中身が合わなければ作らない
+async function restore(deps: CoreDeps, session: string, meta: PayMeta | undefined): Promise<void> {
+  if (!meta || (await deps.store.getPurchase(session))) return;
+  const ok = meta.uid && positive(meta.tickets) && positive(meta.price) && positive(meta.createdAt) && meta.expiresAt > meta.createdAt && meta.pack === `${meta.tickets}-${meta.price}`;
+  if (!ok) return;
+  await deps.store.putPurchase({ id: session, uid: meta.uid, pack: meta.pack, tickets: meta.tickets, price: meta.price, status: 'open', createdAt: meta.createdAt, expiresAt: meta.expiresAt, adultAt: 0, agreedAt: 0 });
+}
+
+// 知らせを 1 つ片づける。利用者がもういない（refused）ときは、足しようが無いので、何もせず終える（呼び直させない）
 export async function handlePayEvent(deps: CoreDeps, event: PayEvent): Promise<void> {
+  try {
+    await handle(deps, event);
+  } catch (e) {
+    if (e instanceof CloudError && e.code === 'refused') return;
+    throw e;
+  }
+}
+
+async function handle(deps: CoreDeps, event: PayEvent): Promise<void> {
   switch (event.kind) {
     case 'completed':
-      if (event.paid) await fulfill(deps, event.session, event.paidAt);
+      if (event.paid) {
+        await restore(deps, event.session, event.meta);
+        await fulfill(deps, event.session, event.paidAt);
+      }
       return;
     case 'expired':
       await deps.store.expirePurchase(event.session);

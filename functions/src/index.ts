@@ -4,6 +4,7 @@
  *   studio       アプリからの呼び出し（利用者・始める・進み具合・見た印・自分の服）。中身は tools/cloud/api.ts
  *   studioWork   生成を進める（時間がかかる。1 点で 30 秒〜1 分）。サーバーの列（Cloud Tasks）が呼ぶ。アプリからは呼べない。
  *                中身は tools/cloud/studioCore.ts の workJob。失敗したら、列が間をあけて呼び直す
+ *   stripeHook   Stripe からの支払いの知らせ（HTTP）。署名を確かめて、チケットを足す・取り戻す。中身は tools/cloud/payment.ts の handlePayEvent
  *   studioSweep  見回り（1 時間に 1 回）。止まった仕事を列に入れ直し、24 時間たっても終わらない仕事は払い戻す
  *
  * アプリは、匿名のログインをしてから、studio だけを呼ぶ。Firestore と Storage は、アプリからは読めない。
@@ -14,6 +15,11 @@
  *   adminCodes   管理者の利用者コード（カンマ区切りの文字列）。管理者は、チケットが無くても作れる
  *   imagesPerDay サーバー全体で、1 日に作る画像の上限（数。既定 100。0 にすると、だれも作れない = 急いで止めたいとき）
  *   imagesPerUserPerDay 利用者 1 人が、1 日に作る画像の上限（数。既定 30。管理者にはかからない）
+ *   salesOpen    true（か "true"）で、「つくる」を開ける人のだれにでも「チケットを買う」を出す（既定は管理者だけ）
+ *   packs        買えるパック。`10:300,30:800`（枚数:税込の円）の形の文字列。空なら買えない
+ *   welcomeTickets Google で初めてログインした人に配る枚数（既定 0）
+ *   payReturnUrl 支払いのあとに戻る先（`https://` で始まるときだけ使う）
+ * 秘密の値 STRIPE_SECRET_KEY・STRIPE_WEBHOOK_SECRET（firebase functions:secrets:set）。どちらかが空なら、買えない（pay:closed）。
  * 1 日の区切りは、世界標準時の 0 時（日本の朝 9 時）。
  */
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -23,11 +29,15 @@ import { getFunctions } from 'firebase-admin/functions';
 import { getStorage } from 'firebase-admin/storage';
 import * as logger from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { callerOfToken, handleCall } from '../../tools/cloud/api.ts';
 import type { Caller } from '../../tools/cloud/api.ts';
+import { createFakeGateway } from '../../tools/cloud/fakeGateway.ts';
+import type { FakeGateway } from '../../tools/cloud/fakeGateway.ts';
+import { handlePayEvent, parsePacks } from '../../tools/cloud/payment.ts';
+import type { PayDeps, PaymentGateway } from '../../tools/cloud/payment.ts';
 import { createPublicContent } from '../../tools/cloud/publicContent.ts';
 import { CloudError } from '../../tools/cloud/store.ts';
 import type { CloudFiles, CloudStore } from '../../tools/cloud/store.ts';
@@ -36,6 +46,7 @@ import type { CoreDeps, PublicContent } from '../../tools/cloud/studioCore.ts';
 import { firebaseConfig } from '../../src/cloud/firebaseConfig.ts';
 import { createGemini, createGeminiText, GEMINI_IMAGE_MODEL, GEMINI_TEXT_MODEL } from '../../tools/studio/ai.ts';
 import { FirestoreStore } from './firestoreStore.ts';
+import { createStripeGateway } from './stripeGateway.ts';
 import { StorageFiles } from './storageFiles.ts';
 
 const REGION = 'asia-northeast1';
@@ -53,13 +64,20 @@ const WORK_BUDGET_MS = 1_500_000;
 // 列の名前（東京の関数は、場所まで含めた名前で指定する。関数の名前だけだと、us-central1 を探してしまう）
 const WORK_QUEUE = `locations/${REGION}/functions/studioWork`;
 const CONFIG_TTL_MS = 60_000;
+const CHECKOUTS_PER_USER_PER_DAY = 10;
+const DEFAULT_PAY_RETURN_URL = 'https://kake-git-hub.github.io/DressUpGame/';
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+const STRIPE_SECRET_KEY = defineSecret('STRIPE_SECRET_KEY');
+const STRIPE_WEBHOOK_SECRET = defineSecret('STRIPE_WEBHOOK_SECRET');
 
 // 手元のエミュレーターでのテストのときだけ、素材と Gemini の行き先を差し替えられる（本番では、この環境変数を見ない）
 const emulated = process.env.FUNCTIONS_EMULATOR === 'true';
 const contentUrl = (emulated && process.env.STUDIO_TEST_CONTENT_URL) || CONTENT_URL;
 const geminiUrl = emulated ? process.env.STUDIO_TEST_GEMINI_URL : undefined;
+// エミュレーターのテストのときだけ、Stripe の代わりににせの口を使う（署名の鍵は whsec_test。tools/cloud/fakeGateway.ts）
+const fakePay = emulated && process.env.STUDIO_TEST_FAKE_PAY === '1';
+let fakeGateway: FakeGateway | null = null;
 const GEMINI_ORIGIN = 'https://generativelanguage.googleapis.com/';
 const aiFetch: typeof fetch = geminiUrl ? (input, init) => fetch(String(input).replace(GEMINI_ORIGIN, geminiUrl), init) : fetch;
 
@@ -67,6 +85,10 @@ interface Config {
   adminCodes: string[];
   perDay: number;
   perUserDay: number;
+  salesOpen: boolean;
+  packs: string;
+  welcomeTickets: number;
+  payReturnUrl: string;
 }
 interface Services {
   store: CloudStore;
@@ -91,11 +113,27 @@ function getServices(): Services {
     content: createPublicContent(contentUrl),
     async config() {
       if (cached && Date.now() - cached.at < CONFIG_TTL_MS) return cached.value;
-      const data = ((await db.collection('system').doc('config').get()).data() ?? {}) as { adminCodes?: unknown; imagesPerDay?: unknown; imagesPerUserPerDay?: unknown };
+      const data = ((await db.collection('system').doc('config').get()).data() ?? {}) as {
+        adminCodes?: unknown;
+        imagesPerDay?: unknown;
+        imagesPerUserPerDay?: unknown;
+        salesOpen?: unknown;
+        packs?: unknown;
+        welcomeTickets?: unknown;
+        payReturnUrl?: unknown;
+      };
       // 文字列（カンマ・空白区切り）でも、配列でも受け付ける
       const listed = Array.isArray(data.adminCodes) ? data.adminCodes.filter((code): code is string => typeof code === 'string').join(',') : typeof data.adminCodes === 'string' ? data.adminCodes : '';
       const adminCodes = listed.split(/[\s,、]+/).map((code) => code.trim().toUpperCase()).filter(Boolean);
-      const value: Config = { adminCodes, perDay: count(data.imagesPerDay, IMAGES_PER_DAY), perUserDay: count(data.imagesPerUserPerDay, IMAGES_PER_USER_PER_DAY) };
+      const value: Config = {
+        adminCodes,
+        perDay: count(data.imagesPerDay, IMAGES_PER_DAY),
+        perUserDay: count(data.imagesPerUserPerDay, IMAGES_PER_USER_PER_DAY),
+        salesOpen: data.salesOpen === true || data.salesOpen === 'true',
+        packs: typeof data.packs === 'string' ? data.packs : '',
+        welcomeTickets: count(data.welcomeTickets, 0),
+        payReturnUrl: typeof data.payReturnUrl === 'string' && data.payReturnUrl.startsWith('https://') ? data.payReturnUrl : DEFAULT_PAY_RETURN_URL,
+      };
       cached = { at: Date.now(), value };
       return value;
     },
@@ -155,9 +193,18 @@ async function enqueue(uid: string, jobId: string, delaySeconds = 0): Promise<vo
   }
 }
 
+// 支払いの口。エミュレーターのテストならにせもの、秘密の値が空なら無し（買えない）
+function payGateway(): PaymentGateway | null {
+  if (fakePay) return (fakeGateway ??= createFakeGateway());
+  const secretKey = STRIPE_SECRET_KEY.value();
+  const webhookSecret = STRIPE_WEBHOOK_SECRET.value();
+  return secretKey && webhookSecret ? createStripeGateway(secretKey, webhookSecret) : null;
+}
+
 async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
   const { store, files, content, config } = getServices();
-  const { adminCodes, perDay, perUserDay } = await config();
+  const { adminCodes, perDay, perUserDay, salesOpen, packs, welcomeTickets, payReturnUrl } = await config();
+  const pay: PayDeps = { gateway: payGateway(), salesOpen, packs: parsePacks(packs), welcomeTickets, returnUrl: payReturnUrl, checkoutsPerDay: CHECKOUTS_PER_USER_PER_DAY };
   const key = GEMINI_API_KEY.value();
   return {
     store,
@@ -170,6 +217,7 @@ async function coreDeps(runBudgetMs?: number): Promise<CoreDeps> {
     newId: () => randomUUID().replace(/-/g, '').slice(0, 20),
     newWord: () => randomBytes(32).toString('hex'),
     enqueue,
+    pay,
     ...(runBudgetMs !== undefined ? { runBudgetMs } : {}),
   };
 }
@@ -198,7 +246,7 @@ function uidOf(request: { auth?: { uid: string } | null }): string {
 const callerOf = (request: { auth?: { token?: unknown } | null }): Caller => callerOfToken(request.auth?.token);
 const opOf = (data: unknown) => (typeof data === 'object' && data !== null ? (data as { op?: unknown }).op : undefined);
 
-export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY], memory: '1GiB', timeoutSeconds: 180, concurrency: 8, maxInstances: 5 }, (request) =>
+export const studio = onCall({ region: REGION, secrets: [GEMINI_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], memory: '1GiB', timeoutSeconds: 180, concurrency: 8, maxInstances: 5 }, (request) =>
   answer('studio', async () => handleCall(await coreDeps(), uidOf(request), request.data, callerOf(request)), ['offer', 'adopt'].includes(String(opOf(request.data)))),
 );
 
@@ -234,4 +282,35 @@ export const studioWork = onTaskDispatched(
 export const studioSweep = onSchedule({ schedule: 'every 60 minutes', region: REGION, secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' }, async () => {
   const seen = await sweep(await coreDeps());
   if (seen > 0) logger.info(`見回り: 終わっていない仕事 ${seen} 件を手当てしました`);
+});
+
+// Stripe からの支払いの知らせ。署名が違えば 400、処理に失敗したら 500（Stripe が間をあけて送り直す）、それ以外は 200
+export const stripeHook = onRequest({ region: REGION, secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], memory: '512MiB', timeoutSeconds: 60 }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('POST only');
+    return;
+  }
+  const gateway = payGateway();
+  if (!gateway) {
+    logger.error('stripeHook: Stripe の秘密の値が入っていません');
+    res.status(500).send('not configured');
+    return;
+  }
+  let event;
+  try {
+    event = await gateway.parseEvent(req.rawBody, String(req.header('stripe-signature') ?? ''));
+  } catch (error) {
+    logger.warn('stripeHook: 署名を確かめられませんでした', { error: String(error) });
+    res.status(400).send('bad signature');
+    return;
+  }
+  try {
+    await handlePayEvent(await coreDeps(), event);
+    // 支払いの番号は、サーバーの記録にだけ残る（公開されない）
+    logger.info('stripeHook: 知らせを処理しました', { kind: event.kind, session: 'session' in event ? event.session : undefined });
+    res.status(200).send('ok');
+  } catch (error) {
+    logger.error('stripeHook: 知らせを処理できませんでした', { kind: event.kind, error: String(error) });
+    res.status(500).send('failed');
+  }
 });

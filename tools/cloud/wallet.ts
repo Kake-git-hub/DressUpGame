@@ -20,7 +20,7 @@ export function readWallet(user: Pick<UserDoc, 'tickets' | 'free' | 'lots' | 'ti
     return { free: tickets, lots: [] };
   }
   let free = finite(user.free);
-  let lots = (user.lots ?? []).filter((l) => l.left >= 0).map((l) => ({ ...l }));
+  const lots = (user.lots ?? []).filter((l) => l.left >= 0).map((l) => ({ ...l }));
   const d = user.ticketsWritten === undefined ? 0 : tickets - finite(user.ticketsWritten);
   if (d > 0) free += d;
   else if (d < 0) {
