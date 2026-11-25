@@ -23,7 +23,7 @@
 - **つくるの画面**: 1 段ずつ、絵をタップして進む（`src/appStudio/AppStudio.tsx` の `step`: doll → what → theme → style → check。ドールが 1 体なら doll なし）。カテゴリの絵は「そのカテゴリの先頭の服のサムネイル」（公開の服を先に。`clothing` を App から渡す）。作者の言葉: 「カテゴリを文字ではなく先頭のサムネを使って選ぶ」。絵柄・テーマの例は絵文字（画像生成は使っていない = 0 枚）。
 - **チケットを配る**（管理者だけ）: サーバーに `op: 'giveTickets'`（`tools/cloud/studioCore.ts` の `giveTickets`。1〜100 枚。`movedTo` をたどる。台帳 `gift:{管理者のコード}`）。`SERVER_API = 4`・`GIFT_API = 4`。画面は `src/appStudio/GiftTickets.tsx`。**作者の PC での載せ直しが要る**（`docs/firebase-setup.md` の 2-12）。冪等ではない（返事が届かなかったら、画面が「相手の枚数を確かめて」と出す）。
 - **ログインの表示**: つくるの中の欄は `<details>` でたたむ。ログイン中は、版数の左に Google の名前（`AccountInfo.name` = providerData の displayName）を薄く出す（`account-badge`。メールアドレスは出さない）。
-- テスト: ユニット 1201・エミュレーター 31・E2E 147、全部通過。型・ESLint エラー 0（前からある警告 1）。
+- テスト（交換と合わせたあと）: ユニット 1268・エミュレーター 36・E2E 154、全部通過。**公開済み**（2026-11-25、作者の指示「公開して」）。サーバーの載せ直しは、まだ（2-12 と 2-13 を 1 回で）。型・ESLint エラー 0（前からある警告 1）。
 
 ### 0-A. 次のセッションが、最初にすること
 
