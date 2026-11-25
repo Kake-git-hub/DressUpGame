@@ -91,6 +91,7 @@ describe('createCheckout / getSession', () => {
     expect(params).toMatchObject({
       mode: 'payment',
       allowed_payment_method_types: ['card'],
+      managed_payments: { enabled: false },
       line_items: [{ quantity: 1, price_data: { currency: 'jpy', unit_amount: 300, product_data: { name: 'チケット 10 枚（服 10 点ぶん）' } } }],
       client_reference_id: 'u1',
       metadata: { uid: 'u1', pack: '10-300', tickets: '10', expiresAt: '2000000000000' },
@@ -99,6 +100,7 @@ describe('createCheckout / getSession', () => {
       locale: 'ja',
     });
     expect(params.allowed_payment_method_types).toEqual(['card']);
+    expect(params.managed_payments).toEqual({ enabled: false });
     expect(Number(params.metadata.createdAt)).toBeGreaterThanOrEqual(now);
     // 作ってから 30 分より先（通信の分の余裕を足す）で、秒の単位
     expect(params.expires_at).toBeGreaterThanOrEqual(Math.floor(now / 1000) + 31 * 60);

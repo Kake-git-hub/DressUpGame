@@ -1,6 +1,8 @@
 /**
  * 支払いの口の本物（Stripe）。中身の決まりは tools/cloud/payment.ts の PaymentGateway。
  * 支払いの方法は、カードだけ（allowed_payment_method_types。Apple Pay・Google Pay もカードの一種として出る）。
+ * 売り手は作者（Managed Payments = Stripe が売り手を引き受ける仕組みは使わない。作者の決定、2026-11-25）。
+ *   アカウントで Managed Payments が最初からオンだと、カードだけの指定と一緒に使えず、支払いページを作れない。そのため、毎回オフを渡す。
  * 鍵が本物の形か（sk_・whsec_ で始まるか）は stripeKeysUsable で見る（「pending」などの仮の値は、鍵が無いのと同じ扱い）。
  */
 import Stripe from 'stripe';
@@ -43,6 +45,7 @@ export function createStripeGateway(secretKey: string, webhookSecret: string, cl
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         allowed_payment_method_types: ['card'],
+        managed_payments: { enabled: false },
         line_items: [{ quantity: 1, price_data: { currency: 'jpy', unit_amount: pack.price, product_data: { name: `チケット ${pack.tickets} 枚（服 ${pack.tickets} 点ぶん）` } } }],
         client_reference_id: uid,
         metadata: { uid, pack: pack.id, tickets: String(pack.tickets), expiresAt: String(input.purchaseExpiresAt), createdAt: String(now) },
