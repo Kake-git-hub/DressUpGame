@@ -124,6 +124,22 @@ describe('つなぎ役', () => {
     expect(JSON.parse(localStorage.getItem(NEW_KEY)!)).toEqual([]);
   });
 
+  it('markNew: NEW の印を足して保存する（2 回呼んでも 1 つ）', async () => {
+    const { make } = setup();
+    const session = make();
+    await session.connect();
+    let notified = 0;
+    session.subscribe(() => notified++);
+    session.markNew('my:got-1');
+    session.markNew('my:got-1');
+    expect(session.getState().newItemIds).toContain('my:got-1');
+    expect(session.getState().newItemIds.filter((id) => id === 'my:got-1')).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(NEW_KEY)!)).toContain('my:got-1');
+    expect(notified).toBe(1);
+    session.markSeen('my:got-1');
+    expect(session.getState().newItemIds).not.toContain('my:got-1');
+  });
+
   it('一度開いた服は、つなぎ直しても NEW に戻らない（その仕事の結果を、まだ見ていなくても）', async () => {
     const { make } = setup();
     const session = make();

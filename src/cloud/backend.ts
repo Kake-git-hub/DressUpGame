@@ -6,6 +6,7 @@
  */
 import type { ManifestItem } from '../content/manifest';
 import type { StudioAccount } from './account';
+import type { TradeRefusal, WireTrade } from './wire';
 
 export interface StudioUser {
   userCode: string; // 作者に伝えると、チケットや服を届けてもらえる短い文字列
@@ -69,10 +70,13 @@ export class BackendError extends Error {
   // 結果が分からない失敗（返事が届かなかった、など。サーバーの側では、もう済んでいるかもしれない）。
   // false なら、サーバーが理由つきで断った = 何も起きていない、と言い切れる
   readonly uncertain: boolean;
-  constructor(code: BackendErrorCode, message: string, options: { uncertain?: boolean } = {}) {
+  // 交換を断られたときの理由（サーバーが `trade:{理由}` で返したもの）
+  readonly tradeRefusal?: TradeRefusal;
+  constructor(code: BackendErrorCode, message: string, options: { uncertain?: boolean; tradeRefusal?: TradeRefusal } = {}) {
     super(message);
     this.code = code;
     this.uncertain = options.uncertain ?? false;
+    if (options.tradeRefusal) this.tradeRefusal = options.tradeRefusal;
   }
 }
 export const OLD_SERVER_MESSAGE = 'サーバーが古い版です（作者が載せ直す必要があります）';
@@ -83,6 +87,21 @@ export interface AdoptAnswer {
   status: 'done' | 'wait' | 'used' | 'unknown' | 'refused';
   tickets: number;
   items: number;
+}
+
+// 交換に出ている服 1 点（絵は、サムネイルだけ）
+export interface TradeItem {
+  id: string;
+  dollId: string;
+  name: string;
+  categoryId: string;
+  hue: number;
+  thumb: Blob;
+}
+// 交換の様子。服は、絵つき（TradeItem）で持つ
+export interface TradeState extends Omit<WireTrade, 'mine' | 'theirs'> {
+  mine?: TradeItem;
+  theirs?: TradeItem;
 }
 
 export interface StudioBackend {
@@ -114,6 +133,24 @@ export interface StudioBackend {
   offerHandoff(): Promise<string>;
   // 合い言葉を出して、この利用者へ移してもらう
   adopt(word: string): Promise<AdoptAnswer>;
+  // ---- 交換（2 台で、服を 1 点ずつ入れ替える）。サーバーが TRADE_API 未満なら、どれも BackendError('old-server')。
+  // 断られたときは BackendError('refused') で、tradeRefusal に理由が入る ----
+  // 自分の服を 1 点出して、交換を始める（合い言葉つき）
+  tradeOpen(itemId: string): Promise<{ tradeId: string; code: string }>;
+  // 始めた交換の合い言葉を、もう一度もらう
+  tradeCode(tradeId: string): Promise<string>;
+  // 相手の合い言葉を読んで、相手の交換に入る
+  tradeClaim(code: string): Promise<{ tradeId: string }>;
+  // 読んだ交換に、自分の服を出す
+  tradeJoin(tradeId: string, itemId: string): Promise<void>;
+  // 交換の様子を聞く
+  trade(tradeId: string): Promise<TradeState>;
+  // 「はい」を押す。2 人とも押すと、入れ替わる
+  tradeAccept(tradeId: string): Promise<TradeState>;
+  // 交換をやめる
+  tradeCancel(tradeId: string): Promise<void>;
+  // 交換を使えるか（つないだサーバーの版が TRADE_API 以上か）
+  canTrade(): Promise<boolean>;
 }
 
 // 自分の服の並び順: order の大きい順（同じなら、新しい順 → ID）

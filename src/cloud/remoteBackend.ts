@@ -9,9 +9,9 @@
 import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, OLD_SERVER_MESSAGE } from './backend';
-import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser } from './backend';
-import { ADOPT_API, MIN_API } from './wire';
-import type { WireFiles, WireItem, WireJob, WireUser } from './wire';
+import type { AdoptAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
+import { ADOPT_API, MIN_API, TRADE_API } from './wire';
+import type { TradeRefusal, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
 
 export interface StudioTransport {
   // サーバーの関数 studio を呼ぶ。失敗は BackendError
@@ -124,6 +124,38 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     owner,
   });
 
+  const toTradeItem = (item: WireTradeItem): TradeItem => ({
+    id: item.id,
+    dollId: item.dollId,
+    name: item.name,
+    categoryId: item.categoryId,
+    hue: item.hue,
+    thumb: toBlob(item.thumb, item.thumbType),
+  });
+  const toTrade = (wire: WireTrade): TradeState => {
+    const { mine, theirs, ...rest } = wire;
+    return {
+      ...rest,
+      ...(mine ? { mine: toTradeItem(mine) } : {}),
+      ...(theirs ? { theirs: toTradeItem(theirs) } : {}),
+    };
+  };
+  // 交換の呼び出し。古いサーバーは呼ばずに断り、断りの理由（`trade:{理由} 日本語`）は tradeRefusal に出す
+  const tradeCall = async <T>(data: Record<string, unknown>): Promise<T> => {
+    if (!(await backend.canTrade())) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+    try {
+      return await transport.call<T>(data);
+    } catch (error) {
+      if (!(error instanceof BackendError) || error.code !== 'refused') throw error;
+      const match = /^trade:(\S+)\s*/.exec(error.message);
+      if (!match) throw error;
+      throw new BackendError('refused', error.message.slice(match[0].length), {
+        uncertain: error.uncertain,
+        tradeRefusal: match[1] as TradeRefusal,
+      });
+    }
+  };
+
   const backend: StudioBackend = {
     get account() {
       return getAccount();
@@ -197,6 +229,46 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     async adopt(word): Promise<AdoptAnswer> {
       const { status, tickets, items } = took(await transport.call<AdoptAnswer & { user?: WireUser }>({ op: 'adopt', word }));
       return { status, tickets, items };
+    },
+    async canTrade() {
+      if (serverApi === null) {
+        try {
+          await backend.signIn();
+        } catch (error) {
+          if (error instanceof BackendError && error.code === 'old-server') return false;
+          throw error;
+        }
+      }
+      return (serverApi ?? 0) >= TRADE_API;
+    },
+    async tradeOpen(itemId) {
+      const { tradeId, code } = await tradeCall<{
+        tradeId: string;
+        code: string;
+      }>({ op: 'tradeOpen', itemId });
+      return { tradeId, code };
+    },
+    async tradeCode(tradeId) {
+      return (await tradeCall<{ code: string }>({ op: 'tradeCode', tradeId })).code;
+    },
+    async tradeClaim(code) {
+      const { tradeId } = await tradeCall<{ tradeId: string }>({
+        op: 'tradeClaim',
+        code,
+      });
+      return { tradeId };
+    },
+    async tradeJoin(tradeId, itemId) {
+      await tradeCall({ op: 'tradeJoin', tradeId, itemId });
+    },
+    async trade(tradeId) {
+      return toTrade((await tradeCall<{ trade: WireTrade }>({ op: 'trade', tradeId })).trade);
+    },
+    async tradeAccept(tradeId) {
+      return toTrade((await tradeCall<{ trade: WireTrade }>({ op: 'tradeAccept', tradeId })).trade);
+    },
+    async tradeCancel(tradeId) {
+      await tradeCall({ op: 'tradeCancel', tradeId });
     },
   };
   return backend;
