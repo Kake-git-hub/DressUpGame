@@ -400,4 +400,120 @@ describe('偽物の裏側（開発とテスト用）', () => {
       expect(await reopened.adopt(word)).toMatchObject({ status: 'done' });
     });
   });
+
+  describe('交換（にせの あいて）', () => {
+    // 服を 1 点作って、そのIDを返す
+    async function withItem(options: Parameters<typeof make>[0] = {}) {
+      const backend = make({ tickets: 5, ...options });
+      const { jobId } = await backend.startJob(top);
+      await vi.advanceTimersByTimeAsync(200);
+      const itemId = lastJob(backend, jobId).candidates[0].itemId!;
+      return { backend, itemId };
+    }
+
+    it('こちらが始める: あいてが読んで服を出し、はいを押す。2 人とも はい で、服が入れ替わる', async () => {
+      const { backend, itemId } = await withItem();
+      const { tradeId, code } = await backend.tradeOpen(itemId);
+      expect(code).toMatch(/^[A-Z0-9]{8}$/);
+      expect(await backend.tradeCode(tradeId)).toBe(code);
+      let state = await backend.trade(tradeId);
+      expect(state).toMatchObject({ status: 'open', me: 'a', myAccepted: false, theirAccepted: false });
+      expect(state.theirs).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1500);
+      state = await backend.trade(tradeId);
+      expect(state.status).toBe('joined');
+      expect(state.theirs).toMatchObject({ name: 'にせの ふく', dollId: 'd' });
+      expect(state.theirs!.thumb).toBeInstanceOf(Blob);
+      expect(state.theirAccepted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await backend.trade(tradeId)).theirAccepted).toBe(true);
+      const done = await backend.tradeAccept(tradeId);
+      expect(done.status).toBe('done');
+      expect(done.receivedId).toBe(done.theirs!.id);
+      const ids = (await backend.listMyItems()).map((i) => i.id);
+      expect(ids).not.toContain(itemId);
+      expect(ids).toContain(done.receivedId);
+      const got = await backend.fetchMyItem(done.receivedId!);
+      expect(got.item.name).toBe('にせの ふく');
+      expect(got.dollId).toBe('d');
+      expect(got.files.thumb).toBeInstanceOf(Blob);
+    });
+
+    it('こちらが先に はい を押しても、あいてが押した時点で入れ替わる（trade を聞くと分かる）', async () => {
+      const { backend, itemId } = await withItem();
+      const { tradeId } = await backend.tradeOpen(itemId);
+      await vi.advanceTimersByTimeAsync(1500);
+      const waiting = await backend.tradeAccept(tradeId);
+      expect(waiting).toMatchObject({ status: 'joined', myAccepted: true, theirAccepted: false });
+      await vi.advanceTimersByTimeAsync(1000);
+      const done = await backend.trade(tradeId);
+      expect(done.status).toBe('done');
+      expect((await backend.listMyItems()).map((i) => i.id)).not.toContain(itemId);
+    });
+
+    it('FAKE を読んで入る: あいての服が見え、こちらが服を出すと joined。はい のあと入れ替わる', async () => {
+      const { backend, itemId } = await withItem();
+      const { tradeId } = await backend.tradeClaim('FAKE');
+      let state = await backend.trade(tradeId);
+      expect(state).toMatchObject({ status: 'claimed', me: 'b' });
+      expect(state.theirs!.name).toBe('にせの ふく');
+      await backend.tradeJoin(tradeId, itemId);
+      state = await backend.trade(tradeId);
+      expect(state.status).toBe('joined');
+      expect(state.mine!.id).toBe(itemId);
+      expect(state.theirs!.dollId).toBe('d');
+      await vi.advanceTimersByTimeAsync(1000);
+      const done = await backend.tradeAccept(tradeId);
+      expect(done.status).toBe('done');
+      expect((await backend.listMyItems()).map((i) => i.id)).toEqual([done.receivedId]);
+    });
+
+    it('partner.refuse: FAKE を読むと、その語で断る。知らない合い言葉は unknown', async () => {
+      const { backend } = await withItem({ partner: { refuse: 'expired' } });
+      const error = await backend.tradeClaim('FAKE').catch((e: unknown) => e);
+      expect(codeOf(error)).toBe('refused');
+      expect((error as BackendError).tradeRefusal).toBe('expired');
+      const other = await backend.tradeClaim('ZZZZZZZZ').catch((e: unknown) => e);
+      expect((other as BackendError).tradeRefusal).toBe('unknown');
+    });
+
+    it('partner.cancelAfterMs: あいてがやめる。服は、そのまま', async () => {
+      const { backend, itemId } = await withItem({ partner: { cancelAfterMs: 500 } });
+      const { tradeId } = await backend.tradeOpen(itemId);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await backend.trade(tradeId)).toMatchObject({ status: 'cancelled', reason: 'cancel' });
+      expect((await backend.listMyItems()).map((i) => i.id)).toContain(itemId);
+    });
+
+    it('こちらがやめる: cancelled。claimAfterMs・acceptAfterMs は変えられる', async () => {
+      const { backend, itemId } = await withItem({ partner: { claimAfterMs: 100, acceptAfterMs: 50 } });
+      const { tradeId } = await backend.tradeOpen(itemId);
+      await vi.advanceTimersByTimeAsync(150);
+      expect(await backend.trade(tradeId)).toMatchObject({ status: 'joined', theirAccepted: true });
+      await backend.tradeCancel(tradeId);
+      expect((await backend.trade(tradeId)).status).toBe('cancelled');
+    });
+
+    it('partner.chooseMs: あいてが読んでから服を出すまで、claimed（あいての服は見えない）', async () => {
+      const { backend, itemId } = await withItem({ partner: { claimAfterMs: 100, chooseMs: 400, acceptAfterMs: 50 } });
+      const { tradeId } = await backend.tradeOpen(itemId);
+      await vi.advanceTimersByTimeAsync(50);
+      expect((await backend.trade(tradeId)).status).toBe('open');
+      await vi.advanceTimersByTimeAsync(200);
+      const choosing = await backend.trade(tradeId);
+      expect(choosing.status).toBe('claimed');
+      expect(choosing.theirs).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(await backend.trade(tradeId)).toMatchObject({ status: 'joined', theirs: { name: 'にせの ふく' } });
+    });
+
+    it('noTrade: どれも old-server。canTrade は false', async () => {
+      const backend = make({ noTrade: true });
+      expect(await backend.canTrade()).toBe(false);
+      expect(codeOf(await backend.tradeOpen('x').catch((e: unknown) => e))).toBe('old-server');
+      expect(codeOf(await backend.tradeClaim('FAKE').catch((e: unknown) => e))).toBe('old-server');
+      expect(codeOf(await backend.trade('t').catch((e: unknown) => e))).toBe('old-server');
+      expect(await make().canTrade()).toBe(true);
+    });
+  });
 });

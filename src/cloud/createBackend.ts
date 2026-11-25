@@ -13,7 +13,7 @@ import type { StudioTransport } from './remoteBackend';
 function fakeOptions(): FakeOptions {
   try {
     const saved = JSON.parse(localStorage.getItem('dressup_fake_options') ?? '{}') as FakeOptions;
-    return typeof saved === 'object' && saved !== null ? { delayMs: saved.delayMs, failCategories: saved.failCategories, tickets: saved.tickets, admin: saved.admin, offline: saved.offline, planMs: saved.planMs, oldServer: saved.oldServer, loginFail: typeof saved.loginFail === 'string' ? saved.loginFail : undefined, googleTaken: saved.googleTaken === true, noAdopt: saved.noAdopt === true, adoptFail: typeof saved.adoptFail === 'number' ? saved.adoptFail : undefined, stashed: saved.stashed === false ? false : undefined, silentFail: saved.silentFail === true } : {};
+    return typeof saved === 'object' && saved !== null ? { delayMs: saved.delayMs, failCategories: saved.failCategories, tickets: saved.tickets, admin: saved.admin, offline: saved.offline, planMs: saved.planMs, oldServer: saved.oldServer, loginFail: typeof saved.loginFail === 'string' ? saved.loginFail : undefined, googleTaken: saved.googleTaken === true, noAdopt: saved.noAdopt === true, adoptFail: typeof saved.adoptFail === 'number' ? saved.adoptFail : undefined, stashed: saved.stashed === false ? false : undefined, silentFail: saved.silentFail === true, noTrade: saved.noTrade === true, partner: typeof saved.partner === 'object' && saved.partner !== null ? saved.partner : undefined } : {};
   } catch {
     return {};
   }

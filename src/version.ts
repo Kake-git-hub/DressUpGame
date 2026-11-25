@@ -1,2 +1,2 @@
 // アプリの版（ゲームとスタジオの両方に出す）。README.md の版数と一緒に上げる
-export const APP_VERSION = '0.41.0';
+export const APP_VERSION = '0.42.0';

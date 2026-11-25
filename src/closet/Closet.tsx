@@ -4,7 +4,7 @@
  *
  * 見るだけなら、つながっていなくてもよい（端末の控えから出す）。直す・消すは、サーバーにつながっているときだけ。
  */
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { MyItem } from '../cloud/backend';
 import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
@@ -24,6 +24,9 @@ export interface ClosetProps {
   onLibraryChanged: () => void | Promise<void>; // 端末の控えを変えた（ゲームのメニューに重ね直す）
 }
 
+// 交換の画面（「こうかん」を押したときに読み込む。カメラの部品もここに入る）
+const TradeRoot = lazy(() => import('../trade'));
+
 const NO_CATEGORIES: ManifestCategory[] = [];
 
 export function Closet({ session, library, dolls, categoriesByDoll, currentDollId, onClose, onLibraryChanged }: ClosetProps) {
@@ -31,6 +34,7 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
   const [items, setItems] = useState<MyItem[] | null>(null);
   const [chosenDoll, setChosenDoll] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [trading, setTrading] = useState(false);
 
   const reload = useCallback(async () => setItems(await library.all()), [library]);
   // 開いている間は、進み具合をこまめに聞く。開いたときに、つなぐ（まだなら）
@@ -77,6 +81,9 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
           <h2>
             <span aria-hidden="true">👗</span> クローゼット
           </h2>
+          <button type="button" className="closet-trade" onClick={() => setTrading(true)} data-testid="closet-trade">
+            <span aria-hidden="true">🔁</span> こうかん
+          </button>
           <button type="button" className="closet-close" onClick={onClose} aria-label="とじる" data-testid="closet-close">
             ✕
           </button>
@@ -144,6 +151,12 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
           ))
         )}
       </div>
+
+      {trading && (
+        <Suspense fallback={null}>
+          <TradeRoot session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} onClose={() => setTrading(false)} onLibraryChanged={changed} />
+        </Suspense>
+      )}
 
       {open && (
         <ClosetItem

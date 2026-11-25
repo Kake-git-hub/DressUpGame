@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import type { ItemDoc, JobDoc } from './store.ts';
+import type { ItemDoc, JobDoc, TradeDoc } from './store.ts';
 
 let store: MemoryStore;
 const job = (id: string, createdAt: number, done = false): JobDoc => ({ id, dollId: 'd', theme: 't', styleId: 'anime', done, tickets: 1, createdAt, heartbeat: createdAt, candidates: [] });
@@ -168,5 +168,94 @@ describe('引き継ぎ（③-b）: チケットと服を移す・合い言葉・
     await store.addAdopted('u2', 'a5');
     expect((await store.getUser('u2'))?.adopted?.slice(-2)).toEqual(['a21', 'a5']);
     expect(new Set((await store.getUser('u2'))?.adopted).size).toBe(20);
+  });
+});
+
+describe('交換', () => {
+  const joined = (over: Partial<TradeDoc> = {}): TradeDoc => ({
+    id: 't1',
+    status: 'joined',
+    a: { uid: 'u1', itemId: 'my:a', accepted: true },
+    b: { uid: 'u2', itemId: 'my:b', accepted: true },
+    code: 'code-1',
+    codeAt: 1,
+    createdAt: 1,
+    joinedAt: 2,
+    ...over,
+  });
+  const mine = (id: string, extra: Partial<ItemDoc> = {}): ItemDoc => ({
+    ...item(id),
+    hue: 40,
+    paths: { 'files/a.webp': 'x/y' },
+    set: { id: 's1', name: 'セット' },
+    order: 3,
+    updatedAt: 3,
+    ...extra,
+  });
+  beforeEach(async () => {
+    await store.createUser('u2', () => 'BBBBBBBB', 1);
+    await store.putItem('u1', mine('my:a'));
+    await store.putItem('u2', mine('my:b'));
+    await store.putTrade(joined());
+  });
+
+  it('swapTrade moves both items and drops set', async () => {
+    const done = await store.swapTrade('t1', 99);
+    expect(done).toMatchObject({ status: 'done', endedAt: 99 });
+    expect(await store.getItem('u1', 'my:a')).toBeNull();
+    expect(await store.getItem('u2', 'my:b')).toBeNull();
+    for (const [uid, id] of [['u2', 'my:a'], ['u1', 'my:b']] as const) {
+      const moved = await store.getItem(uid, id);
+      expect(moved?.set).toBeUndefined();
+      expect(moved).toMatchObject({ hue: 40, order: 99, updatedAt: 99, paths: { 'files/a.webp': 'x/y' } });
+      expect(moved?.item.name).toBe('ふく');
+      expect(moved?.createdAt).toBe(1);
+    }
+    expect(await store.getTrade('t1')).toMatchObject({ status: 'done' });
+  });
+  it('swapTrade aborts when an item vanished', async () => {
+    await store.deleteItem('u2', 'my:b');
+    const result = await store.swapTrade('t1', 99);
+    expect(result).toMatchObject({ status: 'cancelled', reason: 'gone', endedAt: 99 });
+    expect((await store.getItem('u1', 'my:a'))?.set).toBeDefined();
+    expect(await store.getItem('u2', 'my:a')).toBeNull();
+    expect(await store.getItem('u1', 'my:b')).toBeNull();
+    expect((await store.getTrade('t1'))?.reason).toBe('gone');
+  });
+  it('swapTrade conflict', async () => {
+    await store.putItem('u2', mine('my:a'));
+    const result = await store.swapTrade('t1', 99);
+    expect(result).toMatchObject({ status: 'cancelled', reason: 'conflict' });
+    expect(await store.getItem('u1', 'my:a')).toMatchObject({ order: 3, set: { id: 's1' } });
+    expect(await store.getItem('u2', 'my:b')).toMatchObject({ order: 3, set: { id: 's1' } });
+    expect(await store.getItem('u1', 'my:b')).toBeNull();
+  });
+  it('swapTrade twice is a no-op', async () => {
+    const first = await store.swapTrade('t1', 99);
+    const second = await store.swapTrade('t1', 200);
+    expect(second).toEqual(first);
+    expect(await store.getItem('u2', 'my:a')).toMatchObject({ order: 99 });
+  });
+  it('swapTrade does nothing until both accepted', async () => {
+    await store.putTrade(joined({ b: { uid: 'u2', itemId: 'my:b' } }));
+    expect((await store.swapTrade('t1', 99)).status).toBe('joined');
+    expect(await store.getItem('u1', 'my:a')).not.toBeNull();
+  });
+  it('findTradeByCode・updateTrade・setUserTrade', async () => {
+    expect((await store.findTradeByCode('code-1'))?.id).toBe('t1');
+    expect(await store.findTradeByCode('nope')).toBeNull();
+    expect((await store.updateTrade('t1', (t) => ({ ...t, status: 'cancelled', reason: 'cancel' }))).status).toBe('cancelled');
+    expect((await store.updateTrade('t1', () => null)).reason).toBe('cancel');
+    await store.setUserTrade('u1', 't1');
+    expect((await store.getUser('u1'))?.trade).toBe('t1');
+    await store.setUserTrade('u1', null);
+    expect((await store.getUser('u1'))?.trade).toBeUndefined();
+  });
+  it('countTrade: 上限で limit（日が変われば数え直す）', async () => {
+    await store.countTrade('u1', '2026-11-25', 2);
+    await store.countTrade('u1', '2026-11-25', 2);
+    await expect(store.countTrade('u1', '2026-11-25', 2)).rejects.toMatchObject({ code: 'limit' });
+    await store.countTrade('u1', '2026-11-26', 2);
+    await store.countTrade('u2', '2026-11-25', 2);
   });
 });

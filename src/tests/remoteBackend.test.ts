@@ -251,8 +251,8 @@ describe('本物の裏側', () => {
   });
 
   describe('チケットを配る', () => {
-    it('api が 4 なら、op: giveTickets を、書き方をそろえたコードで呼ぶ。返事の gift を返す', async () => {
-      const server = fakeServer(4);
+    it('api が 5 なら、op: giveTickets を、書き方をそろえたコードで呼ぶ。返事の gift を返す', async () => {
+      const server = fakeServer(5);
       const call = server.transport.call.bind(server.transport);
       const gifts: Record<string, unknown>[] = [];
       server.transport.call = (async (data: Record<string, unknown>) => {
@@ -264,8 +264,8 @@ describe('本物の裏側', () => {
       expect(await backend.giveTickets(' wxyz-2345 ', 5)).toEqual({ userCode: 'WXYZ2345', tickets: 8 });
       expect(gifts).toEqual([{ op: 'giveTickets', userCode: 'WXYZ2345', count: 5 }]);
     });
-    it('api が 3 のサーバーでは、呼ばずに old-server', async () => {
-      const server = fakeServer(3);
+    it('api が 4 のサーバー（交換まで）では、呼ばずに old-server', async () => {
+      const server = fakeServer(4);
       const error = await createRemoteBackend(server.transport).giveTickets('WXYZ2345', 1).catch((e: unknown) => e);
       expect((error as BackendError).code).toBe('old-server');
       expect(server.count('giveTickets')).toBe(0);
@@ -335,6 +335,173 @@ describe('本物の裏側', () => {
       server.adopt.fail = new BackendError('offline', 'つながりません');
       const error = await createRemoteBackend(server.transport).adopt('w1').catch((e: unknown) => e);
       expect((error as BackendError).code).toBe('offline');
+    });
+  });
+
+  describe('交換', () => {
+    const wireItem = (id: string) => ({
+      id,
+      dollId: 'doll',
+      name: 'ふく',
+      categoryId: 'トップス',
+      hue: 10,
+      thumb: PNG,
+      thumbType: 'image/png',
+    });
+    const wireTrade = (extra: Record<string, unknown> = {}) => ({
+      id: 't1',
+      status: 'joined',
+      me: 'a',
+      mine: wireItem('my:a'),
+      theirs: wireItem('my:b'),
+      myAccepted: false,
+      theirAccepted: false,
+      ...extra,
+    });
+    // api の版を決めたサーバー + 交換の op に答える運び役
+    function tradeServer(api: number, refuse?: string) {
+      const server = fakeServer(api);
+      const call = server.transport.call.bind(server.transport);
+      server.transport.call = (async (data: Record<string, unknown>) => {
+        if ((typeof data.op === 'string' && data.op.startsWith('trade')) || data.op === 'trade') server.calls.push(data);
+        if (refuse && data.op === 'tradeClaim') throw new BackendError('refused', refuse);
+        switch (data.op) {
+          case 'tradeOpen':
+            return { tradeId: 't1', code: 'ABCD' };
+          case 'tradeCode':
+            return { code: 'ABCD' };
+          case 'tradeClaim':
+            return { tradeId: 't2' };
+          case 'tradeJoin':
+          case 'tradeCancel':
+            return { ok: true };
+          case 'trade':
+            return { trade: wireTrade() };
+          case 'tradeAccept':
+            return { trade: wireTrade({ myAccepted: true }) };
+          default:
+            return call(data);
+        }
+      }) as typeof server.transport.call;
+      return server;
+    }
+    const sent = (server: ReturnType<typeof tradeServer>) => server.calls.filter((c) => String(c.op).startsWith('trade'));
+
+    it('op の名前と引数どおりに呼び、答えを返す', async () => {
+      const server = tradeServer(4);
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.canTrade()).toBe(true);
+      expect(await backend.tradeOpen('my:a')).toEqual({
+        tradeId: 't1',
+        code: 'ABCD',
+      });
+      expect(await backend.tradeCode('t1')).toBe('ABCD');
+      expect(await backend.tradeClaim('ABCD')).toEqual({ tradeId: 't2' });
+      await backend.tradeJoin('t2', 'my:c');
+      await backend.tradeCancel('t2');
+      expect((await backend.tradeAccept('t1')).myAccepted).toBe(true);
+      await backend.trade('t1');
+      expect(sent(server)).toEqual([
+        { op: 'tradeOpen', itemId: 'my:a' },
+        { op: 'tradeCode', tradeId: 't1' },
+        { op: 'tradeClaim', code: 'ABCD' },
+        { op: 'tradeJoin', tradeId: 't2', itemId: 'my:c' },
+        { op: 'tradeCancel', tradeId: 't2' },
+        { op: 'tradeAccept', tradeId: 't1' },
+        { op: 'trade', tradeId: 't1' },
+      ]);
+    });
+
+    it('trade: thumb の base64 を Blob に直す。相手の服が無い間は、theirs も無い', async () => {
+      const server = tradeServer(4);
+      const backend = createRemoteBackend(server.transport);
+      const state = await backend.trade('t1');
+      expect(state).toMatchObject({
+        id: 't1',
+        status: 'joined',
+        me: 'a',
+        myAccepted: false,
+        theirAccepted: false,
+      });
+      expect(state.mine).toMatchObject({
+        id: 'my:a',
+        dollId: 'doll',
+        name: 'ふく',
+        categoryId: 'トップス',
+        hue: 10,
+      });
+      expect(state.mine!.thumb.type).toBe('image/png');
+      expect(await text(state.mine!.thumb)).toBe('png-bytes');
+      expect(state.theirs!.id).toBe('my:b');
+    });
+
+    it('trade: mine / theirs が無ければ、キーも作らない', async () => {
+      const server = tradeServer(4);
+      const call = server.transport.call.bind(server.transport);
+      server.transport.call = (async (data: Record<string, unknown>) =>
+        data.op === 'trade'
+          ? {
+              trade: {
+                id: 't1',
+                status: 'open',
+                me: 'a',
+                myAccepted: false,
+                theirAccepted: false,
+              },
+            }
+          : call(data)) as typeof server.transport.call;
+      const state = await createRemoteBackend(server.transport).trade('t1');
+      expect('mine' in state).toBe(false);
+      expect('theirs' in state).toBe(false);
+    });
+
+    it('古いサーバー（api が 4 より小さい）では、呼ばずに old-server。canTrade は false', async () => {
+      const server = tradeServer(3);
+      const backend = createRemoteBackend(server.transport);
+      expect(await backend.canTrade()).toBe(false);
+      for (const run of [
+        () => backend.tradeOpen('x'),
+        () => backend.tradeCode('t'),
+        () => backend.tradeClaim('c'),
+        () => backend.tradeJoin('t', 'x'),
+        () => backend.trade('t'),
+        () => backend.tradeAccept('t'),
+        () => backend.tradeCancel('t'),
+      ]) {
+        const error = await run().catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BackendError);
+        expect((error as BackendError).code).toBe('old-server');
+      }
+      expect(sent(server)).toEqual([]);
+    });
+
+    it('断りの語（trade:理由 日本語）が tradeRefusal に出る。メッセージは、日本語の部分だけ', async () => {
+      const server = tradeServer(4, 'trade:expired この合い言葉は、もう使えません');
+      const error = await createRemoteBackend(server.transport)
+        .tradeClaim('ABCD')
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BackendError);
+      expect((error as BackendError).code).toBe('refused');
+      expect((error as BackendError).tradeRefusal).toBe('expired');
+      expect((error as BackendError).message).toBe('この合い言葉は、もう使えません');
+    });
+
+    it('知らない断りの語は、tradeRefusal にせず、サーバーの文を出す', async () => {
+      const server = tradeServer(4, 'trade:future-reason あたらしい理由');
+      const error = await createRemoteBackend(server.transport)
+        .tradeClaim('ABCD')
+        .catch((e: unknown) => e);
+      expect((error as BackendError).tradeRefusal).toBeUndefined();
+      expect((error as BackendError).message).toBe('あたらしい理由');
+    });
+
+    it('trade: で始まらない断りは、そのまま（tradeRefusal なし）', async () => {
+      const server = tradeServer(4, 'ほかの理由');
+      const error = await createRemoteBackend(server.transport)
+        .tradeClaim('ABCD')
+        .catch((e: unknown) => e);
+      expect((error as BackendError).message).toBe('ほかの理由');
+      expect((error as BackendError).tradeRefusal).toBeUndefined();
     });
   });
 });

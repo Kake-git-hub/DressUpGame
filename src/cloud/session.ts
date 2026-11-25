@@ -33,6 +33,7 @@ export interface CloudSession {
   track(jobId: string): void; // 「作る」で始めた仕事を、すぐ見はじめる
   ack(jobId: string): Promise<void>; // 演出・知らせを見た
   markSeen(itemId: string): void; // NEW の印を消す
+  markNew(itemId: string): void; // NEW の印を付ける（交換でもらった服など）
   readonly backend: StudioBackend;
 }
 
@@ -232,6 +233,12 @@ export function createSession(deps: {
       }
       set({ jobs: state.jobs.filter((job) => job.id !== jobId), arrivals: state.arrivals.filter((job) => job.id !== jobId) });
       await backend.ackJob(jobId).catch(() => undefined);
+    },
+    markNew(itemId) {
+      if (state.newItemIds.includes(itemId)) return;
+      const newItemIds = [...state.newItemIds, itemId];
+      writeList(storage, NEW_KEY, newItemIds);
+      set({ newItemIds });
     },
     markSeen(itemId) {
       if (!state.newItemIds.includes(itemId)) return;

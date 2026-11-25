@@ -7,10 +7,11 @@
  * `?studio=fake` で開いたときと、E2E で使う。本物（Firebase）と同じ形（StudioBackend）。
  */
 import { browserAccountEnv, createAccount } from './account';
-import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, GIFT_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
+import { BackendError, HUE_MAX, HUE_MIN, GIFT_MAX, NAME_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
 import type { FakeWorld } from './fakeAuth';
-import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser } from './backend';
+import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
+import type { TradeRefusal } from './wire';
 
 export interface FakeOptions {
   tickets?: number; // 最初のチケット（保存されている利用者がいれば、そちらが優先）
@@ -26,6 +27,15 @@ export interface FakeOptions {
   adoptFail?: number; // adopt を、この回数だけ、つながらない（offline）で失敗させる（残りの数は、端末に覚える）
   stashed?: boolean; // false なら、「もう使われている」と断られたときの証明が、返らなかったことにする
   silentFail?: boolean; // 画面なしの行き来（prompt=none）を、Google が interaction_required で断ったことにする
+  noTrade?: boolean; // 交換が、サーバーが古い版のときの動き（old-server）
+  // 交換の「にせの あいて」
+  partner?: {
+    claimAfterMs?: number; // こちらが始めてから、あいてが読んで服を出すまで（既定 1500）
+    chooseMs?: number; // あいてが読んでから、服を出すまで（この間、始めた側は「あいてが えらんでいるよ」。既定 0）
+    acceptAfterMs?: number; // あいてが服を出してから、「はい」を押すまで（既定 1000）
+    refuse?: TradeRefusal; // こちらが FAKE を読んだとき、この語で断る
+    cancelAfterMs?: number; // 交換が始まってから、あいてが「やめる」を押すまで
+  };
   // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角）。テストでは差し替える
   image?: (color: string) => Promise<Blob>;
 }
@@ -51,6 +61,24 @@ interface SavedItem {
   order: number;
   updatedAt: number;
 }
+// 交換 1 件。にせの あいては、時刻で動く（呼ばれたときに、過ぎた分を進める）
+interface FakeTrade {
+  id: string;
+  code: string;
+  me: 'a' | 'b';
+  status: 'open' | 'claimed' | 'joined' | 'done' | 'cancelled';
+  mine?: SavedItem; // 出した服の控え（入れ替わったあと、自分の服から消えても見せられるように）
+  theirs: SavedItem; // にせの服
+  startedAt: number;
+  joinedAt: number; // 両方が服を出した時刻（まだなら Infinity）
+  myAccepted: boolean;
+  theirAccepted: boolean;
+  reason?: 'cancel' | 'expired' | 'gone' | 'conflict' | 'replaced';
+  receivedId?: string;
+}
+const FAKE_CODE = 'FAKE';
+const FAKE_INDEX = 3;
+
 // dueAt: 作成中の品目が、できあがる時刻
 type FakeJob = StudioJob & { dueAt: number };
 interface State {
@@ -103,6 +131,10 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
   };
   const load = (): State =>
     parseState(localStorage.getItem(KEY)) ?? { user: { userCode: newCode(), tickets: options.tickets ?? 5, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+  const claimMs = options.partner?.claimAfterMs ?? 1500;
+  const acceptMs = options.partner?.acceptAfterMs ?? 1000;
+  const chooseMs = options.partner?.chooseMs ?? 0;
+  const trades = new Map<string, FakeTrade>();
   let state = load();
   const save = () => {
     try {
@@ -278,6 +310,74 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
     return saved;
   };
 
+  // ---- 交換 ----
+  const tradeOld = () => {
+    if (options.noTrade || options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+  };
+  const tradeRefuse = (tradeRefusal: TradeRefusal, message: string) => new BackendError('refused', message, { tradeRefusal });
+  const tradeOf = (id: string): FakeTrade => {
+    const trade = trades.get(id);
+    if (!trade) throw tradeRefuse('unknown', 'この交換は見つかりません');
+    return trade;
+  };
+  const partnerItem = (dollId: string, categoryId: string): SavedItem => {
+    const id = `my:fake-trade-${++state.counter}`;
+    return {
+      id,
+      dollId,
+      name: 'にせの ふく',
+      categoryId,
+      index: FAKE_INDEX,
+      createdAt: Date.now(),
+      hue: 0,
+      order: Date.now(),
+      updatedAt: Date.now(),
+    };
+  };
+  // あいての動き（読む・はい・やめる）と、2 人とも「はい」のときの入れ替えを、時刻まで進める
+  const advanceTrade = (trade: FakeTrade) => {
+    if (trade.status === 'done' || trade.status === 'cancelled') return;
+    const now = Date.now();
+    const cancelAfter = options.partner?.cancelAfterMs;
+    if (cancelAfter !== undefined && now - trade.startedAt >= cancelAfter) {
+      Object.assign(trade, { status: 'cancelled', reason: 'cancel' });
+      return;
+    }
+    if (trade.status === 'open' && chooseMs > 0 && now >= trade.joinedAt - chooseMs && now < trade.joinedAt) trade.status = 'claimed';
+    if ((trade.status === 'open' || (trade.status === 'claimed' && trade.me === 'a')) && now >= trade.joinedAt) trade.status = 'joined';
+    if (trade.status === 'joined' && now >= trade.joinedAt + acceptMs) trade.theirAccepted = true;
+    if (trade.status === 'joined' && trade.myAccepted && trade.theirAccepted && trade.mine) {
+      // 入れ替え: こちらの服を外し、にせの服を、自分の服として足す
+      state.items = [...state.items.filter((i) => i.id !== trade.mine!.id), { ...trade.theirs, createdAt: now, order: now, updatedAt: now }];
+      trade.status = 'done';
+      trade.receivedId = trade.theirs.id;
+      save();
+    }
+  };
+  const tradeItem = async (saved: SavedItem): Promise<TradeItem> => ({
+    id: saved.id,
+    dollId: saved.dollId,
+    name: saved.name,
+    categoryId: saved.categoryId,
+    hue: saved.hue,
+    thumb: await makeImage(colorOf(saved.index)),
+  });
+  const tradeView = async (trade: FakeTrade): Promise<TradeState> => {
+    advanceTrade(trade);
+    const showTheirs = trade.me === 'b' || (trade.status !== 'open' && trade.status !== 'claimed'); // 始めた側は、あいてが読むまで、あいての服が見えない
+    return {
+      id: trade.id,
+      status: trade.status,
+      me: trade.me,
+      ...(trade.mine ? { mine: await tradeItem(trade.mine) } : {}),
+      ...(showTheirs ? { theirs: await tradeItem(trade.theirs) } : {}),
+      myAccepted: trade.myAccepted,
+      theirAccepted: trade.theirAccepted,
+      ...(trade.reason ? { reason: trade.reason } : {}),
+      ...(trade.receivedId ? { receivedId: trade.receivedId } : {}),
+    };
+  };
+
   return {
     account,
     async signIn() {
@@ -412,6 +512,89 @@ export function createFakeBackend(options: FakeOptions = {}): StudioBackend {
       setTickets(state.user.tickets + tickets);
       save();
       return { status: 'done', tickets, items: added.length };
+    },
+    async canTrade() {
+      online();
+      return !(options.noTrade || options.oldServer);
+    },
+    async tradeOpen(itemId) {
+      online();
+      tradeOld();
+      const mine = { ...itemOf(itemId) };
+      const now = Date.now();
+      const id = `fake-trade-${++state.counter}`;
+      const code = newCode();
+      trades.set(id, {
+        id,
+        code,
+        me: 'a',
+        status: 'open',
+        mine,
+        theirs: partnerItem(mine.dollId, mine.categoryId),
+        startedAt: now,
+        joinedAt: now + claimMs + chooseMs,
+        myAccepted: false,
+        theirAccepted: false,
+      });
+      return { tradeId: id, code };
+    },
+    async tradeCode(tradeId) {
+      online();
+      tradeOld();
+      return tradeOf(tradeId).code;
+    },
+    async tradeClaim(code) {
+      online();
+      tradeOld();
+      if (code.trim().toUpperCase() !== FAKE_CODE) throw tradeRefuse('unknown', 'この合い言葉の交換は見つかりません');
+      if (options.partner?.refuse) throw tradeRefuse(options.partner.refuse, 'この交換には入れません');
+      const id = `fake-trade-${++state.counter}`;
+      // あいての服は、こちらが服を出すまで、ドールが決まらない（出したとき、こちらと同じにする）
+      trades.set(id, {
+        id,
+        code: FAKE_CODE,
+        me: 'b',
+        status: 'claimed',
+        theirs: partnerItem(state.items[0]?.dollId ?? 'doll', 'トップス'),
+        startedAt: Date.now(),
+        joinedAt: Infinity,
+        myAccepted: false,
+        theirAccepted: false,
+      });
+      return { tradeId: id };
+    },
+    async tradeJoin(tradeId, itemId) {
+      online();
+      tradeOld();
+      const trade = tradeOf(tradeId);
+      advanceTrade(trade);
+      if (trade.status !== 'claimed') throw tradeRefuse('busy', 'この交換には、もう服を出せません');
+      const mine = { ...itemOf(itemId) };
+      Object.assign(trade, { status: 'joined', mine, joinedAt: Date.now() });
+      trade.theirs.dollId = mine.dollId;
+      trade.theirs.categoryId = mine.categoryId;
+    },
+    async trade(tradeId) {
+      online();
+      tradeOld();
+      return tradeView(tradeOf(tradeId));
+    },
+    async tradeAccept(tradeId) {
+      online();
+      tradeOld();
+      const trade = tradeOf(tradeId);
+      advanceTrade(trade);
+      if (trade.status === 'joined') trade.myAccepted = true;
+      else if (trade.status !== 'done') throw tradeRefuse('busy', 'まだ「はい」を押せません');
+      advanceTrade(trade);
+      return tradeView(trade);
+    },
+    async tradeCancel(tradeId) {
+      online();
+      tradeOld();
+      const trade = tradeOf(tradeId);
+      advanceTrade(trade);
+      if (trade.status !== 'done' && trade.status !== 'cancelled') Object.assign(trade, { status: 'cancelled', reason: 'cancel' });
     },
     async giveTickets(userCode, count) {
       online();

@@ -2,7 +2,7 @@
  * メモリの中の置き場（テストと、手元の確認用）。本物（Firestore・Storage）と同じ形。
  */
 import { ADOPTED_MAX, CloudError } from './store.ts';
-import type { CloudFiles, CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, UserDoc } from './store.ts';
+import type { CloudFiles, CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, TradeDoc, UserDoc } from './store.ts';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 // チケットの数が壊れている（数でない）ときは、0 枚として扱う
@@ -16,6 +16,7 @@ export class MemoryStore implements CloudStore {
   readonly usage = new Map<string, number>();
   readonly refunds = new Set<string>();
   readonly handoffs = new Map<string, HandoffDoc>();
+  readonly trades = new Map<string, TradeDoc>();
 
   async getUser(uid: string): Promise<UserDoc | null> {
     const user = this.users.get(uid);
@@ -138,8 +139,8 @@ export class MemoryStore implements CloudStore {
       .map(([, item]) => clone(item))
       .sort((a, b) => a.createdAt - b.createdAt);
   }
-  async deleteItem(uid: string, itemId: string): Promise<void> {
-    this.items.delete(`${uid}/${itemId}`);
+  async deleteItem(uid: string, itemId: string): Promise<boolean> {
+    return this.items.delete(`${uid}/${itemId}`);
   }
   // 引き継ぎの操作は、どれも、間に待ちを入れない（読んで書くまでが、割り込まれない = 本物の 1 つの取り引き）
   private mustUser(uid: string): UserDoc {
@@ -197,6 +198,70 @@ export class MemoryStore implements CloudStore {
     if (!this.items.has(`${to}/${itemId}`)) this.items.set(`${to}/${itemId}`, clone(item));
     this.items.delete(`${from}/${itemId}`);
     return true;
+  }
+
+  // 交換
+  async putTrade(trade: TradeDoc): Promise<void> {
+    this.trades.set(trade.id, clone(trade));
+  }
+  async getTrade(id: string): Promise<TradeDoc | null> {
+    const trade = this.trades.get(id);
+    return trade ? clone(trade) : null;
+  }
+  async findTradeByCode(code: string): Promise<TradeDoc | null> {
+    for (const trade of this.trades.values()) if (trade.code === code) return clone(trade);
+    return null;
+  }
+  // updateJob と同じく、割り込まれたら、やり直す
+  async updateTrade(id: string, change: (trade: TradeDoc) => TradeDoc | null): Promise<TradeDoc> {
+    for (;;) {
+      const current = this.trades.get(id);
+      if (!current) throw new CloudError('refused', 'この交換は見つかりません');
+      const before = JSON.stringify(current);
+      const next = change(clone(current));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (JSON.stringify(this.trades.get(id)) !== before) continue;
+      if (next) this.trades.set(id, clone(next));
+      return clone(next ?? current);
+    }
+  }
+  // 間に待ちを入れない（読んで書くまでが、割り込まれない = 本物の 1 つの取り引き）
+  async swapTrade(id: string, now: number): Promise<TradeDoc> {
+    const trade = this.trades.get(id);
+    if (!trade) throw new CloudError('refused', 'この交換は見つかりません');
+    const { a, b } = trade;
+    if (trade.status !== 'joined' || !b || !a.accepted || !b.accepted || !a.itemId || !b.itemId) return clone(trade);
+    const end = (reason: 'gone' | 'conflict'): TradeDoc => {
+      trade.status = 'cancelled';
+      trade.reason = reason;
+      trade.endedAt = now;
+      return clone(trade);
+    };
+    const mine = this.items.get(`${a.uid}/${a.itemId}`);
+    const theirs = this.items.get(`${b.uid}/${b.itemId}`);
+    if (!mine || !theirs) return end('gone');
+    if (this.items.has(`${b.uid}/${a.itemId}`) || this.items.has(`${a.uid}/${b.itemId}`)) return end('conflict');
+    this.items.delete(`${a.uid}/${a.itemId}`);
+    this.items.delete(`${b.uid}/${b.itemId}`);
+    for (const [owner, doc] of [[b.uid, mine], [a.uid, theirs]] as const) {
+      const moved: ItemDoc = { ...clone(doc), order: now, updatedAt: now };
+      delete moved.set;
+      this.items.set(`${owner}/${moved.id}`, moved);
+    }
+    trade.status = 'done';
+    trade.endedAt = now;
+    return clone(trade);
+  }
+  async countTrade(uid: string, day: string, perDay: number): Promise<void> {
+    const key = `trade:${day}:${uid}`;
+    const used = this.usage.get(key) ?? 0;
+    if (used >= perDay) throw new CloudError('limit', '今日は、こうかんできる回数の上限に達しました。あした、もう一度ためしてください');
+    this.usage.set(key, used + 1);
+  }
+  async setUserTrade(uid: string, tradeId: string | null): Promise<void> {
+    const user = this.mustUser(uid);
+    if (tradeId === null) delete user.trade;
+    else user.trade = tradeId;
   }
 }
 

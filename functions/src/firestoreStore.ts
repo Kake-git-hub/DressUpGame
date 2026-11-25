@@ -7,13 +7,16 @@
  *   users/{uid}/items/{itemId}  自分の服
  *   userCodes/{利用者コード}    利用者コード → uid（重ならないようにするため）
  *   system/usage-{日付}         その日に作った画像の枚数
+ *   system/trade-{日付}-{uid}   その人がその日に始めた交換の回数
  *   handoffs/{合い言葉}         引き継ぎの合い言葉（元の uid・時刻・使った人）
+ *   trades/{id}                 交換（双方の uid・服・状態・読み取りの印）
  *
  * アプリからは直接読めない（firestore.rules で全部断る）。ここは、管理者の権限で読み書きする。
  */
+import { FieldValue } from 'firebase-admin/firestore';
 import type { DocumentReference, Firestore } from 'firebase-admin/firestore';
 import { ADOPTED_MAX, CloudError } from '../../tools/cloud/store.ts';
-import type { CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, UserDoc } from '../../tools/cloud/store.ts';
+import type { CloudStore, HandoffClaim, HandoffDoc, ItemDoc, JobDoc, TradeDoc, UserDoc } from '../../tools/cloud/store.ts';
 
 // 文書の名前に使えない形（/、.、..、__x__）を避ける
 const docId = (id: string) => encodeURIComponent(id).replace(/\./g, '%2E').replace(/^__/, '%5F%5F');
@@ -32,6 +35,9 @@ export class FirestoreStore implements CloudStore {
   }
   private job(uid: string, jobId: string): DocumentReference {
     return this.user(uid).collection('jobs').doc(docId(jobId));
+  }
+  private trade(id: string): DocumentReference {
+    return this.db.collection('trades').doc(docId(id));
   }
   private item(uid: string, itemId: string): DocumentReference {
     return this.user(uid).collection('items').doc(docId(itemId));
@@ -109,6 +115,15 @@ export class FirestoreStore implements CloudStore {
       tx.set(ref, { count: used + 1 });
     });
   }
+  async countTrade(uid: string, day: string, perDay: number): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.db.collection('system').doc(`trade-${docId(day)}-${docId(uid)}`);
+      const snap = await tx.get(ref);
+      const used = snap.exists ? Number((snap.data() as { count?: unknown }).count) || 0 : 0;
+      if (used >= perDay) throw new CloudError('limit', '今日は、こうかんできる回数の上限に達しました。あした、もう一度ためしてください');
+      tx.set(ref, { count: used + 1 });
+    });
+  }
   async createJob(uid: string, job: JobDoc): Promise<void> {
     await this.job(uid, job.id).create(job);
   }
@@ -180,8 +195,14 @@ export class FirestoreStore implements CloudStore {
     const snap = await this.user(uid).collection('items').orderBy('createdAt', 'asc').get(); // 全部（途中で切ると、アプリが「消えた」とみなして端末の控えを消してしまう）
     return snap.docs.map((doc) => doc.data() as ItemDoc);
   }
-  async deleteItem(uid: string, itemId: string): Promise<void> {
-    await this.item(uid, itemId).delete();
+  async deleteItem(uid: string, itemId: string): Promise<boolean> {
+    try {
+      await this.item(uid, itemId).delete({ exists: true }); // 無ければ NOT_FOUND（5）
+      return true;
+    } catch (e) {
+      if ((e as { code?: unknown }).code === 5) return false;
+      throw e;
+    }
   }
 
   // ── 引き継ぎ。どれも、取り引きの中で読み直すので、確定の返事が届かずにもう一度呼ばれても、2 回めは何も変えない ──
@@ -271,6 +292,73 @@ export class FirestoreStore implements CloudStore {
       if (!target.exists) tx.set(toRef, source.data() as ItemDoc);
       tx.delete(fromRef);
       return true;
+    });
+  }
+
+  async putTrade(trade: TradeDoc): Promise<void> {
+    await this.trade(trade.id).set(trade);
+  }
+  async getTrade(id: string): Promise<TradeDoc | null> {
+    const snap = await this.trade(id).get();
+    return snap.exists ? (snap.data() as TradeDoc) : null;
+  }
+  async findTradeByCode(code: string): Promise<TradeDoc | null> {
+    const snap = await this.db.collection('trades').where('code', '==', code).limit(1).get();
+    return snap.empty ? null : (snap.docs[0].data() as TradeDoc);
+  }
+  async updateTrade(id: string, change: (trade: TradeDoc) => TradeDoc | null): Promise<TradeDoc> {
+    return this.db.runTransaction(async (tx) => {
+      const ref = this.trade(id);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', 'この交換は見つかりません');
+      const current = snap.data() as TradeDoc;
+      const next = change(structuredClone(current));
+      if (!next) return current;
+      tx.set(ref, next);
+      return next;
+    });
+  }
+  async swapTrade(id: string, now: number): Promise<TradeDoc> {
+    return this.db.runTransaction(async (tx) => {
+      const tradeRef = this.trade(id);
+      const tradeSnap = await tx.get(tradeRef);
+      if (!tradeSnap.exists) throw new CloudError('refused', 'この交換は見つかりません');
+      const trade = tradeSnap.data() as TradeDoc;
+      const { a, b } = trade;
+      if (trade.status !== 'joined' || !b || !a.accepted || !b.accepted || !a.itemId || !b.itemId) return trade;
+      // 読むのを先に全部済ませる（2 点の服と、受け取る側の同じ ID）
+      const mineRef = this.item(a.uid, a.itemId);
+      const theirsRef = this.item(b.uid, b.itemId);
+      const toBRef = this.item(b.uid, a.itemId);
+      const toARef = this.item(a.uid, b.itemId);
+      const [mine, theirs, toB, toA] = [await tx.get(mineRef), await tx.get(theirsRef), await tx.get(toBRef), await tx.get(toARef)];
+      const end = (reason: 'gone' | 'conflict'): TradeDoc => {
+        const ended: TradeDoc = { ...trade, status: 'cancelled', reason, endedAt: now };
+        tx.set(tradeRef, ended);
+        return ended;
+      };
+      if (!mine.exists || !theirs.exists) return end('gone');
+      if (toB.exists || toA.exists) return end('conflict');
+      const moved = (doc: ItemDoc): ItemDoc => {
+        const next: ItemDoc = { ...doc, order: now, updatedAt: now };
+        delete next.set;
+        return next;
+      };
+      tx.delete(mineRef);
+      tx.delete(theirsRef);
+      tx.set(toBRef, moved(mine.data() as ItemDoc));
+      tx.set(toARef, moved(theirs.data() as ItemDoc));
+      const done: TradeDoc = { ...trade, status: 'done', endedAt: now };
+      tx.set(tradeRef, done);
+      return done;
+    });
+  }
+  async setUserTrade(uid: string, tradeId: string | null): Promise<void> {
+    await this.db.runTransaction(async (tx) => {
+      const ref = this.user(uid);
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new CloudError('refused', '利用者が見つかりません');
+      tx.update(ref, { trade: tradeId ?? FieldValue.delete() });
     });
   }
 }
