@@ -64,7 +64,8 @@ describe('draw / refundTicket', () => {
   it('期限の近い順、最後に free', () => {
     const r = draw(w, 6, NOW)!;
     expect(r.draws).toEqual([{ lot: 'B', n: 2 }, { lot: 'A', n: 3 }, { n: 1 }]);
-    expect(r.wallet).toEqual({ free: 3, lots: [] });
+    expect(r.wallet.free).toBe(3);
+    expect(r.wallet.lots.map((l) => l.left)).toEqual([0, 0]); // 使い切っても期限までは残す
   });
   it('切れた lot からは引かない', () => {
     const r = draw({ free: 1, lots: [L('X', 5, NOW - 1)] }, 1, NOW)!;
@@ -84,6 +85,20 @@ describe('draw / refundTicket', () => {
     expect(refundTicket(dead, draws, 1, NOW).free).toBe(1);
     expect(refundTicket(w, undefined, 0, NOW).free).toBe(5);
     expect(refundTicket(w, draws, 99, NOW).free).toBe(5);
+  });
+  it('使い切った lot へも、期限つきで戻る（保存して読み直しても）', () => {
+    const r = draw({ free: 0, lots: [B] }, 2, NOW)!;
+    expect(r.wallet.lots[0].left).toBe(0);
+    const saved = walletFields(r.wallet, NOW);
+    expect(saved.lots).toHaveLength(1);
+    expect(saved.tickets).toBe(0);
+    const back = readWallet(saved, NOW);
+    const refunded = refundTicket(back, r.draws, 1, NOW);
+    expect(refunded.lots[0].left).toBe(1);
+    expect(refunded.free).toBe(0);
+  });
+  it('cost が正の整数でなければ null', () => {
+    for (const c of [0, -1, 1.5, NaN, Infinity]) expect(draw(w, c, NOW)).toBeNull();
   });
   it('lot が財布に無ければ free へ', () => {
     expect(refundTicket({ free: 0, lots: [] }, draws, 0, NOW).free).toBe(1);
@@ -111,6 +126,7 @@ describe('expire / merge / reclaim / add', () => {
     const r2 = reclaim({ free: 0, lots: [L('A', 2)] }, 'A', 5);
     expect(r2.taken).toBe(2);
     expect(reclaim({ free: 0, lots: [] }, 'A', 5).taken).toBe(0);
+    for (const n of [-3, NaN, Infinity]) expect(reclaim({ free: 0, lots: [L('A', 2)] }, 'A', n).taken).toBe(0);
   });
   it('addFree / addLot', () => {
     expect(addLot(addFree({ free: 1, lots: [] }, 2), L('A', 3))).toEqual({ free: 3, lots: [L('A', 3)] });
