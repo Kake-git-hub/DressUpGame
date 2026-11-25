@@ -39,6 +39,7 @@ export interface FakeOptions {
   };
   // 支払い（チケットを買う）
   shop?: { open?: boolean; packs?: string }; // お店の設定（既定は open: true、packs: '10:300,30:800'。packs は「枚数:値段」をコンマでつなぐ）
+  paySlowMs?: number; // slow のとき、払ってから足されるまでの時間（既定 40 秒）
   payResult?: 'paid' | 'cancel' | 'slow'; // にせの支払いページの、標準の結果（既定 paid）。slow = 払ったあと、チケットが足されるのが 40 秒あと。cancel = ページの標準のボタンが「やめる」
   welcome?: number; // 最初のログインで、ようこその枚数を知らせる（1 回だけ。この端末の利用者ごと）
   anonymous?: boolean; // ログインしていない扱い（買うのは pay:login で断る）
@@ -478,7 +479,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   };
   // 払い終わった支払いのチケットを、足す（slow は、払って 40 秒あと）。足した枚数を返す
   const credit = (purchase: FakePurchase): number => {
-    if (purchase.status !== 'paid' || purchase.credited || Date.now() < (purchase.paidAt ?? 0) + (options.payResult === 'slow' ? SLOW_MS : 0)) return 0;
+    if (purchase.status !== 'paid' || purchase.credited || Date.now() < (purchase.paidAt ?? 0) + (options.payResult === 'slow' ? (options.paySlowMs ?? SLOW_MS) : 0)) return 0;
     purchase.credited = true;
     wallet(state.user.free, [...state.user.lots, { count: purchase.tickets, left: purchase.tickets, expiresAt: purchase.expiresAt }]);
     save();

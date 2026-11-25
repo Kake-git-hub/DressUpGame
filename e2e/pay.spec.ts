@@ -129,10 +129,11 @@ test('にせの支払いページで「やめる」: ふえない', async ({ pag
   expect(page.url()).not.toMatch(/pay=/);
 });
 
-test('なかなか足されない（slow）: 「じかんが かかっています」→ 開き直すと「ふえました」', async ({ page }) => {
+test('なかなか足されない（slow）: 30 秒で「じかんが かかっています」→ 開き直すと「ふえました」', async ({ page }) => {
   test.setTimeout(120_000);
   await loggedIn(page);
-  await openHome(page, { payResult: 'slow' });
+  // 偽物は、払ってから 38 秒あとに足す（アプリは 30 秒で諦める。どちらにも 5 秒ほどの余裕）
+  await openHome(page, { payResult: 'slow', paySlowMs: 38_000 });
   await openStudio(page);
   await toConfirm(page);
   await page.getByTestId('shop-pay').click();
@@ -142,8 +143,7 @@ test('なかなか足されない（slow）: 「じかんが かかっていま�
   await expect(page.getByTestId('pay-return')).toContainText('たしかめています', { timeout: 30_000 });
   await expect(page.getByTestId('pay-return')).toContainText('じかんが かかっています', { timeout: 45_000 });
   await expect(tickets(page)).toContainText('のこり 5 枚');
-  // 偽物は、払ってから 40 秒あとに足す
-  await page.waitForTimeout(Math.max(0, paidAt + 42_000 - Date.now()));
+  await page.waitForTimeout(Math.max(0, paidAt + 44_000 - Date.now()));
   await page.reload();
   await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 60_000 });
   await openStudio(page);

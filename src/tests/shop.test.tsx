@@ -69,6 +69,24 @@ describe('Shop（パック → 最終確認）', () => {
     expect(onLogin).toHaveBeenCalled();
   });
 
+  it('支払いのページから「もどる」でページが戻されたら（pageshow persisted）、押し直せる', async () => {
+    render(<Shop backend={fake()} packs={packs} adultAt={1} onClose={() => undefined} go={() => undefined} />);
+    fireEvent.click(screen.getByTestId('shop-pack-10-300'));
+    fireEvent.click(screen.getByTestId('shop-agree'));
+    fireEvent.click(screen.getByTestId('shop-pay'));
+    await waitFor(() => expect((screen.getByTestId('shop-pay') as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByTestId('shop-pay').textContent).toContain('ひらいています');
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+    });
+    expect((screen.getByTestId('shop-pay') as HTMLButtonElement).disabled).toBe(true);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    });
+    expect((screen.getByTestId('shop-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId('shop-pay').textContent).toContain('支払いへ進む');
+  });
+
   it('つながらなかったときは、押し直せる', async () => {
     const backend = fake();
     backend.checkout = async () => {

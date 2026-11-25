@@ -5,7 +5,7 @@
  * 同意の印を付けるまで「支払いへ進む」は押せない。保護者の確認（AdultGate）は、呼ぶ側が毎回済ませ、通った時刻を adultAt で渡す。
  * 文言は仮（作者の了承を得てから売り始める）。カード・金額・支払いの番号は、きろくに書かない。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BackendError } from '../cloud/backend';
 import type { StudioBackend } from '../cloud/backend';
 import { addMonthsJst, formatJstDate, LOT_MONTHS } from '../cloud/expiry';
@@ -47,6 +47,15 @@ export function Shop({ backend, packs, adultAt, onClose, onLogin, go = (url) => 
   const [message, setMessage] = useState<{ text: string; login: boolean } | null>(null);
   // 有効期限: 買った日から 6 か月（日本時間）。最終確認を出した時刻から数える
   const until = useMemo(() => formatJstDate(addMonthsJst(Date.now(), LOT_MONTHS)), [pack]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 支払いのページから「もどる」で戻ると、ページが（bfcache から）そのまま出される。押せなくなったままにしない
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) setBusy(false);
+    };
+    window.addEventListener('pageshow', restore);
+    return () => window.removeEventListener('pageshow', restore);
+  }, []);
 
   const pay = async () => {
     if (!pack || agreed === null || busy) return;
