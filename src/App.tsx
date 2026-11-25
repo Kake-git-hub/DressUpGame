@@ -19,6 +19,7 @@ import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
 import { clearPayReturn, readPayReturn } from './appStudio/payReturn';
 import type { PayReturn } from './appStudio/payReturn';
+import { PayNotice } from './appStudio/PayNotice';
 import { clearReturn } from './cloud/googleRedirect';
 import type { CloudSession, SessionState } from './cloud/session';
 import { startsOnHome } from './home/homeMode';
@@ -74,10 +75,10 @@ cleanupLegacyData();
 
 // アプリの中のスタジオ（服を作る画面）と、クローゼット。作者が教えた URL（?studio=1）を開いた端末にだけ、ホームにボタンを出す。
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
-// 支払いのページから戻ってきた（?pay=…）。親は「つくる」から来たので、この端末に「つくる」を教えていなくても、この読み込みだけは「つくる」を出す
-// （本物の支払いの戻りの URL には ?studio= が付かない。覚えには書かない）
+// 支払いのページから戻ってきた（?pay=…）。「つくる」を教えた端末では、「つくる」を開いて知らせる。
+// 教えていない端末（「つくる」は出さない）では、小さな知らせを出すだけ（PayNotice。裏側にはつながない）
 const PAY_RETURN = readPayReturn(window.location.search);
-const STUDIO_MODE = readStudioMode(window.location.search) ?? (PAY_RETURN && PAY_RETURN.kind !== 'fake' ? 'real' : null);
+const STUDIO_MODE = readStudioMode(window.location.search);
 // にせの支払いページ（偽物の裏側のときだけ）
 const FakePayPage = lazy(() => import('./appStudio/FakePayPage').then((m) => ({ default: m.FakePayPage })));
 // 「つくる」を教えていない端末は、Google の戻りを受け取らない。main.tsx が取り込んだ証明が、session に残らないように捨てる。
@@ -248,7 +249,7 @@ function App() {
 
   // ホーム画面を出している / ゲームの画面
   // 支払いから戻ったときは、「つくる」を開いて始める（戻りの知らせは、閉じるまで）
-  const [payReturn, setPayReturn] = useState<PayReturn | null>(PAY_RETURN && PAY_RETURN.kind !== 'fake' ? PAY_RETURN : null);
+  const [payReturn, setPayReturn] = useState<PayReturn | null>(STUDIO_MODE && PAY_RETURN && PAY_RETURN.kind !== 'fake' ? PAY_RETURN : null);
   useEffect(() => {
     if (PAY_RETURN && PAY_RETURN.kind !== 'fake') clearPayReturn();
   }, []);
@@ -1135,7 +1136,12 @@ function AppRoot() {
       </Suspense>
     );
   }
-  return <App />;
+  return (
+    <>
+      <App />
+      {!STUDIO_MODE && (PAY_RETURN?.kind === 'done' || PAY_RETURN?.kind === 'cancel') && <PayNotice kind={PAY_RETURN.kind} />}
+    </>
+  );
 }
 
 export default AppRoot;

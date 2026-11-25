@@ -25,6 +25,11 @@ async function toConfirm(page: Page, pack = '10-300') {
   await expect(page.getByTestId('shop-confirm')).toContainText('税込 300 円');
   await page.getByTestId('shop-agree').check();
 }
+// Google でログインしている端末にする（偽物の既定は、ログインしていない端末）
+const loggedIn = (page: Page) =>
+  page.addInitScript(() => {
+    if (!localStorage.getItem('dressup_fake_account')) localStorage.setItem('dressup_fake_account', JSON.stringify({ google: true }));
+  });
 const tickets = (page: Page) => page.getByTestId('studio-tickets');
 
 test('売っていないときは、買うボタンが無い', async ({ page }) => {
@@ -40,7 +45,20 @@ test('売っていなくても、管理者には、買うボタンが出る', as
   await expect(page.getByTestId('studio-buy')).toBeVisible();
 });
 
-test('ログインしていないと、買えず、ログインの案内が出る', async ({ page }) => {
+test('ログインしていないと、押してすぐ、ログインの案内が出る（保護者の確認の前）', async ({ page }) => {
+  await openHome(page);
+  await openStudio(page);
+  await page.getByTestId('studio-buy').click();
+  await expect(page.getByTestId('shop-login-message')).toContainText('Google で ログインすると かえます');
+  await expect(page.getByTestId('adult-gate')).toHaveCount(0);
+  await page.getByTestId('shop-login-go').click();
+  await expect(page.getByTestId('shop-login-guide')).toHaveCount(0);
+  await expect(page.getByTestId('account-section')).toBeVisible();
+  await expect(tickets(page)).toContainText('のこり 5 枚');
+});
+
+test('サーバーが「ログインが要る」と断ったときも、案内が出る（保険）', async ({ page }) => {
+  await loggedIn(page);
   await openHome(page, { anonymous: true });
   await openStudio(page);
   await toConfirm(page);
@@ -49,10 +67,22 @@ test('ログインしていないと、買えず、ログインの案内が出�
   await expect(page.getByTestId('shop-login')).toBeVisible();
   await page.getByTestId('shop-login').click();
   await expect(page.getByTestId('shop')).toHaveCount(0);
-  await expect(tickets(page)).toContainText('のこり 5 枚');
+});
+
+test('「つくる」を出していない端末に戻ったときは、小さな知らせだけ。つくるは開かず、URL は消える', async ({ page }) => {
+  await page.goto('/DressUpGame/?content=e2e-content/&pay=done&session=cs_test_1');
+  await expect(page.getByTestId('pay-notice-plain')).toContainText('ホーム画面の アプリで 「つくる」を ひらくと、チケットが ふえています');
+  await expect(page.getByTestId('app-studio')).toHaveCount(0);
+  await expect(page.getByTestId('home-create')).toHaveCount(0);
+  expect(page.url()).not.toMatch(/pay=|session=/);
+  await page.getByTestId('pay-notice-plain-close').click();
+  await expect(page.getByTestId('pay-notice-plain')).toHaveCount(0);
+  await page.goto('/DressUpGame/?content=e2e-content/&pay=cancel');
+  await expect(page.getByTestId('pay-notice-plain')).toContainText('お支払いを やめました');
 });
 
 test('買う: 確認 → 同意 → にせの支払いページ → 払う → ふえました。残りが +10、期限が出る。戻りの URL は消える', async ({ page }) => {
+  await loggedIn(page);
   await openHome(page);
   await openStudio(page);
   await expect(tickets(page)).toContainText('のこり 5 枚');
@@ -86,6 +116,7 @@ test('買う: 確認 → 同意 → にせの支払いページ → 払う → �
 });
 
 test('にせの支払いページで「やめる」: ふえない', async ({ page }) => {
+  await loggedIn(page);
   await openHome(page);
   await openStudio(page);
   await toConfirm(page);
@@ -100,6 +131,7 @@ test('にせの支払いページで「やめる」: ふえない', async ({ pag
 
 test('なかなか足されない（slow）: 「じかんが かかっています」→ 開き直すと「ふえました」', async ({ page }) => {
   test.setTimeout(120_000);
+  await loggedIn(page);
   await openHome(page, { payResult: 'slow' });
   await openStudio(page);
   await toConfirm(page);

@@ -70,10 +70,19 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
   const [lines, setLines] = useState<string[]>([]);
   // 支払い: 買うボタン・戻りの確かめ・お知らせ。保護者の確認は、買うたびに毎回（通った時刻を、最終確認のあと checkout に渡す）
   const pay = usePay(session, payReturn);
-  const [buying, setBuying] = useState<'gate' | 'shop' | null>(null);
+  const [buying, setBuying] = useState<'login' | 'gate' | 'shop' | null>(null);
   const [adultAt, setAdultAt] = useState(0);
   const [moreLots, setMoreLots] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  // 買う: ログインしていなければ、保護者の確認の前に、ログインの案内（口が用意できないときは、そのまま進む。断られたら Shop が案内する）
+  const startBuying = async () => {
+    const info = await session.backend.account.prepare().catch(() => null);
+    setBuying(info?.kind === 'guest' ? 'login' : 'gate');
+  };
+  const goLogin = () => {
+    setBuying(null);
+    accountRef.current?.scrollIntoView?.({ block: 'center' });
+  };
   // 「こみあっています」に切り替えるために、ときどき描き直す
   const [now, setNow] = useState(() => Date.now());
 
@@ -312,7 +321,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
                 👗 クローゼットを見る
               </button>
               {pay.shop?.open && pay.shop.packs.length > 0 && (
-                <button type="button" onClick={() => setBuying('gate')} data-testid="studio-buy">
+                <button type="button" onClick={() => void startBuying()} data-testid="studio-buy">
                   🎫 チケットを買う
                 </button>
               )}
@@ -331,6 +340,22 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
         )}
       </div>
 
+      {buying === 'login' && (
+        <div className="shop-overlay" data-testid="shop-login-guide">
+          <div className="studio-panel shop-panel">
+            <h2>🎫 チケットを買う</h2>
+            <p data-testid="shop-login-message">Google で ログインすると かえます</p>
+            <div className="studio-row">
+              <button type="button" onClick={() => setBuying(null)} data-testid="shop-login-cancel">
+                やめる
+              </button>
+              <button type="button" className="primary" onClick={goLogin} data-testid="shop-login-go">
+                ログインへ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {buying === 'gate' && (
         <AdultGate
           onCancel={() => setBuying(null)}
@@ -346,10 +371,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, initialDo
           packs={pay.shop.packs}
           adultAt={adultAt}
           onClose={() => setBuying(null)}
-          onLogin={() => {
-            setBuying(null);
-            accountRef.current?.scrollIntoView?.({ block: 'center' });
-          }}
+          onLogin={goLogin}
         />
       )}
 

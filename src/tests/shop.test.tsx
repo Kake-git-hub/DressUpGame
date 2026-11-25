@@ -95,6 +95,20 @@ async function open(options: Parameters<typeof createFakeBackend>[0] = {}, payRe
 }
 
 describe('「つくる」の支払いまわり', () => {
+  it('ログインしていなければ、押してすぐ案内が出る（保護者の確認の前）。ログインしていれば、確認が出る', async () => {
+    await open();
+    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('studio-buy'));
+    await waitFor(() => expect(screen.getByTestId('shop-login-message').textContent).toContain('Google で ログインすると かえます'));
+    expect(screen.queryByTestId('adult-gate')).toBeNull();
+    cleanup();
+    localStorage.setItem('dressup_fake_account', JSON.stringify({ google: true }));
+    await open();
+    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('studio-buy'));
+    await waitFor(() => expect(screen.getByTestId('adult-gate')).toBeTruthy());
+  });
+
   it('売っていないときは、買うボタンが出ない。管理者には出る', async () => {
     await open({ shop: { open: false } });
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());

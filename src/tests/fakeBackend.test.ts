@@ -632,3 +632,28 @@ describe('偽物の裏側（開発とテスト用）', () => {
     });
   });
 });
+
+describe('端末の保存を手で書き換えたとき', () => {
+  const seed = (user: Record<string, unknown>) => localStorage.setItem('dressup_fake_backend', JSON.stringify({ user: { userCode: 'ABCDEFGH', admin: false, ...user }, jobs: [], items: [], seen: [], counter: 0 }));
+  it('tickets だけの古い保存は、その枚数が配った分になる', async () => {
+    seed({ tickets: 7 });
+    const user = await make().signIn();
+    expect(user.free).toBe(7);
+    expect(user.tickets).toBe(7);
+  });
+  it('最後に書いた枚数と tickets が違えば、差を配った分に反映する（増やしても減らしても）', async () => {
+    seed({ tickets: 9, free: 5, lots: [], ticketsWritten: 5 });
+    expect((await make().signIn()).free).toBe(9);
+    seed({ tickets: 2, free: 5, lots: [], ticketsWritten: 5 });
+    const user = await make().signIn();
+    expect(user.free).toBe(2);
+    expect(user.tickets).toBe(2);
+  });
+  it('書き換えのあとは、ticketsWritten が合い、もう一度読んでも変わらない', async () => {
+    seed({ tickets: 4, free: 5, lots: [], ticketsWritten: 5 });
+    const backend = make();
+    await backend.signIn();
+    await backend.startJob(top);
+    expect((await make().signIn()).tickets).toBe(3);
+  });
+});

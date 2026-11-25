@@ -100,6 +100,30 @@ const SLOW_MS = 40_000;
 const DAY_MS = 24 * 3600 * 1000;
 const PAY_PARAM = 'fake';
 
+// 端末の保存にある利用者（ticketsWritten = 最後に書いた使える枚数）。手で tickets だけ書き換えても、差を配った分に反映する（サーバーの readWallet と同じ決まり）
+type StoredUser = StudioUser & { ticketsWritten?: number };
+function readWallet(user: Partial<StoredUser> & { tickets: number }): { free: number; lots: StudioUser['lots'] } {
+  const lots = (user.lots ?? []).map((l) => ({ ...l }));
+  if (user.free === undefined && user.lots === undefined && user.ticketsWritten === undefined) return { free: user.tickets, lots: [] };
+  let free = user.free ?? 0;
+  const d = user.ticketsWritten === undefined ? 0 : user.tickets - user.ticketsWritten;
+  if (d > 0) free += d;
+  else if (d < 0) {
+    let need = -d;
+    const fromFree = Math.min(free, need);
+    free -= fromFree;
+    need -= fromFree;
+    for (const l of [...lots].sort((a, b) => a.expiresAt - b.expiresAt)) {
+      if (need <= 0) break;
+      if (l.expiresAt <= Date.now()) continue;
+      const t = Math.min(l.left, need);
+      l.left -= t;
+      need -= t;
+    }
+  }
+  return { free, lots };
+}
+
 // にせの裏側。StudioBackend のほかに、にせの支払いページが使う口を持つ
 export interface FakeBackend extends StudioBackend {
   readonly payResult: 'paid' | 'cancel' | 'slow';
@@ -110,7 +134,7 @@ export interface FakeBackend extends StudioBackend {
 // dueAt: 作成中の品目が、できあがる時刻
 type FakeJob = StudioJob & { dueAt: number };
 interface State {
-  user: StudioUser;
+  user: StoredUser;
   jobs: FakeJob[];
   items: SavedItem[];
   seen: string[]; // 結果を見た仕事
@@ -154,7 +178,10 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const parseState = (raw: string | null): State | null => {
     try {
       const saved = JSON.parse(raw ?? 'null') as State | null;
-      if (saved && saved.user && Array.isArray(saved.jobs) && Array.isArray(saved.items)) return { ...saved, user: { ...saved.user, free: saved.user.free ?? saved.user.tickets, lots: saved.user.lots ?? [] }, seen: Array.isArray(saved.seen) ? saved.seen : [] };
+      if (saved && saved.user && Array.isArray(saved.jobs) && Array.isArray(saved.items)) {
+        const { free, lots } = readWallet(saved.user);
+        return { ...saved, user: { ...saved.user, free, lots }, seen: Array.isArray(saved.seen) ? saved.seen : [] };
+      }
     } catch {
       // 読めなければ、最初から
     }
@@ -166,7 +193,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     const free = options.tickets ?? 5;
     const now = Date.now();
     const lots = (options.fakeLots ?? []).map((l) => ({ count: l.count, left: l.count, expiresAt: now + l.daysLeft * DAY_MS }));
-    return { user: { userCode: newCode(), tickets: free + lots.reduce((n, l) => n + l.left, 0), free, lots, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
+    return { user: { userCode: newCode(), tickets: free + lots.reduce((n, l) => n + l.left, 0), ticketsWritten: free + lots.reduce((n, l) => n + l.left, 0), free, lots, admin: options.admin ?? false }, jobs: [], items: [], seen: [], counter: 0 };
   };
   const claimMs = options.partner?.claimAfterMs ?? 1500;
   const acceptMs = options.partner?.acceptAfterMs ?? 1000;
@@ -194,7 +221,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const refresh = () => {
     const lots = state.user.lots.filter((l) => l.left > 0 && l.expiresAt > Date.now()).sort((a, b) => a.expiresAt - b.expiresAt);
     const tickets = state.user.free + lots.reduce((n, l) => n + l.left, 0);
-    if (tickets !== state.user.tickets || lots.length !== state.user.lots.length) state = { ...state, user: { ...state.user, lots, tickets } };
+    if (tickets !== state.user.tickets || lots.length !== state.user.lots.length || state.user.ticketsWritten !== tickets) state = { ...state, user: { ...state.user, lots, tickets, ticketsWritten: tickets } };
   };
   const wallet = (free: number, lots: StudioUser['lots']) => {
     state = { ...state, user: { ...state.user, free, lots } };
@@ -325,7 +352,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         adopt(parked);
       } else if (readHandoff()) {
         // 合い言葉の写しがあるのに、置いてある世界が無い = 空のアカウント。写しの世界は、adopt が持ってくる
-        adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false }, jobs: [], items: [], seen: [], counter: 0 });
+        adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false, ticketsWritten: 0 }, jobs: [], items: [], seen: [], counter: 0 });
       }
       setGoogle(true);
     },
@@ -336,7 +363,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
         // 置けなければ、ここで失敗にする（置かずに入れ替えると、世界が無くなる）
         throw { code: 'auth/network-request-failed' };
       }
-      adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false }, jobs: [], items: [], seen: [], counter: 0 });
+      adopt({ user: { userCode: newCode(), tickets: 0, free: 0, lots: [], admin: false, ticketsWritten: 0 }, jobs: [], items: [], seen: [], counter: 0 });
       setGoogle(false);
     },
     isGoogle: () => google,
