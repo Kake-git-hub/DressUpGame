@@ -1062,6 +1062,8 @@ test.describe('調整画面の一覧を、指で動かす', () => {
     await dragItemToDoll(page, 'ボトムス', 'green');
     await page.locator('.tool-button').first().click();
     await expect.poll(() => namesOf(page)).toEqual(['red', 'gre', 'ドール']);
+    // 一覧は、ぴったり収まっている（行の絵の下にすき間ができると「収まらない」と見なされ、すぐ動かしても並べ替わらない）
+    expect(await page.getByTestId('adjust-picker-items').evaluate((el) => el.scrollHeight - el.clientHeight)).toBe(0);
     const handle = () => page.getByTestId('sticker-rotate').boundingBox();
     const before = (await handle())!;
     const touch = await fingers(page);

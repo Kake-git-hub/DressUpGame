@@ -779,6 +779,9 @@ textarea {
   background: #ffe8f3;
 }
 .item-adjust-picker img {
+  /* 行の中で文字の行として並べると、フォントによって下に数 px のすき間ができ、一覧が「収まらない」と見なされる
+     （指ですぐ動かしても並べ替わらず、流れるだけになる）。ブロックにして、すき間を作らない */
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
