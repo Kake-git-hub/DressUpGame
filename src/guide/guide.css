@@ -1,0 +1,68 @@
+/* 操作ガイド（ほかの画面より手前。幕は、下の画面に触らせない） */
+.guide-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  touch-action: none;
+}
+.guide-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(40, 20, 40, 0.55);
+}
+/* 明るく抜く所: 大きな影で、まわりを暗くする */
+.guide-hole {
+  position: absolute;
+  border-radius: 16px;
+  box-shadow: 0 0 0 9999px rgba(40, 20, 40, 0.55);
+  outline: 3px solid #fff;
+  animation: guide-pulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes guide-pulse {
+  0%,
+  100% {
+    outline-color: rgba(255, 255, 255, 0.95);
+  }
+  50% {
+    outline-color: rgba(255, 105, 180, 0.95);
+  }
+}
+.guide-bubble {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.guide-text {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+  font-weight: bold;
+  line-height: 1.5;
+  color: #6a3d63;
+}
+.guide-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.guide-buttons button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 22px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+.guide-skip {
+  border: 2px solid #e9b6d3;
+  background: #fff;
+  color: #a05a8a;
+}
+.guide-next {
+  border: none;
+  background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
+  color: #fff;
+}

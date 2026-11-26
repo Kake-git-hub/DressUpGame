@@ -125,16 +125,18 @@ test('取り込み → 着せる → 着替え → 再読み込みで復元', as
   await expectPixel(page, DOLL_X, BOTTOM_Y, GREEN);
 });
 
-test('タップだけでは着ない（現状の動作）', async ({ page }) => {
+test('着ていない服のタイルをタップすると着る。同じカテゴリの服は入れかわる', async ({ page }) => {
   await openApp(page);
   await openCategory(page, 'トップス');
-  const at = await itemCenter(page, 'red');
-  await page.mouse.click(at.x, at.y);
-  await page.waitForTimeout(800);
-  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+  const red = await itemCenter(page, 'red');
+  await page.mouse.click(red.x, red.y);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  const blue = await itemCenter(page, 'blue');
+  await page.mouse.click(blue.x, blue.y);
+  await expectPixel(page, DOLL_X, TOP_Y, BLUE);
 });
 
-test('着ている服のタイルをタップすると脱げる（着ていない服は、タップしても着ない）', async ({ page }) => {
+test('着ている服のタイルをタップすると脱げる。もう一度タップすると、また着る', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
@@ -145,10 +147,8 @@ test('着ている服のタイルをタップすると脱げる（着ていな�
   await page.waitForTimeout(300);
   const saved = await page.evaluate(() => (JSON.parse(localStorage.getItem('dressup_outfit') ?? '[]') as unknown[]).length);
   expect(saved).toBe(0);
-  // もう一度タップしても、着ない
   await page.mouse.click(at.x, at.y);
-  await page.waitForTimeout(800);
-  expect(near(await canvasPixel(page, DOLL_X, TOP_Y), SKIN)).toBe(true);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
 });
 
 test('服のメニューに「なし」は無く、上下の ▲▼ がある', async ({ page }) => {
@@ -580,13 +580,13 @@ test('色スライダー: 動かすと調整中の表示がその場で変わり
     .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), HUE_GREEN, 12), { timeout: 5000, message: '開き直しても緑' })
     .toBe(true);
 
-  // 色のリセットで元の色に戻る
-  await page.getByTestId('hue-reset').click();
+  // リセットで元の色に戻る（色をもどすボタンは無く、リセット 1 つ）
+  await expect(page.getByTestId('hue-reset')).toHaveCount(0);
+  await page.getByTestId('adjust-reset').click();
   await expect(page.locator('.hue-slider-vertical')).toHaveValue('0');
   await expect
     .poll(async () => near(await screenPixel(page, DOLL_X, TOP_Y), RED, 12), { timeout: 5000, message: 'リセットで赤に戻る' })
     .toBe(true);
-  await expect(page.getByTestId('hue-reset')).toBeDisabled();
 });
 
 test('隠す所を持つ服を着ると、そこだけドールが消える。動かすと隠さない', async ({ page }) => {
@@ -670,14 +670,14 @@ test('隠す所を持つ服を着ると、そこだけドールが消える。�
   });
 }
 
-test('調整の枠: 角のつまみで大きくでき、× で脱がせる', async ({ page }) => {
+test('調整の枠: 右下のつまみで大きくでき（向きは変わらない）、× で脱がせる', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await page.locator('.tool-button').first().click();
   await expect(page.getByTestId('sticker-frame')).toBeVisible();
   // つまみ（服の右下）を、服の中心から見て同じ向きに 1.3 倍の所まで引く → 1.3 倍・回転なし
-  const handle = (await page.getByTestId('sticker-rotate').boundingBox())!;
+  const handle = (await page.getByTestId('sticker-scale').boundingBox())!;
   const hx = handle.x + handle.width / 2;
   const hy = handle.y + handle.height / 2;
   const cx = DOLL_X;
@@ -697,22 +697,39 @@ test('調整の枠: 角のつまみで大きくでき、× で脱がせる', asy
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
 });
 
-test('調整の枠: 右上の ↺ で位置・大きさ・向きだけ元に戻る', async ({ page }) => {
+test('調整の枠: 右上のつまみで回せる（大きさは変わらない）。左下のリセットで、位置・大きさ・向き・色が全部もどる', async ({ page }) => {
   await openApp(page);
   await dragItemToDoll(page, 'トップス', 'red');
   await expectPixel(page, DOLL_X, TOP_Y, RED);
   await page.locator('.tool-button').first().click();
+  await expect(page.getByTestId('sticker-reset')).toHaveCount(0); // 枠には、もどすつまみは無い
+  const frameBefore = (await page.getByTestId('sticker-frame').boundingBox())!;
+  // 右上のつまみを、服の中心のまわりに 90 度（時計まわり）まわす
+  const handle = centerOf((await page.getByTestId('sticker-rotate').boundingBox())!);
+  const cx = DOLL_X;
+  const cy = imgY(380);
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  const r = Math.hypot(handle.x - cx, handle.y - cy);
+  const a0 = Math.atan2(handle.y - cy, handle.x - cx);
+  for (let k = 1; k <= 6; k++) await page.mouse.move(cx + r * Math.cos(a0 + (Math.PI / 2) * (k / 6)), cy + r * Math.sin(a0 + (Math.PI / 2) * (k / 6)));
+  await page.mouse.up();
+  // 回すと、枠（服の向きの箱）の縦横が入れかわって見える。大きさは同じ
+  const frameAfter = (await page.getByTestId('sticker-frame').boundingBox())!;
+  expect(Math.abs(frameAfter.width - frameBefore.height)).toBeLessThan(4);
+  expect(Math.abs(frameAfter.height - frameBefore.width)).toBeLessThan(4);
+  // 動かして、色も変える
   await page.locator('.hue-slider-vertical').fill('120');
   await page.mouse.move(DOLL_X, DOLL_Y);
   await page.mouse.down();
   await page.mouse.move(DOLL_X + ADJUST_DX, DOLL_Y, { steps: 6 });
   await page.mouse.up();
-  await page.getByTestId('sticker-reset').click();
-  await expect(page.locator('.hue-slider-vertical')).toHaveValue('120'); // 色はそのまま
+  await expect(page.getByTestId('adjust-reset')).toContainText('リセット');
+  await page.getByTestId('adjust-reset').click();
+  await expect(page.locator('.hue-slider-vertical')).toHaveValue('0');
   await page.locator('.item-adjust-done-btn-small').click();
-  await expect
-    .poll(async () => near(await canvasPixel(page, DOLL_X, TOP_Y), [0, 255, 0, 255], 12), { timeout: 10_000, message: '元の位置で緑' })
-    .toBe(true);
+  await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expectPixel(page, DOLL_X, imgY(250), RED); // 上端の近く（回したままなら、ここは肌）
 });
 
 test('着せると服が一瞬光り、写真ボタンはリセットから離れている', async ({ page }) => {
@@ -910,7 +927,7 @@ test('色スライダー: 黒い服にも色が付く（調整中の表示と、
   await page.reload();
   await expectPixel(page, DOLL_X, TOP_Y, shown);
   await page.locator('.tool-button').first().click();
-  await page.getByTestId('hue-reset').click();
+  await page.getByTestId('adjust-reset').click();
   await page.locator('.item-adjust-done-btn-small').click();
   await expectPixel(page, DOLL_X, TOP_Y, BLACK);
 });
@@ -1264,11 +1281,16 @@ test('調整中の服の枠は、手前の服より上に出る。服を動か�
   await page.mouse.up();
   await expect.poll(async () => Math.round((await page.getByTestId('sticker-frame').boundingBox())!.x - before.x)).toBe(90);
   await same(1);
-  // 右下のつまみで、大きく・回す
-  const handle = centerOf((await page.getByTestId('sticker-rotate').boundingBox())!);
-  await page.mouse.move(handle.x, handle.y);
+  // 右下のつまみで大きく、右上のつまみで回す
+  const grow = centerOf((await page.getByTestId('sticker-scale').boundingBox())!);
+  await page.mouse.move(grow.x, grow.y);
   await page.mouse.down();
-  await page.mouse.move(handle.x + 60, handle.y - 20, { steps: 5 });
+  await page.mouse.move(grow.x + 50, grow.y + 30, { steps: 5 });
+  await page.mouse.up();
+  const turn = centerOf((await page.getByTestId('sticker-rotate').boundingBox())!);
+  await page.mouse.move(turn.x, turn.y);
+  await page.mouse.down();
+  await page.mouse.move(turn.x + 60, turn.y + 40, { steps: 5 });
   await page.mouse.up();
   await same(2);
   // 縦に持ち替えても、枠は服に付いている
@@ -1319,7 +1341,7 @@ test('角のつまみは、枠の外側にある（服に重ねない）。ス�
   const check = (size: number) => expect(() => measure(size)).toPass({ timeout: 5000 });
   const measure = async (size: number) => {
     const frame = (await page.getByTestId('sticker-frame').boundingBox())!;
-    for (const [id, sx, sy] of [['sticker-remove', -1, -1], ['sticker-reset', 1, -1], ['sticker-rotate', 1, 1]] as const) {
+    for (const [id, sx, sy] of [['sticker-remove', -1, -1], ['sticker-rotate', 1, -1], ['sticker-scale', 1, 1]] as const) {
       const box = (await page.getByTestId(id).boundingBox())!;
       expect([Math.round(box.width), Math.round(box.height)], `${id} の大きさ`).toEqual([size, size]);
       const c = centerOf(box);
@@ -1350,7 +1372,7 @@ test('スマホで、画面の端に近い服（くつ）でも、つまみを�
   await page.getByTestId('portrait-tools').locator('.tool-button').click();
   await expect(page.getByTestId('sticker-frame')).toBeVisible();
   const bar = (await page.locator('.item-adjust-top-buttons').boundingBox())!;
-  for (const id of ['sticker-remove', 'sticker-reset', 'sticker-rotate']) {
+  for (const id of ['sticker-remove', 'sticker-rotate', 'sticker-scale']) {
     const box = (await page.getByTestId(id).boundingBox())!;
     expect(box.x, `${id} の左`).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, `${id} の右`).toBeLessThanOrEqual(390);
@@ -1661,7 +1683,7 @@ test.describe('縦画面', () => {
     a.x + a.width <= b.x + 0.5 || b.x + b.width <= a.x + 0.5 || a.y + a.height <= b.y + 0.5 || b.y + b.height <= a.y + 0.5;
 
   for (const [w, h] of [[390, 844], [375, 667], [820, 1180]] as const) {
-    test(`調整画面の色（${w}×${h}）: 色だけの行に、その服がなる色の太い帯。動かすと服の色が変わり、「色をもどす」で戻る`, async ({ page }) => {
+    test(`調整画面の色（${w}×${h}）: 色だけの行に、その服がなる色の太い帯。動かすと服の色が変わり、リセットで戻る`, async ({ page }) => {
       await openPortraitAdjust(page, w, h);
       const slider = page.locator('.hue-slider-vertical');
       const band = (await slider.boundingBox())!;
@@ -1677,17 +1699,17 @@ test.describe('縦画面', () => {
       // 動かすと、服の色が変わる
       await slider.fill('120');
       await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '120');
-      await page.getByTestId('hue-reset').click();
+      await page.getByTestId('adjust-reset').click();
       await expect(page.getByTestId('adjust-preview')).toHaveAttribute('data-hue', '0');
-      // 帯・色をもどす・一覧・↺・✓ は、画面の中で、互いに重ならない。枠のつまみとも重ならない
-      const parts = {
+      // 帯・一覧・リセット・✓（スマホは虫めがねも）は、画面の中で、互いに重ならない。枠のつまみとも重ならない
+      const parts: Record<string, { x: number; y: number; width: number; height: number }> = {
         band,
-        hueReset: await boxOf(page, '[data-testid="hue-reset"]'),
+        ...((await page.getByTestId('adjust-loupe').count()) > 0 ? { loupe: await boxOf(page, '[data-testid="adjust-loupe"]') } : {}),
         picker: await boxOf(page, '[data-testid="adjust-picker"]'),
         reset: await boxOf(page, '.item-adjust-reset-btn-small'),
         done: await boxOf(page, '.item-adjust-done-btn-small'),
       };
-      const names = Object.keys(parts) as (keyof typeof parts)[];
+      const names = Object.keys(parts);
       for (const name of names) {
         const b = parts[name];
         expect(b.x, `${name} の左`).toBeGreaterThanOrEqual(0);
@@ -1695,7 +1717,7 @@ test.describe('縦画面', () => {
         expect(b.y + b.height, `${name} の下`).toBeLessThanOrEqual(h + 0.5);
       }
       for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) expect(apart(parts[names[i]], parts[names[j]]), `${names[i]} と ${names[j]}`).toBe(true);
-      for (const handle of ['sticker-remove', 'sticker-reset', 'sticker-rotate']) {
+      for (const handle of ['sticker-remove', 'sticker-rotate', 'sticker-scale']) {
         const hb = await boxOf(page, `[data-testid="${handle}"]`);
         for (const name of names) expect(apart(hb, parts[name]), `${handle} と ${name}`).toBe(true);
       }

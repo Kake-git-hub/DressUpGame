@@ -15,6 +15,10 @@ import { sheetsAbove } from './engine/layers';
 import { adjustBaseId, adjustTargetId, partnerOf } from './engine/pairs';
 import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
+import { Guide } from './guide/Guide';
+import type { GuideStep } from './guide/Guide';
+import { resetGuides, shouldShowGuide } from './guide/guideStore';
+import type { GuideName } from './guide/guideStore';
 import { mergeMyItems, openLibrary } from './cloud/library';
 import { readStudioMode, unlockByWord } from './appStudio/unlock';
 import { clearPayReturn, readPayReturn } from './appStudio/payReturn';
@@ -511,6 +515,8 @@ function App() {
 
   // アイテム調整モード（adjustingItemId === null の場合はドール調整モード）
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);
+  // 操作ガイドを終えた・覚えを消したときに、出すガイドを決め直す
+  const [guideTick, setGuideTick] = useState(0);
   const [adjustingItemId, setAdjustingItemId] = useState<string | null>(null);
 
   // 調整中のアイテム - nullの場合はドール調整
@@ -937,6 +943,10 @@ function App() {
             }
             onCloset={STUDIO_MODE ? () => setClosetOpen(true) : undefined}
             closetDot={closetDot}
+            onGuideReset={() => {
+              resetGuides();
+              setGuideTick((t) => t + 1);
+            }}
           />
         </Suspense>
         {closetLayer}
@@ -989,7 +999,7 @@ function App() {
     </button>
   );
   const adjustButton = currentDoll && (
-    <button className="tool-button" onClick={handleAdjustButtonClick} title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'}>
+    <button className="tool-button" onClick={handleAdjustButtonClick} title={equippedItems.length > 0 ? '服を調整' : 'ドール調整'} data-testid="adjust-button">
       {equippedItems.length > 0 ? '👗' : '📐'}
     </button>
   );
@@ -1000,8 +1010,22 @@ function App() {
     </button>
   );
 
+  // 操作ガイド（その場面になったとき、1 回だけ。いちどに 1 つ）
+  const guideName: GuideName | null = studioOpen
+    ? shouldShowGuide('studio') ? 'studio' : null
+    : isAdjustingItem
+      ? adjustingItem && shouldShowGuide('adjust') ? 'adjust' : null
+      : shouldShowGuide('play')
+        ? 'play'
+        : equippedItems.length > 0 && shouldShowGuide('worn')
+          ? 'worn'
+          : null;
+  const guideLayer = guideName && (
+    <Guide key={guideName} name={guideName} steps={guideSteps(guideName, portrait)} onDone={() => setGuideTick((t) => t + 1)} />
+  );
+
   return (
-    <div className="app" data-orientation={layout.orientation} data-phone={layout.phone}>
+    <div className="app" data-orientation={layout.orientation} data-phone={layout.phone} data-guide-tick={guideTick}>
       {versionBadge}
 
       {/* 写真の保存（リセットから離して、押し間違えないようにする）- 調整中は非表示 */}
@@ -1104,6 +1128,7 @@ function App() {
           onSelect={selectAdjusting}
           onLayerChange={(id, layerAdjust) => updateItemAdjustment(id, { layerAdjust })}
           orientation={layout.orientation}
+          loupe={layout.orientation === 'portrait' && layout.phone}
         />
       )}
 
@@ -1156,8 +1181,36 @@ function App() {
 
       {/* アイテムドラッグ中のプレビュー（サムネイル表示） */}
       <DragPreviewLayer ref={dragPreviewRef} aboveMenu={portrait} />
+      {guideLayer}
     </div>
   );
+}
+
+// 操作ガイドの中身（場面ごと）。target は、いくつか書けば最初に見つかったもの（text も同じ順）
+function guideSteps(name: GuideName, portrait: boolean): GuideStep[] {
+  switch (name) {
+    case 'play':
+      return [
+        { target: portrait ? '[data-testid="portrait-categories"]' : '.palette-section', text: 'ここから ふくを えらぼう' },
+        { target: portrait ? '[data-testid="portrait-categories"]' : '.palette-section', text: 'ふくを タップするか、ドールまで ひっぱると きられるよ' },
+      ];
+    case 'worn':
+      return [{ target: '[data-testid="adjust-button"]', text: 'ここを おすと、いちや おおきさを かえられるよ' }];
+    case 'adjust':
+      return [
+        { target: ['[data-testid="adjust-loupe"]', '[data-testid="sticker-frame"]'], text: ['この なかを なぞると、ふくが うごくよ', 'ふくを なぞって うごかそう'] },
+        { target: ['[data-testid="loupe-sticker-rotate"]', '[data-testid="sticker-rotate"]'], text: 'ひっぱって まわそう' },
+        { target: ['[data-testid="loupe-sticker-scale"]', '[data-testid="sticker-scale"]'], text: 'ひっぱって おおきさを かえよう' },
+        { target: '[data-testid="adjust-picker"]', text: 'かさなりの じゅんばん。▲で まえへ、▼で うしろへ' },
+        { target: '[data-testid="adjust-reset"]', text: 'ぜんぶ もとに もどすよ' },
+        { target: '.item-adjust-done-btn-small', text: 'おわったら ここを おしてね' },
+      ];
+    case 'studio':
+      return [
+        { target: '[data-testid="studio-step"]', text: 'えを タップして すすもう' },
+        { target: '[data-testid="studio-tickets"]', text: 'ふく 1てんで、チケット 1まい つかうよ' },
+      ];
+  }
 }
 
 // にせの支払いページの戻り先（?pay=fake）では、ゲームを出さず、にせの支払いページだけを出す

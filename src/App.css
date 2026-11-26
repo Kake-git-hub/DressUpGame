@@ -640,6 +640,19 @@ textarea {
   justify-content: center;
 }
 
+.item-adjust-reset-btn-small {
+  width: auto;
+  padding: 0 14px;
+  gap: 4px;
+  border-radius: 24px;
+  font-weight: bold;
+}
+.item-adjust-reset-icon {
+  font-size: 1.3rem;
+}
+.item-adjust-reset-label {
+  font-size: 0.95rem;
+}
 .item-adjust-reset-btn-small:hover {
   transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
@@ -688,16 +701,31 @@ textarea {
   top: 0;
   background: #ff5a7a;
 }
-.sticker-reset {
+.sticker-rotate {
   right: 0;
   top: 0;
   background: #9370db;
+  cursor: grab;
 }
-.sticker-rotate {
+.sticker-scale {
   right: 0;
   bottom: 0;
   background: #ff69b4;
   cursor: nwse-resize;
+}
+
+/* スマホ縦の虫めがね: ドールと服を大きくした窓（ItemAdjustPanel が位置と大きさを決める）。つまみは大きく */
+.adjust-loupe {
+  position: fixed;
+  overflow: hidden;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  z-index: 180;
+  --sticker-size: 56px;
+}
+.app[data-phone='true'] .adjust-loupe .sticker-handle {
+  font-size: 1.6rem;
 }
 
 /* 調整する服の切り替え（画面の左。上がいちばん手前） */
@@ -876,27 +904,6 @@ textarea {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.hue-reset-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 2px solid #ddd;
-  border-radius: 50%;
-  background: #fff;
-  color: #666;
-  font-size: 1.1rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.hue-reset-btn:active {
-  transform: scale(0.9);
-}
-.hue-reset-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
 
 .hue-value {
   font-size: 0.75rem;
@@ -1449,11 +1456,6 @@ textarea {
 .app[data-orientation='portrait'] .hue-value {
   display: none;
 }
-.app[data-orientation='portrait'] .hue-reset-btn {
-  flex: none;
-  width: 48px;
-  height: 48px;
-}
 /* 重なりの一覧: 縦画面でも左に縦並び（上が手前）。上は画面の上の端から、下は色・ボタンの帯の上まで */
 .app[data-orientation='portrait'] .item-adjust-picker {
   top: calc(var(--top-inset) + 8px);
@@ -1462,6 +1464,11 @@ textarea {
 }
 .app[data-orientation='portrait'] .item-adjust-overlay[data-mode='item'] .item-adjust-picker {
   max-height: calc(var(--app-height, 100vh) - var(--top-inset) - env(safe-area-inset-bottom, 0px) - 124px - 16px);
+}
+/* 虫めがねがあるとき: 一覧は、虫めがねの左に、下をそろえて置く（服が多ければ、上へ伸びる） */
+.app[data-orientation='portrait'] .item-adjust-overlay[data-loupe='true'] .item-adjust-picker {
+  top: auto;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 124px + 8px);
 }
 
 /* 服を作る画面を読み込んでいる間 */

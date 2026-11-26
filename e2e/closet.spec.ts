@@ -114,13 +114,12 @@ test('既定の色: 色を変えると、一覧・メニューの絵・着せた
     const color = await pixel(page, DOLL_X, FIRST_Y);
     return !near(color, FIRST, 30) && !near(color, [255, 224, 192], 30);
   }, { timeout: 20_000 }).toBe(true);
-  // 調整画面: 色のスライダーは既定の色から始まる。変えたあと「色をもどす」で、既定の色に戻る
+  // 調整画面: 色のスライダーは既定の色から始まる。変えたあと「リセット」で、既定の色に戻る
   await page.locator('.tool-button').click();
   await expect(page.locator('.hue-value')).toHaveText('120°');
-  await expect(page.getByTestId('hue-reset')).toBeDisabled();
   await page.locator('.hue-slider-vertical').fill('0');
   await expect(page.locator('.hue-value')).toHaveText('0°');
-  await page.getByTestId('hue-reset').click();
+  await page.getByTestId('adjust-reset').click();
   await expect(page.locator('.hue-value')).toHaveText('120°');
 });
 

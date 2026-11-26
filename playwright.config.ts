@@ -16,6 +16,11 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     trace: 'off',
     viewport: { width: 1180, height: 820 },
+    // 操作ガイドは「見た」ことにしておく（ガイドのテスト = e2e/guide.spec.ts だけ、空の状態で開く）
+    storageState: {
+      cookies: [],
+      origins: [{ origin: 'http://localhost:4173', localStorage: [{ name: 'dressup_guide_seen', value: '["play","worn","adjust","studio"]' }] }],
+    },
     launchOptions: {
       args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
       // 別バージョンのブラウザを使う環境向け（未設定ならPlaywright同梱のものを使う）

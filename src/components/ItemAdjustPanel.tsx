@@ -9,19 +9,28 @@
 import { useCallback, useMemo, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { PlacedDoll, PlacedFrame, PlacedImage, PlacedItem } from './PlacedItem';
 import { canvasGeometry, itemOrigin, itemPivotOnCanvas, lookOf } from './placement';
+import type { CanvasGeometry } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
 import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { activeHides, hidesFor } from '../engine/hides';
 import { RAINBOW_TRACK, hueTrack, trackCss } from '../pipeline/hueTrack';
 import { drawOrder, isBehindDoll, reorderShown, sortByLayer } from '../engine/layers';
-import type { LayerChange } from '../engine/layers';
+import type { LayerChange, Sheet } from '../engine/layers';
 import { adjustBaseId, isPairedBack, partnerOf } from '../engine/pairs';
+import { LOUPE_MIN_HEIGHT, angleFrom, distanceFrom, loupeCanvasAt, loupeZoom, outsideLoupe, rotateBy, scaleBy } from './adjustMath';
 
 // 調整中の服の枠の層（服の重なりは 50〜、下の一覧とボタンは 300）
 const FRAME_Z = 190;
 // 角のつまみを、枠の角から外へ出す量（つまみの大きさに対する割合。縦横それぞれ）
 const HANDLE_OUT = 0.26;
+// 回すつまみの絵: 四角の角にそって曲がる矢印（上の辺 → 右の辺。時計まわり）
+const ROTATE_ICON = (
+  <svg width="62%" height="62%" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M5 9 H14 A9 9 0 0 1 23 18 V25" />
+    <path d="M18.5 21 L23 26 L27.5 21" />
+  </svg>
+);
 
 export interface PendingAdjust {
   item?: ItemAdjustment; // 服の調整（キャンバスの px）
@@ -52,6 +61,8 @@ interface ItemAdjustPanelProps {
   rightOffset?: number;
   // ドール（ドール調整モードのプレビュー用）
   doll?: DollData | null;
+  // スマホの縦: ドールの下に「虫めがね」（ドールと服を大きくした窓）を出す。重なりの一覧は、その左に置く
+  loupe?: boolean;
 }
 
 // タッチポイントの型
@@ -91,6 +102,7 @@ export function ItemAdjustPanel({
   onSelect,
   onLayerChange,
   orientation = 'landscape',
+  loupe = false,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -280,14 +292,6 @@ export function ItemAdjustPanel({
       onAdjustRef.current({ layerAdjust: 0 });
     }
   }, [isDollMode, defaultHue]);
-
-  // 枠の右上: 位置・大きさ・傾きだけを元に戻す
-  const handleResetPlacement = useCallback(() => {
-    setOffsetX(0);
-    setOffsetY(0);
-    setScale(1.0);
-    setRotation(0);
-  }, []);
 
   // 髪は、前髪と対のうしろがみを一緒に動かす: 位置・大きさ・向き・色は、対の相手にも同じ値を入れる（重なりの順番は別々）
   const partner = item ? partnerOf(equippedItems, item.id) : null;
@@ -484,34 +488,194 @@ export function ItemAdjustPanel({
     return next === index ? undefined : { transform: `translateY(${(next - index) * rowDrag.pitch}px)` };
   };
 
-  // 枠の角の「拡大・回転」つまみ（シールの調整と同じ操作）
-  const handleRef = useRef<{ cx: number; cy: number; distance: number; angle: number; scale: number; rotation: number } | null>(null);
-  const startHandle = (e: React.PointerEvent, cx: number, cy: number) => {
+  // 枠のつまみ: 右上 = 回す（服の中心のまわり）、右下 = 大きさだけ。cx, cy は服の中心（画面の px）
+  const handleRef = useRef<{ kind: 'rotate' | 'scale'; cx: number; cy: number; distance: number; angle: number; scale: number; rotation: number } | null>(null);
+  const startHandle = (e: React.PointerEvent, kind: 'rotate' | 'scale', cx: number, cy: number) => {
     e.stopPropagation();
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    const dx = e.clientX - cx;
-    const dy = e.clientY - cy;
-    handleRef.current = { cx, cy, distance: Math.max(1, Math.hypot(dx, dy)), angle: (Math.atan2(dy, dx) * 180) / Math.PI, scale, rotation };
+    handleRef.current = { kind, cx, cy, distance: distanceFrom(cx, cy, e.clientX, e.clientY), angle: angleFrom(cx, cy, e.clientX, e.clientY), scale, rotation };
   };
   const moveHandle = (e: React.PointerEvent) => {
     const h = handleRef.current;
     if (!h) return;
     e.stopPropagation();
-    const dx = e.clientX - h.cx;
-    const dy = e.clientY - h.cy;
-    setScale(Math.max(0.3, Math.min(2.5, h.scale * (Math.hypot(dx, dy) / h.distance))));
-    let next = h.rotation + (Math.atan2(dy, dx) * 180) / Math.PI - h.angle;
-    while (next > 180) next -= 360;
-    while (next < -180) next += 360;
-    setRotation(next);
+    if (h.kind === 'rotate') setRotation(rotateBy(h.rotation, h.angle, angleFrom(h.cx, h.cy, e.clientX, e.clientY)));
+    else setScale(scaleBy(h.scale, h.distance, distanceFrom(h.cx, h.cy, e.clientX, e.clientY)));
   };
   const endHandle = (e: React.PointerEvent) => {
     e.stopPropagation();
     handleRef.current = null;
+    recenterRef.current();
   };
   // つまみに触れたときは、背景の「移動」の操作を始めない
   const stopGesture = { onTouchStart: (e: React.TouchEvent) => e.stopPropagation(), onMouseDown: (e: React.MouseEvent) => e.stopPropagation() };
+
+  // 調整中の服の、いまの見た目と画面の位置（枠・つまみ・虫めがねが使う）
+  const scene = !isDollMode && item
+    ? (() => {
+        const geometry = canvasGeometry(canvasInfo, canvasWidth, canvasHeight, menuOffset, rightOffset);
+        const look = { offsetX, offsetY, scale, rotation, hue: colorHue };
+        const origin = itemOrigin(item, look, geometry, dollTransform);
+        const k = previewUnit * dollTransform.scale; // 元キャンバスの 1px → 画面の px
+        // 拡大・回転の軸（ふつうは服の中心。うしろがみは、前髪の中心）。画面の座標
+        const pivot = itemPivotOnCanvas(item);
+        return {
+          geometry,
+          look,
+          centerX: origin.x + (pivot.x - item.canvasW / 2) * k,
+          centerY: origin.y + (pivot.y - item.canvasH / 2) * k,
+          frame: { w: item.box.w * k * scale, h: item.box.h * k * scale },
+        };
+      })()
+    : null;
+
+  // 虫めがね（スマホ縦）: 置き場所は、キャンバスの下から、色・ボタンの帯の上まで。左は重なりの一覧の右。
+  // 低すぎる端末では出さない（いままでの画面のまま）
+  const topButtonsRef = useRef<HTMLDivElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const [loupeBox, setLoupeBox] = useState<{ left: number; top: number; w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!loupe || isDollMode) return undefined;
+    const measure = () => {
+      const bar = topButtonsRef.current?.getBoundingClientRect();
+      const picker = pickerRef.current?.getBoundingClientRect();
+      if (!bar) return;
+      const top = canvasInfo.top + canvasInfo.height + 8;
+      const left = (picker ? picker.right : 0) + 8;
+      const right = (window.visualViewport?.width ?? window.innerWidth) - 8;
+      const bottom = bar.top - 8;
+      const next = bottom - top >= LOUPE_MIN_HEIGHT && right - left >= 120 ? { left, top, w: right - left, h: bottom - top } : null;
+      setLoupeBox((prev) => (prev && next && prev.left === next.left && prev.top === next.top && prev.w === next.w && prev.h === next.h ? prev : next));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [loupe, isDollMode, canvasInfo]);
+  // 虫めがねのまん中に見せる点（画面の px）と倍率。開いたときに、服の中心に合わせる。
+  // 動かしているあいだは変えない（服だけが動く）。離したときに服の中心が外れていたら、まん中に戻す
+  const [loupeView, setLoupeView] = useState<{ x: number; y: number; zoom: number } | null>(null);
+  const sceneRef = useRef(scene);
+  const loupeRef = useRef<{ box: typeof loupeBox; view: typeof loupeView }>({ box: null, view: null });
+  useEffect(() => {
+    sceneRef.current = scene;
+    loupeRef.current = { box: loupeBox, view: loupeView };
+  });
+  useEffect(() => {
+    const sc = sceneRef.current;
+    if (!loupeBox || !sc) return;
+    setLoupeView((v) => v ?? { x: sc.centerX, y: sc.centerY, zoom: loupeZoom(loupeBox, sc.frame) });
+  }, [loupeBox]);
+  // 一本指で動かすときの速さ（虫めがねの中なら 1/倍率。指に付いて動く）
+  const gainRef = useRef(1);
+  const loupeGain = (x: number, y: number): number => {
+    const { box, view } = loupeRef.current;
+    if (!box || !view) return 1;
+    return x >= box.left && x <= box.left + box.w && y >= box.top && y <= box.top + box.h ? 1 / view.zoom : 1;
+  };
+  const recenterRef = useRef(() => {});
+  useEffect(() => {
+    recenterRef.current = () => {
+      const { box, view } = loupeRef.current;
+      const sc = sceneRef.current;
+      if (!box || !view || !sc) return;
+      const center = { x: sc.centerX, y: sc.centerY };
+      if (outsideLoupe(center, view, box, view.zoom)) setLoupeView({ ...view, ...center });
+    };
+  });
+
+  // 服・ドール 1 枚を描く（調整画面の上の重ね・虫めがねの中）。main = 上の重ね（色の帯の画素を読む・テストの名前）
+  const clipById = item ? hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items : null;
+  const renderSheet = (sheet: Sheet, geometry: CanvasGeometry, zIndex: number, main: boolean) => {
+    if (!item || !scene) return null;
+    if (sheet.kind === 'doll') {
+      return doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} />;
+    }
+    if (sheet.item.id === item.id) {
+      return main ? (
+        <PlacedItem key={item.id} item={item} look={scene.look} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} alwaysHue dark={pairDark} onDark={reportDark(item.id)} onPixels={setItemPixels} showUnder testId="adjust-preview" />
+      ) : (
+        <PlacedItem key={item.id} item={item} look={scene.look} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} alwaysHue dark={pairDark ?? darkById[item.id]} showUnder testId="loupe-preview" />
+      );
+    }
+    if (sheet.item.id === partner?.id) {
+      return (
+        <PlacedItem key={partner.id} item={partner} look={scene.look} geometry={geometry} dollTransform={dollTransform} zIndex={zIndex} alwaysHue dark={pairDark} onDark={main ? reportDark(partner.id) : undefined} testId={main ? 'adjust-partner' : undefined} />
+      );
+    }
+    return (
+      <PlacedItem
+        key={sheet.item.id}
+        item={sheet.item}
+        look={lookOf(sheet.item)}
+        clip={clipById?.get(sheet.item.id)}
+        geometry={geometry}
+        dollTransform={dollTransform}
+        zIndex={zIndex}
+        className={main ? 'adjust-front-item' : undefined}
+      />
+    );
+  };
+
+  // シールのような枠: 左上 × で脱がせる、右上で回す、右下で大きさ。unit = 元キャンバスの 1px の画面の px、cx・cy = 服の中心（画面の px）
+  const renderFrame = (unit: number, cx: number, cy: number, prefix: string) => {
+    if (!item) return null;
+    const { box } = item;
+    const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
+    // つまみは、枠の角の外側に置く（服に重ねない）: 中心を、角から縦横それぞれ「つまみの大きさの 26%」だけ外へ。
+    // 大きさは CSS の --sticker-size（スマホは 34px、ほかは 40px、虫めがねは 56px）。服を大きく・小さくしても、画面での大きさと離れ方は一定
+    const out = (sign: 1 | -1) => `calc(${sign * 50}% + var(--sticker-size, 40px) * ${(sign * HANDLE_OUT * counter).toFixed(4)})`;
+    const handleAt = (sx: 1 | -1, sy: 1 | -1) => `translate(${out(sx)}, ${out(sy)}) scale(${counter})`;
+    return (
+      <div
+        className="sticker-frame"
+        data-testid={`${prefix}sticker-frame`}
+        style={{ left: `${box.x * unit}px`, top: `${box.y * unit}px`, width: `${box.w * unit}px`, height: `${box.h * unit}px`, borderWidth: `${2 * counter}px` }}
+      >
+        {onRemove && (
+          <button
+            className="sticker-handle sticker-remove"
+            style={{ transform: handleAt(-1, -1) }}
+            {...stopGesture}
+            onClick={() => onRemove(item.id)}
+            title="ぬがせる"
+            aria-label="ぬがせる"
+            data-testid={`${prefix}sticker-remove`}
+          >
+            ×
+          </button>
+        )}
+        <div
+          className="sticker-handle sticker-rotate"
+          style={{ transform: handleAt(1, -1) }}
+          {...stopGesture}
+          onPointerDown={(e) => startHandle(e, 'rotate', cx, cy)}
+          onPointerMove={moveHandle}
+          onPointerUp={endHandle}
+          onPointerCancel={endHandle}
+          title="ひっぱって まわす"
+          aria-label="まわす"
+          data-testid={`${prefix}sticker-rotate`}
+        >
+          {ROTATE_ICON}
+        </div>
+        <div
+          className="sticker-handle sticker-scale"
+          style={{ transform: handleAt(1, 1) }}
+          {...stopGesture}
+          onPointerDown={(e) => startHandle(e, 'scale', cx, cy)}
+          onPointerMove={moveHandle}
+          onPointerUp={endHandle}
+          onPointerCancel={endHandle}
+          title="ひっぱって おおきさを かえる"
+          aria-label="おおきさ"
+          data-testid={`${prefix}sticker-scale`}
+        >
+          ⤡
+        </div>
+      </div>
+    );
+  };
 
   // 別の服に切り替える前に、いまの調整を反映する
   const switchTo = (id: string) => {
@@ -534,7 +698,8 @@ export function ItemAdjustPanel({
     const currentRotation = isDollMode ? 0 : rotation; // ドールモードでは回転なし
 
     if (touches.length === 1) {
-      // 一本指: 位置移動開始
+      // 一本指: 位置移動開始（虫めがねの中なら、指に付いて動く = 上のドールでは 1/倍率）
+      gainRef.current = loupeGain(touches[0].clientX, touches[0].clientY);
       touchStartRef.current = {
         x: touches[0].clientX,
         y: touches[0].clientY,
@@ -574,8 +739,8 @@ export function ItemAdjustPanel({
       const deltaY = touches[0].clientY - touchStartRef.current.y;
 
       // 入力はCSSピクセルなので、論理座標(Pixi)に変換
-      const logicalDeltaX = deltaX * invCanvasScaleX;
-      const logicalDeltaY = deltaY * invCanvasScaleY;
+      const logicalDeltaX = deltaX * invCanvasScaleX * gainRef.current;
+      const logicalDeltaY = deltaY * invCanvasScaleY * gainRef.current;
       
       if (isDollMode) {
         // ドールモード: パーセンテージで移動（bgSize=canvasHeightを基準）
@@ -633,6 +798,7 @@ export function ItemAdjustPanel({
 
     if (touches.length === 0) {
       touchStartRef.current = null;
+      recenterRef.current();
     } else if (touches.length === 1) {
       // 二本指から一本指に戻った場合、一本指モードに切り替え
       touchStartRef.current = {
@@ -661,6 +827,7 @@ export function ItemAdjustPanel({
     const currentOffsetY = isDollMode ? dollY : offsetY;
     
     setIsMouseDragging(true);
+    gainRef.current = loupeGain(e.clientX, e.clientY);
     mouseStartRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -676,8 +843,8 @@ export function ItemAdjustPanel({
     const deltaY = e.clientY - mouseStartRef.current.y;
 
     // 入力はCSSピクセルなので、論理座標(Pixi)に変換
-    const logicalDeltaX = deltaX * invCanvasScaleX;
-    const logicalDeltaY = deltaY * invCanvasScaleY;
+    const logicalDeltaX = deltaX * invCanvasScaleX * gainRef.current;
+    const logicalDeltaY = deltaY * invCanvasScaleY * gainRef.current;
 
     if (isDollMode) {
       // ドールモード: パーセンテージで移動（bgSize=canvasHeightを基準）
@@ -698,6 +865,7 @@ export function ItemAdjustPanel({
 
   const handleMouseUp = useCallback(() => {
     setIsMouseDragging(false);
+    if (mouseStartRef.current) recenterRef.current();
     mouseStartRef.current = null;
   }, []);
 
@@ -728,6 +896,7 @@ export function ItemAdjustPanel({
     <div
       className="item-adjust-overlay"
       data-mode={isDollMode ? 'doll' : 'item'}
+      data-loupe={loupeBox ? 'true' : 'false'}
       // 一覧の行を動かしているあいだは、ほかの指（手のひら）で服を動かさない
       onTouchStart={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchStart(e))}
       onTouchMove={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchMove(e))}
@@ -742,116 +911,37 @@ export function ItemAdjustPanel({
     >
       {/* アイテムモード時：調整中のアイテムをCSSでリアルタイムプレビュー。
           調整中の服より手前の服も、キャンバスではなくここに重ねて、重なりの順番をその場で見せる */}
-      {!isDollMode && item && (() => {
-        const geometry = canvasGeometry(canvasInfo, canvasWidth, canvasHeight, menuOffset, rightOffset);
-        const look = { offsetX, offsetY, scale, rotation, hue: colorHue };
-        const origin = itemOrigin(item, look, geometry, dollTransform);
-        const { box, canvasW, canvasH } = item;
-        const k = previewUnit * dollTransform.scale; // 元キャンバスの 1px → 画面の px
-        // 拡大・回転の軸（ふつうは服の中心。うしろがみは、前髪の中心）。画面の座標
-        const pivot = itemPivotOnCanvas(item);
-        const centerX = origin.x + (pivot.x - canvasW / 2) * k;
-        const centerY = origin.y + (pivot.y - canvasH / 2) * k;
-        const counter = 1 / Math.max(0.01, scale * dollTransform.scale); // つまみの大きさを一定にする
-        // つまみは、枠の角の外側に置く（服に重ねない）: 中心を、角から縦横それぞれ「つまみの大きさの 26%」だけ外へ。
-        // 大きさは CSS の --sticker-size（スマホは 34px、ほかは 40px）。服を大きく・小さくしても、画面での大きさと離れ方は一定
-        const out = (sign: 1 | -1) => `calc(${sign * 50}% + var(--sticker-size, 40px) * ${(sign * HANDLE_OUT * counter).toFixed(4)})`;
-        const handleAt = (sx: 1 | -1, sy: 1 | -1) => `translate(${out(sx)}, ${out(sy)}) scale(${counter})`;
-
-        // シールのような枠: 左上 × で脱がせる、右上で位置などを元に戻す、右下で拡大・回転
-        const frame = (
-          <div
-            className="sticker-frame"
-            data-testid="sticker-frame"
-            style={{
-              left: `${box.x * previewUnit}px`,
-              top: `${box.y * previewUnit}px`,
-              width: `${box.w * previewUnit}px`,
-              height: `${box.h * previewUnit}px`,
-              borderWidth: `${2 * counter}px`,
-            }}
-          >
-            {onRemove && (
-              <button
-                className="sticker-handle sticker-remove"
-                style={{ transform: handleAt(-1, -1) }}
-                {...stopGesture}
-                onClick={() => onRemove(item.id)}
-                title="ぬがせる"
-                aria-label="ぬがせる"
-                data-testid="sticker-remove"
-              >
-                ×
-              </button>
-            )}
-            <button
-              className="sticker-handle sticker-reset"
-              style={{ transform: handleAt(1, -1) }}
-              {...stopGesture}
-              onClick={handleResetPlacement}
-              title="位置・大きさ・向きをもどす"
-              aria-label="位置・大きさ・向きをもどす"
-              data-testid="sticker-reset"
-            >
-              ↺
-            </button>
-            <div
-              className="sticker-handle sticker-rotate"
-              style={{ transform: handleAt(1, 1) }}
-              {...stopGesture}
-              onPointerDown={(e) => startHandle(e, centerX, centerY)}
-              onPointerMove={moveHandle}
-              onPointerUp={endHandle}
-              onPointerCancel={endHandle}
-              title="ひっぱって大きさと向きを変える"
-              aria-label="大きさと向き"
-              data-testid="sticker-rotate"
-            >
-              ⤡
-            </div>
-          </div>
-        );
-
+      {!isDollMode && item && scene && (() => {
         // キャンバスの代わりに、ここに重ねて描くもの（下から）: 調整中の服と対の相手のうち下にあるほうと、それより手前の服・ドール。
         // 重なりの順番と、対の相手の位置・色を、その場で見せる
         const order = drawOrder(current);
         const sheets = order.slice(order.findIndex((s) => s.kind === 'item' && s.item.id === adjustBaseId(current, item.id)));
-        // 手前の服のうち、ほかの服が隠す所を持つもの（くつの下の靴下など）。キャンバスと同じように消して描く
-        const clip = hidesFor(current, item.id, { w: doll?.canvasW ?? 1024, h: doll?.canvasH ?? 1024 }).items;
-        const layers = sheets.map((sheet, i) => {
-          if (sheet.kind === 'doll') {
-            return doll && <PlacedDoll key="doll" doll={doll} hides={activeHides(current, item.id)} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} />;
-          }
-          if (sheet.item.id === item.id) {
-            return (
-              <PlacedItem key={item.id} item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(item.id)} onPixels={setItemPixels} showUnder testId="adjust-preview" />
-            );
-          }
-          if (sheet.item.id === partner?.id) {
-            return (
-              <PlacedItem key={partner.id} item={partner} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={50 + i} alwaysHue dark={pairDark} onDark={reportDark(partner.id)} testId="adjust-partner" />
-            );
-          }
-          return (
-            <PlacedItem
-              key={sheet.item.id}
-              item={sheet.item}
-              look={lookOf(sheet.item)}
-              clip={clip.get(sheet.item.id)}
-              geometry={geometry}
-              dollTransform={dollTransform}
-              zIndex={50 + i}
-              className="adjust-front-item"
-            />
-          );
-        });
+        const layers = sheets.map((sheet, i) => renderSheet(sheet, scene.geometry, 50 + i, true));
         // 枠とつまみは、服の重なりの順に関係なく、どの服・ドールよりも手前に出す（服の絵は、重なりの順のまま）
         return [
           ...layers,
-          <PlacedFrame key="frame" item={item} look={look} geometry={geometry} dollTransform={dollTransform} zIndex={FRAME_Z}>
-            {frame}
+          <PlacedFrame key="frame" item={item} look={scene.look} geometry={scene.geometry} dollTransform={dollTransform} zIndex={FRAME_Z}>
+            {renderFrame(scene.geometry.unit, scene.centerX, scene.centerY, '')}
           </PlacedFrame>,
         ];
+      })()}
+
+      {/* スマホ縦の虫めがね: ドールと着ている服を全部、大きくして描く。中をなぞると、服が指に付いて動く */}
+      {!isDollMode && item && scene && loupeBox && loupeView && (() => {
+        const box = { w: loupeBox.w, h: loupeBox.h };
+        const at = loupeCanvasAt(loupeView, { left: canvasLeft, top: canvasTop }, box, loupeView.zoom);
+        const geometry = canvasGeometry({ left: at.left, top: at.top, width: actualCanvasWidth * loupeView.zoom, height: actualCanvasHeight * loupeView.zoom }, canvasWidth, canvasHeight, menuOffset, rightOffset);
+        // 服の中心（画面の px）: 虫めがねの中の位置 + 虫めがねの左上
+        const cx = loupeBox.left + box.w / 2 + (scene.centerX - loupeView.x) * loupeView.zoom;
+        const cy = loupeBox.top + box.h / 2 + (scene.centerY - loupeView.y) * loupeView.zoom;
+        return (
+          <div className="adjust-loupe" data-testid="adjust-loupe" style={{ left: `${loupeBox.left}px`, top: `${loupeBox.top}px`, width: `${box.w}px`, height: `${box.h}px` }}>
+            {drawOrder(current).map((sheet, i) => renderSheet(sheet, geometry, 10 + i, false))}
+            <PlacedFrame item={item} look={scene.look} geometry={geometry} dollTransform={dollTransform} zIndex={FRAME_Z}>
+              {renderFrame(geometry.unit, cx, cy, 'loupe-')}
+            </PlacedFrame>
+          </div>
+        );
       })()}
 
       {/* ドールモード時：ドール画像のプレビュー */}
@@ -913,12 +1003,14 @@ export function ItemAdjustPanel({
       })()}
 
       {/* 右上ボタン（完了・リセット・カラー） */}
-      <div className="item-adjust-top-buttons">
+      <div className="item-adjust-top-buttons" ref={topButtonsRef}>
         <button className="item-adjust-done-btn-small" onClick={handleClose} title="完了">
           ✓
         </button>
-        <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット">
-          ↺
+        {/* リセット（1 つだけ）: 位置・大きさ・向き・重なり・色を、全部もどす */}
+        <button className="item-adjust-reset-btn-small" onClick={handleResetAll} title="リセット" aria-label="リセット" data-testid="adjust-reset">
+          <span className="item-adjust-reset-icon" aria-hidden="true">↺</span>
+          <span className="item-adjust-reset-label">リセット</span>
         </button>
         {/* 色相スライダー（アイテムモードのみ） */}
         {!isDollMode && (
@@ -941,16 +1033,6 @@ export function ItemAdjustPanel({
               title={`色相: ${colorHue}°`}
             />
             <div className="hue-value">{colorHue}°</div>
-            <button
-              className="hue-reset-btn"
-              onClick={() => setColorHue(defaultHue)}
-              disabled={colorHue === defaultHue}
-              title="色をもどす"
-              aria-label="色をもどす"
-              data-testid="hue-reset"
-            >
-              ↺
-            </button>
           </div>
         )}
       </div>
@@ -958,7 +1040,7 @@ export function ItemAdjustPanel({
       {/* 着ている服とドール（重なりの順番。手前が上）。服を押すと、その服の調整に切り替える。
           上下のボタンで、調整中の服の重なりを前後に入れ替える。ドールより下へ動かすと、ドールの後ろに回る */}
       {!isDollMode && item && (
-        <div className="item-adjust-picker" onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
+        <div className="item-adjust-picker" ref={pickerRef} onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
           <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={!canMove(1)} title="まえへ" aria-label="まえへ" data-testid="layer-front">
             ▲
           </button>

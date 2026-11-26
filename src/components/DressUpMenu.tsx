@@ -12,7 +12,8 @@ import type { MenuSet } from './menuSets';
 interface DressUpMenuProps {
   items: ClothingItemData[];
   onItemDrop: (item: ClothingItemData) => void;
-  // 着ている服のタイルをタップ（ほとんど動かさずに離す）したとき。脱がせる（セットは、パーツを全部）
+  // 着ている服のタイルをタップ（ほとんど動かさずに離す）したとき。脱がせる（セットは、パーツを全部）。
+  // 着ていない服のタップは、onItemDrop（セットは onSetDrop）で着せる
   onItemRemove?: (items: ClothingItemData[]) => void;
   equippedItems: ClothingItemData[];
   dolls: DollData[];
@@ -665,9 +666,10 @@ const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, on
     scrollRow,
     dropTargetId,
     menuSelector: '.palette-section',
-    tapApplies: false, // タップ（ほぼ移動なし）は装着しない。着ている服なら、脱がせる
+    tapApplies: false,
     onDrop: () => onDrop(item),
-    onTap: isEquipped && onRemove ? () => onRemove([item]) : undefined,
+    // タップ（ほぼ移動なし）: 着ていなければ着る（ドールへ運んだのと同じ）。着ていれば、脱がせる
+    onTap: isEquipped ? (onRemove ? () => onRemove([item]) : undefined) : () => onDrop(item),
     onMove: onDragMove ? (position) => onDragMove(item, position) : undefined,
     onEnd: onDragEnd,
   });
@@ -729,7 +731,8 @@ const DraggableSet = memo(function DraggableSet({
     menuSelector: '.palette-section',
     tapApplies: false,
     onDrop: () => onDrop(set.items),
-    onTap: isWorn && onRemove ? () => onRemove(set.items) : undefined,
+    // タップ: 全部着ていなければ全部着る。全部着ていれば、全部脱がせる
+    onTap: isWorn ? (onRemove ? () => onRemove(set.items) : undefined) : () => onDrop(set.items),
     // 指に付いてくる絵は、先頭のパーツ
     onMove: onDragMove && set.items[0] ? (position) => onDragMove(set.items[0], position) : undefined,
     onEnd: onDragEnd,

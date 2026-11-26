@@ -12,11 +12,13 @@ export interface HomeScreenProps {
   onCreate?: () => void; // 無ければ、「つくる」を出さない
   onCloset?: () => void; // 無ければ、「クローゼット」を出さない
   closetDot?: boolean; // 新しい服がある・作っている途中
+  onGuideReset?: () => void; // 「つかいかた」: 操作ガイドを、また出す
 }
 
 type CopyState = 'copying' | 'copied' | 'failed';
 
-export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = false }: HomeScreenProps) {
+export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = false, onGuideReset }: HomeScreenProps) {
+  const [guideAgain, setGuideAgain] = useState(false);
   const url = useMemo(() => shareUrl(window.location.origin, import.meta.env.BASE_URL), []);
   const [shareOpen, setShareOpen] = useState(false);
   const [copy, setCopy] = useState<CopyState>('copying');
@@ -50,6 +52,18 @@ export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = fal
       <button className="home-share-button" onClick={openShare} data-testid="home-share">
         ともだちにおしえる
       </button>
+      {onGuideReset && (
+        <button
+          className="home-guide-button"
+          onClick={() => {
+            onGuideReset();
+            setGuideAgain(true);
+          }}
+          data-testid="home-guide"
+        >
+          {guideAgain ? 'つかいかたを また だすよ' : 'つかいかた'}
+        </button>
+      )}
 
       {shareOpen && (
         <div className="home-share-overlay" onClick={() => setShareOpen(false)} data-testid="home-share-dialog">

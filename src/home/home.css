@@ -94,6 +94,19 @@
   transform: scale(0.96);
 }
 
+/* つかいかた: 操作ガイドを、また出す（小さく） */
+.home-guide-button {
+  margin-top: 10px;
+  padding: 6px 16px;
+  font-size: 15px;
+  color: #a05a8a;
+  background: transparent;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
 /* ともだちにおしえる: QR コードと URL */
 .home-share-overlay {
   position: fixed;
