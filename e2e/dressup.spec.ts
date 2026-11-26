@@ -1456,16 +1456,12 @@ test('セット: ドールへドラッグすると、全部のパーツが一度
   await expect.poll(saved).toEqual([]);
   await expectPixel(page, DOLL_X, TOP_Y, SKIN);
   await expect(tile).toHaveAttribute('data-worn', 'false');
-  // 着ていないセットは、タップ（動かさない）では着ない
+  // 着ていないセットは、タップでも全部着る
   await tile.click();
-  await page.waitForTimeout(300);
-  expect(await saved()).toEqual([]);
-  // もう一度着せてから、トップスだけ着替える: ボトムスは残り、セットの ✓ は消える
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(DOLL_X, DOLL_Y, { steps: 4 });
-  await page.mouse.up();
+  await expect.poll(saved).toEqual(['green', 'red']);
   await expectPixel(page, DOLL_X, TOP_Y, RED);
+  await expect(tile).toHaveAttribute('data-worn', 'true');
+  // トップスだけ着替える: ボトムスは残り、セットの ✓ は消える
   await backToCategories(page);
   await dragItemToDoll(page, 'トップス', 'blue');
   await expectPixel(page, DOLL_X, TOP_Y, BLUE);
