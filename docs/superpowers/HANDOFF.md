@@ -15,7 +15,10 @@
 - **v0.44.0（1・2・3）**: 作業ブランチ `claude/doll-generation-improvements-vuz5oc`。設計 `specs/2026-11-26-v0.44.0-design.md`（作者が決めたことは 1 章。写真 `specs/2026-11-26-v0.44.0/`）。サーバーは変えない。画像生成 0 枚。**公開済み**（2026-11-26、作者がカードで「すぐ公開する」。別の目のレビューは、作者の判断でとばした）。単体テスト 1385/1386（落ちた 1 件は `tools/studio/processSwap.test.ts` の 5 秒の時間切れ。変えていない所で、変更前から同じ）・E2E 174 全部通過。
   - 作り: タップで着る（`DressUpMenu.tsx` の `onTap`）。つまみは右上 = 回す・右下 = 大きさ（`adjustMath.ts`）。リセット 1 つ（`adjust-reset`）。虫めがね（`ItemAdjustPanel.tsx` の `loupe`。スマホ縦だけ、高さ 160px 以上のとき）。ガイド `src/guide/`（覚えは `dressup_guide_seen`。E2E は `playwright.config.ts` の `storageState` で「見た」にしてある。ガイドのテストは `e2e/guide.spec.ts`）。
   - この作業環境では、E2E を `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium` を付けて走らせる（入っている Playwright の版が違うため）。
-- 次は 4（クローゼットの初期位置。サーバーを変える）。
+- **v0.45.0（4 = クローゼットの「はじめの いち」）**: 同じ作業ブランチ。設計 `specs/2026-11-26-v0.45.0-design.md`（作者が決めたことは 1 章: 決めるのはクローゼットだけ・覚えるのは位置・大きさ・向き・交換で一緒に渡す・決める画面は着せ替えと同じ調整画面）。**サーバーを変えた（`SERVER_API` 7・`FIT_API` 7）。作者の PC での載せ直しが要る**（`docs/firebase-setup.md` の 2-15）。載せ直す前は「いちを きめる」が押せず、理由が出る。
+  - 作り: `src/engine/fit.ts`（形・範囲・着せたときの値）。サーバー `updateItem` の `fit`（null で消す）。端末の控え・`mergeMyItems` の `defaultFit`（髪は 2 枚とも）。`useDressUp` の `equipItem` が `defaultFit` から始める。調整画面のリセットは `defaultFit` へ。決める画面 `src/components/FitEditor.tsx`（クローゼットが開く。`ItemAdjustPanel` の `fitMode`）。クローゼットの見本（`Stage` の `fit`）。偽の裏側の `noFit`（古いサーバーのふり）。
+  - 残したこと: 着せ替えの調整画面から決める近道（作者が「クローゼットだけ」と決めた）。いま着ている服は、クローゼットで変えても動かない（着せ直すと新しい位置）。
+- 次は 5（マントの前後分け）。作者に、うまくいかないマントの写真をもらう。
 
 ## 0. いまの状態（2026-11-25、v0.43.0）
 
