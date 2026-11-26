@@ -3,9 +3,10 @@
  *
  * 直す・消すは、サーバーを先に変え、通ったら端末の控えを変える（通らなければ、何も変えずに知らせる）。
  */
+import { mergeInfo } from './mergeInfo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX } from '../cloud/backend';
-import type { MyItem, MyItemInfo, StudioBackend } from '../cloud/backend';
+import type { MyItem, StudioBackend } from '../cloud/backend';
 import { useItemLayers } from '../cloud/itemLayers';
 import type { Library } from '../cloud/library';
 import { BlobImage, Stage } from '../cloud/Stage';
@@ -30,11 +31,7 @@ interface Props {
 // 色のスライダーを動かし終えてから、保存するまでの間（動かしている間は、保存しない）
 const HUE_SAVE_MS = 400;
 const stageSize = () => Math.max(140, Math.min(260, Math.floor(Math.min(window.innerWidth * 0.5, window.innerHeight * 0.36))));
-export const mergeInfo = (item: MyItem, info: MyItemInfo): MyItem => {
-  const { fit: _old, ...rest } = item;
-  void _old;
-  return { ...rest, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes, ...(info.fit ? { fit: info.fit } : {}) };
-};
+
 
 export function ClosetItem({ item, doll, group, online, backend, library, onChanged, onGone, onClose, fitReady = null, onEditFit }: Props) {
   const [name, setName] = useState(item.item.name);
