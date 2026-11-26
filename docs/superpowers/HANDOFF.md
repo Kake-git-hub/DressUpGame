@@ -12,7 +12,7 @@
 ## 0-N. 次の 8 つの計画（2026-11-26 から。いちばん新しい）
 
 - 計画書: `plans/2026-11-26-next-features-plan.md`（操作ガイド・スマホ縦のコントローラー・タップで着せる・クローゼットの初期位置・マントの前後分け・生成の幅・ポーズ・掲示板）。作者が順番を了承（1・3・2 → 4 → 5 → 6 → 7 → 8）。**詳しいことは、カードで聞きながら進める**（作者の指示）。
-- **v0.44.0（1・2・3）**: 作業ブランチ `claude/doll-generation-improvements-vuz5oc`。設計 `specs/2026-11-26-v0.44.0-design.md`（作者が決めたことは 1 章。写真 `specs/2026-11-26-v0.44.0/`）。サーバーは変えない。画像生成 0 枚。**まだ公開していない**（作者に写真を見せて、公開してよいかを聞く）。
+- **v0.44.0（1・2・3）**: 作業ブランチ `claude/doll-generation-improvements-vuz5oc`。設計 `specs/2026-11-26-v0.44.0-design.md`（作者が決めたことは 1 章。写真 `specs/2026-11-26-v0.44.0/`）。サーバーは変えない。画像生成 0 枚。**公開済み**（2026-11-26、作者がカードで「すぐ公開する」。別の目のレビューは、作者の判断でとばした）。単体テスト 1385/1386（落ちた 1 件は `tools/studio/processSwap.test.ts` の 5 秒の時間切れ。変えていない所で、変更前から同じ）・E2E 174 全部通過。
   - 作り: タップで着る（`DressUpMenu.tsx` の `onTap`）。つまみは右上 = 回す・右下 = 大きさ（`adjustMath.ts`）。リセット 1 つ（`adjust-reset`）。虫めがね（`ItemAdjustPanel.tsx` の `loupe`。スマホ縦だけ、高さ 160px 以上のとき）。ガイド `src/guide/`（覚えは `dressup_guide_seen`。E2E は `playwright.config.ts` の `storageState` で「見た」にしてある。ガイドのテストは `e2e/guide.spec.ts`）。
   - この作業環境では、E2E を `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium` を付けて走らせる（入っている Playwright の版が違うため）。
 - 次は 4（クローゼットの初期位置。サーバーを変える）。
