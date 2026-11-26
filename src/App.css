@@ -723,6 +723,7 @@ textarea {
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* 重なりの前後（一覧の上が「まえへ」、下が「うしろへ」） */
 .item-adjust-picker .item-adjust-layer-btn {
@@ -767,9 +768,10 @@ textarea {
   border-radius: 10px;
   background: #f3edff;
 }
-/* 一覧のドラッグ（重なりの並べ替え）。行は指に付いてきて、ほかの行は場所をあける */
+/* 一覧のドラッグ（重なりの並べ替え）。行は指に付いてきて、ほかの行は場所をあける。
+   touch-action は行ごと（ItemAdjustPanel）: つかめる行は none、なぞると一覧が流れる行は pan-y */
 .item-adjust-picker-items button {
-  touch-action: none;
+  position: relative;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -788,6 +790,22 @@ textarea {
 .item-adjust-picker-items button.on {
   border-color: #ff69b4;
   background: #ffe8f3;
+}
+/* 選んでいる服の印: つかんで上下に動かせる */
+.item-adjust-picker-grip {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ff69b4;
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 .item-adjust-picker img {
   /* 行の中で文字の行として並べると、フォントによって下に数 px のすき間ができ、一覧が「収まらない」と見なされる
@@ -1436,36 +1454,14 @@ textarea {
   width: 48px;
   height: 48px;
 }
-/* その上の行: 重なりの一覧（横並び。左が手前） */
+/* 重なりの一覧: 縦画面でも左に縦並び（上が手前）。上は画面の上の端から、下は色・ボタンの帯の上まで */
 .app[data-orientation='portrait'] .item-adjust-picker {
-  top: auto;
-  left: max(8px, env(safe-area-inset-left, 0px));
-  right: max(8px, env(safe-area-inset-right, 0px));
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px + 8px);
+  top: calc(var(--top-inset) + 8px);
   transform: none;
-  flex-direction: row;
-  max-height: none;
-  padding: 6px 8px;
+  max-height: calc(var(--app-height, 100vh) - var(--top-inset) - env(safe-area-inset-bottom, 0px) - 64px - 16px);
 }
-.app[data-orientation='portrait'] .item-adjust-picker-items {
-  flex: 1;
-  min-width: 0;
-  flex-direction: row;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-/* 服の調整では、色だけの行の分、一覧を上げる */
 .app[data-orientation='portrait'] .item-adjust-overlay[data-mode='item'] .item-adjust-picker {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 124px + 8px);
-}
-/* ▲▼ は、左（まえへ）・右（うしろへ）を向ける */
-.app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn {
-  width: 40px;
-  height: 52px;
-  transform: rotate(-90deg);
-}
-.app[data-orientation='portrait'] .item-adjust-picker .item-adjust-layer-btn:active {
-  transform: rotate(-90deg) scale(0.92);
+  max-height: calc(var(--app-height, 100vh) - var(--top-inset) - env(safe-area-inset-bottom, 0px) - 124px - 16px);
 }
 
 /* 服を作る画面を読み込んでいる間 */

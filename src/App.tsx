@@ -12,7 +12,7 @@ import type { AvatarCanvasHandle, DragPreviewHandle, PendingAdjust } from './com
 import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
-import { adjustBaseId, partnerOf } from './engine/pairs';
+import { adjustBaseId, adjustTargetId, partnerOf } from './engine/pairs';
 import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
 import { computeLayout } from './components/layout';
 import { mergeMyItems, openLibrary } from './cloud/library';
@@ -518,6 +518,8 @@ function App() {
     if (adjustingItemId === null) return null;
     return canvasItems.find(item => item.id === adjustingItemId) ?? null;
   }, [adjustingItemId, canvasItems]);
+  // 調整する服を選ぶ。対のうしろがみは、前髪を選ぶ（うしろがみは前髪と一緒に動き、重なりの一覧にも出さない）
+  const selectAdjusting = useCallback((id: string) => setAdjustingItemId(adjustTargetId(equippedItems, id)), [equippedItems]);
 
   // 調整中の服より手前のもの（服・ドール）。調整画面が代わりに重ねて描くので、キャンバスには描かない。
   // 髪は、前髪とうしろがみが一緒に動くので、下にあるほう（うしろがみ）から上を、調整画面が描く
@@ -543,9 +545,9 @@ function App() {
     const lastItem = equippedItems.reduce((latest, item) =>
       item.equipOrder > latest.equipOrder ? item : latest
     );
-    setAdjustingItemId(lastItem.id);
+    selectAdjusting(lastItem.id);
     setIsAdjustingItem(true);
-  }, [isAdjustingItem, equippedItems]);
+  }, [isAdjustingItem, equippedItems, selectAdjusting]);
 
   // アイテム調整値を更新
   const handleItemAdjust = useCallback((adjustment: ItemAdjustment) => {
@@ -585,7 +587,7 @@ function App() {
       const rest = equippedItems.filter((item) => item.id !== itemId && item.id !== partnerId);
       unequipItemById(itemId);
       if (rest.length > 0) {
-        setAdjustingItemId(rest[rest.length - 1].id); // equippedItems は重ね順（最後がいちばん手前）
+        setAdjustingItemId(adjustTargetId(rest, rest[rest.length - 1].id)); // equippedItems は重ね順（最後がいちばん手前）
       } else {
         setIsAdjustingItem(false);
         setAdjustingItemId(null);
@@ -677,6 +679,14 @@ function App() {
       playDressUpSound();
     },
     [equipItem, resetAll, allClothing]
+  );
+
+  // メニューで、着ている服のタイルをタップしたとき: 脱がせる（髪は、対のうしろがみも一緒に。セットは、パーツを全部）
+  const handleMenuRemove = useCallback(
+    (items: ClothingItemData[]) => {
+      for (const item of items) unequipItemById(item.id);
+    },
+    [unequipItemById],
   );
 
   // アイテムドラッグ中のコールバック（全アイテム対象）
@@ -1039,6 +1049,7 @@ function App() {
             <DressUpMenu
               items={filteredClothing}
               onItemDrop={handleItemDrop}
+              onItemRemove={handleMenuRemove}
               equippedItems={equippedItems}
               dolls={allDolls}
               currentDollId={currentDoll?.id ?? ''}
@@ -1090,7 +1101,7 @@ function App() {
           doll={currentDoll}
           equippedItems={canvasItems}
           onRemove={handleAdjustRemove}
-          onSelect={setAdjustingItemId}
+          onSelect={selectAdjusting}
           onLayerChange={(id, layerAdjust) => updateItemAdjustment(id, { layerAdjust })}
           orientation={layout.orientation}
         />

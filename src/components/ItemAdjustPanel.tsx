@@ -6,7 +6,7 @@
  * - 二本指回転: 傾き
  * ドール調整モード: 服がない場合にドールの位置・サイズを調整
  */
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { PlacedDoll, PlacedFrame, PlacedImage, PlacedItem } from './PlacedItem';
 import { canvasGeometry, itemOrigin, itemPivotOnCanvas, lookOf } from './placement';
 import type { DollData, EquippedItem, DollTransform } from '../types';
@@ -14,9 +14,9 @@ import { DEFAULT_DOLL_TRANSFORM } from '../types';
 import type { ItemAdjustment } from '../hooks/useDressUp';
 import { activeHides, hidesFor } from '../engine/hides';
 import { RAINBOW_TRACK, hueTrack, trackCss } from '../pipeline/hueTrack';
-import { drawOrder, isBehindDoll, moveLayer as nextLayerAdjust, reorderLayer, sortByLayer } from '../engine/layers';
+import { drawOrder, isBehindDoll, reorderShown, sortByLayer } from '../engine/layers';
 import type { LayerChange } from '../engine/layers';
-import { adjustBaseId, partnerOf } from '../engine/pairs';
+import { adjustBaseId, isPairedBack, partnerOf } from '../engine/pairs';
 
 // 調整中の服の枠の層（服の重なりは 50〜、下の一覧とボタンは 300）
 const FRAME_Z = 190;
@@ -35,7 +35,7 @@ interface ItemAdjustPanelProps {
   onRemove?: (itemId: string) => void; // 枠の × で服を脱がせる
   onSelect?: (itemId: string) => void; // 別の服の調整に切り替える（いまの調整は先に反映される）
   onLayerChange?: (itemId: string, layerAdjust: number) => void; // 調整中でない服の、重なりの前後を変える（一覧のドラッグ）
-  // 縦画面では、一覧・色・ボタンを画面の下に置き、一覧は横並び（左が手前）になる
+  // 縦画面では、色・ボタンを画面の下に置く（一覧は、横画面と同じく左に縦並び）
   orientation?: 'landscape' | 'portrait';
   onAdjust: (adjustment: ItemAdjustment) => void;
   // まだ確定していない、いまの調整（変わるたびに知らせる。閉じる・開き直すときは null）。
@@ -315,40 +315,54 @@ export function ItemAdjustPanel({
       )
     : [];
   const stack = sortByLayer(current);
-  const canMove = (direction: 1 | -1) => !!item && nextLayerAdjust(current, item.id, direction) !== null;
+  // 対のうしろがみは一覧に出さない（前髪だけを並べ替える。うしろがみの重なりは、そのまま）
+  const hiddenIds = new Set(current.filter((i) => isPairedBack(current, i.id)).map((i) => i.id));
+  // 一覧に出す行（上が手前）。null がドールの行
+  const shownRows: (EquippedItem | null)[] = [
+    ...stack.filter((i) => !isBehindDoll(i) && !hiddenIds.has(i.id)).reverse(),
+    null,
+    ...stack.filter((i) => isBehindDoll(i) && !hiddenIds.has(i.id)).reverse(),
+  ];
+  const ownRow = item ? shownRows.findIndex((r) => r?.id === item.id) : -1;
+  // まえへ（+1）= 一覧の 1 つ上、うしろへ（-1）= 1 つ下。番号は、調整中の服を抜いた一覧の中で数える
+  const canMove = (direction: 1 | -1) => ownRow >= 0 && ownRow - direction >= 0 && ownRow - direction <= shownRows.length - 1;
   const moveLayer = (direction: 1 | -1) => {
-    if (!item) return;
-    const next = nextLayerAdjust(current, item.id, direction);
-    if (next === null) return;
-    setLayerAdjust(next);
+    if (!item || !canMove(direction)) return;
     // 重なりの順番は、調整中でもその場でキャンバスに反映する
-    onAdjustRef.current({ layerAdjust: next });
+    applyLayerChanges(reorderShown(current, item.id, ownRow - direction, hiddenIds) ?? []);
   };
 
   // 一覧のドラッグで並べ替える: 行をつかんで上下に動かすと、離した位置に重なりが入る。
   // 行は指に付いてきて、ほかの行（ドールの行も）は 1 行分ずれて場所をあける。
-  // 一覧が画面に収まらないとき（服をたくさん着たとき）は、指では「すばやくなぞる = 一覧を流す」
-  // 「長く押してから動かす = 並べ替え」に分ける（行を touch-action: none にしているので、流すのも自前で行う）
+  // 指で「なぞる = 一覧を流す」と「つかんで動かす = 並べ替え」がぶつからないように、一覧が画面に収まらないときは、
+  // 指でつかんで動かせるのは、いま選んでいる服（⇅ の印）だけ。ほかの服は、なぞると一覧が流れ、押すとその服を選ぶ
+  // （選んでから動かす）。一覧が収まるとき（流れないとき）と、マウスでは、どの行もすぐ動かせる
   const DRAG_START_PX = 6; // これより動かさなければ「押した」（調整する服の切り替え）
-  const HOLD_MS = 250; // 一覧が収まらないとき、これだけ押し続けると行が浮く
   const EDGE_SCROLL_PX = 24; // 一覧の端からこの幅に指があるあいだ、一覧を流し続ける
   const EDGE_SCROLL_STEP = 6; // 1 フレームに流す量
   const pickerItemsRef = useRef<HTMLDivElement>(null);
-  // 一覧の向き: 横画面は縦並び（上が手前）、縦画面は横並び（左が手前）。ドラッグも、その向きで見る
-  const horizontal = orientation === 'portrait';
-  const pointerPos = (e: { clientX: number; clientY: number }) => (horizontal ? e.clientX : e.clientY);
-  const rectStart = (r: DOMRect) => (horizontal ? r.left : r.top);
-  const rectSize = (r: DOMRect) => (horizontal ? r.width : r.height);
-  const getScroll = (el: HTMLElement) => (horizontal ? el.scrollLeft : el.scrollTop);
-  const setScroll = (el: HTMLElement, value: number) => {
-    if (horizontal) el.scrollLeft = value;
-    else el.scrollTop = value;
-  };
-  const scrollRange = (el: HTMLElement) => Math.max(0, horizontal ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight);
+  const scrollRange = (el: HTMLElement) => Math.max(0, el.scrollHeight - el.clientHeight);
+  // 一覧が画面に収まらないか（行の touch-action を決める。指が触れる前に決まっていないといけない）
+  const [overflow, setOverflow] = useState(false);
+  const rowCount = shownRows.length;
+  useLayoutEffect(() => {
+    const container = pickerItemsRef.current;
+    if (!container) return undefined;
+    const check = () => setOverflow(scrollRange(container) > 1);
+    check();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
+    observer?.observe(container);
+    window.addEventListener('resize', check);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', check);
+    };
+  }, [rowCount]);
+  const touchDraggable = (id: string) => !overflow || id === item?.id;
   const rowDragRef = useRef<{
     id: string;
     pointerId: number;
-    startY: number; // 一覧の向きでの位置（横画面は上下、縦画面は左右）
+    startY: number;
     lastY: number;
     startScroll: number;
     maxScroll: number; // 流せる上限（つかんだ時点。動かしている行は transform で外へ出るので、あとからは測れない）
@@ -356,15 +370,13 @@ export function ItemAdjustPanel({
     to: number;
     slots: number[]; // 全部の行の中心（上から。つかんだ時点の画面の位置）
     pitch: number;
-    mode: 'pending' | 'drag' | 'scroll';
-    holdToDrag: boolean;
-    holdTimer: number | null;
+    mode: 'pending' | 'drag';
     frame: number | null;
     moved: boolean;
   } | null>(null);
   const [rowDrag, setRowDrag] = useState<{ id: string; dy: number; from: number; to: number; pitch: number } | null>(null);
   const suppressClickRef = useRef(false);
-  const applyLayerChanges = (changes: LayerChange[]) => {
+  function applyLayerChanges(changes: LayerChange[]) {
     for (const change of changes) {
       if (item && change.id === item.id) {
         setLayerAdjust(change.layerAdjust);
@@ -373,13 +385,13 @@ export function ItemAdjustPanel({
         onLayerChange?.(change.id, change.layerAdjust);
       }
     }
-  };
+  }
   // 指の位置（と一覧の流れた量）から、行のずれと、入れる位置を決める
   const updateRowDrag = () => {
     const d = rowDragRef.current;
     const container = pickerItemsRef.current;
     if (!d || !container) return;
-    const dy = d.lastY - d.startY + (getScroll(container) - d.startScroll);
+    const dy = d.lastY - d.startY + (container.scrollTop - d.startScroll);
     const own = d.slots[d.from] + dy;
     // いちばん近い行の位置に入る（となりの行までの半分を越えたら、入れ替わる）
     let to = 0;
@@ -393,77 +405,55 @@ export function ItemAdjustPanel({
     const container = pickerItemsRef.current;
     if (!d || !container || d.mode !== 'drag') return;
     const box = container.getBoundingClientRect();
-    const before = getScroll(container);
-    const near = rectStart(box);
-    const far = near + rectSize(box);
-    if (d.lastY < near + EDGE_SCROLL_PX) setScroll(container, Math.max(0, before - EDGE_SCROLL_STEP));
-    else if (d.lastY > far - EDGE_SCROLL_PX) setScroll(container, Math.min(d.maxScroll, before + EDGE_SCROLL_STEP));
-    if (getScroll(container) !== before) updateRowDrag();
+    const before = container.scrollTop;
+    if (d.lastY < box.top + EDGE_SCROLL_PX) container.scrollTop = Math.max(0, before - EDGE_SCROLL_STEP);
+    else if (d.lastY > box.bottom - EDGE_SCROLL_PX) container.scrollTop = Math.min(d.maxScroll, before + EDGE_SCROLL_STEP);
+    if (container.scrollTop !== before) updateRowDrag();
     d.frame = requestAnimationFrame(edgeScroll);
   };
   const stopRowDragTimers = () => {
     const d = rowDragRef.current;
     if (!d) return;
-    if (d.holdTimer !== null) clearTimeout(d.holdTimer);
     if (d.frame !== null) cancelAnimationFrame(d.frame);
-    d.holdTimer = null;
     d.frame = null;
   };
   const startRowDrag = (e: React.PointerEvent<HTMLElement>, id: string) => {
     const container = pickerItemsRef.current;
     if (!container || rowDragRef.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    // 指で、選んでいない服をなぞったときは、一覧を流す（ブラウザに任せる）。押しただけなら click で選ぶ
+    if (e.pointerType !== 'mouse' && !touchDraggable(id)) return;
     const rows = [...container.children];
     const from = rows.indexOf(e.currentTarget);
     if (from < 0) return;
     const rects = rows.map((r) => r.getBoundingClientRect());
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    const pitch = rects.length > 1 ? Math.abs(rectStart(rects[1]) - rectStart(rects[0])) : rectSize(rects[0]);
-    // 一覧が収まらないときの指: 押し続けてから並べ替える。マウスは（ホイールで流せるので）いつでもすぐ並べ替える
-    const holdToDrag = e.pointerType !== 'mouse' && scrollRange(container) > 1;
+    const pitch = rects.length > 1 ? Math.abs(rects[1].top - rects[0].top) : rects[0].height;
     rowDragRef.current = {
       id,
       pointerId: e.pointerId,
-      startY: pointerPos(e),
-      lastY: pointerPos(e),
-      startScroll: getScroll(container),
+      startY: e.clientY,
+      lastY: e.clientY,
+      startScroll: container.scrollTop,
       maxScroll: scrollRange(container),
       from,
       to: from,
-      slots: rects.map((r) => rectStart(r) + rectSize(r) / 2),
+      slots: rects.map((r) => r.top + r.height / 2),
       pitch,
       mode: 'pending',
-      holdToDrag,
-      holdTimer: null,
       frame: null,
       moved: false,
     };
-    if (holdToDrag) {
-      rowDragRef.current.holdTimer = window.setTimeout(() => {
-        const d = rowDragRef.current;
-        if (!d || d.mode !== 'pending') return;
-        d.holdTimer = null;
-        d.mode = 'drag';
-        d.moved = true; // 浮かせたあとは、離しても「押した」にしない
-        setRowDrag({ id: d.id, dy: 0, from: d.from, to: d.from, pitch: d.pitch }); // 行を浮かせて、動かせることを見せる
-      }, HOLD_MS);
-    }
   };
   const moveRowDrag = (e: React.PointerEvent<HTMLElement>) => {
     const d = rowDragRef.current;
     const container = pickerItemsRef.current;
     if (!d || !container || e.pointerId !== d.pointerId) return;
-    d.lastY = pointerPos(e);
+    d.lastY = e.clientY;
     if (d.mode === 'pending') {
       if (Math.abs(d.lastY - d.startY) < DRAG_START_PX) return;
-      if (d.holdTimer !== null) clearTimeout(d.holdTimer);
-      d.holdTimer = null;
-      d.mode = d.holdToDrag ? 'scroll' : 'drag';
+      d.mode = 'drag';
     }
     d.moved = true;
-    if (d.mode === 'scroll') {
-      setScroll(container, Math.max(0, Math.min(d.maxScroll, d.startScroll - (d.lastY - d.startY))));
-      return;
-    }
     updateRowDrag();
     if (d.frame === null) d.frame = requestAnimationFrame(edgeScroll);
   };
@@ -474,26 +464,24 @@ export function ItemAdjustPanel({
     rowDragRef.current = null;
     setRowDrag(null);
     if (!d.moved) return;
-    // ドラッグ（や、なぞって流した）あとの click では、調整する服を切り替えない
+    // ドラッグのあとの click では、調整する服を切り替えない
     suppressClickRef.current = true;
     setTimeout(() => {
       suppressClickRef.current = false;
     }, 0);
     if (!commit || d.mode !== 'drag' || d.to === d.from) return;
-    // 一覧は上が手前。reorderLayer は、動かす服を抜いた一覧を下から数える
-    const others = d.slots.length - 1;
-    applyLayerChanges(reorderLayer(current, d.id, others - d.to) ?? []);
+    // d.to は、動かす服を抜いた一覧（上から、見えている行だけ）の中の番号と同じ
+    applyLayerChanges(reorderShown(current, d.id, d.to, hiddenIds) ?? []);
   };
   // 画面を閉じるとき・別の服に切り替わるときは、タイマーを止める
   useEffect(() => () => stopRowDragTimers(), []);
   // 行の見た目: 動かしている行は指に付いていき、ほかの行は場所をあける。index は一覧の上からの番号（ドールの行も数える）
   const rowStyle = (index: number): React.CSSProperties | undefined => {
     if (!rowDrag) return undefined;
-    const translate = horizontal ? 'translateX' : 'translateY';
-    if (index === rowDrag.from) return { transform: `${translate}(${rowDrag.dy}px)` };
+    if (index === rowDrag.from) return { transform: `translateY(${rowDrag.dy}px)` };
     const order = index < rowDrag.from ? index : index - 1; // ほかの行の中での番号
     const next = order < rowDrag.to ? order : order + 1; // 入れたあとの番号
-    return next === index ? undefined : { transform: `${translate}(${(next - index) * rowDrag.pitch}px)` };
+    return next === index ? undefined : { transform: `translateY(${(next - index) * rowDrag.pitch}px)` };
   };
 
   // 枠の角の「拡大・回転」つまみ（シールの調整と同じ操作）
@@ -974,42 +962,34 @@ export function ItemAdjustPanel({
           <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={!canMove(1)} title="まえへ" aria-label="まえへ" data-testid="layer-front">
             ▲
           </button>
-          <div ref={pickerItemsRef} className={`item-adjust-picker-items${rowDrag ? ' sorting' : ''}`} data-testid="adjust-picker-items">
-            {(() => {
-              const upper = stack.filter((i) => !isBehindDoll(i)).reverse();
-              const lower = stack.filter(isBehindDoll).reverse();
-              // 一覧の上からの番号（ドールの行も数える）。ドラッグ中の見た目に使う
-              const row = (i: EquippedItem, index: number) => (
+          <div ref={pickerItemsRef} className={`item-adjust-picker-items${rowDrag ? ' sorting' : ''}`} data-testid="adjust-picker-items" data-overflow={overflow ? 'true' : 'false'}>
+            {shownRows.map((i, index) =>
+              i === null ? (
+                <div key="doll" className="item-adjust-picker-doll" style={rowStyle(index)} title="ドール（これより下は、ドールのうしろ）" data-testid="adjust-picker-doll">
+                  {doll && <img src={doll.bodyImageUrl} alt="ドール" draggable={false} />}
+                </div>
+              ) : (
                 <button
                   key={i.id}
                   className={[i.id === item.id ? 'on' : '', rowDrag?.id === i.id ? 'dragging' : ''].filter(Boolean).join(' ')}
-                  style={rowStyle(index)}
+                  // 指でつかめない行は、なぞると一覧が流れる（縦だけ）
+                  style={{ ...rowStyle(index), touchAction: touchDraggable(i.id) ? 'none' : 'pan-y' }}
                   onClick={() => switchTo(i.id)}
                   onPointerDown={(e) => startRowDrag(e, i.id)}
                   onPointerMove={moveRowDrag}
                   onPointerUp={(e) => endRowDrag(e, true)}
                   onPointerCancel={(e) => endRowDrag(e, false)}
-                  onContextMenu={(e) => e.preventDefault()} // 長押しのメニューを出さない（並べ替えの長押しと重なる）
+                  onContextMenu={(e) => e.preventDefault()} // 長押しのメニューを出さない
                   title={i.name}
                   data-dragging={rowDrag?.id === i.id ? 'true' : undefined}
                   data-testid="adjust-picker-item"
                 >
                   <img src={i.thumbnailUrl || i.imageUrl} alt={i.name} draggable={false} />
+                  {/* 選んでいる服: つかんで上下に動かせる印 */}
+                  {i.id === item.id && <span className="item-adjust-picker-grip" aria-hidden="true">⇅</span>}
                 </button>
-              );
-              const dollIndex = upper.length;
-              return (
-                <>
-                  {upper.map((i, n) => row(i, n))}
-                  {doll && (
-                    <div className="item-adjust-picker-doll" style={rowStyle(dollIndex)} title="ドール（これより下は、ドールのうしろ）" data-testid="adjust-picker-doll">
-                      <img src={doll.bodyImageUrl} alt="ドール" draggable={false} />
-                    </div>
-                  )}
-                  {lower.map((i, n) => row(i, dollIndex + (doll ? 1 : 0) + n))}
-                </>
-              );
-            })()}
+              ),
+            )}
           </div>
           <button className="item-adjust-layer-btn" onClick={() => moveLayer(-1)} disabled={!canMove(-1)} title="うしろへ" aria-label="うしろへ" data-testid="layer-back">
             ▼

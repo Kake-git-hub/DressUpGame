@@ -12,6 +12,8 @@ import type { MenuSet } from './menuSets';
 interface DressUpMenuProps {
   items: ClothingItemData[];
   onItemDrop: (item: ClothingItemData) => void;
+  // 着ている服のタイルをタップ（ほとんど動かさずに離す）したとき。脱がせる（セットは、パーツを全部）
+  onItemRemove?: (items: ClothingItemData[]) => void;
   equippedItems: ClothingItemData[];
   dolls: DollData[];
   currentDollId: string;
@@ -42,6 +44,7 @@ const SET_LABEL = 'セット';
 export function DressUpMenu({
   items,
   onItemDrop,
+  onItemRemove,
   equippedItems,
   dolls,
   currentDollId,
@@ -135,6 +138,7 @@ export function DressUpMenu({
         itemRows={itemRows}
         itemTile={itemTile}
         onItemDrop={onItemDrop}
+        onItemRemove={onItemRemove}
         dolls={dolls}
         currentDollId={currentDollId}
         onDollChange={onDollChange}
@@ -212,7 +216,7 @@ export function DressUpMenu({
           <ScrollList>
             <div style={styles.scrollContent}>
               {sets.map((set) => (
-                <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={dropSet} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} />
+                <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={dropSet} onRemove={onItemRemove} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} />
               ))}
             </div>
           </ScrollList>
@@ -243,6 +247,7 @@ export function DressUpMenu({
                   item={item}
                   isEquipped={equippedIds.has(item.id)}
                   onDrop={onItemDrop}
+                  onRemove={onItemRemove}
                   dropTargetId={dropTargetId}
                   onDragMove={onDragMove}
                   onDragEnd={onDragEnd}
@@ -381,6 +386,7 @@ interface PortraitMenuProps {
   itemRows: number;
   itemTile: number;
   onItemDrop: (item: ClothingItemData) => void;
+  onItemRemove?: (items: ClothingItemData[]) => void;
   dolls: DollData[];
   currentDollId: string;
   onDollChange: (dollId: string) => void;
@@ -404,6 +410,7 @@ function PortraitMenu({
   itemRows,
   itemTile,
   onItemDrop,
+  onItemRemove,
   dolls,
   currentDollId,
   onDollChange,
@@ -515,7 +522,7 @@ function PortraitMenu({
           </>
         ) : selected === SET_CATEGORY ? (
           sets.map((set) => (
-            <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={onSetDrop} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} size={itemTile} scrollRow />
+            <DraggableSet key={set.id} set={set} isWorn={isSetWorn(set)} onDrop={onSetDrop} onRemove={onItemRemove} dropTargetId={dropTargetId} onDragMove={onDragMove} onDragEnd={onDragEnd} size={itemTile} scrollRow />
           ))
         ) : (
           items.map((item) => (
@@ -524,6 +531,7 @@ function PortraitMenu({
               item={item}
               isEquipped={equippedIds.has(item.id)}
               onDrop={onItemDrop}
+              onRemove={onItemRemove}
               dropTargetId={dropTargetId}
               onDragMove={onDragMove}
               onDragEnd={onDragEnd}
@@ -541,6 +549,7 @@ interface DraggableItemProps {
   item: ClothingItemData;
   isEquipped: boolean;
   onDrop: (item: ClothingItemData) => void;
+  onRemove?: (items: ClothingItemData[]) => void; // 着ているときにタップすると脱がせる
   dropTargetId: string;
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
@@ -586,6 +595,8 @@ function useTileDrag(options: {
   menuSelector: string;
   tapApplies: boolean;
   onDrop: () => void;
+  onTap?: () => void; // タップ（ほぼ移動なし）したとき（tapApplies でないとき）
+
   onMove?: (position: Position) => void;
   onEnd?: () => void;
 }) {
@@ -626,6 +637,7 @@ function useTileDrag(options: {
       // タップ（ほぼ移動なし）
       if (movedDistance.current < 10) {
         if (options.tapApplies) options.onDrop();
+        else options.onTap?.();
         return;
       }
       // メニュー領域上で指を離した場合は何もしない（キャンバスが背面にあっても誤判定を防ぐ）
@@ -648,13 +660,14 @@ function useTileDrag(options: {
 const BROKEN_ITEM = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="40">?</text></svg>';
 const BROKEN_BACKGROUND = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="20">🖼️</text></svg>';
 
-const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, dropTargetId, onDragMove, onDragEnd, size, scrollRow = false }: DraggableItemProps) {
+const DraggableItem = memo(function DraggableItem({ item, isEquipped, onDrop, onRemove, dropTargetId, onDragMove, onDragEnd, size, scrollRow = false }: DraggableItemProps) {
   const drag = useTileDrag({
     scrollRow,
     dropTargetId,
     menuSelector: '.palette-section',
-    tapApplies: false, // タップ（ほぼ移動なし）は装着しない
+    tapApplies: false, // タップ（ほぼ移動なし）は装着しない。着ている服なら、脱がせる
     onDrop: () => onDrop(item),
+    onTap: isEquipped && onRemove ? () => onRemove([item]) : undefined,
     onMove: onDragMove ? (position) => onDragMove(item, position) : undefined,
     onEnd: onDragEnd,
   });
@@ -693,6 +706,7 @@ const DraggableSet = memo(function DraggableSet({
   set,
   isWorn,
   onDrop,
+  onRemove,
   dropTargetId,
   onDragMove,
   onDragEnd,
@@ -702,6 +716,7 @@ const DraggableSet = memo(function DraggableSet({
   set: MenuSet;
   isWorn: boolean; // パーツを全部着ている
   onDrop: (items: ClothingItemData[]) => void;
+  onRemove?: (items: ClothingItemData[]) => void; // 全部着ているときにタップすると、パーツを全部脱がせる
   dropTargetId: string;
   onDragMove?: (item: ClothingItemData, position: Position) => void;
   onDragEnd?: () => void;
@@ -714,6 +729,7 @@ const DraggableSet = memo(function DraggableSet({
     menuSelector: '.palette-section',
     tapApplies: false,
     onDrop: () => onDrop(set.items),
+    onTap: isWorn && onRemove ? () => onRemove(set.items) : undefined,
     // 指に付いてくる絵は、先頭のパーツ
     onMove: onDragMove && set.items[0] ? (position) => onDragMove(set.items[0], position) : undefined,
     onEnd: onDragEnd,

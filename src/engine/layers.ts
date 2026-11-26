@@ -125,3 +125,18 @@ export function reorderLayer(items: EquippedItem[], id: string, index: number): 
   const step = (end - lo) / (tied.length + 2);
   return [change(id, lo + step), ...tied.map((rowId, i) => change(rowId, lo + step * (i + 2)))];
 }
+
+/**
+ * 一覧に出さない服（hidden。対のうしろがみ）を数えずに並べ替える。
+ * to は、一覧に出ている行（ドールの行も数える。動かす服は抜く）の上からの番号（0 = いちばん手前）。
+ * 入れる所のすぐ上に見えている行の、すぐ下に入れる（見えない服をはさんでいても、見えている並びのとおりになる）。
+ * 変えるべき layerAdjust を返す（reorderLayer と同じ）
+ */
+export function reorderShown(items: EquippedItem[], id: string, to: number, hidden: ReadonlySet<string>): LayerChange[] | null {
+  if (!items.some((i) => i.id === id)) return null;
+  const others = layerRows(items).reverse().filter((r) => r.id !== id); // 上から
+  const shown = others.filter((r) => r.id === null || !hidden.has(r.id));
+  const at = Math.max(0, Math.min(shown.length, Math.round(to)));
+  const top = at === 0 ? 0 : others.indexOf(shown[at - 1]) + 1;
+  return reorderLayer(items, id, others.length - top);
+}
