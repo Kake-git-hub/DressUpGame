@@ -5,6 +5,7 @@
  * 「読んで、変えて、書く」が途中で割り込まれてはいけない操作（チケットを引く・進み具合を書き換える）は、
  * この形の 1 つの操作にまとめてある（本物は、取り引きで行う）。
  */
+import type { ItemFit } from '../../src/engine/fit.ts';
 import type { Box, ManifestItem } from '../../src/content/manifest.ts';
 
 export type CloudErrorCode = 'no-tickets' | 'limit' | 'refused' | 'unknown';
@@ -126,6 +127,7 @@ export interface ItemDoc {
   order?: number; // 並び順（大きいほど先。無ければ createdAt）
   updatedAt?: number; // 名前・色・並び順を最後に変えた時刻（無ければ createdAt）
   notes?: string[]; // 検品で気づいたこと（注意あり）
+  fit?: ItemFit; // はじめの位置（クローゼットで決める。無ければ、もとの位置）
 }
 
 // 交換（trades/{id}）。a = 出した人、b = 読み取った人。code = 読み取りの印、codeAt = 印を出した時刻

@@ -2,6 +2,7 @@
  * 着せ替え状態を管理するカスタムフック
  * Custom hook for managing dress-up state
  */
+import { fitAdjustment } from '../engine/fit';
 import { useState, useCallback, useMemo } from 'react';
 import type { ClothingItemData, ClothingType, DressUpState, EquippedItem } from '../types';
 import { sortByLayer } from '../engine/layers';
@@ -92,7 +93,8 @@ export function useDressUp(
       const kept = prev.equippedItems.filter((e) => !replaces(e, item) && !orphans.has(e.id) && !(back && replaces(e, back)));
 
       // うしろがみを先に、前髪を後に（「最後に着た服」は前髪）
-      const added = [...(back ? [back] : []), item].map((x, i): EquippedItem => ({ ...x, equipOrder: prev.equipCounter + i }));
+      // 自分の服に「はじめの位置」があれば、そこから始める
+      const added = [...(back ? [back] : []), item].map((x, i): EquippedItem => ({ ...x, equipOrder: prev.equipCounter + i, ...fitAdjustment(x.defaultFit) }));
 
       return {
         ...prev,

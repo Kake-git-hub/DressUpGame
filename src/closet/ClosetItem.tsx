@@ -22,14 +22,21 @@ interface Props {
   onChanged: () => Promise<void>; // 端末の控えを変えた（一覧とメニューを読み直す）
   onGone: () => void; // この服が、もう無かった（ほかの端末で消された）
   onClose: () => void;
+  // はじめの位置: 使えるか（null = 確かめ中、false = サーバーが古い）と、決める画面を開く
+  fitReady?: boolean | null;
+  onEditFit?: () => void;
 }
 
 // 色のスライダーを動かし終えてから、保存するまでの間（動かしている間は、保存しない）
 const HUE_SAVE_MS = 400;
 const stageSize = () => Math.max(140, Math.min(260, Math.floor(Math.min(window.innerWidth * 0.5, window.innerHeight * 0.36))));
-const mergeInfo = (item: MyItem, info: MyItemInfo): MyItem => ({ ...item, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes });
+export const mergeInfo = (item: MyItem, info: MyItemInfo): MyItem => {
+  const { fit: _old, ...rest } = item;
+  void _old;
+  return { ...rest, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes, ...(info.fit ? { fit: info.fit } : {}) };
+};
 
-export function ClosetItem({ item, doll, group, online, backend, library, onChanged, onGone, onClose }: Props) {
+export function ClosetItem({ item, doll, group, online, backend, library, onChanged, onGone, onClose, fitReady = null, onEditFit }: Props) {
   const [name, setName] = useState(item.item.name);
   const [hue, setHue] = useState(item.hue);
   const [busy, setBusy] = useState(false);
@@ -131,6 +138,13 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
       await onChanged();
     });
   };
+  // はじめの位置を、もとにもどす
+  const resetFit = () =>
+    apply(async () => {
+      const info = await backend.updateMyItem(item.id, { fit: null });
+      await library.put(mergeInfo(latest.current, info));
+      await onChanged();
+    });
   const remove = () =>
     apply(async () => {
       await backend.deleteMyItem(item.id);
@@ -146,7 +160,7 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
     <div className="closet-sheet-backdrop" data-testid="closet-item-sheet" onClick={onClose}>
       <div className="closet-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="closet-sheet-stage">
-          <Stage doll={doll} layers={layers} size={size} testId="closet-stage" />
+          <Stage doll={doll} layers={layers} size={size} testId="closet-stage" fit={item.fit} />
         </div>
         <div className="closet-sheet-form">
           {!online && (
@@ -200,6 +214,26 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
               </button>
             </div>
           </div>
+          {onEditFit && doll && (
+            <div className="closet-field">
+              <span>はじめの いち</span>
+              <div className="closet-row">
+                <button type="button" disabled={locked || fitReady !== true} onClick={onEditFit} data-testid="closet-fit">
+                  いちを きめる
+                </button>
+                {item.fit && (
+                  <button type="button" disabled={locked || fitReady !== true} onClick={() => void resetFit()} data-testid="closet-fit-reset">
+                    もとに もどす
+                  </button>
+                )}
+              </div>
+              {online && fitReady === false && (
+                <p className="closet-note" data-testid="closet-fit-old">
+                  いちを きめるのは、まだ つかえません（サーバーが ふるい はんです）
+                </p>
+              )}
+            </div>
+          )}
           {item.set && <p className="closet-set">セット「{item.set.name}」</p>}
           {error && (
             <p className="closet-error" data-testid="closet-error">

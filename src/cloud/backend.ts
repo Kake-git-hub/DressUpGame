@@ -4,6 +4,7 @@
  * アプリは、裏側をこの形としてだけ知る。本物は Firebase（段階 E3）、テストと開発は端末の中だけで動く偽物（fakeBackend.ts）。
  * チケットの残り・生成・保存は、どれも裏側が決める（アプリの側では増減しない）。
  */
+import type { ItemFit } from '../engine/fit';
 import type { ManifestItem } from '../content/manifest';
 import type { StudioAccount } from './account';
 import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireTrade } from './wire';
@@ -61,6 +62,7 @@ export interface MyItem {
   order: number; // 並び順（大きいほど先。作ったときは createdAt）
   updatedAt: number; // 名前・色・並び順を最後に変えた時刻
   notes: string[]; // 検品で気づいたこと（注意あり）
+  fit?: ItemFit; // はじめの位置（クローゼットで決める。無ければ、もとの位置）
 }
 // 一覧に載る中身（絵は含まない）
 export type MyItemInfo = Omit<MyItem, 'files' | 'owner'>;
@@ -129,8 +131,11 @@ export interface StudioBackend {
   listMyItems(): Promise<MyItemInfo[]>;
   // 自分の服 1 点を、絵ごと取る
   fetchMyItem(id: string): Promise<MyItem>;
-  // 名前・既定の色を変える
-  updateMyItem(id: string, change: { name?: string; hue?: number }): Promise<MyItemInfo>;
+  // 名前・既定の色・はじめの位置を変える（fit: null = もとの位置にもどす）。
+  // fit は、サーバーが FIT_API 未満なら BackendError('old-server')
+  updateMyItem(id: string, change: { name?: string; hue?: number; fit?: ItemFit | null }): Promise<MyItemInfo>;
+  // はじめの位置を使えるか（つないだサーバーの版が FIT_API 以上か）
+  canFit(): Promise<boolean>;
   // 並び順を変える（ids の先頭ほど、先に並ぶ）。返り値は、変えた服
   orderMyItems(ids: string[]): Promise<MyItemInfo[]>;
   deleteMyItem(id: string): Promise<void>;

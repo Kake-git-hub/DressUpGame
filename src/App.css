@@ -1520,3 +1520,56 @@ textarea {
 .home-back-button:active {
   transform: scale(0.9);
 }
+
+/* はじめの位置を決める画面（クローゼットから開く。クローゼットより手前） */
+.app.fit-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: linear-gradient(180deg, #fff5fa 0%, #fde8f3 100%);
+}
+.fit-editor-head {
+  position: fixed;
+  top: calc(var(--top-inset) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 320;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 16px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.fit-editor-title {
+  white-space: nowrap;
+  font-weight: bold;
+  color: #a05a8a;
+}
+.fit-editor-cancel {
+  white-space: nowrap;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 2px solid #e9b6d3;
+  border-radius: 18px;
+  background: #fff;
+  color: #a05a8a;
+  font-weight: bold;
+  cursor: pointer;
+}
+.fit-editor-note {
+  position: fixed;
+  top: calc(var(--top-inset) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 320;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: #fff;
+  color: #6a3d63;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.fit-editor-error {
+  color: #c0392b;
+}

@@ -8,6 +8,8 @@ import type { CSSProperties } from 'react';
 import { HueCanvas } from '../components/HueCanvas';
 import type { Box } from '../content/manifest';
 import type { DollData } from '../types';
+import type { ItemFit } from '../engine/fit';
+import { isPlainFit } from '../engine/fit';
 import './stage.css';
 
 // 重ねる絵 1 枚。位置は、その絵のキャンバス（ドールのキャンバスと中心が同じ）の上
@@ -49,9 +51,10 @@ interface StageProps {
   layers?: StageLayer[];
   size: number; // 枠の幅（px）
   testId?: string;
+  fit?: ItemFit; // 服（layers 全部）の、はじめの位置。軸は、手前の絵（無ければ最初の絵）のまんなか
 }
 
-export function Stage({ doll, layers = [], size, testId }: StageProps) {
+export function Stage({ doll, layers = [], size, testId, fit }: StageProps) {
   // ドールが無いときは、服のキャンバスを枠にする
   const canvasW = doll?.canvasW ?? layers[0]?.canvasW ?? 1;
   const canvasH = doll?.canvasH ?? layers[0]?.canvasH ?? 1;
@@ -64,11 +67,24 @@ export function Stage({ doll, layers = [], size, testId }: StageProps) {
   };
   const draw = (layer: StageLayer) =>
     layer.hue ? <HueCanvas key={layer.key} src={layer.url} hue={layer.hue} style={place(layer)} /> : <img key={layer.key} src={layer.url} alt="" draggable={false} data-preview="" style={place(layer)} />;
+  // はじめの位置: 服の絵を、まとめて動かす・大きくする・回す（ドールは動かさない）
+  const pivotLayer = layers.find((layer) => !layer.behind) ?? layers[0];
+  const moved = (children: React.ReactNode[]) => {
+    if (!fit || isPlainFit(fit) || !pivotLayer || children.length === 0) return children;
+    const p = place(pivotLayer);
+    const ox = Number(p.left) + Number(p.width) / 2;
+    const oy = Number(p.top) + Number(p.height) / 2;
+    return (
+      <div data-fit="" style={{ position: 'absolute', inset: 0, transformOrigin: `${ox}px ${oy}px`, transform: `translate(${fit.x * k}px, ${fit.y * k}px) rotate(${fit.rotation}deg) scale(${fit.scale})` }}>
+        {children}
+      </div>
+    );
+  };
   return (
     <div className="studio-stage" data-testid={testId} style={{ width: size, height: (canvasH / canvasW) * size }}>
-      {layers.filter((layer) => layer.behind).map(draw)}
+      {moved(layers.filter((layer) => layer.behind).map(draw))}
       {doll && <img src={doll.bodyImageUrl} alt="" draggable={false} style={{ position: 'absolute', left: doll.box.x * k, top: doll.box.y * k, width: doll.box.w * k, height: doll.box.h * k }} />}
-      {layers.filter((layer) => !layer.behind).map(draw)}
+      {moved(layers.filter((layer) => !layer.behind).map(draw))}
     </div>
   );
 }

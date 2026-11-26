@@ -24,6 +24,13 @@ export function toCanvasOffsets<T extends Offsets>(item: T, unit: number): T {
   return usable(unit) ? scaleOffsets(item, unit) : item;
 }
 
+// はじめの位置（ドールの絵の px）も、描画・調整画面に渡すときは、キャンバスの px に直す
+export function toCanvasItem<T extends Offsets & { defaultFit?: { x: number; y: number; scale: number; rotation: number } }>(item: T, unit: number): T {
+  const next = toCanvasOffsets(item, unit);
+  if (!next.defaultFit || !usable(unit)) return next;
+  return { ...next, defaultFit: { ...next.defaultFit, x: next.defaultFit.x * unit, y: next.defaultFit.y * unit } };
+}
+
 // 調整画面から受け取った値（キャンバスの px）→ 状態（ドールの絵の px）
 export function toDollOffsets<T extends Offsets>(adjustment: T, unit: number): T {
   return usable(unit) ? scaleOffsets(adjustment, 1 / unit) : adjustment;

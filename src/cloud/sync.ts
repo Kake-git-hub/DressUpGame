@@ -53,7 +53,9 @@ export async function syncLibrary(backend: SyncSource, library: Library, userCod
     const info = byId.get(item.id);
     if (!info || info.updatedAt === item.updatedAt) continue;
     try {
-      await library.put({ ...item, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes });
+      const { fit: _old, ...rest } = item;
+      void _old;
+      await library.put({ ...rest, item: { ...item.item, name: info.item.name }, hue: info.hue, order: info.order, updatedAt: info.updatedAt, notes: info.notes, ...(info.fit ? { fit: info.fit } : {}) });
       result.updated++;
     } catch {
       result.failed++;

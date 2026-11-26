@@ -13,7 +13,7 @@ import { useDressUp } from './hooks/useDressUp';
 import type { ItemAdjustment } from './hooks/useDressUp';
 import { sheetsAbove } from './engine/layers';
 import { adjustBaseId, adjustTargetId, partnerOf } from './engine/pairs';
-import { stageUnit, toCanvasOffsets, toDollOffsets } from './engine/units';
+import { stageUnit, toDollOffsets, toCanvasItem } from './engine/units';
 import { computeLayout } from './components/layout';
 import { Guide } from './guide/Guide';
 import type { GuideStep } from './guide/Guide';
@@ -511,7 +511,7 @@ function App() {
   // 服の位置の調整値は、状態では「ドールの絵の px」。描画と調整画面には「キャンバスの px」に直して渡す
   // （画面の大きさや向きが変わっても、ドールに対して同じ位置になる）
   const unit = stageUnit(canvasSize.height);
-  const canvasItems = useMemo(() => equippedItems.map((item) => toCanvasOffsets(item, unit)), [equippedItems, unit]);
+  const canvasItems = useMemo(() => equippedItems.map((item) => toCanvasItem(item, unit)), [equippedItems, unit]);
 
   // アイテム調整モード（adjustingItemId === null の場合はドール調整モード）
   const [isAdjustingItem, setIsAdjustingItem] = useState(false);
@@ -916,6 +916,8 @@ function App() {
             currentDollId={currentDoll?.id ?? ''}
             onClose={() => setClosetOpen(false)}
             onLibraryChanged={refreshMyItems}
+            clothing={allClothing}
+            layout={layout}
           />
         ) : (
           <div className="studio-loading">よみこみちゅう…</div>

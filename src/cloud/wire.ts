@@ -4,6 +4,7 @@
  * アプリは、関数 `studio` に { op: '…', … } を渡して呼ぶ（中身は tools/cloud/api.ts）。
  * 絵は、base64 の文字列で受け取る（置き場のパスや、AI への指示は、アプリには渡らない）。
  */
+import type { ItemFit } from '../engine/fit';
 import type { ManifestItem } from '../content/manifest';
 import type { SetRef, StudioUser } from './backend';
 
@@ -13,7 +14,8 @@ import type { SetRef, StudioUser } from './backend';
 //   4 = 交換（op: 'tradeOpen' など。2 台で、服を 1 点ずつ入れ替える）
 //   5 = チケットを配る（op: 'giveTickets'。管理者だけ）
 //   6 = 支払い（op: 'shop'・'checkout'・'purchase'・'shopAck'。チケットを買う）と、ようこそのチケット
-export const SERVER_API = 6;
+//   7 = 自分の服の「はじめの位置」（op: 'updateItem' の fit、服の fit）
+export const SERVER_API = 7;
 // アプリが要る、いちばん古いサーバーの版（これより古いと、「サーバーが古い版です」で、作れない）
 export const MIN_API = 2;
 // 引き継ぎに要るサーバーの版（これより古いサーバーでは、合わせることだけが、できない）
@@ -24,6 +26,8 @@ export const TRADE_API = 4;
 export const GIFT_API = 5;
 // 支払い（チケットを買う）に要るサーバーの版
 export const PAY_API = 6;
+// はじめの位置（クローゼットで決める）に要るサーバーの版
+export const FIT_API = 7;
 
 // 古いサーバーの返事には、free・lots が無い（remoteBackend が、全部を配った分として補う）
 export type WireUser = Omit<StudioUser, 'free' | 'lots'> & Partial<Pick<StudioUser, 'free' | 'lots'>>;
@@ -59,6 +63,7 @@ export interface WireItem {
   order: number; // 並び順（大きいほど先）
   updatedAt: number; // 名前・色・並び順を最後に変えた時刻
   notes: string[]; // 検品で気づいたこと
+  fit?: ItemFit; // はじめの位置（無ければ、もとの位置。版 7 から）
 }
 
 // 絵の名前（item の中の file・thumb など）→ base64

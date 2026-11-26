@@ -2,6 +2,7 @@
  * 着せ替えゲームの型定義
  * Types for the dress-up game
  */
+import type { ItemFit } from '../engine/fit';
 
 import type { Box } from '../pipeline/alpha';
 
@@ -270,8 +271,10 @@ export interface ClothingItemData {
   mine?: boolean;
   // 色（色スライダーの角度。-180〜180）。着る前の服では、既定の色（クローゼットで決めた色）。着たあとは、調整画面で変えた色
   colorHue?: number;
-  // 既定の色。調整画面の「色をもどす」は、ここへ戻す（無ければ 0 = もとの色）
+  // 既定の色。調整画面の「リセット」は、ここへ戻す（無ければ 0 = もとの色）
   defaultHue?: number;
+  // はじめの位置（自分の服。クローゼットで決める。位置はドールの絵の px）。着せると、ここから始まる。「リセット」もここへ戻す
+  defaultFit?: ItemFit;
   // 拡大・回転の軸（元キャンバスの中心からの px）。無ければ服そのものの中心。うしろがみは、前髪の中心を軸にする
   pivot?: Position;
 }

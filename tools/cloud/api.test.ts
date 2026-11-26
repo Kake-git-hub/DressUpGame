@@ -95,7 +95,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(6); // 6 = 支払いもできるサーバー（5 = チケットを配る、4 = 交換、3 = 引き継ぎ）
+    expect(api).toBe(7); // 7 = はじめの位置も使えるサーバー（6 = 支払い、5 = チケットを配る、4 = 交換、3 = 引き継ぎ）
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -125,6 +125,10 @@ describe('アプリからの呼び出し', () => {
     const changed = await call<{ item: ItemView }>('u1', { op: 'updateItem', id: kept.item.id, name: 'ふく', hue: 90 });
     expect(changed.item).toMatchObject({ item: { name: 'ふく' }, hue: 90, updatedAt: clock });
     kept.item = changed.item;
+    // はじめの位置
+    const fitted = await call<{ item: ItemView }>('u1', { op: 'updateItem', id: kept.item.id, fit: { x: 10, y: -5, scale: 1.5, rotation: 20 } });
+    expect(fitted.item.fit).toEqual({ x: 10, y: -5, scale: 1.5, rotation: 20 });
+    kept.item = fitted.item;
     const ordered = await call<{ items: ItemView[] }>('u1', { op: 'orderItems', ids: [kept.item.id] });
     expect(ordered.items.map((i) => i.id)).toEqual([kept.item.id]);
     kept.item = ordered.items[0];
@@ -149,7 +153,7 @@ describe('アプリからの呼び出し', () => {
   }, 60_000);
 
   it('形の違う呼び出しは断る（落ちない）', async () => {
-    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'discard', jobId: 'a', index: 0 }, { op: 'preview', jobId: 'a', index: 0 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }, { op: 'ack' }, { op: 'updateItem', id: 'my:a', hue: '90' }, { op: 'updateItem', id: 'my:a', name: 5 }, { op: 'updateItem', id: 'my:a' }, { op: 'orderItems', ids: 'my:a' }, { op: 'orderItems', ids: [1, 2] }, { op: 'orderItems', ids: Array.from({ length: 501 }, (_, i) => `my:${i}`) }]) {
+    for (const data of [null, 'x', {}, { op: 'nope' }, { op: 'job' }, { op: 'job', jobId: 5 }, { op: 'keep', jobId: 'a', index: 0 }, { op: 'discard', jobId: 'a', index: 0 }, { op: 'preview', jobId: 'a', index: 0 }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: { kind: 'other' } }, { op: 'startJob', dollId, theme: 'x', styleId: 'anime', target: null }, { op: 'itemFiles', id: 'x'.repeat(300) }, { op: 'ack' }, { op: 'updateItem', id: 'my:a', hue: '90' }, { op: 'updateItem', id: 'my:a', name: 5 },  { op: 'updateItem', id: 'my:a' }, { op: 'updateItem', id: 'my:a', fit: { x: 1, y: 2, scale: 'big', rotation: 0 } }, { op: 'updateItem', id: 'my:a', fit: 5 }, { op: 'orderItems', ids: 'my:a' }, { op: 'orderItems', ids: [1, 2] }, { op: 'orderItems', ids: Array.from({ length: 501 }, (_, i) => `my:${i}`) }]) {
       expect(codeOf(await call('u1', data).catch((e) => e))).toBe('refused');
     }
   });
@@ -187,11 +191,11 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
   const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
 
   it('signIn の返事の api は 6。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
-    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(6);
-    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(6);
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(7);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(7);
     expect((await store.getUser('a1'))!.named).toBeUndefined();
     const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
-    expect(answer).toMatchObject({ api: 6, user: { tickets: 0, admin: false } });
+    expect(answer).toMatchObject({ api: 7, user: { tickets: 0, admin: false } });
     expect((await store.getUser('g1'))!.named).toBe(true);
   });
 
@@ -232,7 +236,7 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     store.moveTickets = async () => {
       throw new Error('store is down');
     };
-    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(6);
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(7);
   });
 
   it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {

@@ -6,6 +6,8 @@
  * 読み込み直したとき、時刻を過ぎていた分は、できあがっている（「閉じていても、サーバーが進める」を確かめられる）。
  * `?studio=fake` で開いたときと、E2E で使う。本物（Firebase）と同じ形（StudioBackend）。
  */
+import { isPlainFit, normalizeFit, sameFit } from '../engine/fit';
+import type { ItemFit } from '../engine/fit';
 import { browserAccountEnv, createAccount } from './account';
 import { BackendError, HUE_MAX, HUE_MIN, GIFT_MAX, NAME_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
@@ -29,6 +31,7 @@ export interface FakeOptions {
   stashed?: boolean; // false なら、「もう使われている」と断られたときの証明が、返らなかったことにする
   silentFail?: boolean; // 画面なしの行き来（prompt=none）を、Google が interaction_required で断ったことにする
   noTrade?: boolean; // 交換が、サーバーが古い版のときの動き（old-server）
+  noFit?: boolean; // はじめの位置が、サーバーが古い版のときの動き（old-server）
   // 交換の「にせの あいて」
   partner?: {
     claimAfterMs?: number; // こちらが始めてから、あいてが読んで服を出すまで（既定 1500）
@@ -68,6 +71,7 @@ interface SavedItem {
   hue: number;
   order: number;
   updatedAt: number;
+  fit?: ItemFit;
 }
 // 交換 1 件。にせの あいては、時刻で動く（呼ばれたときに、過ぎた分を進める）
 interface FakeTrade {
@@ -385,6 +389,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     order: saved.order,
     updatedAt: saved.updatedAt,
     notes: [],
+    ...(saved.fit ? { fit: saved.fit } : {}),
   });
   const toMyItem = async (saved: SavedItem): Promise<MyItem> => {
     const blob = await makeImage(colorOf(saved.index));
@@ -572,11 +577,24 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       const saved = itemOf(id);
       const name = typeof change.name === 'string' ? change.name.trim().slice(0, NAME_MAX).trim() || saved.name : saved.name;
       const hue = typeof change.hue === 'number' && Number.isFinite(change.hue) ? Math.max(HUE_MIN, Math.min(HUE_MAX, Math.round(change.hue))) : saved.hue;
-      if (name !== saved.name || hue !== saved.hue) {
+      let fit = saved.fit;
+      if (change.fit !== undefined) {
+        if (options.noFit || options.oldServer) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+        const next = change.fit === null ? null : normalizeFit(change.fit);
+        if (next === undefined) throw new BackendError('refused', '呼び出しの形が正しくありません');
+        fit = next && !isPlainFit(next) ? next : undefined;
+      }
+      if (name !== saved.name || hue !== saved.hue || !sameFit(fit, saved.fit)) {
         Object.assign(saved, { name, hue, updatedAt: Date.now() });
+        if (fit) saved.fit = fit;
+        else delete saved.fit;
         save();
       }
       return toInfo(saved);
+    },
+    async canFit() {
+      online();
+      return !(options.noFit || options.oldServer);
     },
     async orderMyItems(ids) {
       online();

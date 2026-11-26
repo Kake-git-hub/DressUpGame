@@ -63,6 +63,8 @@ interface ItemAdjustPanelProps {
   doll?: DollData | null;
   // スマホの縦: ドールの下に「虫めがね」（ドールと服を大きくした窓）を出す。重なりの一覧は、その左に置く
   loupe?: boolean;
+  // はじめの位置を決める画面（クローゼットから開く）: 色の帯・重なりの一覧は出さない
+  fitMode?: boolean;
 }
 
 // タッチポイントの型
@@ -103,6 +105,7 @@ export function ItemAdjustPanel({
   onLayerChange,
   orientation = 'landscape',
   loupe = false,
+  fitMode = false,
 }: ItemAdjustPanelProps) {
   // ドール調整モードかどうか
   const isDollMode = item === null;
@@ -195,8 +198,9 @@ export function ItemAdjustPanel({
   const [rotation, setRotation] = useState(item?.adjustRotation ?? 0);
   const [layerAdjust, setLayerAdjust] = useState(item?.layerAdjust ?? 0);
   const [colorHue, setColorHue] = useState(item?.colorHue ?? 0);
-  // 「色をもどす」の戻す先: クローゼットで決めた既定の色（無ければ、もとの色）
+  // 「リセット」の戻す先: クローゼットで決めた既定の色・はじめの位置（無ければ、もとの色・位置）。位置はキャンバスの px
   const defaultHue = item?.defaultHue ?? 0;
+  const defaultFit = item?.defaultFit;
 
   // ドール調整用ローカルステート
   const [dollX, setDollX] = useState(dollTransform.x);
@@ -282,16 +286,16 @@ export function ItemAdjustPanel({
       setDollScale(DEFAULT_DOLL_TRANSFORM.scale);
     } else {
       // アイテムモード
-      setOffsetX(0);
-      setOffsetY(0);
-      setScale(1.0);
-      setRotation(0);
+      setOffsetX(defaultFit?.x ?? 0);
+      setOffsetY(defaultFit?.y ?? 0);
+      setScale(defaultFit?.scale ?? 1.0);
+      setRotation(defaultFit?.rotation ?? 0);
       setLayerAdjust(0);
       setColorHue(defaultHue);
       // 重なりの順番はその場でキャンバスに反映する
       onAdjustRef.current({ layerAdjust: 0 });
     }
-  }, [isDollMode, defaultHue]);
+  }, [isDollMode, defaultHue, defaultFit]);
 
   // 髪は、前髪と対のうしろがみを一緒に動かす: 位置・大きさ・向き・色は、対の相手にも同じ値を入れる（重なりの順番は別々）
   const partner = item ? partnerOf(equippedItems, item.id) : null;
@@ -895,7 +899,7 @@ export function ItemAdjustPanel({
   return (
     <div
       className="item-adjust-overlay"
-      data-mode={isDollMode ? 'doll' : 'item'}
+      data-mode={isDollMode ? 'doll' : fitMode ? 'fit' : 'item'}
       data-loupe={loupeBox ? 'true' : 'false'}
       // 一覧の行を動かしているあいだは、ほかの指（手のひら）で服を動かさない
       onTouchStart={(e) => (rowDragRef.current ? e.preventDefault() : handleTouchStart(e))}
@@ -1013,7 +1017,7 @@ export function ItemAdjustPanel({
           <span className="item-adjust-reset-label">リセット</span>
         </button>
         {/* 色相スライダー（アイテムモードのみ） */}
-        {!isDollMode && (
+        {!isDollMode && !fitMode && (
           <div 
             className="item-adjust-hue-slider"
             onTouchStart={(e) => e.stopPropagation()}
@@ -1039,7 +1043,7 @@ export function ItemAdjustPanel({
 
       {/* 着ている服とドール（重なりの順番。手前が上）。服を押すと、その服の調整に切り替える。
           上下のボタンで、調整中の服の重なりを前後に入れ替える。ドールより下へ動かすと、ドールの後ろに回る */}
-      {!isDollMode && item && (
+      {!isDollMode && item && !fitMode && (
         <div className="item-adjust-picker" ref={pickerRef} onTouchStart={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} data-testid="adjust-picker">
           <button className="item-adjust-layer-btn" onClick={() => moveLayer(1)} disabled={!canMove(1)} title="まえへ" aria-label="まえへ" data-testid="layer-front">
             ▲

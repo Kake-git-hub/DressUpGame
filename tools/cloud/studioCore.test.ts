@@ -974,6 +974,22 @@ describe('自分の服を直す', () => {
     clock += 5;
     expect((await updateItem(deps, 'u1', 'my:a', { hue: -180 })).updatedAt).toBe(before);
   });
+  it('はじめの位置: 覚える・範囲に収める・null（またはもとの位置）で消す。変わらなければ updatedAt は進まない', async () => {
+    await put('u1', 'my:a', 100);
+    clock += 5;
+    const fitted = await updateItem(deps, 'u1', 'my:a', { fit: { x: 12.345, y: -2000, scale: 9, rotation: 30 } });
+    expect(fitted.fit).toEqual({ x: 12.35, y: -1024, scale: 2.5, rotation: 30 });
+    expect(fitted.updatedAt).toBe(clock);
+    const before = fitted.updatedAt;
+    clock += 5;
+    expect((await updateItem(deps, 'u1', 'my:a', { fit: { x: 12.35, y: -1024, scale: 2.5, rotation: 30 } })).updatedAt).toBe(before);
+    expect((await updateItem(deps, 'u1', 'my:a', { fit: null })).fit).toBeUndefined();
+    await updateItem(deps, 'u1', 'my:a', { fit: { x: 1, y: 1, scale: 1, rotation: 0 } });
+    expect((await updateItem(deps, 'u1', 'my:a', { fit: { x: 0, y: 0, scale: 1, rotation: 0 } })).fit).toBeUndefined();
+    // 名前だけ変えても、はじめの位置は残る
+    await updateItem(deps, 'u1', 'my:a', { fit: { x: 5, y: 6, scale: 1.2, rotation: -10 } });
+    expect((await updateItem(deps, 'u1', 'my:a', { name: 'べつ' })).fit).toEqual({ x: 5, y: 6, scale: 1.2, rotation: -10 });
+  });
   it('ほかの利用者の服・無い服は refused', async () => {
     await put('u1', 'my:a', 100);
     expect(code(await updateItem(deps, 'u2', 'my:a', { name: 'x' }).catch((e) => e))).toBe('refused');
@@ -1361,6 +1377,17 @@ describe('交換', () => {
     expect(await store.getItem('ua', 'my:x-0-1')).toBeNull();
     expect(await store.getItem('ub', 'my:x-0-1')).toMatchObject({ order: clock, hue: 20 });
     expect((await store.getItem('ua', 'my:y-0-1'))?.set).toBeUndefined();
+  });
+  it('the starting position moves with the traded item', async () => {
+    await giver('ua', 'my:x-0-1', { fit: { x: 30, y: -12, scale: 1.4, rotation: 15 } });
+    await giver('ub', 'my:y-0-1');
+    const { tradeId: id, code } = await tradeOpen(deps, 'ua', 'my:x-0-1');
+    await tradeClaim(deps, 'ub', code);
+    await tradeJoin(deps, 'ub', id, 'my:y-0-1');
+    clock += 1000;
+    await tradeAccept(deps, 'ua', id);
+    await tradeAccept(deps, 'ub', id);
+    expect((await store.getItem('ub', 'my:x-0-1'))?.fit).toEqual({ x: 30, y: -12, scale: 1.4, rotation: 15 });
   });
   it('one accept does not move', async () => {
     const id = await joined();

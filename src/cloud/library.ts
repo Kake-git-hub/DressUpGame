@@ -6,6 +6,7 @@
  * 自分の服は、公開の服より先に並ぶ。
  * データベースの名前は、旧方式の片付け（legacyCleanup.ts）が消す `DressUpAssets` とは別にする。
  */
+import { isPlainFit } from '../engine/fit';
 import { itemToClothing } from '../content/loadContent';
 import type { LoadedContent } from '../content/loadContent';
 import type { ManifestImage } from '../content/manifest';
@@ -210,6 +211,8 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[], tint
           ...c,
           mine: true,
           ...(hue !== 0 ? { colorHue: hue, defaultHue: hue } : {}),
+          // はじめの位置（前髪・うしろがみの両方。位置・大きさ・向きは、対でそろえる）
+          ...(mine.fit && !isPlainFit(mine.fit) ? { defaultFit: mine.fit } : {}),
           // 色を付けるのは、メニューに出る絵（前髪・服）だけ。うしろがみは、メニューに出ない
           ...(tinted !== null && c.id === mine.item.id ? { thumbnailUrl: tinted } : {}),
         })),

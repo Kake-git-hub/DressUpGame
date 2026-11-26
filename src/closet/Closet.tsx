@@ -10,8 +10,11 @@ import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
 import { BlobImage } from '../cloud/Stage';
 import type { ManifestCategory } from '../content/manifest';
-import type { DollData } from '../types';
-import { ClosetItem } from './ClosetItem';
+import type { ClothingItemData, DollData } from '../types';
+import { ClosetItem, mergeInfo } from './ClosetItem';
+import { FitEditor } from '../components/FitEditor';
+import type { Layout } from '../components/layout';
+import type { ItemFit } from '../engine/fit';
 import { closetDolls, closetGroups } from './closetView';
 
 export interface ClosetProps {
@@ -22,6 +25,9 @@ export interface ClosetProps {
   currentDollId: string;
   onClose: () => void;
   onLibraryChanged: () => void | Promise<void>; // 端末の控えを変えた（ゲームのメニューに重ね直す）
+  // はじめの位置を決める画面に使う: ゲームの服（自分の服を重ねたもの）と、画面の配置
+  clothing?: ClothingItemData[];
+  layout?: Layout;
 }
 
 // 交換の画面（「こうかん」を押したときに読み込む。カメラの部品もここに入る）
@@ -29,7 +35,10 @@ const TradeRoot = lazy(() => import('../trade'));
 
 const NO_CATEGORIES: ManifestCategory[] = [];
 
-export function Closet({ session, library, dolls, categoriesByDoll, currentDollId, onClose, onLibraryChanged }: ClosetProps) {
+export function Closet({ session, library, dolls, categoriesByDoll, currentDollId, onClose, onLibraryChanged, clothing, layout }: ClosetProps) {
+  // はじめの位置: サーバーが使えるか（つながったら聞く）と、決めている服
+  const [fitReady, setFitReady] = useState<boolean | null>(null);
+  const [fitting, setFitting] = useState<MyItem | null>(null);
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const [items, setItems] = useState<MyItem[] | null>(null);
   const [chosenDoll, setChosenDoll] = useState<string | null>(null);
@@ -64,6 +73,28 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
   const labelOf = (forDoll: string, id: string) => categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id;
   // 作りかけの品目（どのドールの分も）
   const making = state.jobs.filter((job) => !job.done).flatMap((job) => job.candidates.filter((c) => c.status === 'waiting' || c.status === 'working').map((c) => ({ key: `${job.id}:${c.index}`, label: labelOf(job.dollId, c.categoryId) })));
+
+  useEffect(() => {
+    if (!online || fitReady !== null) return;
+    let alive = true;
+    session.backend.canFit().then(
+      (ok) => alive && setFitReady(ok),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [online, fitReady, session]);
+  // 決める画面に出す服（髪は、前髪とうしろがみ）
+  const fitParts = (mine: MyItem): ClothingItemData[] => (clothing ?? []).filter((c) => c.id === mine.item.id || c.frontItemId === mine.item.id);
+  const fitDoll = fitting ? dolls.find((doll) => doll.id === fitting.dollId) : undefined;
+  const saveFit = async (fit: ItemFit) => {
+    if (!fitting) return;
+    const info = await session.backend.updateMyItem(fitting.id, { fit });
+    await library.put(mergeInfo(fitting, info));
+    await changed();
+    setFitting(null);
+  };
 
   const changed = async () => {
     await reload();
@@ -174,7 +205,13 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
             void session.refresh().then(reload);
           }}
           onClose={() => setOpenId(null)}
+          fitReady={fitReady}
+          onEditFit={layout && fitParts(open).length > 0 ? () => setFitting(open) : undefined}
         />
+      )}
+
+      {fitting && fitDoll && layout && (
+        <FitEditor doll={fitDoll} parts={fitParts(fitting)} fit={fitting.fit} layout={layout} onSave={saveFit} onCancel={() => setFitting(null)} />
       )}
     </div>
   );

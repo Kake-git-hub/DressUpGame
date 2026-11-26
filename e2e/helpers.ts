@@ -27,6 +27,7 @@ export interface FakeOptions {
   loginFail?: string;
   googleTaken?: boolean;
   noTrade?: boolean;
+  noFit?: boolean;
   shop?: { open?: boolean; packs?: string };
   paySlowMs?: number;
   payResult?: 'paid' | 'cancel' | 'slow';

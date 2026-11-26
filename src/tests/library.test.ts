@@ -178,6 +178,15 @@ describe('自分の服を、公開の素材に重ねる', () => {
     expect(changed.clothing[0]).toMatchObject({ colorHue: -30, defaultHue: -30, thumbnailUrl: 'tinted:-30' });
   });
 
+  it('はじめの位置のある服は defaultFit が付く（髪は、うしろがみにも）。もとの位置なら付かない', async () => {
+    const fit = { x: 10, y: -20, scale: 1.2, rotation: 15 };
+    const hair = myItem('my:h', { fit, files: { image: blob('f'), thumb: blob('t'), back: blob('b') } }, { category: 'ヘア', back: image('back', { x: 350, y: 30, w: 300, h: 600 }) });
+    const merged = await mergeMyItems(content, [hair, myItem('my:plain', { fit: { x: 0, y: 0, scale: 1, rotation: 0 } })], async () => 'tinted');
+    expect(merged.clothing.find((c) => c.id === 'my:h')?.defaultFit).toEqual(fit);
+    expect(merged.clothing.find((c) => c.type === BACK_HAIR_TYPE)?.defaultFit).toEqual(fit);
+    expect(merged.clothing.find((c) => c.id === 'my:plain')?.defaultFit).toBeUndefined();
+  });
+
   it('色を付けた絵を作れなくても、服は出る（サムネイルは、もとの絵）', async () => {
     const merged = await mergeMyItems(content, [myItem('my:red', { hue: 90 })], async () => {
       throw new Error('no canvas');

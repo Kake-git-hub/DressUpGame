@@ -8,6 +8,7 @@ import type { WireCandidate, WireItem, WireJob } from '../../src/cloud/wire.ts';
 import { CloudError } from './store.ts';
 import type { ItemDoc, JobDoc } from './store.ts';
 import { SERVER_API } from '../../src/cloud/wire.ts';
+import { normalizeFit } from '../../src/engine/fit.ts';
 import { checkout, purchase, shop, shopAck, welcome } from './payment.ts';
 import { ackJob, adoptUser, deleteItem, drainAdopted, listItems, offerHandoff, openJobs, orderItems, PHOTO_MAX_BYTES, signIn, startJob, tendJob, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, giveTickets } from './studioCore.ts';
 import type { CoreDeps, Target, UserView } from './studioCore.ts';
@@ -49,6 +50,7 @@ const itemView = (item: ItemDoc): ItemView => ({
   order: item.order ?? item.createdAt,
   updatedAt: item.updatedAt ?? item.createdAt,
   notes: item.notes ?? [],
+  ...(item.fit ? { fit: item.fit } : {}),
 });
 
 const refused = (message = '呼び出しの形が正しくありません') => new CloudError('refused', message);
@@ -165,8 +167,11 @@ export async function handleCall(deps: CoreDeps, uid: string, data: unknown, cal
     case 'updateItem': {
       if (d.name !== undefined && typeof d.name !== 'string') throw refused();
       if (d.hue !== undefined && (typeof d.hue !== 'number' || !Number.isFinite(d.hue))) throw refused();
-      if (d.name === undefined && d.hue === undefined) throw refused();
-      const change = { ...(typeof d.name === 'string' ? { name: d.name.slice(0, 200) } : {}), ...(typeof d.hue === 'number' ? { hue: d.hue } : {}) };
+      // fit: はじめの位置（null = もとにもどす）。形がおかしければ断る
+      const fit = d.fit === undefined || d.fit === null ? d.fit : normalizeFit(d.fit);
+      if (fit === undefined && d.fit !== undefined) throw refused();
+      if (d.name === undefined && d.hue === undefined && d.fit === undefined) throw refused();
+      const change = { ...(typeof d.name === 'string' ? { name: d.name.slice(0, 200) } : {}), ...(typeof d.hue === 'number' ? { hue: d.hue } : {}), ...(fit !== undefined ? { fit } : {}) };
       return { item: itemView(await updateItem(deps, uid, str(d.id, 100), change)) };
     }
     case 'orderItems': {

@@ -8,6 +8,8 @@
 import sharp from 'sharp';
 import type { Manifest, ManifestDoll, ManifestItem } from '../../src/content/manifest.ts';
 import { isBackHairCategory } from '../../src/pipeline/hairSplit.ts';
+import { isPlainFit, normalizeFit, sameFit } from '../../src/engine/fit.ts';
+import type { ItemFit } from '../../src/engine/fit.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 import { MemoryWriter } from '../content/encode.ts';
 import { encodeItemImages } from '../content/manifestEdit.ts';
@@ -641,15 +643,19 @@ export async function ackJob(deps: CoreDeps, uid: string, jobId: string): Promis
   await deps.store.updateJob(uid, jobId, (job) => (!job.done || job.seen ? null : { ...job, seen: true }));
 }
 
-// 自分の服の、名前・既定の色を変える
-export async function updateItem(deps: CoreDeps, uid: string, itemId: string, change: { name?: string; hue?: number }): Promise<ItemDoc> {
+// 自分の服の、名前・既定の色・はじめの位置を変える（fit: null = もとの位置にもどす）
+export async function updateItem(deps: CoreDeps, uid: string, itemId: string, change: { name?: string; hue?: number; fit?: ItemFit | null }): Promise<ItemDoc> {
   // 相手が「はい」と決めた服は、変えない（名前・色が変わると、決めた服と別のものになる）
   if (await inLiveTrade(deps, uid, itemId, 'joined')) throw new CloudError('refused', 'この服は、こうかんの はなしが すすんでいるので、かえられません');
   return deps.store.updateItem(uid, itemId, (item) => {
     const next: ItemDoc = { ...item, item: { ...item.item } };
     if (typeof change.name === 'string') next.item.name = plainName(change.name, item.item.name);
     if (typeof change.hue === 'number' && Number.isFinite(change.hue)) next.hue = Math.max(HUE_MIN, Math.min(HUE_MAX, Math.round(change.hue)));
-    if (next.item.name === item.item.name && (next.hue ?? 0) === (item.hue ?? 0)) return null;
+    const fit = change.fit ? normalizeFit(change.fit) : change.fit;
+    if (change.fit && !fit) throw new CloudError('refused', '呼び出しの形が正しくありません');
+    if (fit === null || (fit && isPlainFit(fit))) delete next.fit;
+    else if (fit) next.fit = fit;
+    if (next.item.name === item.item.name && (next.hue ?? 0) === (item.hue ?? 0) && sameFit(next.fit, item.fit)) return null;
     next.updatedAt = deps.now();
     return next;
   });

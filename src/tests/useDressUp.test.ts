@@ -103,6 +103,17 @@ describe('useDressUp', () => {
     expect(result.current.equippedItems).toHaveLength(1);
   });
 
+  it('はじめの位置（defaultFit）のある服は、そこから始まる。無い服は、もとの位置', () => {
+    const { result } = renderHook(() => useDressUp(mockClothingItems));
+    const fitted = { ...mockClothingItems[0], defaultFit: { x: 12, y: -8, scale: 1.3, rotation: 20 } };
+    act(() => {
+      result.current.equipItem(fitted);
+      result.current.equipItem(mockClothingItems[1]);
+    });
+    expect(result.current.getEquippedItem('top')).toMatchObject({ adjustOffsetX: 12, adjustOffsetY: -8, adjustScale: 1.3, adjustRotation: 20 });
+    expect(result.current.getEquippedItem('bottom')?.adjustOffsetX).toBeUndefined();
+  });
+
   it('複数の服を着せることができる', () => {
     const { result } = renderHook(() => useDressUp(mockClothingItems));
 

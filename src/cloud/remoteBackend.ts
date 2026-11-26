@@ -10,7 +10,8 @@ import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, normalizeUserCode, OLD_SERVER_MESSAGE } from './backend';
 import type { AdoptAnswer, GiftAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
-import { ADOPT_API, GIFT_API, MIN_API, PAY_API, TRADE_API } from './wire';
+import { ADOPT_API, FIT_API, GIFT_API, MIN_API, PAY_API, TRADE_API } from './wire';
+import { normalizeFit } from '../engine/fit';
 import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
 
 export interface StudioTransport {
@@ -120,6 +121,7 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
     order: item.order ?? item.createdAt,
     updatedAt: item.updatedAt ?? item.createdAt,
     notes: item.notes ?? [],
+    ...(normalizeFit(item.fit) ? { fit: normalizeFit(item.fit) } : {}),
   });
   const toMyItem = (item: WireItem, files: WireFiles, owner: string): MyItem => ({
     ...toInfo(item),
@@ -231,8 +233,26 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       return toMyItem(item, files, (await me()).userCode);
     },
     async updateMyItem(id, change) {
-      const { item } = await transport.call<{ item: WireItem }>({ op: 'updateItem', id, ...(change.name !== undefined ? { name: change.name } : {}), ...(change.hue !== undefined ? { hue: change.hue } : {}) });
+      if (change.fit !== undefined && !(await backend.canFit())) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
+      const { item } = await transport.call<{ item: WireItem }>({
+        op: 'updateItem',
+        id,
+        ...(change.name !== undefined ? { name: change.name } : {}),
+        ...(change.hue !== undefined ? { hue: change.hue } : {}),
+        ...(change.fit !== undefined ? { fit: change.fit } : {}),
+      });
       return toInfo(item);
+    },
+    async canFit() {
+      if (serverApi === null) {
+        try {
+          await backend.signIn();
+        } catch (error) {
+          if (error instanceof BackendError && error.code === 'old-server') return false;
+          throw error;
+        }
+      }
+      return (serverApi ?? 0) >= FIT_API;
     },
     async orderMyItems(ids) {
       return (await transport.call<{ items: WireItem[] }>({ op: 'orderItems', ids })).items.map(toInfo);
