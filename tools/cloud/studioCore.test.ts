@@ -226,6 +226,7 @@ describe('最近の服の説明（recentDescriptions）', () => {
       job(1, 'd', [cand('トップス', 'old')]),
       job(3, 'd', [cand('トップス', 'failed', 'failed'), cand('くつ', 'shoe')]),
       job(2, 'other', [cand('トップス', 'other doll')]),
+      { ...job(4, 'd', [cand('くつ', 'from photo')]), photo: 'users/u/jobs/j4/photo.png' },
       ...Array.from({ length: 6 }, (_, i) => job(10 + i, 'd', [cand('トップス', `t${i}`, 'kept')])),
     ];
     expect(recentDescriptions(jobs, 'd', ['トップス', 'くつ'])).toEqual({ トップス: ['t5', 't4', 't3', 't2', 't1'], くつ: ['shoe'] });

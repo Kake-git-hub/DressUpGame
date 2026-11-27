@@ -35,7 +35,8 @@ import { processHair } from './processHair.ts';
 import { processShoe } from './processShoe.ts';
 import { processSwap } from './processSwap.ts';
 import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
-import { RECENT_MAX, VARIETY_PROPERTIES, VARIETY_REQUIRED, drawHints, hintLine, readVariety, recentRules, varietyKind, varietyRules } from './variety.ts';
+import { categoryKind } from './categoryKind.ts';
+import { VARIETY_PROPERTIES, VARIETY_REQUIRED, drawHints, hintLine, interleaveRecent, readVariety, recentRules, varietyKind, varietyRules } from './variety.ts';
 import type { VarietyInput, VarietyNote } from './variety.ts';
 
 // ドールごとの型紙（studio/templates.json に保存する）
@@ -150,7 +151,7 @@ export async function planItems(
   // 生成の幅: カテゴリごとにくじでヒントを引く。写真から顔を作るときは、写真に似せるので引かない
   const rng = input.rng ?? Math.random;
   const offered = new Map(categories.map((c) => [c.id, input.photo ? [] : drawHints(varietyKind(c.label), rng).map(hintLine)]));
-  const recent = input.photo ? [] : categories.flatMap((c) => input.recent?.[c.id] ?? []).slice(0, RECENT_MAX);
+  const recent = input.photo ? [] : interleaveRecent(categories.map((c) => input.recent?.[c.id] ?? []));
   const result = await text.json<{ items: PlannedReply[] }>({
     system:
       'You plan clothing and accessory items for a paper-doll dress-up game played by young children in Japan. ' +
@@ -233,7 +234,7 @@ export async function planSet(
   if (categories.length < 2) throw new AiError('セットに入れるカテゴリを 2 つ以上選んでください', 400);
   // 生成の幅: セット全体の色・柄・飾り・モチーフを引く（形は品目ごとにちがうので引かない）
   const offered = drawHints('garment', input.rng ?? Math.random, ['shape']).map(hintLine);
-  const recent = categories.flatMap((c) => input.recent?.[c.id] ?? []).slice(0, RECENT_MAX);
+  const recent = interleaveRecent(categories.map((c) => input.recent?.[c.id] ?? []));
   const result = await text.json<{ name: string; items: PlannedItem[]; decided?: unknown; specificity?: unknown; hints?: unknown }>({
     system:
       'You plan one coordinated outfit set for a paper-doll dress-up game played by young children in Japan. ' +
@@ -272,7 +273,7 @@ export async function planSet(
       '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
       '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
       '',
-      ...varietyRules(['The hints are for the whole set (its shared palette, motifs and decorations):', ...offered.map((h, i) => `(${i + 1}) ${h}`)]),
+      ...varietyRules(['The hints are for the whole set (its shared palette, motifs and decorations). Use pattern, motif and decoration hints only on clothing, shoes, hats and accessories; a face or hairstyle item takes at most the colour scheme, and never animal ears, whiskers or patterns:', ...offered.map((h, i) => `(${i + 1}) ${h}`)]),
       ...(recent.length ? ['', ...recentRules(recent)] : []),
     ].join('\n'),
     schema: SET_SCHEMA,
@@ -296,19 +297,7 @@ export async function planSet(
   return { name: setName, items, missing, variety: readVariety(result, offered) };
 }
 
-// 顔と髪型は別のカテゴリで着せ替えるので、それぞれ相手の部分を描かせない
-const FACE_LABEL = /かお|顔|face|メイク|makeup/i;
-const HAIR_LABEL = /^(かみ|髪|ヘア|hair)$|ヘアスタイル|かみがた|髪型|hair ?style|まえがみ|前髪/i;
-
-const SHOES_LABEL = /くつ(?!した)|靴(?!下)|shoe|ブーツ|boot/i;
-
-export function categoryKind(label: string): 'face' | 'hair' | 'backhair' | 'shoes' | null {
-  if (isBackHairCategory(label)) return 'backhair';
-  if (HAIR_LABEL.test(label.trim())) return 'hair';
-  if (FACE_LABEL.test(label)) return 'face';
-  if (SHOES_LABEL.test(label)) return 'shoes';
-  return null;
-}
+export { categoryKind } from './categoryKind.ts';
 
 // カテゴリごとの追加の決まり（シルエットに描かせる品目の、画像生成への指示）
 export function categoryRules(label: string): string[] {

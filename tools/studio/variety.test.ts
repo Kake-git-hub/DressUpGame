@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ManifestDoll } from '../../src/content/manifest.ts';
 import type { TextAi } from './ai.ts';
 import { planItems, planSet } from './generate.ts';
-import { MAX_HINTS_USED, drawHints, readVariety, recentRules, varietyKind, varietyRules } from './variety.ts';
+import { MAX_HINTS_USED, drawHints, interleaveRecent, readVariety, recentRules, varietyKind, varietyRules } from './variety.ts';
 import type { Rng } from './variety.ts';
 
 // 決まった並びの乱数（くじの結果を毎回同じにする）
@@ -96,6 +96,11 @@ describe('企画の AI への指示', () => {
     expect(lines.filter((l) => l.startsWith('- '))).toHaveLength(5);
   });
 
+  it('最近の服は、カテゴリをかわりばんこに 5 件まで', () => {
+    expect(interleaveRecent([['a1', 'a2', 'a3', 'a4', 'a5'], ['b1', 'b2'], []])).toEqual(['a1', 'b1', 'a2', 'b2', 'a3']);
+    expect(interleaveRecent([])).toEqual([]);
+  });
+
   it('返事の細かさを読む（知らない値は null）', () => {
     expect(readVariety({ specificity: 'broad', decided: [], hints: ['x'] }, ['o']).specificity).toBe('broad');
     expect(readVariety({ specificity: 'wild' }, []).specificity).toBeNull();
@@ -148,6 +153,7 @@ describe('planSet に、セット全体のくじが入る', () => {
     }));
     const result = await planSet(text, doll, { theme: 'ピンクの はる', categories: ['ドレス', 'くつ'], style: '', rng: seeded(5), recent: { くつ: ['Blue sneakers.'] } });
     expect(calls[0].prompt).toMatch(/hints are for the whole set/);
+    expect(calls[0].prompt).toMatch(/face or hairstyle item takes at most the colour scheme/);
     expect(calls[0].prompt).not.toMatch(/shape\/style:/);
     expect(calls[0].prompt).toContain('Blue sneakers.');
     expect(result.variety.specificity).toBe('normal');

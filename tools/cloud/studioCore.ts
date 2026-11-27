@@ -128,13 +128,14 @@ async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
   return doll;
 }
 
-// 最近の仕事から、同じドール・同じカテゴリの服の説明を集める（カテゴリ ID → 新しい順、最大 RECENT_MAX）。できなかった品目は入れない
+// 最近の仕事から、同じドール・同じカテゴリの服の説明を集める（カテゴリ ID → 新しい順、最大 RECENT_MAX）。できなかった品目・写真から作った仕事は入れない
 export function recentDescriptions(jobs: JobDoc[], dollId: string, categoryIds: string[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   const sorted = [...jobs].sort((a, b) => b.createdAt - a.createdAt);
   for (const id of categoryIds) {
     out[id] = sorted
-      .filter((job) => job.dollId === dollId)
+      // 写真から作った顔（実在の人に似せた説明）は、ほかの仕事に持ち込まない
+      .filter((job) => job.dollId === dollId && !job.photo)
       .flatMap((job) => job.candidates.filter((c) => c.categoryId === id && c.status !== 'failed' && c.description).map((c) => c.description))
       .slice(0, RECENT_MAX);
   }

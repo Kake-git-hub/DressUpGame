@@ -12,7 +12,7 @@
  *  - ヒントは説明の文にだけ入る（マネキン・背景・子ども向けの決まりには触らない）。テーマとぶつかったら、テーマが勝つ。
  *  - 候補は子ども向けの服として安全なものだけ。カテゴリに合わない軸は出さない。ぶつかる組み合わせは表で外す。
  */
-import { categoryKind } from './generate.ts';
+import { categoryKind } from './categoryKind.ts';
 
 export type Rng = () => number; // 0 以上 1 未満
 
@@ -156,6 +156,14 @@ export function varietyRules(hintsBlock: string[]): string[] {
 
 // 最近の服の説明（同じドール・同じカテゴリ、新しい順）を、「これとは違うものに」と添える
 export const RECENT_MAX = 5;
+// カテゴリごとの最近の服を、かわりばんこに 5 件まで（先のカテゴリだけで埋まらないように）
+export function interleaveRecent(lists: string[][]): string[] {
+  const out: string[] = [];
+  for (let i = 0; out.length < RECENT_MAX && lists.some((l) => i < l.length); i++) {
+    for (const l of lists) if (i < l.length && out.length < RECENT_MAX) out.push(l[i]);
+  }
+  return out;
+}
 export function recentRules(recent: string[]): string[] {
   const list = recent.slice(0, RECENT_MAX);
   if (list.length === 0) return [];
