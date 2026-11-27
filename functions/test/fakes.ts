@@ -68,8 +68,15 @@ export async function startFakes(): Promise<Fakes> {
             res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'completed', steps: [] }));
             return;
           }
+          // 絵を渡されない頼み（背景）: 横長の青い絵を返す
+          const given = body.input.find((part) => part.type === 'image');
+          if (!given) {
+            const scene = await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#40a0e0' } }).png().toBuffer();
+            reply(res, { type: 'image', mime_type: 'image/png', data: scene.toString('base64') });
+            return;
+          }
           // 型（1 枚目の絵）の胸のあたりに、赤い服を描いて返す
-          const template = Buffer.from(body.input.find((part) => part.type === 'image')!.data!, 'base64');
+          const template = Buffer.from(given.data!, 'base64');
           const w = (await sharp(template).metadata()).width!;
           const cloth = await sharp({ create: { width: Math.round(w * 0.24), height: Math.round(w * 0.2), channels: 3, background: '#c81e28' } }).png().toBuffer();
           const image = await sharp(template).composite([{ input: cloth, left: Math.round(w * 0.38), top: Math.round(w * 0.22) }]).png().toBuffer();
@@ -81,6 +88,11 @@ export async function startFakes(): Promise<Fakes> {
         const prompt = body.input.find((part) => part.type === 'text')?.text ?? '';
         if ('ok' in props) {
           reply(res, { type: 'text', text: JSON.stringify({ ok: true, reason: 'よくできています' }) });
+          return;
+        }
+        // 背景の企画
+        if (prompt.includes('Number of backgrounds')) {
+          reply(res, { type: 'text', text: JSON.stringify({ items: [{ name: 'うみのはいけい', description: 'A calm beach at noon.' }] }) });
           return;
         }
         const wanted = [...prompt.matchAll(/^- (\S+)/gm)].map((m) => m[1]).filter((id) => ['トップス', 'アクセサリー', 'ボトムス', 'くつ'].includes(id));

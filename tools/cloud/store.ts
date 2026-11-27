@@ -117,7 +117,9 @@ export interface JobDoc {
   width?: { level: 'tight' | 'normal' | 'wide' | 'none'; hints: string[] };
   candidates: CandidateDoc[];
 }
-// 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける
+// 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける。
+// 自分の背景も、この形（item.category が BACKGROUND_CATEGORY。image = 背景の絵（キャンバス全体）、thumb = サムネイル。dollId = そのドール用）。
+// 一覧・消す・交換・引き継ぎは、服と同じ道を通る。色（hue）・はじめの位置（fit）は、背景には付けない
 export interface ItemDoc {
   id: string; // `my:` で始まる
   dollId: string;

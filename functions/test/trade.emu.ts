@@ -70,6 +70,22 @@ describe('交換（Firestore）', () => {
     }
     expect(await store.getTrade(trade.id)).toMatchObject({ status: 'done' });
   });
+  it('背景と服を入れ替える: 背景の印（カテゴリ）・ドール・絵のパスは、そのまま。持ち主だけが替わる', async () => {
+    const { a, b, ia, ib, trade } = await setup();
+    const background: ItemDoc = { ...item(ia), dollId: 'doll-x', item: { ...item(ia).item, category: '__background', name: 'はいけい' }, paths: { 'files/background.webp': 'x/bg', 'files/background-thumb.webp': 'x/thumb' } };
+    delete background.set;
+    await store.putItem(a, background);
+    const done = await store.swapTrade(trade.id, 9000);
+    expect(done.status).toBe('done');
+    expect(await store.getItem(a, ia)).toBeNull();
+    expect(await store.getItem(b, ia)).toEqual({ ...background, order: 9000, updatedAt: 9000 });
+    expect((await store.listItems(b)).map((i) => i.id)).toEqual([ia]);
+    expect((await store.getItem(a, ib))?.item.category).toBe('トップス');
+    // 引き継ぎ（moveItem）でも、中身はそのまま
+    expect(await store.moveItem(b, a, ia)).toBe(true);
+    expect(await store.getItem(a, ia)).toEqual({ ...background, order: 9000, updatedAt: 9000 });
+  });
+
   it('片方の服が消えていたら、何も動かさず cancelled（gone）。受け取る側に同じ ID があれば conflict', async () => {
     const gone = await setup();
     await store.deleteItem(gone.b, gone.ib);

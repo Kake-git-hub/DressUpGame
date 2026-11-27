@@ -16,7 +16,8 @@ import type { SetRef, StudioUser } from './backend';
 //   6 = 支払い（op: 'shop'・'checkout'・'purchase'・'shopAck'。チケットを買う）と、ようこそのチケット
 //   7 = 自分の服の「はじめの位置」（op: 'updateItem' の fit、服の fit）
 //   8 = テーマの細かさで、生成の幅を変える（サーバーの中だけの変更。アプリは、8 を要らない。載っている版を見分けるための数）
-export const SERVER_API = 8;
+//   9 = 背景を作る（op: 'startJob' の target { kind: 'background' }。できた背景は、カテゴリが BACKGROUND_CATEGORY の「自分の服」として届く）
+export const SERVER_API = 9;
 // アプリが要る、いちばん古いサーバーの版（これより古いと、「サーバーが古い版です」で、作れない）
 export const MIN_API = 2;
 // 引き継ぎに要るサーバーの版（これより古いサーバーでは、合わせることだけが、できない）
@@ -29,6 +30,10 @@ export const GIFT_API = 5;
 export const PAY_API = 6;
 // はじめの位置（クローゼットで決める）に要るサーバーの版
 export const FIT_API = 7;
+// 背景を作るのに要るサーバーの版（これより古いサーバーでは、「はいけい」のタイルを出さない）
+export const BG_API = 9;
+// 背景の印: 仕事の品目（categoryId）と、できた背景（item.category）は、このカテゴリ ID を持つ。ドールのカテゴリには無い ID
+export const BACKGROUND_CATEGORY = '__background';
 
 // 古いサーバーの返事には、free・lots が無い（remoteBackend が、全部を配った分として補う）
 export type WireUser = Omit<StudioUser, 'free' | 'lots'> & Partial<Pick<StudioUser, 'free' | 'lots'>>;

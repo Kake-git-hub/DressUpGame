@@ -66,6 +66,7 @@ function target(value: unknown): Target {
   const v = value as { kind?: unknown; categoryId?: unknown; categoryIds?: unknown } | null;
   if (typeof v !== 'object' || v === null) throw refused();
   if (v.kind === 'category') return { kind: 'category', categoryId: str(v.categoryId) };
+  if (v.kind === 'background') return { kind: 'background' };
   if (v.kind === 'set' && Array.isArray(v.categoryIds) && v.categoryIds.length <= 20) return { kind: 'set', categoryIds: v.categoryIds.map((id) => str(id)) };
   throw refused();
 }

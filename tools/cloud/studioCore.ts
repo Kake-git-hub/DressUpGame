@@ -15,13 +15,14 @@ import { MemoryWriter } from '../content/encode.ts';
 import { encodeItemImages } from '../content/manifestEdit.ts';
 import type { AiClients, TextAi } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
-import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
+import { generateBackground, generateCandidate, planBackgrounds, planItems, planSet } from '../studio/generate.ts';
 import { axesFor, dollLines, drawHints, levelOf, measureTheme, MEASURE_TIMEOUT_MS, widthKind, widthLines } from '../studio/themeWidth.ts';
-import type { Candidate, PlannedItem } from '../studio/generate.ts';
+import type { BackgroundCandidate, Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
 import { readWallet, usable as usableCount } from './wallet.ts';
 import type { PayDeps } from './payment.ts';
+import { BACKGROUND_CATEGORY } from '../../src/cloud/wire.ts';
 import type { WireTrade, WireTradeItem, TradeRefusal } from '../../src/cloud/wire.ts';
 import type { CandidateDoc, CloudFiles, CloudStore, ItemDoc, JobDoc, LayerKind, SetRef, TradeDoc, TradeEndReason } from './store.ts';
 
@@ -58,7 +59,13 @@ export interface UserView {
   lots: { count: number; left: number; expiresAt: number }[]; // 買った分（期限内で、残りがあるものだけ。期限の早い順）
   admin: boolean;
 }
-export type Target = { kind: 'category'; categoryId: string } | { kind: 'set'; categoryIds: string[] };
+// background = そのドール用の背景を 1 枚（チケット 1 枚）
+export type Target = { kind: 'category'; categoryId: string } | { kind: 'set'; categoryIds: string[] } | { kind: 'background' };
+// 自分の背景か（服と同じ置き場に、背景のカテゴリで入っている）
+export const isBackground = (item: Pick<ItemDoc, 'item'>): boolean => item.item.category === BACKGROUND_CATEGORY;
+// 背景の絵の大きさ（長い辺）と、サムネイル
+const BACKGROUND_SIZE = 1024;
+const BACKGROUND_THUMB = 192;
 
 export const THEME_MAX = 60;
 export const SET_MIN = 2;
@@ -148,7 +155,7 @@ export function recentDescriptions(jobs: JobDoc[], dollId: string, target: Targe
     if (target.kind === 'set') {
       const first = job.set ? job.candidates.find(usable) : undefined;
       if (job.set && first) found.push(`${job.set.name}: ${first.description.trim()}`);
-    } else {
+    } else if (target.kind === 'category') {
       for (const c of job.candidates) if (c.categoryId === target.categoryId && usable(c)) found.push(c.description.trim());
     }
   }
@@ -189,9 +196,11 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   if (!theme || theme.length > THEME_MAX) throw new CloudError('refused', `テーマは 1〜${THEME_MAX} 文字で入力してください`);
   const doll = await dollOf(deps, input.dollId);
   const target = input.target;
+  // 背景は、カテゴリを選ばない（1 枚）
+  const background = target?.kind === 'background';
   const wanted = target?.kind === 'set' ? target.categoryIds : target?.kind === 'category' ? [target.categoryId] : [];
   const usable = (id: unknown) => doll.categories.some((c) => c.id === id && !isBackHairCategory(c.label));
-  if (!Array.isArray(wanted) || wanted.length === 0 || !wanted.every(usable) || new Set(wanted).size !== wanted.length) throw new CloudError('refused', '作るものを選び直してください');
+  if (!background && (!Array.isArray(wanted) || wanted.length === 0 || !wanted.every(usable) || new Set(wanted).size !== wanted.length)) throw new CloudError('refused', '作るものを選び直してください');
   if (target.kind === 'set' && (wanted.length < SET_MIN || wanted.length > SET_MAX)) throw new CloudError('refused', `セットに入れるものは ${SET_MIN}〜${SET_MAX} 個にしてください`);
   // 写真は、顔のカテゴリ 1 点を作るときだけ
   const faceLabel = target.kind === 'category' ? doll.categories.find((c) => c.id === target.categoryId)?.label : undefined;
@@ -201,10 +210,11 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません（AI のキーが設定されていません）');
 
   // 足りないと分かっているなら、企画（文章の AI）も呼ばない（チケットの無い人に、作者の費用で AI を使わせない）
-  if (!user.admin && user.tickets < wanted.length) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${wanted.length} 枚）`);
+  const need = background ? 1 : wanted.length;
+  if (!user.admin && user.tickets < need) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${need} 枚）`);
 
-  // テーマの細かさに合わせた幅（写真に似せる顔には、足さない）。チケットが足りると分かってから呼ぶ
-  const wide = photo ? null : await planWidth(deps, text, uid, doll, theme, target, wanted);
+  // テーマの細かさに合わせた幅（写真に似せる顔・背景には、足さない）。チケットが足りると分かってから呼ぶ
+  const wide = photo || background ? null : await planWidth(deps, text, uid, doll, theme, target, wanted);
   const extra = wide?.extra.length ? { extra: wide.extra } : {};
 
   // 企画（文章の AI）。ここで失敗しても、チケットは引いていない
@@ -212,7 +222,12 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   let items: PlannedItem[];
   let setName: string | null = null;
   try {
-    if (target.kind === 'set') {
+    if (target.kind === 'background') {
+      // そのドールの、いまある自分の背景と、同じ名前にしない（読めなくても、作れる）
+      const existing = (await deps.store.listItems(uid).catch(() => [])).filter((i) => isBackground(i) && i.dollId === doll.id).map((i) => i.item.name);
+      const planned = await planBackgrounds(text, { theme, count: 1, existing });
+      items = planned.map((p) => ({ category: BACKGROUND_CATEGORY, name: p.name, description: p.description, colors: [] }));
+    } else if (target.kind === 'set') {
       const planned = await planSet(text, doll, { theme, categories: wanted, style: style.prompt, ...extra });
       items = planned.items;
       setName = planned.name;
@@ -303,6 +318,24 @@ async function saveItem(
   }
   const now = deps.now();
   const doc: ItemDoc = { id: itemId, dollId: doll.id, item, paths, ...(job.set ? { set: job.set as SetRef } : {}), createdAt: now, hue: 0, order: now, updatedAt: now, ...(notes.length > 0 ? { notes } : {}) };
+  await deps.store.putItem(uid, doc);
+  return doc;
+}
+
+// できた背景を、自分の背景（そのドール用）として保存する。置き場・一覧は、服と同じ（カテゴリが、背景の印）。
+// 絵は、長い辺 1024 の WebP と、小さいサムネイル
+async function saveBackground(deps: CoreDeps, uid: string, doll: ManifestDoll, itemId: string, source: { name: string; png: Buffer }): Promise<ItemDoc> {
+  const base = sharp(source.png).flatten({ background: '#ffffff' });
+  const main = await base.clone().resize({ width: BACKGROUND_SIZE, height: BACKGROUND_SIZE, fit: 'inside', withoutEnlargement: true }).webp({ quality: 85 }).toBuffer({ resolveWithObject: true });
+  const thumb = await base.clone().resize({ width: BACKGROUND_THUMB, height: BACKGROUND_THUMB, fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+  const { width, height } = main.info;
+  const name = plainName(source.name, 'はいけい');
+  const item: ManifestItem = { id: itemId, name, category: BACKGROUND_CATEGORY, image: { file: 'files/background.webp', canvasW: width, canvasH: height, box: { x: 0, y: 0, w: width, h: height } }, thumb: 'files/background-thumb.webp' };
+  const paths: Record<string, string> = { [item.image.file]: `${itemPrefix(uid, itemId)}background.webp`, [item.thumb]: `${itemPrefix(uid, itemId)}background-thumb.webp` };
+  await deps.files.put(paths[item.image.file], main.data, 'image/webp');
+  await deps.files.put(paths[item.thumb], thumb, 'image/webp');
+  const now = deps.now();
+  const doc: ItemDoc = { id: itemId, dollId: doll.id, item, paths, createdAt: now, hue: 0, order: now, updatedAt: now };
   await deps.store.putItem(uid, doc);
   return doc;
 }
@@ -528,23 +561,36 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
         try {
           if (!doll) throw new CloudError('refused', 'このドールは、いまは使えません');
           if (!text || !image) throw new CloudError('unknown', 'サーバーの準備ができていません');
-          const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
-          await generateCandidate(
-            {
-              text,
-              image,
-              budget: { spend },
-              doll,
-              template: await deps.content.assets.workTemplate(doll),
-              data: await deps.content.assets.workData(doll),
-              style: findStyle(first.styleId).prompt,
-              hi: await deps.content.assets.hiTemplate(doll),
-              maxAttempts: deps.limits.maxAttempts,
-              ...(photo ? { photo } : {}),
-            },
-            candidate,
-          );
-          if (!candidate.png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
+          // できた絵と、その保存のしかた（背景と服で違う。あとの段取り = 追い越しの確かめ・結果を書く・払い戻しは、同じ）
+          let made: { notes: string[]; save: (itemId: string) => Promise<unknown> };
+          if (c.categoryId === BACKGROUND_CATEGORY) {
+            const scene: BackgroundCandidate = { item: { name: c.name, description: c.description }, status: 'waiting', attempts: 0, notes: [] };
+            await generateBackground({ text, image, budget: { spend }, style: findStyle(first.styleId).prompt }, scene);
+            const png = scene.png;
+            if (!png || scene.status === 'failed') throw new Error(scene.notes.join(' ') || '絵を作れませんでした');
+            // 背景には、検品の注意は無い（書き直しの知らせは、残さない）
+            made = { notes: [], save: (itemId) => saveBackground(deps, uid, doll, itemId, { name: c.name, png }) };
+          } else {
+            const candidate: Candidate = { item: { category: c.categoryId, name: c.name, description: c.description, colors: c.colors }, status: 'waiting', attempts: 0, warnings: [], notes: [] };
+            await generateCandidate(
+              {
+                text,
+                image,
+                budget: { spend },
+                doll,
+                template: await deps.content.assets.workTemplate(doll),
+                data: await deps.content.assets.workData(doll),
+                style: findStyle(first.styleId).prompt,
+                hi: await deps.content.assets.hiTemplate(doll),
+                maxAttempts: deps.limits.maxAttempts,
+                ...(photo ? { photo } : {}),
+              },
+              candidate,
+            );
+            const png = candidate.png;
+            if (!png || candidate.status === 'failed') throw new Error(candidate.notes.join(' ') || '絵を作れませんでした');
+            made = { notes: candidate.notes, save: (itemId) => saveItem(deps, uid, first, doll, itemId, { category: c.categoryId, name: c.name, png, hide: candidate.hide, shape: candidate.shape, front: candidate.front, under: candidate.under }, candidate.notes) };
+          }
           // 追い越されていたら、服にしない（引き継いだ呼び出しが、同じ品目を作っている・作り終えている）
           const now = await deps.store.getJob(uid, jobId);
           if (!now || !mine(now, c.index)) {
@@ -554,8 +600,8 @@ export async function runJob(deps: CoreDeps, uid: string, jobId: string): Promis
           // 受け持ちごとに別の名前にする（追い越された呼び出しが、引き継いだ呼び出しの服を消さないように）
           const itemId = `my:${jobId}-${c.index}-${c.tries ?? 1}`;
           savedId = itemId;
-          await saveItem(deps, uid, first, doll, itemId, { category: c.categoryId, name: c.name, png: candidate.png, hide: candidate.hide, shape: candidate.shape, front: candidate.front, under: candidate.under }, candidate.notes);
-          change = { status: 'kept', notes: candidate.notes, itemId };
+          await made.save(itemId);
+          change = { status: 'kept', notes: made.notes, itemId };
           ok = true;
         } catch (error) {
           // 保存の途中で失敗したら、書きかけを消す
@@ -706,6 +752,12 @@ export async function updateItem(deps: CoreDeps, uid: string, itemId: string, ch
   return deps.store.updateItem(uid, itemId, (item) => {
     const next: ItemDoc = { ...item, item: { ...item.item } };
     if (typeof change.name === 'string') next.item.name = plainName(change.name, item.item.name);
+    // 背景には、色・はじめの位置を付けない（頼まれても、変えずに、そのまま返す。名前は変えられる）
+    if (isBackground(item)) {
+      if (next.item.name === item.item.name) return null;
+      next.updatedAt = deps.now();
+      return next;
+    }
     if (typeof change.hue === 'number' && Number.isFinite(change.hue)) next.hue = Math.max(HUE_MIN, Math.min(HUE_MAX, Math.round(change.hue)));
     const fit = change.fit ? normalizeFit(change.fit) : change.fit;
     if (change.fit && !fit) throw new CloudError('refused', '呼び出しの形が正しくありません');

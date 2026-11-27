@@ -75,6 +75,43 @@ afterAll(async () => {
 });
 
 describe('サーバーの関数（エミュレーター）', () => {
+  it('背景を作る（v0.49.0）: チケット 1 枚 → 何も呼ばなくても、そのドールの自分の背景になる（WebP の絵とサムネイル）→ 名前は変えられ、色は付かない → 消す', async () => {
+    const me = await client();
+    await me.call({ op: 'signIn' });
+    const background = { op: 'startJob', dollId: fakes.dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'background' } };
+    // チケットが無い: 断られ、AI は呼ばれない
+    const textBefore = fakes.gemini.text;
+    expect(failure(await me.call(background).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'no-tickets' });
+    expect(fakes.gemini.text).toBe(textBefore);
+
+    await grant(me.uid, 2);
+    const imagesBefore = fakes.gemini.image;
+    const started = await me.call<{ jobId: string; cost: number; user: UserView }>(background);
+    expect(started).toMatchObject({ cost: 1, user: { tickets: 1 } });
+    const job = await me.finished(started.jobId);
+    expect(job.candidates).toEqual([expect.objectContaining({ categoryId: '__background', status: 'kept', name: 'うみのはいけい' })]);
+    expect(fakes.gemini.image - imagesBefore).toBe(1);
+
+    const { items } = await me.call<{ items: ItemView[] }>({ op: 'items' });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: job.candidates[0].itemId, dollId: fakes.dollId, hue: 0, item: { name: 'うみのはいけい', category: '__background' } });
+    const got = await me.call<{ item: ItemView; files: Record<string, string> }>({ op: 'itemFiles', id: items[0].id });
+    expect(Object.keys(got.files).sort()).toEqual([items[0].item.image.file, items[0].item.thumb].sort());
+    expect(await sharp(Buffer.from(got.files[items[0].item.image.file], 'base64')).metadata()).toMatchObject({ format: 'webp', width: 1024, height: 1024 });
+    expect((await sharp(Buffer.from(got.files[items[0].item.thumb], 'base64')).metadata()).width).toBe(192);
+
+    // 名前は変わる。色・はじめの位置は、頼んでも付かない
+    const changed = await me.call<{ item: ItemView }>({ op: 'updateItem', id: items[0].id, name: 'ゆうやけ', hue: 90, fit: { x: 20, y: 0, scale: 1.2, rotation: 0 } });
+    expect(changed.item).toMatchObject({ hue: 0, item: { name: 'ゆうやけ', category: '__background' } });
+    expect(changed.item.fit).toBeUndefined();
+
+    // 消すと、一覧からも、絵も無くなる
+    await me.call({ op: 'deleteItem', id: items[0].id });
+    expect((await me.call<{ items: ItemView[] }>({ op: 'items' })).items).toEqual([]);
+    expect(failure(await me.call({ op: 'itemFiles', id: items[0].id }).catch((e) => e)).reason).toBe('refused');
+    expect((await me.call<{ user: UserView }>({ op: 'signIn' })).user.tickets).toBe(1);
+  }, 120_000);
+
   it('ログインしていない呼び出しは断る。アプリからは、生成を進める関数を呼べない', async () => {
     const anonymous = await client(false);
     expect(failure(await anonymous.call({ op: 'signIn' }).catch((e) => e)).code).toBe('functions/unauthenticated');
@@ -89,7 +126,7 @@ describe('サーバーの関数（エミュレーター）', () => {
     const { user, api } = await me.call<{ user: UserView; api: number }>({ op: 'signIn' });
     expect(user).toMatchObject({ tickets: 0, admin: false });
     expect(user.userCode).toMatch(/^[A-Z2-9]{8}$/);
-    expect(api).toBe(8);
+    expect(api).toBe(9);
 
     // チケットが無い: 断られ、文章の AI も呼ばれない
     const textBefore = fakes.gemini.text;
