@@ -63,7 +63,7 @@ const PATTERNS: WidthOption[] = [
   f('little hearts', 'ハート'),
   o('plain fabric with no pattern', 'むじ'),
   o('tartan plaid', 'タータンチェック'),
-  o('a fruit print such as cherries or strawberries', 'くだもの'),
+  o('zigzag lines', 'ジグザグ'),
 ];
 const TASTES: WidthOption[] = [
   o('casual everyday wear', 'ふだんぎ'),
@@ -370,6 +370,12 @@ const BOY_DOLL = /おとこ|男|boy/i;
 export function axesFor(kind: WidthKind, dollName: string): WidthAxis[] {
   const boy = BOY_DOLL.test(dollName);
   return AXES[kind].map((a) => ({ ...a, options: boy ? a.options.filter((option) => !option.frilly) : [...a.options] }));
+}
+
+// 品目を考える AI に、ドールのことを伝える行。おとこのこ のドールには、男の子の服を（伝えないと、スカートやツインテールを考える）
+export function dollLines(dollName: string): string[] {
+  if (!BOY_DOLL.test(dollName)) return [];
+  return ['This item is for a boy doll: design boys\' clothing and boys\' hairstyles (no skirts, dresses, frills, lace, hair ribbons or twin tails), unless the theme itself asks for them.'];
 }
 
 // 細かさ: 点 = 言っている軸の数 +（話題の言葉が 2 つ以上なら 1）。2 点以上 = きっちり、1 点 = ふつう、0 点 = ひろく

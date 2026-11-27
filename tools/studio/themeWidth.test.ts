@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { TextAi } from './ai.ts';
-import { axesFor, drawHints, levelOf, measureTheme, widthKind, widthLines } from './themeWidth.ts';
+import { axesFor, dollLines, drawHints, levelOf, measureTheme, widthKind, widthLines } from './themeWidth.ts';
 import type { WidthKind } from './themeWidth.ts';
 
 const seq = (...values: number[]) => { let i = 0; return () => values[i++ % values.length]; };
@@ -147,5 +147,20 @@ describe('テーマを測る', () => {
     const seen: { prompt?: string } = {};
     expect(await measureTheme(ai(answer({}), seen), { ...input, theme })).toEqual({ fixed: [], topics: [] });
     expect(seen.prompt).toContain('🌸');
+  });
+});
+
+describe('ドールに合わせる行', () => {
+  it('おとこのこ のドール: 男の子の服に、と添える（テーマが頼めば、テーマが勝つ）。ほかのドールには、何も添えない', () => {
+    expect(dollLines('おとこのこ').join('\n')).toMatch(/boy/i);
+    expect(dollLines('おとこのこ').join('\n')).toMatch(/unless the theme/i);
+    expect(dollLines('Boy 2')).not.toEqual([]);
+    expect(dollLines('おんなのこ')).toEqual([]);
+    expect(dollLines('アニメ　その２')).toEqual([]);
+  });
+});
+describe('くじの表（テーマとぶつかりやすい柄）', () => {
+  it('くだものの柄は、入れない（「うみ」に さくらんぼ、のように、話題とぶつかる）', () => {
+    for (const kind of ['dress', 'tops', 'bottoms', 'hat', 'other', 'set'] as const) for (const axis of axesFor(kind, 'おんなのこ')) for (const option of axis.options) expect(option.en).not.toMatch(/fruit|cherr|strawberr/i);
   });
 });

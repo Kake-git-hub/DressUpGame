@@ -16,7 +16,7 @@ import { encodeItemImages } from '../content/manifestEdit.ts';
 import type { AiClients, TextAi } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
 import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
-import { axesFor, drawHints, levelOf, measureTheme, MEASURE_TIMEOUT_MS, widthKind, widthLines } from '../studio/themeWidth.ts';
+import { axesFor, dollLines, drawHints, levelOf, measureTheme, MEASURE_TIMEOUT_MS, widthKind, widthLines } from '../studio/themeWidth.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
@@ -171,7 +171,7 @@ async function planWidth(deps: CoreDeps, text: TextAi, uid: string, doll: Manife
     const hints = drawHints(level, measure.fixed, axes, deps.random ?? Math.random);
     // 最近の服を読めなくても、作れる
     const recent = level === 'tight' ? [] : recentDescriptions(await deps.store.listJobs(uid).catch(() => []), doll.id, target);
-    return { extra: widthLines(level, hints, recent), width: { level, hints: hints.map((h) => h.ja) } };
+    return { extra: [...widthLines(level, hints, recent), ...dollLines(doll.name)], width: { level, hints: hints.map((h) => h.ja) } };
   } catch {
     return none;
   }

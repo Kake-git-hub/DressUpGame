@@ -80,7 +80,7 @@ describe('引き継ぎ（エミュレーター）', () => {
 
     const b = await client(`b-${Date.now()}@example.com`);
     const before = await b.call<{ user: UserView; api: number }>({ op: 'signIn' });
-    expect(before).toMatchObject({ api: 7, user: { tickets: 0 } });
+    expect(before).toMatchObject({ api: 8, user: { tickets: 0 } });
     expect((await getAdminFirestore(admin).doc(`users/${b.uid}`).get()).data()).toMatchObject({ named: true });
     // 匿名でない利用者は、合い言葉をもらえない
     expect(failure(await b.call({ op: 'offer' }).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });

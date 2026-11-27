@@ -95,7 +95,7 @@ describe('アプリからの呼び出し', () => {
   it('ひととおり: 利用者 → 始める → 進める → 進み具合 → 自分の服（絵つきで取れる）→ 消す', async () => {
     const { user, api } = await call<{ user: UserView; api: number }>('u1', { op: 'signIn' });
     expect(user.tickets).toBe(0);
-    expect(api).toBe(7); // 7 = はじめの位置も使えるサーバー（6 = 支払い、5 = チケットを配る、4 = 交換、3 = 引き継ぎ）
+    expect(api).toBe(8); // 8 = テーマの幅（7 = はじめの位置、6 = 支払い、5 = チケットを配る、4 = 交換、3 = 引き継ぎ）
     await store.addTickets('u1', 3, 'test', clock);
     const started = await call<{ jobId: string; cost: number; user: UserView }>('u1', { op: 'startJob', dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
     expect(started).toMatchObject({ cost: 1, user: { tickets: 2 } });
@@ -191,11 +191,11 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
   const callAs = <T>(uid: string, data: unknown, caller: { anonymous: boolean }) => handleCall(deps, uid, data, caller) as Promise<T>;
 
   it('signIn の返事の api は 6。匿名でない signIn で named の印が付く（匿名・既定では付かない）', async () => {
-    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(7);
-    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(7);
+    expect((await call<{ api: number }>('a1', { op: 'signIn' })).api).toBe(8);
+    expect((await callAs<{ api: number }>('a1', { op: 'signIn' }, anon)).api).toBe(8);
     expect((await store.getUser('a1'))!.named).toBeUndefined();
     const answer = await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named);
-    expect(answer).toMatchObject({ api: 7, user: { tickets: 0, admin: false } });
+    expect(answer).toMatchObject({ api: 8, user: { tickets: 0, admin: false } });
     expect((await store.getUser('g1'))!.named).toBe(true);
   });
 
@@ -236,7 +236,7 @@ describe('引き継ぎ（③-b）: offer・adopt', () => {
     store.moveTickets = async () => {
       throw new Error('store is down');
     };
-    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(7);
+    expect((await callAs<{ user: UserView; api: number }>('g1', { op: 'signIn' }, named)).api).toBe(8);
   });
 
   it('名前のある利用者（1 台めとして結び付けた）の合い言葉は、使えない（refused）', async () => {

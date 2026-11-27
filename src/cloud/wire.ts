@@ -15,7 +15,8 @@ import type { SetRef, StudioUser } from './backend';
 //   5 = チケットを配る（op: 'giveTickets'。管理者だけ）
 //   6 = 支払い（op: 'shop'・'checkout'・'purchase'・'shopAck'。チケットを買う）と、ようこそのチケット
 //   7 = 自分の服の「はじめの位置」（op: 'updateItem' の fit、服の fit）
-export const SERVER_API = 7;
+//   8 = テーマの細かさで、生成の幅を変える（サーバーの中だけの変更。アプリは、8 を要らない。載っている版を見分けるための数）
+export const SERVER_API = 8;
 // アプリが要る、いちばん古いサーバーの版（これより古いと、「サーバーが古い版です」で、作れない）
 export const MIN_API = 2;
 // 引き継ぎに要るサーバーの版（これより古いサーバーでは、合わせることだけが、できない）

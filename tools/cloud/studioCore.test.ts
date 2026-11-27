@@ -1839,5 +1839,12 @@ describe('テーマの細かさで、幅を変える（v0.47.0）', () => {
     }
     expect(all.length).toBeGreaterThanOrEqual(60);
     expect(all.join(' ')).not.toMatch(/リボン|フリル|レース|パール|ピンク|チュール/);
+    // 品目を考える AI にも、男の子のドールだと伝える（伝えないと、スカートやツインテールを考える）
+    expect(planPrompts.at(-1)).toMatch(/boy doll/i);
+  });
+  it('おとこのこ でないドールには、ドールの行を添えない', async () => {
+    await userWith('u1', 1);
+    await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).not.toMatch(/boy doll/i);
   });
 });
