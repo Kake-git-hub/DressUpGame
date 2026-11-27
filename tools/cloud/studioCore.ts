@@ -161,7 +161,8 @@ export function recentDescriptions(jobs: JobDoc[], dollId: string, target: Targe
  * 測れなかったら、何も足さない（いままでどおりに企画する）。ここでは、決して失敗しない。
  */
 async function planWidth(deps: CoreDeps, text: TextAi, uid: string, doll: ManifestDoll, theme: string, target: Target, wanted: string[]): Promise<{ extra: string[]; width: NonNullable<JobDoc['width']> }> {
-  const none = { extra: [], width: { level: 'none' as const, hints: [] } };
+  // 測れなかったとき: くじも最近の服も添えない（いままでどおり）。ドールのことだけは伝える（AI を呼ばない、決まった 1 行）
+  const none = { extra: dollLines(doll.name), width: { level: 'none' as const, hints: [] } };
   try {
     const labels = wanted.map((id) => doll.categories.find((c) => c.id === id)?.label ?? id);
     const axes = axesFor(target.kind === 'set' ? 'set' : widthKind(labels[0]), doll.name);

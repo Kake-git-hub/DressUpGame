@@ -164,3 +164,21 @@ describe('くじの表（テーマとぶつかりやすい柄）', () => {
     for (const kind of ['dress', 'tops', 'bottoms', 'hat', 'other', 'set'] as const) for (const axis of axesFor(kind, 'おんなのこ')) for (const option of axis.options) expect(option.en).not.toMatch(/fruit|cherr|strawberr/i);
   });
 });
+
+describe('レビューで見つかったこと（v0.47.0）', () => {
+  it('くじ同士がぶつかったら（ショートパンツ + くるぶし丈 など）、片方だけを使う、と頼む', () => {
+    const lines = widthLines('wide', [{ axis: 'shape', en: 'shorts', ja: 'ショートパンツ' }, { axis: 'length', en: 'ankle-length', ja: 'くるぶしたけ' }], []).join('\n');
+    expect(lines).toMatch(/conflict with each other/i);
+  });
+  it('ぼうしの形の候補は、ぼうしだけ（カチューシャ・リボン・はなかんむりは、ぼうしを頼んだ子が困る）', () => {
+    const shapes = axesFor('hat', 'おんなのこ').find((a) => a.id === 'shape')!.options.map((o) => o.en).join(' ');
+    expect(shapes).not.toMatch(/headband|bow|crown/i);
+    expect(axesFor('hat', 'おとこのこ').find((a) => a.id === 'shape')!.options.length).toBeGreaterThanOrEqual(4);
+  });
+  it('カタカナの ハット・キャップ も、ぼうし。ヘッドドレス は、ドレスではない', () => {
+    expect(widthKind('ハット')).toBe('hat');
+    expect(widthKind('キャップ')).toBe('hat');
+    expect(widthKind('ヘッドドレス')).toBe('other');
+    expect(widthKind('ドレス')).toBe('dress');
+  });
+});

@@ -58,7 +58,8 @@ async function makeNew(doll: ManifestDoll, categories: string[], theme: string, 
   const axes = axesFor(isSet ? 'set' : widthKind(labels[0]), doll.name);
   const measure = await measureTheme(text, { theme, categoryLabels: labels, axes }, 30_000);
   if (!measure) {
-    const items = isSet ? (await planSet(text, doll, { theme, categories, style })).items : await planItems(text, doll, { theme, count: 1, categories, style });
+    const extra = dollLines(doll.name);
+    const items = isSet ? (await planSet(text, doll, { theme, categories, style, extra })).items : await planItems(text, doll, { theme, count: 1, categories, style, extra });
     return { level: 'none', fixed: [], topics: [], hints: [], items, ms: Date.now() - t };
   }
   const level = levelOf(measure.fixed, measure.topics);

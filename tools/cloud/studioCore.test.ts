@@ -1842,6 +1842,15 @@ describe('テーマの細かさで、幅を変える（v0.47.0）', () => {
     // 品目を考える AI にも、男の子のドールだと伝える（伝えないと、スカートやツインテールを考える）
     expect(planPrompts.at(-1)).toMatch(/boy doll/i);
   });
+  it('おとこのこ のドール: 測れなかったときも、男の子のドールだとは伝える（くじ・最近の服は添えない）', async () => {
+    const boy = (await new ContentStore(dir).addDoll({ name: 'おとこのこ', data: await dollPng() })).id;
+    await userWith('u1', 2);
+    measured = 'throw';
+    const { jobId } = await startJob(deps, 'u1', { dollId: boy, theme: 'はる', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
+    expect(planPrompts.at(-1)).toMatch(/boy doll/i);
+    expect(planPrompts.at(-1)).not.toMatch(/Design hints|clearly different/);
+    expect((await store.getJob('u1', jobId))!.width).toEqual({ level: 'none', hints: [] });
+  });
   it('おとこのこ でないドールには、ドールの行を添えない', async () => {
     await userWith('u1', 1);
     await startJob(deps, 'u1', oneTop());

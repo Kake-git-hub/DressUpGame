@@ -260,10 +260,9 @@ const AXES: Record<WidthKind, WidthAxis[]> = {
       o('a straw hat', 'むぎわらぼうし'),
       o('a baseball cap', 'キャップ'),
       o('a bucket hat', 'バケットハット'),
-      f('a headband', 'カチューシャ'),
-      f('a big hair bow', 'おおきなリボン'),
-      f('a flower crown', 'はなかんむり'),
       o('a newsboy cap', 'キャスケット'),
+      o('a sailor hat', 'セーラーぼう'),
+      o('a wide-brimmed sun hat', 'つばひろ ぼうし'),
     ]),
     axis('material', '素材', []),
     axis('taste', 'ふんいき', TASTES),
@@ -356,10 +355,11 @@ export function widthKind(categoryLabel: string): WidthKind {
   if (known === 'face') return 'face';
   if (known === 'hair' || known === 'backhair') return 'hair';
   if (known === 'shoes') return 'shoes';
-  if (/ドレス|ワンピ|dress/i.test(categoryLabel)) return 'dress';
+  if (/ぼうし|帽子|ハット|キャップ|\bhat\b|\bcap\b/i.test(categoryLabel)) return 'hat';
+  // ヘッドドレス（頭の飾り）は、ドレスではない
+  if (/(?<!ヘッド)ドレス|ワンピ|(?<!head)dress/i.test(categoryLabel)) return 'dress';
   if (/トップス|シャツ|ブラウス|上着|うわぎ|tops?\b/i.test(categoryLabel)) return 'tops';
   if (/ボトムス|スカート|パンツ|ズボン|bottoms?\b/i.test(categoryLabel)) return 'bottoms';
-  if (/ぼうし|帽子|\bhat\b|\bcap\b/i.test(categoryLabel)) return 'hat';
   return 'other';
 }
 
@@ -413,7 +413,7 @@ export function widthLines(level: WidthLevel, hints: WidthHint[], recent: string
     lines.push(
       'Design hints (drawn at random so that the same theme gives a different design each time):',
       ...hints.map((h) => `- ${h.axis}: ${h.en}`),
-      'Work these hints into the design where the theme leaves it open. The theme always wins: drop a hint that contradicts the theme, and drop a hint that does not suit the season or mood of the theme. The result must still clearly show the theme and be normal, wearable and child-friendly.',
+      'Work these hints into the design where the theme leaves it open. The theme always wins: drop a hint that contradicts the theme, and drop a hint that does not suit the season or mood of the theme. If two hints conflict with each other, keep only one of them. The result must still clearly show the theme and be normal, wearable and child-friendly.',
     );
   }
   if (recent.length > 0) {

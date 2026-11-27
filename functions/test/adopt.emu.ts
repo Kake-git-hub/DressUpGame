@@ -128,7 +128,7 @@ describe('引き継ぎ（エミュレーター）', () => {
     expect(claims.firebase?.identities?.['google.com']).toHaveLength(1);
 
     expect(failure(await first.call({ op: 'offer' }).catch((e) => e))).toMatchObject({ code: 'functions/failed-precondition', reason: 'refused' });
-    expect((await first.call<{ api: number }>({ op: 'signIn' })).api).toBe(7);
+    expect((await first.call<{ api: number }>({ op: 'signIn' })).api).toBe(8);
     expect((await getAdminFirestore(admin).doc(`users/${first.uid}`).get()).data()).toMatchObject({ named: true });
 
     const second = await client();
