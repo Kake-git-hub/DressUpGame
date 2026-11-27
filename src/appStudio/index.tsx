@@ -23,7 +23,6 @@ export interface StudioRootProps {
   clothing: ClothingItemData[];
   initialDollId: string;
   onClose: () => void;
-  onOpenCloset: () => void;
   skipGate?: boolean; // 保護者の確認をしない（販売を始めるまで）
   demo?: boolean; // 確認用（偽物の裏側）
   payReturn?: PayReturn | null; // 支払いのページから戻ってきたとき
@@ -32,9 +31,17 @@ export interface StudioRootProps {
 // 注文の演出の絵（洋服屋の店員とお店。この画面と一緒に、開いたときに読み込む）
 const ART: ShopArt = { shop: shopArt, order: orderArt, ticket: ticketArt };
 
-export default function StudioRoot({ session, library, dolls, categoriesByDoll, clothing, initialDollId, onClose, onOpenCloset, skipGate = false, demo = false, payReturn = null }: StudioRootProps) {
+export default function StudioRoot({ session, library, dolls, categoriesByDoll, clothing, initialDollId, onClose, skipGate = false, demo = false, payReturn = null }: StudioRootProps) {
   // 保護者の確認は、開くたびに毎回たずねる（覚えない）
   const [confirmed, setConfirmed] = useState(skipGate);
-  if (!confirmed) return <AdultGate onCancel={onClose} onPass={() => setConfirmed(true)} />;
-  return <AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} clothing={clothing} initialDollId={initialDollId} onClose={onClose} onOpenCloset={onOpenCloset} demo={demo} art={ART} payReturn={payReturn} />;
+  // 確認の間も、うしろは「つくる」の画面の色（ホームや遊ぶ画面は、うしろに無い）
+  if (!confirmed) {
+    return (
+      <>
+        <div className="studio-screen" aria-hidden="true" />
+        <AdultGate onCancel={onClose} onPass={() => setConfirmed(true)} />
+      </>
+    );
+  }
+  return <AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} clothing={clothing} initialDollId={initialDollId} onClose={onClose} demo={demo} art={ART} payReturn={payReturn} />;
 }

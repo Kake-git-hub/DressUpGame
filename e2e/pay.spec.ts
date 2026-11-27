@@ -17,9 +17,10 @@ async function passGate(page: Page) {
   await page.getByTestId('adult-18').check();
   await page.getByTestId('adult-open').click();
 }
-// 「チケットを買う」→ 保護者の確認 → パック → 同意（支払いへ進む の前まで）
+const tickets = (page: Page) => page.getByTestId('studio-tickets');
+// チケットの残り（リンク）を押す → 保護者の確認 → パック → 同意（支払いへ進む の前まで）
 async function toConfirm(page: Page, pack = '10-300') {
-  await page.getByTestId('studio-buy').click();
+  await tickets(page).click();
   await passGate(page);
   await page.getByTestId(`shop-pack-${pack}`).click();
   await expect(page.getByTestId('shop-confirm')).toContainText('税込 300 円');
@@ -30,34 +31,45 @@ const loggedIn = (page: Page) =>
   page.addInitScript(() => {
     if (!localStorage.getItem('dressup_fake_account')) localStorage.setItem('dressup_fake_account', JSON.stringify({ google: true }));
   });
-const tickets = (page: Page) => page.getByTestId('studio-tickets');
 
-test('売っていないときは、買うボタンが無い', async ({ page }) => {
+const tagOf = (page: Page) => tickets(page).evaluate((el) => el.tagName);
+
+test('売っていないときは、チケットの残りは、ただの文（押せない）。「チケットを買う」のボタンも無い', async ({ page }) => {
   await openHome(page, { shop: { open: false } });
   await openStudio(page);
   await expect(tickets(page)).toContainText('のこり 5 枚');
+  await page.waitForTimeout(1000);
+  expect(await tagOf(page)).toBe('SPAN');
   await expect(page.getByTestId('studio-buy')).toHaveCount(0);
 });
 
-test('売っていなくても、管理者には、買うボタンが出る', async ({ page }) => {
+test('売っているときは、チケットの残りが、下線つきのリンク。別の「チケットを買う」ボタンは無い', async ({ page }) => {
+  await openHome(page);
+  await openStudio(page);
+  await expect(tickets(page)).toHaveText('🎫 のこり 5 枚');
+  await expect.poll(() => tagOf(page)).toBe('BUTTON');
+  expect(await tickets(page).evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('underline');
+  await expect(page.getByTestId('studio-buy')).toHaveCount(0);
+});
+
+test('売っていなくても、管理者には、チケットの残りが、買う入口（リンク）になる', async ({ page }) => {
   await openHome(page, { shop: { open: false }, admin: true });
   await openStudio(page);
-  await expect(page.getByTestId('studio-buy')).toBeVisible();
   // 管理者にも、試しに買った結果（枚数）が見える
   await expect(tickets(page)).toContainText('管理者（制限なし）・🎫 のこり 5 枚');
+  await expect.poll(() => tagOf(page)).toBe('BUTTON');
 });
 
 test('ログインしていないと、押してすぐ、ログインの案内が出る（保護者の確認の前）', async ({ page }) => {
   await openHome(page);
   await openStudio(page);
-  await page.getByTestId('studio-buy').click();
+  await tickets(page).click();
   await expect(page.getByTestId('shop-login-message')).toContainText('Google で ログインすると かえます');
   await expect(page.getByTestId('adult-gate')).toHaveCount(0);
   await page.getByTestId('shop-login-go').click();
   await expect(page.getByTestId('shop-login-guide')).toHaveCount(0);
-  await expect(page.getByTestId('account-section')).toBeVisible();
-  // たたんであるアカウントの欄が、開いて見える
-  await expect(page.getByTestId('account-section')).toHaveAttribute('open', '');
+  // アカウントの欄（「Google で ログイン」のボタン）が、画面の中に見える
+  await expect(page.getByTestId('account-login-redirect')).toBeInViewport();
   await expect(tickets(page)).toContainText('のこり 5 枚');
 });
 
@@ -90,7 +102,7 @@ test('買う: 確認 → 同意 → にせの支払いページ → 払う → �
   await openHome(page);
   await openStudio(page);
   await expect(tickets(page)).toContainText('のこり 5 枚');
-  await page.getByTestId('studio-buy').click();
+  await tickets(page).click();
   await passGate(page);
   await page.getByTestId('shop-pack-10-300').click();
   // 最終確認: 同意の印が無いと進めない
@@ -111,6 +123,11 @@ test('買う: 確認 → 同意 → にせの支払いページ → 払う → �
   expect(page.url()).not.toMatch(/pay=|session=/);
   expect(page.url()).toContain('studio=fake');
   expect((await fakeState(page))!.user.tickets).toBe(15);
+  // 支払いから戻ったときも、「つくる」は、ひとつの画面（遊ぶ画面には入っていない）。閉じると、ホーム
+  await expect(page.locator('#avatar-canvas')).toHaveCount(0);
+  await page.getByTestId('studio-close').click();
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await expect(page.locator('#avatar-canvas')).toHaveCount(0);
   // 読み込み直しても、もう知らせない
   await page.reload();
   await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 60_000 });

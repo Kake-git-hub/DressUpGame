@@ -247,12 +247,13 @@ function App() {
   const canvasSize = layout.canvas;
 
   // ホーム画面を出している / ゲームの画面
-  // 支払いから戻ったときは、「つくる」を開いて始める（戻りの知らせは、閉じるまで）
+  // 支払いから戻ったときは、「つくる」を開いて始める（戻りの知らせは、閉じるまで）。
+  // 「つくる」は、ホームの側の、ひとつの画面（遊ぶ画面には入らない）なので、このときもホームから始める
   const [payReturn, setPayReturn] = useState<PayReturn | null>(STUDIO_MODE && PAY_RETURN && PAY_RETURN.kind !== 'fake' ? PAY_RETURN : null);
   useEffect(() => {
     if (PAY_RETURN && PAY_RETURN.kind !== 'fake') clearPayReturn();
   }, []);
-  const [onHome, setOnHome] = useState(START_ON_HOME && !payReturn);
+  const [onHome, setOnHome] = useState(START_ON_HOME || payReturn !== null);
   // 服を作る画面・クローゼットを開いているか（どちらも、ホームから開き、閉じるとホームにもどる）
   const [studioOpen, setStudioOpen] = useState(payReturn !== null);
   const [closetOpen, setClosetOpen] = useState(false);
@@ -265,14 +266,14 @@ function App() {
   const commitPendingAdjustRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     studioOpenRef.current = studioOpen;
-    // 閉じたら、その間に変わっていた画面の大きさに合わせ直す
+    // 閉じたら、その間に変わっていた画面の大きさに合わせ直す（「つくる」で文字を打っている間は、配置を変えないでいた）
     if (!studioOpen) window.dispatchEvent(new Event('resize'));
   }, [studioOpen]);
 
   // 画面サイズの変化（持ち替えを含む）に合わせる。CSS変数も同時に更新してレイアウト全体を制御
   useEffect(() => {
     const update = () => {
-      // スタジオで文字を打っている間は、キーボードで画面が縮んでも、うしろのゲームの配置を変えない
+      // スタジオで文字を打っている間は、キーボードで画面が縮んでも、ゲームの配置を変えない
       if (studioOpenRef.current) return;
       // 調整画面を開いたまま画面の大きさが変わる（持ち替えなど）と、調整画面は新しい縮尺で開き直る。
       // その前に、まだ確定していない調整を覚えておく（消さない）
@@ -921,34 +922,68 @@ function App() {
     </StudioBoundary>
   );
 
+  // 服を作る画面（ホームから開く、ひとつの画面。遊ぶ画面には入らない。開いたときに読み込む）。
+  // 素材の読み込みが済むまでは「よみこみちゅう…」。読めなかったら、やり直すか、閉じる
+  const studioLayer = studioOpen && STUDIO_MODE && (
+    <StudioBoundary onClose={closeStudio}>
+      <Suspense fallback={<div className="studio-loading studio-loading-screen">よみこみちゅう…</div>}>
+        {session && currentDoll ? (
+          <StudioRoot
+            session={session}
+            library={library}
+            dolls={allDolls}
+            categoriesByDoll={categoriesByDoll}
+            clothing={allClothing}
+            initialDollId={currentDoll.id}
+            onClose={closeStudio}
+            payReturn={payReturn}
+            skipGate={!ASK_ADULT}
+            demo={STUDIO_MODE === 'fake'}
+          />
+        ) : loadState === 'error' ? (
+          <div className="status-screen studio-loading-screen" data-testid="studio-load-error">
+            <p>インターネットにつないでね</p>
+            <button onClick={handleRetryLoad}>もういちど</button>
+            <button onClick={closeStudio}>とじる</button>
+          </div>
+        ) : (
+          <div className="studio-loading studio-loading-screen">よみこみちゅう…</div>
+        )}
+      </Suspense>
+    </StudioBoundary>
+  );
+  // 「つくる」の操作ガイド（はじめて開いたとき、1 回だけ。画面が出てから）
+  const studioGuide = studioOpen && STUDIO_MODE && session && currentDoll && shouldShowGuide('studio') && (
+    <Guide key="studio" name="studio" steps={guideSteps('studio', false)} onDone={() => setGuideTick((t) => t + 1)} />
+  );
+
   // ホーム画面（読み込みは裏で続ける）
   if (onHome) {
     return (
       <div className="app">
         {versionBadge}
-        <Suspense fallback={null}>
-          <HomeScreen
-            onPlay={() => setOnHome(false)}
-            // 「つくる」「クローゼット」は、「つくる」を教えた端末にだけ出す
-            onCreate={
-              STUDIO_MODE
-                ? () => {
-                    setOnHome(false);
-                    setStudioOpen(true);
-                  }
-                : undefined
-            }
-            onCloset={STUDIO_MODE ? () => setClosetOpen(true) : undefined}
-            closetDot={closetDot}
-            onGuideReset={() => {
-              resetGuides();
-              setGuideTick((t) => t + 1);
-            }}
-          />
-        </Suspense>
+        {/* 「つくる」を開いている間は、ホームのボタンは出さない（「つくる」は、ひとつの画面） */}
+        {!studioLayer && (
+          <Suspense fallback={null}>
+            <HomeScreen
+              onPlay={() => setOnHome(false)}
+              // 「つくる」「クローゼット」は、「つくる」を教えた端末にだけ出す。
+              // 「つくる」は、ホームの側の、ひとつの画面として開く（遊ぶ画面には入らない。閉じると、ホーム）
+              onCreate={STUDIO_MODE ? () => setStudioOpen(true) : undefined}
+              onCloset={STUDIO_MODE ? () => setClosetOpen(true) : undefined}
+              closetDot={closetDot}
+              onGuideReset={() => {
+                resetGuides();
+                setGuideTick((t) => t + 1);
+              }}
+            />
+          </Suspense>
+        )}
         {closetLayer}
+        {studioLayer}
         {revealLayer}
         {noticeLayer}
+        {studioGuide}
       </div>
     );
   }
@@ -1008,15 +1043,14 @@ function App() {
   );
 
   // 操作ガイド（その場面になったとき、1 回だけ。いちどに 1 つ）
-  const guideName: GuideName | null = studioOpen
-    ? shouldShowGuide('studio') ? 'studio' : null
-    : isAdjustingItem
-      ? adjustingItem && shouldShowGuide('adjust') ? 'adjust' : null
-      : shouldShowGuide('play')
-        ? 'play'
-        : equippedItems.length > 0 && shouldShowGuide('worn')
-          ? 'worn'
-          : null;
+  // （「つくる」のガイドは、ホームの側で出す）
+  const guideName: GuideName | null = isAdjustingItem
+    ? adjustingItem && shouldShowGuide('adjust') ? 'adjust' : null
+    : shouldShowGuide('play')
+      ? 'play'
+      : equippedItems.length > 0 && shouldShowGuide('worn')
+        ? 'worn'
+        : null;
   const guideLayer = guideName && (
     <Guide key={guideName} name={guideName} steps={guideSteps(guideName, portrait)} onDone={() => setGuideTick((t) => t + 1)} />
   );
@@ -1142,36 +1176,6 @@ function App() {
             rightOffset={layout.rightOffset}
           />
         ))}
-
-      {/* 服を作る画面（開いたときに読み込む） */}
-      {studioOpen && STUDIO_MODE && currentDoll && (
-        <StudioBoundary onClose={closeStudio}>
-          <Suspense fallback={<div className="studio-loading">よみこみちゅう…</div>}>
-            {session ? (
-              <StudioRoot
-                session={session}
-                library={library}
-                dolls={allDolls}
-                categoriesByDoll={categoriesByDoll}
-                clothing={allClothing}
-                initialDollId={currentDoll.id}
-                onClose={closeStudio}
-                onOpenCloset={() => {
-                  setStudioOpen(false);
-                  setPayReturn(null);
-                  setOnHome(true);
-                  setClosetOpen(true);
-                }}
-                payReturn={payReturn}
-                skipGate={!ASK_ADULT}
-                demo={STUDIO_MODE === 'fake'}
-              />
-            ) : (
-              <div className="studio-loading">よみこみちゅう…</div>
-            )}
-          </Suspense>
-        </StudioBoundary>
-      )}
 
       {revealLayer}
       {noticeLayer}

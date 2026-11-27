@@ -18,7 +18,7 @@ const library = { all: async () => [], put: async () => undefined, remove: async
 
 function open(options: Parameters<typeof createFakeBackend>[0] = {}, props: Partial<Parameters<typeof AppStudio>[0]> = {}) {
   const session = createSession({ backend: createFakeBackend({ image: async () => new Blob(['x']), planMs: 0, ...options }), library, onLibraryChanged: () => undefined });
-  render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} {...props} />);
+  render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} {...props} />);
   return session;
 }
 const tiles = (testId: string) => Array.from(screen.getByTestId(testId).querySelectorAll(':scope > button')).map((b) => b.getAttribute('aria-label'));
@@ -157,6 +157,59 @@ describe('つくる', () => {
     expect((screen.getByTestId('gift-give') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('説明の文は置かない（v0.48.0）: 注文の説明・テーマの書き方・セットの選び方の文は無い。「クローゼットを見る」「チケットを買う」のボタンも無い', async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    const all = () => screen.getByTestId('app-studio').textContent ?? '';
+    expect(all()).not.toContain('絵をえらんで注文すると');
+    expect(screen.queryByTestId('studio-open-closet')).toBeNull();
+    expect(screen.queryByTestId('studio-buy')).toBeNull();
+    expect(all()).not.toContain('クローゼットを見る');
+    next();
+    tap('studio-target', 'セット');
+    // セットに入れるものの絵は出る。選び方の文は無い
+    expect(pressed('studio-set-categories')).toEqual(['トップス', 'ドレス']);
+    expect(all()).not.toContain('タップで えらんでね');
+    expect(screen.getByTestId('studio-set-categories').querySelector(':scope > span')).toBeNull();
+    next();
+    expect(stepOf()).toBe('theme');
+    expect(all()).not.toContain('すきな ことばを 書いてね');
+    expect(screen.getAllByTestId('studio-theme-idea').length).toBeGreaterThan(0);
+  });
+
+  it('利用者コードは、「コード: XXXXXXXX」だけ（説明の文は無い）', async () => {
+    const session = open();
+    await waitFor(() => expect(screen.getByTestId('studio-user-code')).toBeTruthy());
+    const code = session.getState().user!.userCode;
+    expect(screen.getByTestId('studio-user-code').textContent).toBe(code);
+    expect(screen.getByTestId('studio-user-code').parentElement?.textContent).toBe(`コード: ${code}`);
+  });
+
+  it('作っている服の欄に、説明の文（閉じても続きます）は無い。進み具合は出る', async () => {
+    open({ delayMs: 60_000 });
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    next();
+    tap('studio-target', 'トップス');
+    fireEvent.change(screen.getByTestId('studio-theme'), { target: { value: 'うみ' } });
+    next();
+    next();
+    fireEvent.click(screen.getByTestId('studio-make'));
+    await waitFor(() => expect(screen.getByTestId('studio-making')).toBeTruthy(), { timeout: 4000 });
+    expect(screen.getByTestId('studio-making').textContent).not.toContain('この画面を閉じても');
+    expect(screen.getByTestId('studio-job-notice').textContent).not.toBe('');
+  });
+
+  it('確認用の裏側（demo）の注は、残す', async () => {
+    open({}, { demo: true });
+    await waitFor(() => expect(screen.getByTestId('studio-demo').textContent).toContain('確認用の画面です'));
+  });
+
+  it('画面は、遊ぶ画面の上の半透明の幕ではなく、ひとつの画面（studio-screen）', async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
+    expect(screen.getByTestId('app-studio').className).toBe('studio-screen');
+  });
+
   it('古いサーバーのときは、知らせを出して、作る欄を出さない', async () => {
     open({ oldServer: true });
     await waitFor(() => expect(screen.getByTestId('studio-problem').textContent).toContain('サーバーが古い版です'));
@@ -180,7 +233,7 @@ describe('つくる', () => {
       refreshed++;
       return realRefresh();
     };
-    render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
+    render(<AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} initialDollId="girl" onClose={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
     fireEvent.click(screen.getByTestId('studio-next')); // ドール
     fireEvent.click(screen.getByTestId('studio-next')); // なにを

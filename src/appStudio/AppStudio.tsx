@@ -4,6 +4,9 @@
  *
  * チケット・生成・保存は、サーバーが行う。「作る」の返事が返ったあとは、この画面を閉じても、アプリを閉じても、
  * サーバーが最後まで作り、できた服は自動でクローゼットに入る（届いた知らせは、つなぎ役 = session が出す）。
+ *
+ * 遊ぶ画面の上に重ねる幕ではなく、ひとつの画面（ホームから開き、閉じるとホームにもどる）。
+ * 説明の文は置かない（絵とボタンだけで進める）。チケットの残りは、売っているときは、買う入口のリンクになる（v0.48.0）。
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
@@ -34,7 +37,6 @@ interface Props {
   clothing?: ClothingItemData[]; // 服の一覧（カテゴリの絵に、先頭の服のサムネイルを使う）
   initialDollId: string; // 最初に選んでおくドール（最後に遊んだドール）
   onClose: () => void;
-  onOpenCloset: () => void;
   demo?: boolean; // 確認用（偽物の裏側）。絵は色の四角で、チケットもにせもの
   art?: ShopArt;
   payReturn?: PayReturn | null; // 支払いのページから戻ってきたとき（?pay=done / cancel）
@@ -80,7 +82,7 @@ const NOTICE = {
   crowded: 'こみあっています。できたら、クローゼットに入ります。',
 };
 
-export function AppStudio({ session, library, dolls, categoriesByDoll, clothing = NO_CLOTHING, initialDollId, onClose, onOpenCloset, demo = false, art, payReturn = null }: Props) {
+export function AppStudio({ session, library, dolls, categoriesByDoll, clothing = NO_CLOTHING, initialDollId, onClose, demo = false, art, payReturn = null }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { user } = state;
   const [dollId, setDollId] = useState(() => (dolls.some((d) => d.id === initialDollId) ? initialDollId : (dolls[0]?.id ?? '')));
@@ -126,9 +128,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   };
   const goLogin = () => {
     setBuying(null);
-    // アカウントの欄は、たたんであるので、開いてから見せる
-    const details = accountRef.current?.querySelector('details');
-    if (details) details.open = true;
+    // アカウントの欄（「Google で ログイン」のボタン）を、見える所へ
     accountRef.current?.scrollIntoView?.({ block: 'center' });
   };
   // 「こみあっています」に切り替えるために、ときどき描き直す
@@ -215,17 +215,25 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   // 作りかけの仕事（どのドールの分も）。終わった仕事は、ここには出さない（届いた知らせが出る）
   const making = state.jobs.filter((job) => !job.done);
   const dollName = (id: string) => dolls.find((d) => d.id === id)?.name ?? 'いまは選べないドール';
+  // チケットを売っているか（売っていれば、残りの枚数が、買う入口になる）
+  const canBuy = Boolean(pay.shop?.open && pay.shop.packs.length > 0);
+  const ticketText = user ? (user.admin ? `管理者（制限なし）・🎫 のこり ${user.tickets} 枚` : `🎫 のこり ${user.tickets} 枚`) : '';
 
   return (
-    <div className="studio-overlay" data-testid="app-studio">
+    <div className="studio-screen" data-testid="app-studio">
       <div className="studio-panel" inert={phase !== null}>
         <header className="studio-header">
           <h2>✨ 服を作る</h2>
-          {user && (
-            <span className="studio-tickets" data-testid="studio-tickets">
-              {user.admin ? `管理者（制限なし）・🎫 のこり ${user.tickets} 枚` : `🎫 のこり ${user.tickets} 枚`}
-            </span>
-          )}
+          {user &&
+            (canBuy && !problem ? (
+              <button type="button" className="studio-tickets studio-tickets-link" onClick={() => void startBuying()} data-testid="studio-tickets">
+                {ticketText}
+              </button>
+            ) : (
+              <span className="studio-tickets" data-testid="studio-tickets">
+                {ticketText}
+              </span>
+            ))}
           <button type="button" onClick={onClose} aria-label="とじる" data-testid="studio-close">
             ✕
           </button>
@@ -280,9 +288,6 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
                 確認用の画面です。絵は色の四角で、AI は使いません。チケットも、この端末の中だけのにせものです。
               </p>
             )}
-            <p className="studio-note">
-              絵をえらんで注文すると、AI が服を作ります。できた服は、1〜2 分でクローゼットに届きます（アプリを閉じていても）。服 1 点 = チケット 1 枚。
-            </p>
 
             <section className="studio-wizard" data-testid="studio-step" data-step={step}>
               <ol className="studio-steps" aria-label="すすみぐあい">
@@ -329,9 +334,6 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
                   </div>
                   {isSet && (
                     <div className="studio-set" data-testid="studio-set-categories">
-                      <span>
-                        セットに入れるものを、タップで えらんでね（{SET_MIN}〜{SET_MAX} 個。色と飾りをそろえて、1 点ずつ作ります）
-                      </span>
                       <div className="studio-tiles studio-tiles-small">
                         {targets.map((c) => {
                           const on = setCats.includes(c.id);
@@ -352,7 +354,6 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
               {step === 'theme' && (
                 <div className="studio-group">
                   <input className="studio-theme-input" value={theme} maxLength={THEME_MAX} onChange={(e) => setTheme(e.target.value)} placeholder="例: うみのおひめさま" aria-label="テーマ" data-testid="studio-theme" />
-                  <span className="studio-hint">すきな ことばを 書いてね。下から えらんでも いいよ</span>
                   <div className="studio-ideas">
                     {THEME_IDEAS.map((idea) => (
                       <button type="button" key={idea.word} className="studio-idea" aria-pressed={text === idea.word} onClick={() => setTheme(idea.word)} data-testid="studio-theme-idea">
@@ -430,7 +431,6 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
             {making.length > 0 && (
               <section data-testid="studio-making">
                 <h3>作っている服</h3>
-                <p className="studio-hint">この画面を閉じても、アプリを閉じても、続きます。できたら、クローゼットに入ります。</p>
                 <div className="studio-cards">
                   {making.map((job) => (
                     <div key={job.id} className="studio-candidate" data-testid="studio-job" data-notice={jobNotice(job, now)}>
@@ -454,17 +454,6 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
               </section>
             )}
 
-            <div className="shop-buy-row">
-              <button type="button" onClick={onOpenCloset} data-testid="studio-open-closet">
-                👗 クローゼットを見る
-              </button>
-              {pay.shop?.open && pay.shop.packs.length > 0 && (
-                <button type="button" onClick={() => void startBuying()} data-testid="studio-buy">
-                  🎫 チケットを買う
-                </button>
-              )}
-            </div>
-
             <div ref={accountRef}>
               <Account session={session} library={library} />
             </div>
@@ -473,7 +462,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
 
             {user && (
               <p className="studio-hint">
-                利用者コード: <b data-testid="studio-user-code">{user.userCode}</b>（チケットを受け取るときに、作者に伝えるコードです）
+                コード: <b data-testid="studio-user-code">{user.userCode}</b>
               </p>
             )}
           </>

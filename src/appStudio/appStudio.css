@@ -1,4 +1,25 @@
 /* アプリの中のスタジオ（入口の確認と、作る画面）。大人が使う画面なので、落ち着いた見た目にする */
+/* 作る画面: ひとつの画面（うしろは透けない。ホームと同じ、やわらかい色）。中身は、まんなかの 1 列 */
+.studio-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: linear-gradient(180deg, #fff5fa 0%, #f3ecff 100%);
+  padding: calc(var(--top-inset, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+  box-sizing: border-box;
+  touch-action: pan-y;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.studio-screen > .studio-panel {
+  box-shadow: 0 2px 12px rgba(122, 79, 176, 0.12);
+}
+/* 入口の確認など、上に重ねる小さい窓の幕 */
 .studio-overlay {
   position: fixed;
   inset: 0;
@@ -219,15 +240,11 @@
   color: #b3261e;
 }
 
-/* アカウントの欄（ログイン・ログアウト）。幅 390px の縦のスマホでも、ボタンの文は折り返して、はみ出さない */
+/* アカウントの欄（ゲストは「Google で ログイン」のボタン 1 つ。ログイン中は、名前とログアウト）。箱や見出しは置かない */
 .studio-account {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
-  background: #faf6fd;
-  border: 1px solid #e6dcec;
-  border-radius: 12px;
 }
 .studio-account p {
   margin: 0;
@@ -241,18 +258,6 @@
   width: 100%;
   max-width: 100%;
   white-space: normal; /* 文が長いので、折り返す */
-}
-.studio-account-fallback {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-}
-.studio-account-small {
-  width: auto;
-  padding: 4px 10px;
-  font-size: 12px;
 }
 .studio-account-row {
   justify-content: space-between;
@@ -523,21 +528,6 @@
   border: none;
 }
 
-/* アカウントの欄（たたんで、小さく） */
-details.studio-account {
-  display: block;
-  padding: 6px 12px;
-  font-size: 13px;
-}
-details.studio-account > * + * {
-  margin-top: 8px;
-}
-.studio-account-summary {
-  cursor: pointer;
-  color: #6c5a7c;
-  font-size: 13px;
-}
-
 /* チケットを配る（管理者だけ） */
 .studio-gift {
   display: flex;
@@ -569,4 +559,16 @@ details.studio-account > * + * {
   white-space: normal;
   text-align: right;
   font-size: 13px;
+}
+/* チケットの残りが、買う入口のとき: リンクの見た目（下線）。ボタンの枠は付けない */
+.studio-panel button.studio-tickets-link {
+  min-height: 40px;
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  color: #7a4fb0;
+  font-size: 13px;
+  font-weight: bold;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }

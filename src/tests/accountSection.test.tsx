@@ -31,8 +31,7 @@ interface Setup {
   admin?: boolean;
   canRedirect?: boolean;
   prepare?: () => Promise<AccountInfo>;
-  popup?: (intent: 'link' | 'signin') => Promise<LoginResult>;
-  redirect?: (intent: 'link' | 'signin') => Promise<LoginResult>;
+  redirect?: (intent: 'link' | 'signin', options?: { step?: string }) => Promise<LoginResult>;
   offer?: () => Promise<string>; // offerHandoff（既定は、合い言葉 'word-1'）
   adopt?: (word: string) => Promise<AdoptAnswer>; // 既定は done（チケット 3・服 1）
   stashed?: boolean; // signInWithStashed の答え（既定 true）
@@ -50,7 +49,7 @@ function setup(options: Setup = {}) {
   const account = {
     prepare: vi.fn(options.prepare ?? (async () => info)),
     canRedirect: vi.fn(async () => options.canRedirect ?? true),
-    loginWithPopup: vi.fn(options.popup ?? (async () => ({ outcome: 'linked' }) as LoginResult)),
+    loginWithPopup: vi.fn(async () => ({ outcome: 'linked' }) as LoginResult),
     startRedirect: vi.fn(options.redirect ?? (async () => ({ outcome: 'not-ready' }) as LoginResult)),
     signInWithStashed: vi.fn(async () => options.stashed ?? true),
     finishRedirect: vi.fn(async () => null),
@@ -98,11 +97,10 @@ function setup(options: Setup = {}) {
 }
 
 const planted = (over: Record<string, unknown> = {}) => localStorage.setItem(ADOPT_KEY, JSON.stringify({ word: 'word-1', from: 'AAAA', stage: 'offered', at: Date.now(), ...over }));
-const popupButton = () => screen.getByTestId('account-login-popup') as HTMLButtonElement;
 const redirectButton = () => screen.getByTestId('account-login-redirect') as HTMLButtonElement;
 const message = () => screen.getByTestId('account-message').textContent;
 const ready = async () => {
-  await waitFor(() => expect(popupButton().disabled).toBe(false));
+  await waitFor(() => expect(redirectButton().disabled).toBe(false));
 };
 const ids = async () => (await library.all()).map((i) => i.id);
 
@@ -129,10 +127,10 @@ describe('「アカウント」の欄', () => {
       await act(async () => {
         vi.advanceTimersByTime(20_000);
       });
-      expect(popupButton().disabled).toBe(false); // 聞き直している間も、押せる
+      expect(redirectButton().disabled).toBe(false); // 聞き直している間も、押せる
       await act(async () => undefined);
-      fireEvent.click(popupButton());
-      expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+      fireEvent.click(redirectButton());
+      expect(account.startRedirect).toHaveBeenCalledWith('link');
     } finally {
       vi.useRealTimers();
     }
@@ -147,8 +145,8 @@ describe('「アカウント」の欄', () => {
       window.dispatchEvent(new Event('focus'));
     });
     await waitFor(() => expect((backend.signIn as Mock).mock.calls.length).toBeGreaterThan(calls));
-    fireEvent.click(popupButton());
-    expect(account.loginWithPopup).toHaveBeenLastCalledWith('link');
+    fireEvent.click(redirectButton());
+    expect(account.startRedirect).toHaveBeenLastCalledWith('link');
     cleanup();
     // 閉じたあとは、聞かない
     const after = (backend.signIn as Mock).mock.calls.length;
@@ -177,31 +175,26 @@ describe('「アカウント」の欄', () => {
     await ready();
     setTickets(3);
     await ready();
-    fireEvent.click(popupButton());
-    expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+    fireEvent.click(redirectButton());
+    expect(account.startRedirect).toHaveBeenCalledWith('link');
   });
 
-  it('見出しと説明、ボタンの文: 大きい「Google でログイン」と、「うまくいかないとき: 」の小さい「小さい窓でログイン」。ためしの版の注は無い', async () => {
+  it('ゲストの欄は、「Google で ログイン」のボタン 1 つだけ。説明の文・小さい窓のボタン・たたむ見出しは無い', async () => {
     setup();
     await ready();
     const section = screen.getByTestId('account-section');
-    expect(section.textContent).toContain('アカウント');
-    expect(section.textContent).toContain('Google のアカウントでログインすると、ほかの端末でも、同じチケットと服を使えます。');
-    expect(redirectButton().textContent).toBe('Google でログイン');
-    expect(popupButton().textContent).toBe('小さい窓でログイン');
-    expect(popupButton().parentElement?.textContent).toBe('うまくいかないとき: 小さい窓でログイン');
-    expect(section.textContent).not.toContain('ためしの版です');
-    expect(section.textContent).not.toContain('方法 1');
-    expect(section.textContent).not.toContain('方法 2');
-    // 大きいボタンが先、小さいボタンはその下
-    expect(redirectButton().compareDocumentPosition(popupButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(popupButton().className).toContain('studio-account-small');
+    expect(redirectButton().textContent).toBe('Google で ログイン');
+    expect(section.textContent).toBe('Google で ログイン');
+    expect(section.querySelectorAll('button').length).toBe(1);
+    expect(screen.queryByTestId('account-login-popup')).toBeNull();
+    expect(screen.queryByTestId('account-summary')).toBeNull();
+    expect(section.tagName).not.toBe('DETAILS');
+    expect(section.querySelector('details, summary')).toBeNull();
   });
 
-  it('準備が済むまで、2 つのボタンは押せない（「準備しています…」）。済むと押せる', async () => {
+  it('準備が済むまで、ボタンは押せない（「準備しています…」）。済むと押せる', async () => {
     let finish: (info: AccountInfo) => void = () => undefined;
     setup({ prepare: () => new Promise<AccountInfo>((resolve) => (finish = resolve)) });
-    expect(popupButton().disabled).toBe(true);
     expect(redirectButton().disabled).toBe(true);
     expect(screen.getByTestId('account-section').textContent).toContain('準備しています…');
     await act(async () => finish(GUEST));
@@ -213,27 +206,25 @@ describe('「アカウント」の欄', () => {
   it('準備に失敗したら、そう出して、ボタンは押せないまま', async () => {
     setup({ prepare: async () => Promise.reject(new Error('x')) });
     await waitFor(() => expect(message()).toBe('いまは、ログインの準備ができません（インターネットを確かめてください）'));
-    expect(popupButton().disabled).toBe(true);
     expect(redirectButton().disabled).toBe(true);
   });
 
-  it('空でない端末: 方法 1 は loginWithPopup(link)。クリックが返った時点で、もう呼ばれている。linked → ログイン中と文', async () => {
+  it('空でない端末: startRedirect(link)。クリックが返った時点で、もう呼ばれている。linked → ログイン中と文', async () => {
     const { account, setInfo } = setup({ tickets: 3 });
     await ready();
     let done: (r: LoginResult) => void = () => undefined;
-    account.loginWithPopup.mockImplementationOnce(() => new Promise<LoginResult>((resolve) => (done = resolve)));
-    fireEvent.click(popupButton());
-    expect(account.loginWithPopup).toHaveBeenCalledTimes(1);
-    expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+    account.startRedirect.mockImplementationOnce(() => new Promise<LoginResult>((resolve) => (done = resolve)));
+    fireEvent.click(redirectButton());
+    expect(account.startRedirect).toHaveBeenCalledTimes(1);
+    expect(account.startRedirect).toHaveBeenCalledWith('link');
     // 待っている間
     expect(screen.getByTestId('account-busy').textContent).toBe('ログインしています…');
-    expect(popupButton().disabled).toBe(true);
     expect(redirectButton().disabled).toBe(true);
     setInfo(GOOGLE);
     await act(async () => done({ outcome: 'linked' }));
     await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe('ためし はなこ でログイン中'));
     expect(message()).toBe(LOGIN_MESSAGES.linked);
-    expect(screen.queryByTestId('account-login-popup')).toBeNull();
+    expect(screen.queryByTestId('account-login-redirect')).toBeNull();
     expect(screen.queryByTestId('account-busy')).toBeNull();
     expect(reload).not.toHaveBeenCalled();
   });
@@ -242,19 +233,19 @@ describe('「アカウント」の欄', () => {
     for (const change of [{ items: 1 }, { jobs: 1 }, { admin: true }]) {
       const { account } = setup(change);
       await ready();
-      fireEvent.click(popupButton());
-      expect(account.loginWithPopup).toHaveBeenCalledWith('link');
+      fireEvent.click(redirectButton());
+      expect(account.startRedirect).toHaveBeenCalledWith('link');
       cleanup();
     }
   });
 
-  it('空の端末: 小さい窓は loginWithPopup(signin)。switched（覚えが無い）→ settleLogin を通る: 前の利用者の服だけ控えから外し、知らせを置いて、読み込み直す。adopt は呼ばない', async () => {
+  it('空の端末: startRedirect(signin)。switched（覚えが無い）→ settleLogin を通る: 前の利用者の服だけ控えから外し、知らせを置いて、読み込み直す。adopt は呼ばない', async () => {
     localStorage.setItem(NEW_KEY, '["a1"]');
     localStorage.setItem(ACKED_KEY, '["j"]');
-    const { account, backend } = setup({ popup: async () => ({ outcome: 'switched' }) });
+    const { account, backend } = setup({ redirect: async () => ({ outcome: 'switched' }) });
     await ready();
-    fireEvent.click(popupButton());
-    expect(account.loginWithPopup).toHaveBeenCalledWith('signin');
+    fireEvent.click(redirectButton());
+    expect(account.startRedirect).toHaveBeenCalledWith('signin');
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(backend.adopt).not.toHaveBeenCalled();
     expect(await ids()).toEqual(['b1', 'c1']);
@@ -264,22 +255,22 @@ describe('「アカウント」の欄', () => {
   });
 
   it.each(['cancelled', 'no-popup', 'failed', 'not-ready'] as const)('%s → その文が欄に出る。読み込み直さない・控えは変わらない', async (outcome) => {
-    setup({ tickets: 2, popup: async () => ({ outcome }) });
+    setup({ tickets: 2, redirect: async () => ({ outcome }) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(message()).toBe(LOGIN_MESSAGES[outcome]));
     expect(reload).not.toHaveBeenCalled();
     expect(await ids()).toEqual(['a1', 'a2', 'b1', 'c1']);
     // 失敗のあとは、また押せる
-    expect(popupButton().disabled).toBe(false);
+    expect(redirectButton().disabled).toBe(false);
     expect(screen.queryByTestId('account-busy')).toBeNull();
   });
 
-  it('小さい窓で taken → 合い言葉をもらい、証明で入れれば、adopt で合わさる: 知らせ merged を置いて、元の利用者の服だけ控えから外し、読み込み直す', async () => {
+  it('taken → 合い言葉をもらい、証明で入れれば、adopt で合わさる: 知らせ merged を置いて、元の利用者の服だけ控えから外し、読み込み直す', async () => {
     localStorage.setItem(NEW_KEY, '["a1"]');
-    const { account, backend } = setup({ tickets: 2, popup: async () => ({ outcome: 'taken', code: 'auth/credential-already-in-use', hint: 'sub-secret' }) });
+    const { account, backend } = setup({ tickets: 2, redirect: async () => ({ outcome: 'taken', code: 'auth/credential-already-in-use', hint: 'sub-secret' }) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(backend.offerHandoff).toHaveBeenCalledTimes(1);
     expect(account.signInWithStashed).toHaveBeenCalledTimes(1);
@@ -287,31 +278,21 @@ describe('「アカウント」の欄', () => {
     expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
     expect(await ids()).toEqual(['b1', 'c1']);
     expect(localStorage.getItem(ADOPT_KEY)).toBeNull();
-    expect(account.startRedirect).not.toHaveBeenCalled();
+    expect(account.startRedirect).toHaveBeenCalledTimes(1); // 押したときの 1 回だけ（もう一度、画面を移らない）
   });
 
-  it('小さい窓で taken、証明が返らない → 「もう一度「小さい窓でログイン」を押すと…」。覚え（offered）が残る。次に押すと「入る」で、合わさる', async () => {
-    const { account, backend } = setup({ tickets: 2, stashed: false, popup: async () => ({ outcome: 'taken', code: 'auth/credential-already-in-use' }) });
+  it('taken、証明が返らない → 覚え（offered）を残して、画面なしの行き来（signin・silent）へ進む。控えは、まだ外さない', async () => {
+    const { account } = setup({ tickets: 2, stashed: false, redirect: async (_intent, options?: { step?: string }) => (options?.step ? { outcome: 'not-ready' } : { outcome: 'taken', code: 'auth/credential-already-in-use' }) });
     await ready();
-    fireEvent.click(popupButton());
-    await waitFor(() => expect(message()).toBe(LOGIN_MESSAGES['press-again']));
-    expect(message()).toBe('もう一度「小さい窓でログイン」を押すと、この端末のチケットと服を合わせて、ログインします');
-    expect(reload).not.toHaveBeenCalled();
-    expect(account.startRedirect).not.toHaveBeenCalled();
+    fireEvent.click(redirectButton());
+    await waitFor(() => expect(account.startRedirect).toHaveBeenCalledTimes(2));
+    expect(account.startRedirect).toHaveBeenLastCalledWith('signin', { step: 'silent' });
     expect(JSON.parse(localStorage.getItem(ADOPT_KEY)!)).toMatchObject({ word: 'word-1', from: 'AAAA', stage: 'offered' });
-    expect(await ids()).toEqual(['a1', 'a2', 'b1', 'c1']); // 控えは、まだ外さない
-    expect(popupButton().disabled).toBe(false);
-    // 2 回め: 空でなくても、効いている offered があれば「入る」
-    account.loginWithPopup.mockResolvedValueOnce({ outcome: 'switched' });
-    fireEvent.click(popupButton());
-    expect(account.loginWithPopup).toHaveBeenLastCalledWith('signin');
-    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-    expect(backend.adopt).toHaveBeenCalledWith('word-1');
-    expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged);
-    expect(await ids()).toEqual(['b1', 'c1']);
+    expect(reload).not.toHaveBeenCalled();
+    expect(await ids()).toEqual(['a1', 'a2', 'b1', 'c1']);
   });
 
-  it('効いている offered の覚えがあれば、空でなくても、大きいボタン（画面を移る）も signin。10 分を過ぎた覚えは、無いのと同じ（link）', async () => {
+  it('効いている offered の覚えがあれば、空でなくても、signin。10 分を過ぎた覚えは、無いのと同じ（link）', async () => {
     planted();
     const first = setup({ tickets: 3 });
     await ready();
@@ -327,9 +308,9 @@ describe('「アカウント」の欄', () => {
   });
 
   it('サーバーが古い（old-server）→ その文。何も変えない・覚えも置かない', async () => {
-    setup({ tickets: 2, popup: async () => ({ outcome: 'taken' }), offer: async () => Promise.reject(new BackendError('old-server', '古い')) });
+    setup({ tickets: 2, redirect: async () => ({ outcome: 'taken' }), offer: async () => Promise.reject(new BackendError('old-server', '古い')) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(message()).toBe(LOGIN_MESSAGES['taken-old-server']));
     expect(reload).not.toHaveBeenCalled();
     expect(localStorage.getItem(ADOPT_KEY)).toBeNull();
@@ -337,19 +318,19 @@ describe('「アカウント」の欄', () => {
   });
 
   it('合い言葉がもらえない → 書き換えた taken の文（合わせる準備ができませんでした）。何も変えない', async () => {
-    setup({ tickets: 2, popup: async () => ({ outcome: 'taken' }), offer: async () => Promise.reject(new BackendError('offline', 'x')) });
+    setup({ tickets: 2, redirect: async () => ({ outcome: 'taken' }), offer: async () => Promise.reject(new BackendError('offline', 'x')) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(message()).toBe('この Google のアカウントは、ほかの端末で使われています。合わせる準備ができませんでした。少し待ってから、もう一度ログインしてください'));
     expect(reload).not.toHaveBeenCalled();
     expect(localStorage.getItem(ADOPT_KEY)).toBeNull();
-    expect(popupButton().disabled).toBe(false);
+    expect(redirectButton().disabled).toBe(false);
   });
 
   it('入ったあと adopt が落ちたら → merge-later の文を置いて読み込み直す。覚えは switched で残り、端末の服は外さない', async () => {
-    const { backend } = setup({ tickets: 2, popup: async () => ({ outcome: 'taken' }), adopt: async () => Promise.reject(new BackendError('offline', 'x')) });
+    const { backend } = setup({ tickets: 2, redirect: async () => ({ outcome: 'taken' }), adopt: async () => Promise.reject(new BackendError('offline', 'x')) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(backend.adopt).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES['merge-later']);
@@ -358,14 +339,14 @@ describe('「アカウント」の欄', () => {
   });
 
   it('管理者の端末で合わさったら、知らせに「管理者の印が外れました」が付く', async () => {
-    setup({ admin: true, popup: async () => ({ outcome: 'taken' }) });
+    setup({ admin: true, redirect: async () => ({ outcome: 'taken' }) });
     await ready();
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES.merged + ADMIN_NOTE);
   });
 
-  it('方法 2（大きいボタン）: startRedirect(intent)。移れなければ（not-ready）、その文', async () => {
+  it('ボタンを押すと startRedirect(intent)。移れなければ（not-ready）、その文', async () => {
     const { account } = setup({ tickets: 1 });
     await ready();
     fireEvent.click(redirectButton());
@@ -376,7 +357,7 @@ describe('「アカウント」の欄', () => {
     expect(redirectButton().disabled).toBe(false);
   });
 
-  it('方法 2: 空の端末では signin。移れる間（返らない）は、「ログインしています…」のまま', async () => {
+  it('空の端末では signin。移れる間（返らない）は、「ログインしています…」のまま', async () => {
     const { account } = setup({ redirect: () => new Promise<LoginResult>(() => undefined) });
     await ready();
     fireEvent.click(redirectButton());
@@ -386,7 +367,7 @@ describe('「アカウント」の欄', () => {
     expect(redirectButton().disabled).toBe(true);
   });
 
-  it('client_id が分からなくても、方法 2 のボタンは押せる（押したら not-ready の文）', async () => {
+  it('client_id が分からなくても、ボタンは押せる（押したら not-ready の文）', async () => {
     setup({ canRedirect: false });
     await ready();
     await waitFor(() => expect(redirectButton().disabled).toBe(false));
@@ -403,7 +384,7 @@ describe('「アカウント」の欄', () => {
     setup({ info: { kind: 'google', email: '', name: '' } });
     await waitFor(() => expect(screen.getByTestId('account-email').textContent).toBe('ログイン中'));
     expect(screen.getByTestId('account-logout').textContent).toBe('ログアウト');
-    expect(screen.queryByTestId('account-login-popup')).toBeNull();
+    expect(screen.queryByTestId('account-login-redirect')).toBeNull();
   });
 
   it('ログアウト: 押すと確かめ。「やめる」で何も起きない', async () => {
@@ -486,10 +467,10 @@ describe('「アカウント」の欄', () => {
   });
 
   it('入った（switched）あと、端末の控えが読めなくても、読み込み直す', async () => {
-    setup({ popup: async () => ({ outcome: 'switched' }) });
+    setup({ redirect: async () => ({ outcome: 'switched' }) });
     await ready();
     library.all = async () => Promise.reject(new Error('idb'));
-    fireEvent.click(popupButton());
+    fireEvent.click(redirectButton());
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(sessionStorage.getItem(NOTICE_KEY)).toBe(LOGIN_MESSAGES.switched);
   });

@@ -107,35 +107,51 @@ async function open(options: Parameters<typeof createFakeBackend>[0] = {}, payRe
   // 起動のときのログインは、「つくる」を開くより前に済んでいる
   await act(async () => {
     await session.connect();
-    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} payReturn={payReturn} />);
+    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} payReturn={payReturn} />);
   });
   return { backend, session };
 }
 
+// チケットの残り（のこり N 枚）が、買う入口（押せるリンク）になっている。別の「チケットを買う」ボタンは無い
+const buyLink = () => {
+  const el = screen.getByTestId('studio-tickets');
+  expect(el.tagName).toBe('BUTTON');
+  expect(screen.queryByTestId('studio-buy')).toBeNull();
+  return el;
+};
+
 describe('「つくる」の支払いまわり', () => {
+  it('売っているときは、チケットの残りがリンク（下線つきのボタン）。押すと、買う流れが始まる。文は「🎫 のこり N 枚」のまま', async () => {
+    await open();
+    await waitFor(() => expect(buyLink()).toBeTruthy());
+    expect(buyLink().textContent).toBe('🎫 のこり 5 枚');
+    expect(buyLink().className).toContain('studio-tickets-link');
+  });
+
   it('ログインしていなければ、押してすぐ案内が出る（保護者の確認の前）。ログインしていれば、確認が出る', async () => {
     await open();
-    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('studio-buy'));
+    await waitFor(() => expect(buyLink()).toBeTruthy());
+    fireEvent.click(buyLink());
     await waitFor(() => expect(screen.getByTestId('shop-login-message').textContent).toContain('Google で ログインすると かえます'));
     expect(screen.queryByTestId('adult-gate')).toBeNull();
     cleanup();
     localStorage.setItem('dressup_fake_account', JSON.stringify({ google: true }));
     await open();
-    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('studio-buy'));
+    await waitFor(() => expect(buyLink()).toBeTruthy());
+    fireEvent.click(buyLink());
     await waitFor(() => expect(screen.getByTestId('adult-gate')).toBeTruthy());
   });
 
-  it('売っていないときは、買うボタンが出ない。管理者には出る', async () => {
+  it('売っていないときは、チケットの残りは、ただの文（押せない）。管理者には、押せるリンクになる', async () => {
     await open({ shop: { open: false } });
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
     await act(async () => undefined);
+    expect(screen.getByTestId('studio-tickets').tagName).toBe('SPAN');
     expect(screen.queryByTestId('studio-buy')).toBeNull();
     cleanup();
     localStorage.clear();
     await open({ shop: { open: false }, admin: true });
-    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
+    await waitFor(() => expect(buyLink()).toBeTruthy());
   });
 
   it('買った分の期限が、残りの下に出る（2 つ以上なら、ほか）', async () => {
@@ -169,7 +185,7 @@ describe('「つくる」の支払いまわり', () => {
     const made = await backend.checkout('10-300', 1, 1);
     backend.fakePay(made.session, 'paid');
     const session = createSession({ backend, library, onLibraryChanged: () => undefined });
-    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} payReturn={{ kind: 'done', session: made.session }} />);
+    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} payReturn={{ kind: 'done', session: made.session }} />);
     await waitFor(() => expect(screen.getByTestId('pay-return').getAttribute('data-status')).toBe('paid'));
     expect(screen.getByTestId('pay-return').textContent).toContain('チケットが 10 枚 ふえました');
     await waitFor(() => expect(screen.getByTestId('studio-tickets').textContent).toContain('のこり 15 枚'));
@@ -181,7 +197,7 @@ describe('「つくる」の支払いまわり', () => {
     const made = await backend.checkout('10-300', 1, 1);
     backend.fakePay(made.session, 'paid');
     const session = createSession({ backend, library, onLibraryChanged: () => undefined });
-    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} payReturn={{ kind: 'done', session: made.session }} />);
+    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} payReturn={{ kind: 'done', session: made.session }} />);
     await waitFor(() => expect(screen.getByTestId('pay-return').getAttribute('data-status')).toBe('checking'));
     expect(screen.getByTestId('pay-return').textContent).toContain('お支払いを たしかめています');
     await act(async () => {
@@ -205,11 +221,11 @@ describe('「つくる」の支払いまわり', () => {
     const made = await backend.checkout('30-800', 1, 1);
     backend.fakePay(made.session, 'paid');
     const session = createSession({ backend, library, onLibraryChanged: () => undefined });
-    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
+    render(<AppStudio session={session} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('pay-notice').textContent).toContain('チケットが 30 枚 ふえました'));
     cleanup();
-    render(<AppStudio session={createSession({ backend, library, onLibraryChanged: () => undefined })} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} onOpenCloset={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('studio-buy')).toBeTruthy());
+    render(<AppStudio session={createSession({ backend, library, onLibraryChanged: () => undefined })} library={library} dolls={[doll]} categoriesByDoll={{ girl: [] }} initialDollId="girl" onClose={() => undefined} />);
+    await waitFor(() => expect(buyLink()).toBeTruthy());
     expect(screen.queryByTestId('pay-notice')).toBeNull();
   });
 });

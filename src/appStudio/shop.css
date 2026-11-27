@@ -77,12 +77,6 @@
 .shop-banner > span {
   flex: 1;
 }
-.shop-buy-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
 .shop-lots {
   margin: 0;
   font-size: 13px;

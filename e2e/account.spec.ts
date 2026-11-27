@@ -1,7 +1,8 @@
 /**
  * E2Eテスト: 「つくる」の「アカウント」の欄（Google のアカウントでログイン・ログアウト）。裏側は、端末の中だけで動く偽物（?studio=fake）
  *
- * 偽物の裏側も、本物と同じ段取り（src/cloud/account.ts）を通る。方法 2 の「画面を移る」だけが、にせの戻り（# を付けて読み込み直す）。
+ * 偽物の裏側も、本物と同じ段取り（src/cloud/account.ts）を通る。「画面を移る」だけが、にせの戻り（# を付けて読み込み直す）。
+ * 欄は、「Google で ログイン」のボタン 1 つだけ（v0.48.0。小さい窓のボタン・説明の文・たたむ見出しは、やめた）。
  */
 import { test, expect, type Page } from '@playwright/test';
 import { APP, dismissReveal, FAKE, fakeState, openHome, openStudio, order } from './helpers';
@@ -13,32 +14,30 @@ const MSG = {
   merged: 'Google のアカウントでログインしました。この端末のチケットと服を、アカウントに合わせました',
   mergeLater: 'Google のアカウントでログインしました。この端末のチケットと服は、インターネットにつながったときに、合わせます',
   oldServer: 'この Google のアカウントは、ほかの端末で使われています。サーバーが古い版のため、まだ合わせられません（作者が載せ直す必要があります）',
-  pressAgain: 'もう一度「小さい窓でログイン」を押すと、この端末のチケットと服を合わせて、ログインします',
   adminNote: 'この端末は管理者でしたが、合わせたので、管理者の印が外れました',
   cancelled: 'ログインを やめました',
-  noPopup: '小さい窓を開けませんでした。方法 2 を試してください',
   failed: 'ログインできませんでした。少し待ってから、もう一度ためしてください',
 };
 
-const popupButton = (page: Page) => page.getByTestId('account-login-popup');
 const redirectButton = (page: Page) => page.getByTestId('account-login-redirect');
 // 準備が済む（ボタンが押せる）まで待つ
 async function sectionReady(page: Page) {
   await expect(page.getByTestId('account-section')).toBeVisible();
-  await openDetails(page);
-  await expect(popupButton(page)).toBeEnabled({ timeout: 30_000 });
-  await expect(redirectButton(page)).toBeEnabled();
+  await expect(redirectButton(page)).toBeEnabled({ timeout: 30_000 });
 }
 // つくる → 欄まで
 async function openAccount(page: Page) {
   await openStudio(page);
   await page.getByTestId('account-section').scrollIntoViewIfNeeded();
-  await openDetails(page);
 }
-// アカウントの欄は、たたんである。開いていなければ開く
-async function openDetails(page: Page) {
-  const section = page.getByTestId('account-section');
-  if (!(await section.evaluate((el) => (el as HTMLDetailsElement).open))) await page.getByTestId('account-summary').click();
+// つくる → 「Google で ログイン」→ にせの「画面を移る」で読み込み直される → ホームの知らせ（結び付いた）を閉じる
+async function linkGoogle(page: Page) {
+  await openAccount(page);
+  await sectionReady(page);
+  await redirectButton(page).click();
+  await expect(page.getByTestId('login-notice')).toContainText(MSG.done, { timeout: 30_000 });
+  await page.getByTestId('login-notice-ok').click();
+  await expect(page.getByTestId('login-notice')).toHaveCount(0);
 }
 // 1 点作って、できあがるまで待つ（チケット 1 枚）
 async function makeOne(page: Page, theme = 'うみ') {
@@ -69,9 +68,8 @@ async function patchOptions(page: Page, patch: Record<string, unknown>) {
 async function setupSecondDevice(page: Page, options: Record<string, unknown> = {}, admin = false) {
   await openHome(page, { tickets: 6 });
   await makeOne(page, 'うみ');
+  await linkGoogle(page);
   await openAccount(page);
-  await sectionReady(page);
-  await popupButton(page).click();
   await expect(page.getByTestId('account-email')).toBeVisible();
   await page.getByTestId('account-logout').click();
   await page.getByTestId('account-logout-yes').click();
@@ -120,7 +118,19 @@ const diagText = async (page: Page) => {
   return panel.locator('pre').innerText();
 };
 
-test('方法 1 で結び付ける: 「ログイン中」になり、読み込み直しても続く。チケットも服も、そのまま', async ({ page }) => {
+test('ゲストの欄は、「Google で ログイン」のボタン 1 つだけ。小さい窓のボタン・説明の文・たたむ見出しは無い', async ({ page }) => {
+  await openHome(page);
+  await openAccount(page);
+  await sectionReady(page);
+  const section = page.getByTestId('account-section');
+  await expect(section).toHaveText('Google で ログイン');
+  await expect(section.getByRole('button')).toHaveCount(1);
+  await expect(page.getByTestId('account-login-popup')).toHaveCount(0);
+  await expect(page.getByTestId('account-summary')).toHaveCount(0);
+  await expect(page.locator('[data-testid="app-studio"] details')).toHaveCount(0);
+});
+
+test('「Google で ログイン」で結び付ける: 画面を移って戻ると、ホームに知らせ。「ログイン中」になり、読み込み直しても続く。チケットも服も、そのまま', async ({ page }) => {
   await openHome(page, { tickets: 5 });
   await makeOne(page);
   const before = (await fakeState(page))!;
@@ -128,14 +138,14 @@ test('方法 1 で結び付ける: 「ログイン中」になり、読み込み
 
   await openAccount(page);
   await expect(page.getByTestId('account-email')).toHaveCount(0); // ログイン前
-  await sectionReady(page);
-  await popupButton(page).click();
+  await page.getByTestId('studio-close').click();
+  await linkGoogle(page);
+  expect(page.url()).not.toContain('#');
+  await openAccount(page);
   await expect(page.getByTestId('account-email')).toHaveText(`${NAME} でログイン中`);
-  await expect(page.getByTestId('account-message')).toHaveText(MSG.done);
   await expect(page.getByTestId('studio-tickets')).toContainText('のこり 4 枚');
 
   // 右上に、名前だけを薄く出す（メールアドレスは出さない）
-  await expect(page.getByTestId('account-badge')).toHaveCount(0); // 「つくる」を開いている間は、聞き直さない
   await page.getByTestId('studio-close').click();
   await expect(page.getByTestId('account-badge')).toHaveText('👤 ためし はなこ');
   await expect(page.locator('.version-badge')).not.toContainText(EMAIL);
@@ -154,13 +164,12 @@ test('方法 1 で結び付ける: 「ログイン中」になり、読み込み
   await expect(page.getByTestId('closet-item')).toHaveCount(1);
 });
 
-test('ログアウト → 方法 2 で入り直す: 空の端末になり、入り直すと、元の服とチケットが戻る。URL に # は残らない。きろくに、メールも証明も出ない', async ({ page }) => {
+test('ログアウト → 入り直す: 空の端末になり、入り直すと、元の服とチケットが戻る。URL に # は残らない。きろくに、メールも証明も出ない', async ({ page }) => {
   await openHome(page, { tickets: 5 });
   await makeOne(page);
   const before = (await fakeState(page))!;
+  await linkGoogle(page);
   await openAccount(page);
-  await sectionReady(page);
-  await popupButton(page).click();
   await expect(page.getByTestId('account-email')).toBeVisible();
 
   // ログアウト: 確かめ → 読み込み直される → 空の端末・ログイン前
@@ -179,7 +188,7 @@ test('ログアウト → 方法 2 で入り直す: 空の端末になり、入�
   await expect(page.getByTestId('account-email')).toHaveCount(0);
   await sectionReady(page);
 
-  // 方法 2: にせの「画面を移る」で読み込み直される → ホームに知らせ
+  // にせの「画面を移る」で読み込み直される → ホームに知らせ
   await redirectButton(page).click();
   await expect(page.getByTestId('login-notice')).toContainText(MSG.done, { timeout: 30_000 });
   expect(new URL(page.url()).hash).toBe('');
@@ -196,7 +205,7 @@ test('ログアウト → 方法 2 で入り直す: 空の端末になり、入�
   // きろく: 段取りの語はあるが、メールと証明は無い
   await page.getByTestId('closet-close').click();
   const text = `${beforeLogout}\n${await diagText(page)}`;
-  for (const word of ['login start popup', 'login result linked', 'login out', 'login back ok', 'login result switched']) expect(text).toContain(word);
+  for (const word of ['login start redirect', 'login result linked', 'login out', 'login back ok', 'login result switched']) expect(text).toContain(word);
   // 画面の大きさの「1180x820@1」にも @ があるので、ログインの行だけを見る
   const loginLines = text.split('\n').filter((line) => line.includes(' login '));
   expect(loginLines.length).toBeGreaterThanOrEqual(5);
@@ -304,34 +313,6 @@ test('古いサーバー（noAdopt）: 「サーバーが古い版のため、�
   expect(await page.evaluate(() => localStorage.getItem('dressup_fake_google'))).not.toBeNull();
 });
 
-test.describe('小さい窓で合わさる', () => {
-  test('証明が返る: 「小さい窓でログイン」→ 読み込み直しのあと、知らせ → 8 枚・2 点', async ({ page }) => {
-    await setupSecondDevice(page);
-    await openAccount(page);
-    await sectionReady(page);
-    await popupButton(page).click();
-    await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
-    await noticeOk(page);
-    await expectMerged(page);
-  });
-
-  test('証明が返らない（stashed: false）: 「もう一度「小さい窓でログイン」を押すと…」→ もう一度押す → 合わさる', async ({ page }) => {
-    await setupSecondDevice(page, { stashed: false });
-    await openAccount(page);
-    await sectionReady(page);
-    await popupButton(page).click();
-    await expect(page.getByTestId('account-message')).toHaveText(MSG.pressAgain);
-    await expect(page.getByTestId('account-email')).toHaveCount(0);
-    expect((await fakeState(page))!.user.tickets).toBe(3);
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dressup_adopt_pending') ?? 'null')?.stage)).toBe('offered');
-    await expect(popupButton(page)).toBeEnabled();
-    await popupButton(page).click();
-    await expect(page.getByTestId('login-notice')).toContainText(MSG.merged, { timeout: 30_000 });
-    await noticeOk(page);
-    await expectMerged(page);
-  });
-});
-
 test('管理者の端末: 同じく合わさって、知らせに「この端末は管理者でしたが…」が入る', async ({ page }) => {
   await setupSecondDevice(page, {}, true);
   await openAccount(page);
@@ -366,27 +347,8 @@ test('きろく: 合わさったあと、「--- ログイン ---」に段取り�
   expect(text).not.toMatch(/[0-9a-f]{32}/);
 });
 
-test.describe('やめた・窓が開かない', () => {
-  test('窓を閉じた（auth/popup-closed-by-user）: 「ログインを やめました」。まだ押せる', async ({ page }) => {
-    await openHome(page, { loginFail: 'auth/popup-closed-by-user' });
-    await openAccount(page);
-    await sectionReady(page);
-    await popupButton(page).click();
-    await expect(page.getByTestId('account-message')).toHaveText(MSG.cancelled);
-    await expect(page.getByTestId('account-email')).toHaveCount(0);
-    await expect(popupButton(page)).toBeEnabled();
-  });
-
-  test('窓を止められた（auth/popup-blocked）: 「方法 2 を試してください」', async ({ page }) => {
-    await openHome(page, { loginFail: 'auth/popup-blocked' });
-    await openAccount(page);
-    await sectionReady(page);
-    await popupButton(page).click();
-    await expect(page.getByTestId('account-message')).toHaveText(MSG.noPopup);
-    await expect(page.getByTestId('account-email')).toHaveCount(0);
-  });
-
-  test('方法 2 で Google が断った（access_denied）: ホームの知らせに「ログインを やめました」', async ({ page }) => {
+test.describe('やめた', () => {
+  test('Google が断った（access_denied）: ホームの知らせに「ログインを やめました」', async ({ page }) => {
     await openHome(page, { loginFail: 'access_denied' });
     await openAccount(page);
     await sectionReady(page);
@@ -434,15 +396,13 @@ test.describe('よその #', () => {
   });
 });
 
-test('縦のスマホ（390×844）: 欄の 2 つのボタンが、画面の幅に収まっている', async ({ page }) => {
+test('縦のスマホ（390×844）: 欄のボタンが、画面の幅に収まっている', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openHome(page);
   await openAccount(page);
   await sectionReady(page);
-  for (const button of [popupButton(page), redirectButton(page)]) {
-    const box = (await button.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(390);
-  }
+  const box = (await redirectButton(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= 390)).toBe(true);
 });

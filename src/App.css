@@ -1484,6 +1484,13 @@ textarea {
   font-size: 1.2rem;
 }
 
+/* 「つくる」は、ひとつの画面: 読み込んでいる間も、うしろは透けない（ホームと同じ色） */
+.studio-loading-screen {
+  z-index: 1000;
+  background: linear-gradient(180deg, #fff5fa 0%, #f3ecff 100%);
+  color: #7a4a6a;
+}
+
 .studio-load-failed {
   max-width: 320px;
   margin: 16px;

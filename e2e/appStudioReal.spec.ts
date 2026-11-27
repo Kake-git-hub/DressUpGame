@@ -199,7 +199,7 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
   });
 
-  test('「アカウント」の欄: 準備が済むと 2 つのボタンが押せる（ログイン前）。方法 2 は、定数の client_id（GOOGLE_CLIENT_ID）を付けて accounts.google.com へ移る（Google へは、通信を出さない）', async ({ page }) => {
+  test('「アカウント」の欄: 準備が済むと「Google で ログイン」が押せる（ログイン前）。押すと、定数の client_id（GOOGLE_CLIENT_ID）を付けて accounts.google.com へ移る（Google へは、通信を出さない）', async ({ page }) => {
     const fake = await fakeFirebase(page);
     // Google の画面への移動は、ここで受け止めて、空のページを返す
     const moved: string[] = [];
@@ -209,9 +209,7 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     });
     await openStudio(page);
     await expect(page.getByTestId('account-section')).toBeVisible();
-    await page.getByTestId('account-summary').click(); // たたんであるのを開く
-    await expect(page.getByTestId('account-login-popup')).toBeEnabled({ timeout: 30_000 });
-    await expect(page.getByTestId('account-login-redirect')).toBeEnabled();
+    await expect(page.getByTestId('account-login-redirect')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('account-email')).toHaveCount(0);
     await expect(page.getByTestId('account-message')).toHaveCount(0);
 

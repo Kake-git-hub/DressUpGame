@@ -9,6 +9,39 @@ import { test, expect } from '@playwright/test';
 import { APP, DOLL_X, dismissReveal, FIRST, FIRST_Y, SECOND, SECOND_Y, expectPixel, fakeState, gameReady, openHome, openStudio, order, play, pressMake, wear, chooseTarget, chooseSet, themeAndCheck } from './helpers';
 
 const jobs = (page: import('@playwright/test').Page) => page.getByTestId('studio-job');
+
+test('「つくる」は、ひとつの画面: 遊ぶ画面の上には重ならない（うしろに遊ぶ画面は無い・透けない）。閉じると、ホームにもどる。「クローゼットを見る」は無い', async ({ page }) => {
+  await openHome(page);
+  await openStudio(page);
+  await expect(page.getByTestId('studio-tickets')).toContainText('のこり 5 枚');
+  // 遊ぶ画面（ドールのキャンバス・服のメニュー・ホームへのボタン）には、入っていない
+  await expect(page.locator('#avatar-canvas')).toHaveCount(0);
+  await expect(page.locator('.palette-section')).toHaveCount(0);
+  await expect(page.getByTestId('home-back-button')).toHaveCount(0);
+  // 画面いっぱいで、うしろが透けない（半透明の色ではなく、ホームと同じ、やわらかい色）
+  const screen = await page.getByTestId('app-studio').evaluate((el) => {
+    const style = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return { image: style.backgroundImage, w: r.width, h: r.height, vw: window.innerWidth, vh: window.innerHeight };
+  });
+  expect(screen.image).toContain('linear-gradient');
+  expect(screen.image).not.toContain('rgba');
+  expect([screen.w, screen.h]).toEqual([screen.vw, screen.vh]);
+  // ホームのボタンも、うしろに無い
+  await expect(page.getByTestId('home-screen')).toHaveCount(0);
+  // 説明の文・「クローゼットを見る」「チケットを買う」のボタンは無い。利用者コードは「コード: XXXXXXXX」だけ
+  await expect(page.getByTestId('studio-open-closet')).toHaveCount(0);
+  await expect(page.getByTestId('studio-buy')).toHaveCount(0);
+  await expect(page.getByTestId('app-studio')).not.toContainText('絵をえらんで注文すると');
+  await expect(page.getByTestId('app-studio')).not.toContainText('クローゼットを見る');
+  expect(await page.getByTestId('studio-user-code').evaluate((el) => el.parentElement!.textContent)).toMatch(/^コード: [A-Z0-9]{8}$/);
+  // 閉じると、ホーム。クローゼットは、ホームから開ける
+  await page.getByTestId('studio-close').click();
+  await expect(page.getByTestId('app-studio')).toHaveCount(0);
+  await expect(page.getByTestId('home-screen')).toBeVisible();
+  await expect(page.locator('#avatar-canvas')).toHaveCount(0);
+  await expect(page.getByTestId('home-closet')).toBeVisible();
+});
 test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 減る）→ 作りかけ。できた服は、メニューの先頭に出て着せられる。読み込み直しても残る', async ({ page }) => {
   await openHome(page, { delayMs: 1500, planMs: 900 });
   await openStudio(page);
@@ -45,7 +78,7 @@ test('1 点作る: 注文の演出 → チケットの演出（のこりが 1 �
   await expect(show).toHaveCount(0);
   await expect(page.getByTestId('studio-tickets')).toContainText('のこり 4 枚');
   await expect(jobs(page)).toHaveCount(1);
-  await expect(page.getByTestId('studio-making')).toContainText('この画面を閉じても、アプリを閉じても、続きます');
+  await expect(page.getByTestId('studio-making')).not.toContainText('この画面を閉じても');
 
   // できたら、作りかけから消え、自分の服になっている（「使う」は要らない）
   await expect(jobs(page)).toHaveCount(0, { timeout: 15_000 });
