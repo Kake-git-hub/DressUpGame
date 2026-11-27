@@ -177,6 +177,18 @@ describe('背景を始める（startJob）', () => {
     expect(await tickets('u1')).toBe(2);
     expect(await store.listJobs('u1')).toEqual([]);
   });
+  it('背景の印（__background）は、服のカテゴリとしては頼めない（ドールに、たまたま同じ名前のカテゴリがあっても）。引かない・作らない', async () => {
+    await userWith('u1', 2);
+    const manifest = deps.content.manifest;
+    deps.content.manifest = async () => {
+      const m = await manifest();
+      return { ...m, dolls: m.dolls.map((d) => ({ ...d, categories: [...d.categories, { id: '__background', label: 'へんなカテゴリ', menuOrder: 99 }] })) } as typeof m;
+    };
+    await expect(startJob(deps, 'u1', { dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'category', categoryId: '__background' } })).rejects.toSatisfy((e) => code(e) === 'refused');
+    await expect(startJob(deps, 'u1', { dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'set', categoryIds: ['トップス', '__background'] } })).rejects.toSatisfy((e) => code(e) === 'refused');
+    expect(await tickets('u1')).toBe(2);
+    expect(await store.listJobs('u1')).toEqual([]);
+  });
   it('企画には、そのドールの、いまある自分の背景の名前だけを伝える（ほかのドール・服の名前は伝えない）', async () => {
     await userWith('u1', 5);
     const first = await made('u1');

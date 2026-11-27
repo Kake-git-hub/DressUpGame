@@ -199,7 +199,8 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   // 背景は、カテゴリを選ばない（1 枚）
   const background = target?.kind === 'background';
   const wanted = target?.kind === 'set' ? target.categoryIds : target?.kind === 'category' ? [target.categoryId] : [];
-  const usable = (id: unknown) => doll.categories.some((c) => c.id === id && !isBackHairCategory(c.label));
+  // 背景の印（__background）は、服のカテゴリとしては受け付けない（背景は target.kind === 'background' だけ）
+  const usable = (id: unknown) => id !== BACKGROUND_CATEGORY && doll.categories.some((c) => c.id === id && !isBackHairCategory(c.label));
   if (!background && (!Array.isArray(wanted) || wanted.length === 0 || !wanted.every(usable) || new Set(wanted).size !== wanted.length)) throw new CloudError('refused', '作るものを選び直してください');
   if (target.kind === 'set' && (wanted.length < SET_MIN || wanted.length > SET_MAX)) throw new CloudError('refused', `セットに入れるものは ${SET_MIN}〜${SET_MAX} 個にしてください`);
   // 写真は、顔のカテゴリ 1 点を作るときだけ

@@ -55,7 +55,7 @@ const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
 type Step = 'doll' | 'what' | 'theme' | 'style' | 'check';
 const STEP_TITLE: Record<Step, string> = {
-  doll: 'どの子の 服を作る？',
+  doll: 'どの子に 作る？',
   what: 'なにを 作る？',
   theme: 'どんな テーマ？',
   style: 'どんな 絵に する？',
@@ -461,7 +461,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
 
             {making.length > 0 && (
               <section data-testid="studio-making">
-                <h3>作っている服</h3>
+                <h3>作っているもの</h3>
                 <div className="studio-cards">
                   {making.map((job) => (
                     <div key={job.id} className="studio-candidate" data-testid="studio-job" data-notice={jobNotice(job, now)}>
