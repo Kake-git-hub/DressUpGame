@@ -1,9 +1,9 @@
 /**
  * ホームに出す、小さな窓:「ホームがめんに ついかすると、つぎから すぐ あそべるよ」。
- * 「ともだちにおしえる」で教えてもらって開いた端末にだけ、開いたときに 1 回出る（決まりは installHint.ts）。
- * 「あとで」か、窓の外を押すと閉じて、その回（読み込み直すまで）は、ホームにもどっても出ない。
+ * まだアプリとして開いていない端末なら、だれにでも、開いたときに 1 回出る（決まりは installHint.ts）。
+ * 「あとで」か、窓の外を押すと閉じて、20 時間は出ない（あそんでホームにもどっても、読み込み直しても）。
  */
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { closeInstallHint, finishInstallHint, installKind, wantsInstallHint } from './installHint';
 import type { InstallKind, InstallPromptStore } from './installHint';
 
@@ -13,6 +13,7 @@ export interface InstallHintProps {
   standalone: boolean;
   userAgent: string;
   maxTouchPoints: number;
+  now?: () => number;
 }
 
 // iPhone・iPad の「共有」の印（四角から上向きの矢印）
@@ -57,23 +58,26 @@ function Steps({ kind }: { kind: InstallKind }) {
   }
 }
 
-export function InstallHint({ store, storage, standalone, userAgent, maxTouchPoints }: InstallHintProps) {
-  // ブラウザの知らせ（追加の画面を出せる・追加された）や「あとで」で、描き直す
+export function InstallHint({ store, storage, standalone, userAgent, maxTouchPoints, now = Date.now }: InstallHintProps) {
+  // ブラウザの知らせ（追加の画面を出せる・追加された）で、描き直す
   useSyncExternalStore(store.subscribe, store.version);
+  // 出すかどうかは、ホームを開いたときに 1 回だけ決める（出ている途中で、時刻のせいで消えたり出たりしない）
+  const [wanted] = useState(() => wantsInstallHint(storage, standalone, now()));
+  const [closed, setClosed] = useState(false);
 
-  if (store.snoozed() || store.installed() || !wantsInstallHint(storage, standalone)) return null;
+  if (!wanted || closed || store.installed()) return null;
   const kind = installKind({ userAgent, maxTouchPoints, canPrompt: store.canPrompt() });
 
   const add = () => {
     void store.prompt().then((ok) => {
       if (!ok) return;
       finishInstallHint(storage);
-      store.snooze();
+      setClosed(true);
     });
   };
   const later = () => {
-    closeInstallHint(storage);
-    store.snooze();
+    closeInstallHint(storage, now());
+    setClosed(true);
   };
 
   return (

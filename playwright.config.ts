@@ -16,10 +16,19 @@ export default defineConfig({
     baseURL: 'http://localhost:4173',
     trace: 'off',
     viewport: { width: 1180, height: 820 },
-    // 操作ガイドは「見た」ことにしておく（ガイドのテスト = e2e/guide.spec.ts だけ、空の状態で開く）
+    // 操作ガイドは「見た」ことにしておく（ガイドのテスト = e2e/guide.spec.ts だけ、見ていない状態で開く）。
+    // ホーム画面への追加の案内も「もう出さない」にしておく（案内のテスト = e2e/home.spec.ts の一部だけ、空の状態で開く）
     storageState: {
       cookies: [],
-      origins: [{ origin: 'http://localhost:4173', localStorage: [{ name: 'dressup_guide_seen', value: '["play","worn","adjust","studio"]' }] }],
+      origins: [
+        {
+          origin: 'http://localhost:4173',
+          localStorage: [
+            { name: 'dressup_guide_seen', value: '["play","worn","adjust","studio"]' },
+            { name: 'dressup_install_hint', value: '{"closed":0,"done":true}' },
+          ],
+        },
+      ],
     },
     launchOptions: {
       args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],

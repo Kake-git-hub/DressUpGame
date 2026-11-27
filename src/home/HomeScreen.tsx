@@ -69,7 +69,7 @@ export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = fal
         </button>
       )}
 
-      {/* 教えてもらって開いた端末にだけ: ホーム画面への追加・ブックマークの案内（開いたときに 1 回） */}
+      {/* まだアプリとして開いていない端末に: ホーム画面への追加・ブックマークの案内（開いたときに 1 回） */}
       <InstallHint store={installPrompts} storage={installStorage} standalone={standalone} userAgent={navigator.userAgent} maxTouchPoints={navigator.maxTouchPoints} />
 
       {shareOpen && (
@@ -80,7 +80,7 @@ export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = fal
               {url}
             </p>
             <p className="home-share-note" data-testid="home-share-note">
-              ひらいた ともだちには、「ホームがめんに ついか」の あんないが でるよ
+              ひらいた ともだちにも、「ホームがめんに ついか」の あんないが でるよ
             </p>
             <p className={`home-share-status ${copy}`} data-testid="home-share-status">
               {copy === 'copied' ? 'URL をコピーしたよ！' : copy === 'failed' ? 'コピーできなかったよ。QR コードをよみとってね' : 'コピーしています…'}

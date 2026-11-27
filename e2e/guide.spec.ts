@@ -4,8 +4,10 @@
 import { test, expect, type Page } from '@playwright/test';
 import { openHome, openStudio } from './helpers';
 
-// このファイルだけ、ガイドを見ていない端末で開く
-test.use({ storageState: { cookies: [], origins: [] } });
+// このファイルだけ、ガイドを見ていない端末で開く（ホーム画面への追加の案内は、ここでは出さない）
+test.use({
+  storageState: { cookies: [], origins: [{ origin: 'http://localhost:4173', localStorage: [{ name: 'dressup_install_hint', value: '{"closed":0,"done":true}' }] }] },
+});
 
 const APP_URL = '/DressUpGame/?content=e2e-content/&home=0';
 const guide = (page: Page) => page.getByTestId('guide');

@@ -98,55 +98,67 @@ test('ともだちにおしえる: QR コードを出し、URL をコピーす�
   await page.getByTestId('home-share').click();
   await expect(page.getByTestId('home-share-qr').locator('svg')).toBeVisible();
   await expect(page.getByTestId('home-share-status')).toHaveText('URL をコピーしたよ！');
-  // 教えてもらって開いた、と分かる印が付く（開いた人に、ホーム画面への追加をすすめる）
-  const url = 'http://localhost:4173/DressUpGame/?from=share';
+  const url = 'http://localhost:4173/DressUpGame/';
   await expect(page.getByTestId('home-share-url')).toHaveText(url);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
   await page.getByTestId('home-share-close').click();
   await expect(page.getByTestId('home-share-dialog')).toHaveCount(0);
 });
 
-test.describe('教えてもらって開いた人への、ホーム画面に追加の案内', () => {
+test.describe('ホーム画面に追加の案内（まだアプリとして開いていない人には、だれにでも）', () => {
   // まだ何も覚えていない端末として開く
   test.use({ storageState: { cookies: [], origins: [] } });
-  const SHARED = '/DressUpGame/?content=e2e-content/&from=share';
 
-  test('ふつうに開いた人には、出ない', async ({ page }) => {
+  // 「あとで」を押した時刻を、1 日前にずらす（次の日に開いた、ことにする）
+  const nextDay = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => {
+      const state = JSON.parse(localStorage.getItem('dressup_install_hint')!);
+      localStorage.setItem('dressup_install_hint', JSON.stringify({ ...state, at: state.at - 24 * 3_600_000 }));
+    });
+
+  test('はじめて開くと、ホームに案内の窓が出る。「あとで」で閉じると、あそんでもどっても、読み込み直しても出ない。次の日は、また出る。合わせて 3 回閉じたら、もう出ない', async ({ page }) => {
     await page.goto(APP);
-    await expect(page.getByTestId('home-screen')).toBeVisible();
-    await expect(page.getByTestId('install-hint')).toHaveCount(0);
-  });
-
-  test('おしえる の URL から開くと、ホームに案内の窓が出る。URL から印は消える。「あとで」を 3 回押すと、もう出ない', async ({ page }) => {
-    await page.goto(SHARED);
     await expect(page.getByTestId('install-hint')).toBeVisible();
-    expect(page.url()).not.toContain('from=share');
-    expect(page.url()).toContain('content=e2e-content');
-    // あとで → 閉じる。あそんでホームにもどっても、この回は、もう出ない
+    // あとで → 閉じる。あそんでホームにもどっても、出ない
     await page.getByTestId('install-hint-later').click();
     await expect(page.getByTestId('install-hint')).toHaveCount(0);
     await page.getByTestId('home-play').click();
+    // はじめての端末なので、操作ガイドが出る。とばして、ホームへ
+    await page.getByTestId('guide-skip').click();
     await gameReady(page);
     await page.getByTestId('home-back-button').click();
     await expect(page.getByTestId('home-screen')).toBeVisible();
     await expect(page.getByTestId('install-hint')).toHaveCount(0);
-    // 印の無い URL で開き直しても、また出る（端末が覚えている）。合わせて 3 回閉じたら、もう出ない
+    // 読み込み直しても（自動の更新・ログインの戻りと同じ）、その日は出ない
+    await page.reload();
+    await expect(page.getByTestId('home-play')).toBeVisible();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+    // 次の日に開くと、また出る。合わせて 3 回閉じたら、何日たっても、もう出ない
     for (let i = 0; i < 2; i++) {
+      await nextDay(page);
       await page.goto(APP);
       await expect(page.getByTestId('install-hint')).toBeVisible();
       await page.getByTestId('install-hint-later').click();
     }
+    await nextDay(page);
     await page.goto(APP);
-    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await expect(page.getByTestId('home-play')).toBeVisible();
     await expect(page.getByTestId('install-hint')).toHaveCount(0);
   });
 
-  test('LINE の中の画面では、URL の印を残す（ブラウザで開き直した先でも、案内が出るように）', async ({ browser }) => {
+  test('もうホーム画面から開いている（アプリとして開いている）人には、出ない', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(window.navigator, 'standalone', { value: true }));
+    await page.goto(APP);
+    await expect(page.getByTestId('home-play')).toBeVisible();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+  });
+
+  test('LINE の中の画面では、「ブラウザで開く」をすすめる', async ({ browser }) => {
     const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/15.18.0', storageState: { cookies: [], origins: [] } });
     const page = await context.newPage();
-    await page.goto(`http://localhost:4173${SHARED}`);
+    await page.goto(`http://localhost:4173${APP}`);
     await expect(page.getByTestId('install-hint')).toHaveAttribute('data-kind', 'inapp');
-    expect(page.url()).toContain('from=share');
+    await expect(page.getByTestId('install-hint')).toContainText('ブラウザで開く');
     await context.close();
   });
 
@@ -158,7 +170,7 @@ test.describe('教えてもらって開いた人への、ホーム画面に追�
   ]) {
     test(`案内の窓は、画面に収まり、「あとで」が押せる（${size.name}）`, async ({ page }) => {
       await page.setViewportSize({ width: size.width, height: size.height });
-      await page.goto(SHARED);
+      await page.goto(APP);
       for (const id of ['install-hint', 'install-hint-later']) {
         const box = (await page.getByTestId(id).boundingBox())!;
         expect(box.x, id).toBeGreaterThanOrEqual(0);
