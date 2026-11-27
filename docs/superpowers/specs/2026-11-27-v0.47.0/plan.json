@@ -1,0 +1,65 @@
+{
+  "model": "gemini-3.8-flash",
+  "calls": 18,
+  "record": [
+    {
+      "theme": "あかい リボンの ついた しろい ワンピース",
+      "run": 0,
+      "now": "A crisp white sleeveless A-line dress with subtle frills along the rounded hem and neckline, adorned with a large bright red satin ribbon bow at the center of the chest and a matching thin red waistband.",
+      "new": "A clean, simple white one-piece dress featuring short puffed sleeves, a gentle flared A-line skirt, and a neat bright red ribbon tied at the center of the chest. The cotton fabric is smooth and solid white with minimal soft shading.",
+      "level": "tight",
+      "hints": []
+    },
+    {
+      "theme": "あかい リボンの ついた しろい ワンピース",
+      "run": 1,
+      "now": "A flared knee-length white dress with short puffed sleeves and scalloped white lace trim along the hem, accented with a vibrant red satin ribbon bow at the chest and red ribbon ties at the waist.",
+      "new": "A clean white short-sleeved A-line dress crafted from soft cotton, adorned with a neat red ribbon bow at the center of the waist. The dress has a simple rounded collar and a gently flared skirt with a smooth hemline.",
+      "level": "tight",
+      "hints": []
+    },
+    {
+      "theme": "うみのおひめさま",
+      "run": 0,
+      "now": "A sparkling ocean princess ballgown featuring tiered layers of aquamarine and pastel pink ruffled tulle resembling gentle ocean waves, adorned with iridescent pearls and seashell motifs along the bodice. The voluminous shimmering skirt is trimmed with soft seafoam lace and glossy turquoise ribbons.",
+      "new": "A princess ballgown featuring an aqua-blue satin bodice adorned with delicate pearl trims and an ankle-length skirt made of layered tulle in gradient shades of seafoam and ocean blue that look like gentle waves. A pearl cluster with a tiny golden starfish brooch accents the center of the scalloped waistline.",
+      "level": "normal",
+      "hints": [
+        "チュール"
+      ]
+    },
+    {
+      "theme": "うみのおひめさま",
+      "run": 1,
+      "now": "A flowing oceanic ballgown made of layered aqua blue and seafoam green organza, shaped like gentle waves with a sparkling scalloped neckline. The layered skirt features pearly seashell embroidery and translucent chiffon frills trimmed with soft lavender ribbon.",
+      "new": "An elegant mermaid-style evening gown made of shimmering shell-pink satin with scalloped off-the-shoulder sleeve ruffles edged in fine pearl beads. The fitted bodice extends into a trumpet skirt with tiers of translucent lavender organza ruffles, fastened at the waist with a tiny golden nautilus shell brooch.",
+      "level": "normal",
+      "hints": [
+        "パーティー"
+      ]
+    },
+    {
+      "theme": "はる",
+      "run": 0,
+      "now": "A pastel pink frilled dress with layered cherry-blossom petal skirts, accented with mint green waist ribbons and delicate embroidered white flower appliques along the ruffled hemline.",
+      "new": "A casual short-sleeved spring dress made of soft pastel pink cotton, featuring a gentle flared knee-length skirt and a single big ribbon bow in light pastel yellow tied at the waist. Delicate white daisy patterns are lightly printed along the hemline.",
+      "level": "wide",
+      "hints": [
+        "おおきなリボン",
+        "ふだんぎ"
+      ]
+    },
+    {
+      "theme": "はる",
+      "run": 1,
+      "now": "A pastel pink knee-length chiffon party dress with ruffled short puff sleeves, a sweetheart neckline trimmed with white lace, and a layered flared skirt adorned with embroidered cherry blossom petals and a pale spring-green ribbon at the waist.",
+      "new": "A chic mid-calf pinafore dress in fresh sage mint fabric featuring straight shoulder straps and a pleated skirt, layered over a crisp cream long-sleeved blouse. The pinafore bib is accented with neat vertical slate-blue piped accents and small polished silver buttons down the front.",
+      "level": "wide",
+      "hints": [
+        "クール",
+        "ジャンパースカート",
+        "ながそで・ミモレたけ"
+      ]
+    }
+  ]
+}
