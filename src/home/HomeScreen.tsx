@@ -5,6 +5,9 @@
  */
 import { useMemo, useState } from 'react';
 import { copyText, qrSvg, shareUrl } from './share';
+import { InstallHint } from './InstallHint';
+import { installPrompts, installStorage } from './installBoot';
+import { isStandalone } from './installHint';
 import './home.css';
 
 export interface HomeScreenProps {
@@ -21,6 +24,7 @@ export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = fal
   const [guideAgain, setGuideAgain] = useState(false);
   const url = useMemo(() => shareUrl(window.location.origin, import.meta.env.BASE_URL), []);
   const [shareOpen, setShareOpen] = useState(false);
+  const standalone = useMemo(() => isStandalone(window), []);
   const [copy, setCopy] = useState<CopyState>('copying');
 
   // 押したらすぐコピーする（ブラウザは、押した操作の中でないとコピーさせてくれないことがある）
@@ -65,12 +69,18 @@ export default function HomeScreen({ onPlay, onCreate, onCloset, closetDot = fal
         </button>
       )}
 
+      {/* 教えてもらって開いた端末にだけ: ホーム画面への追加・ブックマークの案内（開いたときに 1 回） */}
+      <InstallHint store={installPrompts} storage={installStorage} standalone={standalone} userAgent={navigator.userAgent} maxTouchPoints={navigator.maxTouchPoints} />
+
       {shareOpen && (
         <div className="home-share-overlay" onClick={() => setShareOpen(false)} data-testid="home-share-dialog">
           <div className="home-share-panel" onClick={(e) => e.stopPropagation()}>
             <div className="home-share-qr" data-testid="home-share-qr" dangerouslySetInnerHTML={{ __html: qrSvg(url) }} />
             <p className="home-share-url" data-testid="home-share-url">
               {url}
+            </p>
+            <p className="home-share-note" data-testid="home-share-note">
+              ひらいた ともだちには、「ホームがめんに ついか」の あんないが でるよ
             </p>
             <p className={`home-share-status ${copy}`} data-testid="home-share-status">
               {copy === 'copied' ? 'URL をコピーしたよ！' : copy === 'failed' ? 'コピーできなかったよ。QR コードをよみとってね' : 'コピーしています…'}

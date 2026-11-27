@@ -98,9 +98,79 @@ test('ともだちにおしえる: QR コードを出し、URL をコピーす�
   await page.getByTestId('home-share').click();
   await expect(page.getByTestId('home-share-qr').locator('svg')).toBeVisible();
   await expect(page.getByTestId('home-share-status')).toHaveText('URL をコピーしたよ！');
-  const url = 'http://localhost:4173/DressUpGame/';
+  // 教えてもらって開いた、と分かる印が付く（開いた人に、ホーム画面への追加をすすめる）
+  const url = 'http://localhost:4173/DressUpGame/?from=share';
   await expect(page.getByTestId('home-share-url')).toHaveText(url);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
   await page.getByTestId('home-share-close').click();
   await expect(page.getByTestId('home-share-dialog')).toHaveCount(0);
+});
+
+test.describe('教えてもらって開いた人への、ホーム画面に追加の案内', () => {
+  // まだ何も覚えていない端末として開く
+  test.use({ storageState: { cookies: [], origins: [] } });
+  const SHARED = '/DressUpGame/?content=e2e-content/&from=share';
+
+  test('ふつうに開いた人には、出ない', async ({ page }) => {
+    await page.goto(APP);
+    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+  });
+
+  test('おしえる の URL から開くと、ホームに案内の窓が出る。URL から印は消える。「あとで」を 3 回押すと、もう出ない', async ({ page }) => {
+    await page.goto(SHARED);
+    await expect(page.getByTestId('install-hint')).toBeVisible();
+    expect(page.url()).not.toContain('from=share');
+    expect(page.url()).toContain('content=e2e-content');
+    // あとで → 閉じる。あそんでホームにもどっても、この回は、もう出ない
+    await page.getByTestId('install-hint-later').click();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+    await page.getByTestId('home-play').click();
+    await gameReady(page);
+    await page.getByTestId('home-back-button').click();
+    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+    // 印の無い URL で開き直しても、また出る（端末が覚えている）。合わせて 3 回閉じたら、もう出ない
+    for (let i = 0; i < 2; i++) {
+      await page.goto(APP);
+      await expect(page.getByTestId('install-hint')).toBeVisible();
+      await page.getByTestId('install-hint-later').click();
+    }
+    await page.goto(APP);
+    await expect(page.getByTestId('home-screen')).toBeVisible();
+    await expect(page.getByTestId('install-hint')).toHaveCount(0);
+  });
+
+  test('LINE の中の画面では、URL の印を残す（ブラウザで開き直した先でも、案内が出るように）', async ({ browser }) => {
+    const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/15.18.0', storageState: { cookies: [], origins: [] } });
+    const page = await context.newPage();
+    await page.goto(`http://localhost:4173${SHARED}`);
+    await expect(page.getByTestId('install-hint')).toHaveAttribute('data-kind', 'inapp');
+    expect(page.url()).toContain('from=share');
+    await context.close();
+  });
+
+  for (const size of [
+    { name: '小さいスマホの縦', width: 320, height: 480 },
+    { name: 'スマホの横', width: 667, height: 375 },
+    { name: '小さいスマホの横', width: 568, height: 320 },
+    { name: 'タブレットの縦', width: 820, height: 1180 },
+  ]) {
+    test(`案内の窓は、画面に収まり、「あとで」が押せる（${size.name}）`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.goto(SHARED);
+      for (const id of ['install-hint', 'install-hint-later']) {
+        const box = (await page.getByTestId(id).boundingBox())!;
+        expect(box.x, id).toBeGreaterThanOrEqual(0);
+        expect(box.y, id).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, id).toBeLessThanOrEqual(size.width);
+        expect(box.y + box.height, id).toBeLessThanOrEqual(size.height);
+      }
+      await page.getByTestId('install-hint-later').click();
+      await expect(page.getByTestId('install-hint')).toHaveCount(0);
+      // 閉じたら、ホームのボタンは、そのまま押せる
+      await page.getByTestId('home-play').click();
+      await expect(page.getByTestId('home-screen')).toHaveCount(0);
+    });
+  }
 });

@@ -27,6 +27,7 @@ import { PayNotice } from './appStudio/PayNotice';
 import { clearReturn } from './cloud/googleRedirect';
 import type { CloudSession, SessionState } from './cloud/session';
 import { startsOnHome } from './home/homeMode';
+import { isStandalone as standaloneOf } from './home/installHint';
 import type { LoadedContent } from './content/loadContent';
 import type { ManifestCategory } from './content/manifest';
 import { loadContent, resolveContentUrl } from './content/loadContent';
@@ -159,13 +160,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 
 // つなぎ役の、いまの状態（つなぎ役がまだ無ければ null）
 // きろく（あいことば「log」）に添える、端末と描画の状態
-function isStandalone(): boolean {
-  try {
-    return window.matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
-  } catch {
-    return false;
-  }
-}
+const isStandalone = (): boolean => standaloneOf(window);
 function viewportText(): string {
   return `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio}`;
 }

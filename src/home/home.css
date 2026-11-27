@@ -182,6 +182,65 @@
   background: linear-gradient(135deg, #ff69b4 0%, #9370db 100%);
 }
 
+.home-share-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #8a7aa8;
+  text-align: center;
+}
+
+/* ホームがめんに ついか の案内（教えてもらって開いた端末にだけ。おしえる の窓と同じ見た目） */
+.install-hint {
+  gap: 14px;
+  /* ひらがなの文は、空白の所でだけ折り返す（ことばの途中で切らない） */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.install-hint-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: bold;
+  line-height: 1.5;
+  color: #c2468b;
+  text-align: center;
+}
+.install-hint-steps {
+  margin: 0;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1.9;
+  color: #444;
+}
+ol.install-hint-steps {
+  padding-left: 1.5em;
+}
+p.install-hint-steps {
+  text-align: center;
+}
+.install-hint-icon {
+  width: 24px;
+  height: 24px;
+  vertical-align: -5px;
+  color: #2f7bf5;
+}
+/* 背の低い画面（スマホの横）: つめる */
+@media (max-height: 420px) {
+  .install-hint {
+    gap: 8px;
+    padding: 14px 18px;
+  }
+  .install-hint-title {
+    font-size: 16px;
+  }
+  .install-hint-steps {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+}
+
 /* ログインの結果の知らせ（共有の窓と同じ見た目。ゲームの画面の上にも出るので、いちばん手前に置く） */
 .home-notice-overlay {
   z-index: 1100;

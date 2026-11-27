@@ -19,8 +19,8 @@ describe('ホーム画面から始めるか', () => {
 });
 
 describe('ともだちにおしえる', () => {
-  it('URL は、アプリの入口（? の印は付けない）', () => {
-    expect(shareUrl('https://kake-git-hub.github.io', '/DressUpGame/')).toBe('https://kake-git-hub.github.io/DressUpGame/');
+  it('URL は、アプリの入口（作者用の印は付けない。教えてもらって開いた、の印だけ）', () => {
+    expect(shareUrl('https://kake-git-hub.github.io', '/DressUpGame/')).toBe('https://kake-git-hub.github.io/DressUpGame/?from=share');
   });
   it('QR コードは SVG', () => {
     expect(qrSvg('https://example.com/')).toMatch(/^<svg[\s\S]*<\/svg>$/);
