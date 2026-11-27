@@ -145,3 +145,11 @@
    - 細かさ: broad / 決まっていること: なし / 使ったヒント: shape/style: tiered layers of ruffles、decoration: cute pockets
 5. A long-sleeved soft knit top decorated with horizontal stripes in dreamy apricot orange, sweet strawberry pink, and warm cream. Delicate white eyelet lace trim accents the wide square neckline and flared bell sleeves.
    - 細かさ: broad / 決まっていること: なし / 使ったヒント: pattern: stripes、decoration: lace trim
+
+## 画像での比べ（2026-11-27、12 枚）
+
+- 写真: `2026-11-27-variety/compare-12.jpg`（左 2 列 = いま、右 2 列 = 新しい。上の説明の 1・2 回め）。`tryItems.ts`、1 品目 1 枚（作り直しなし、見た目の検品なし）。12 点とも、数値の検品は合格。
+- はる: いまは 2 枚ともピンクのフリル + 桜 + ミントのリボン。新しいは、虹と雲の水色×ピンク／ミントの水玉に丸えり。
+- ピンクのスカート: いまは 2 枚ともフリルの段 + 前のリボン。新しいは、ハイウエストのサッシュ + ポケット／透ける重ね。
+- しろいワンピース: どちらもテーマどおり。ただし、新しい 2 は、説明にある「胸の赤いリボン」が絵に出ていない（画像の AI が落とした。くじではなく、絵を描く側のこと）。
+- 費用の実測（文の AI、はる・1 回ずつ）: いま 510 入力 / 599 出力（考え込み含む）トークン ≒ 0.39 円、新しい 857 / 886 ≒ 0.59 円、新しい + 最近 5 件 1130 / 1096 ≒ 0.74 円（2026 年中の値段、1 ドル 150 円）。画像 1 枚 ≒ 5 円は変わらない。
