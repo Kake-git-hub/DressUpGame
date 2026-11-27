@@ -13,9 +13,10 @@ import type { ItemFit } from '../../src/engine/fit.ts';
 import { findStyle } from '../../src/studio/stylePresets.ts';
 import { MemoryWriter } from '../content/encode.ts';
 import { encodeItemImages } from '../content/manifestEdit.ts';
-import type { AiClients } from '../studio/ai.ts';
+import type { AiClients, TextAi } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
 import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
+import { axesFor, drawHints, levelOf, measureTheme, MEASURE_TIMEOUT_MS, widthKind, widthLines } from '../studio/themeWidth.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
@@ -46,6 +47,8 @@ export interface CoreDeps {
   maxTries?: number; // 1 つの品目に取りかかれる回数（既定 3。超えたら、打ち切って払い戻す）
   heartbeatMs?: number; // 作っている間、この間隔で「動いている」の合図を書く（既定 30 秒）
   runBudgetMs?: number; // 1 回の呼び出しで、新しい品目に取りかかるのは、始めてからこの時間まで（既定 8 分。関数の時間切れの前に、自分でやめる）
+  random?: () => number; // テーマの幅のくじ（既定 Math.random。テストで差し替える）
+  measureTimeoutMs?: number; // テーマを測るのを待つ上限（既定 8 秒）
 }
 
 export interface UserView {
@@ -127,6 +130,53 @@ async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
   return doll;
 }
 
+// 最近の服の説明を、いくつまで添えるか
+const RECENT_MAX = 5;
+
+/**
+ * その人が最近作った服の説明（新しい順の jobs から、5 件まで）。企画に「これらとは違うものに」と添える。
+ *  - 1 点: 同じドールの、同じカテゴリの品目（前のセットの中の品目も数える）
+ *  - セット: 同じドールの、前のセットごとに「名前: 1 点めの説明」
+ * 作っている途中・順番待ちの品目も入れる（同じテーマを続けて頼んだ子に、同じ服を 2 着作らないため）。できなかった品目は入れない。
+ */
+export function recentDescriptions(jobs: JobDoc[], dollId: string, target: Target): string[] {
+  const usable = (c: CandidateDoc) => c.status !== 'failed' && typeof c.description === 'string' && c.description.trim() !== '';
+  const found: string[] = [];
+  for (const job of jobs) {
+    if (found.length >= RECENT_MAX) break;
+    if (job.dollId !== dollId || !Array.isArray(job.candidates)) continue;
+    if (target.kind === 'set') {
+      const first = job.set ? job.candidates.find(usable) : undefined;
+      if (job.set && first) found.push(`${job.set.name}: ${first.description.trim()}`);
+    } else {
+      for (const c of job.candidates) if (c.categoryId === target.categoryId && usable(c)) found.push(c.description.trim());
+    }
+  }
+  return found.slice(0, RECENT_MAX);
+}
+
+/**
+ * テーマの細かさに合わせて、企画に足す行を決める（themeWidth.ts）。
+ * 細かいテーマは、そのとおりに。大きなテーマは、くじのヒントと「最近の服とは違うものに」で、毎回ちがうデザインに。
+ * 測れなかったら、何も足さない（いままでどおりに企画する）。ここでは、決して失敗しない。
+ */
+async function planWidth(deps: CoreDeps, text: TextAi, uid: string, doll: ManifestDoll, theme: string, target: Target, wanted: string[]): Promise<{ extra: string[]; width: NonNullable<JobDoc['width']> }> {
+  const none = { extra: [], width: { level: 'none' as const, hints: [] } };
+  try {
+    const labels = wanted.map((id) => doll.categories.find((c) => c.id === id)?.label ?? id);
+    const axes = axesFor(target.kind === 'set' ? 'set' : widthKind(labels[0]), doll.name);
+    const measure = await measureTheme(text, { theme, categoryLabels: labels, axes }, deps.measureTimeoutMs ?? MEASURE_TIMEOUT_MS);
+    if (!measure) return none;
+    const level = levelOf(measure.fixed, measure.topics);
+    const hints = drawHints(level, measure.fixed, axes, deps.random ?? Math.random);
+    // 最近の服を読めなくても、作れる
+    const recent = level === 'tight' ? [] : recentDescriptions(await deps.store.listJobs(uid).catch(() => []), doll.id, target);
+    return { extra: widthLines(level, hints, recent), width: { level, hints: hints.map((h) => h.ja) } };
+  } catch {
+    return none;
+  }
+}
+
 /**
  * 生成を始める: 入力を確かめ、企画を作り、チケットを引いて、順番待ちの仕事を作る。絵は、まだ作らない（runJob）。
  */
@@ -152,17 +202,21 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
   // 足りないと分かっているなら、企画（文章の AI）も呼ばない（チケットの無い人に、作者の費用で AI を使わせない）
   if (!user.admin && user.tickets < wanted.length) throw new CloudError('no-tickets', `チケットが足りません（のこり ${user.tickets} 枚、必要 ${wanted.length} 枚）`);
 
+  // テーマの細かさに合わせた幅（写真に似せる顔には、足さない）。チケットが足りると分かってから呼ぶ
+  const wide = photo ? null : await planWidth(deps, text, uid, doll, theme, target, wanted);
+  const extra = wide?.extra.length ? { extra: wide.extra } : {};
+
   // 企画（文章の AI）。ここで失敗しても、チケットは引いていない
   const style = findStyle(input.styleId);
   let items: PlannedItem[];
   let setName: string | null = null;
   try {
     if (target.kind === 'set') {
-      const planned = await planSet(text, doll, { theme, categories: wanted, style: style.prompt });
+      const planned = await planSet(text, doll, { theme, categories: wanted, style: style.prompt, ...extra });
       items = planned.items;
       setName = planned.name;
     } else {
-      items = await planItems(text, doll, { theme: photo && !typed ? 'a face that looks like the person in the photo' : theme, count: 1, categories: wanted, style: style.prompt, ...(photo ? { photo } : {}) });
+      items = await planItems(text, doll, { theme: photo && !typed ? 'a face that looks like the person in the photo' : theme, count: 1, categories: wanted, style: style.prompt, ...(photo ? { photo } : {}), ...extra });
     }
   } catch (error) {
     throw new CloudError('unknown', `企画を作れませんでした（${(error as Error).message}）`);
@@ -188,6 +242,7 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
     queuedAt: now,
     ...(user.admin ? { free: true } : {}),
     ...(photo ? { photo: photoPath(uid, jobId) } : {}),
+    ...(wide ? { width: wide.width } : {}),
     candidates: items.map((item, index): CandidateDoc => ({ index, name: item.name, categoryId: item.category, description: item.description, colors: item.colors, status: 'waiting', notes: [] })),
   };
   try {

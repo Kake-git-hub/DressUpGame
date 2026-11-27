@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, TRADE_CODE_MS, TRADE_CLAIMED_MS, TRADE_JOINED_MS, TRADE_OPEN_MS, TRADE_PER_DAY, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, workJob } from './studioCore.ts';
+import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, recentDescriptions, runJob, settleRefunds, signIn, startJob, sweep, tendJob, TRADE_CODE_MS, TRADE_CLAIMED_MS, TRADE_JOINED_MS, TRADE_OPEN_MS, TRADE_PER_DAY, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 import type { CandidateDoc, ItemDoc, JobDoc } from './store.ts';
 
@@ -1036,6 +1036,8 @@ describe('顔写真から顔を作る', () => {
         async json<T>(input: { prompt: string; images?: Buffer[]; schema: Record<string, unknown> }): Promise<T> {
           const props = (input.schema.properties ?? {}) as Record<string, unknown>;
           if ('ok' in props) return { ok: true, reason: 'よい' } as T;
+          // テーマを測る呼び出し（v0.47.0）は、企画ではない。ここでは「測れなかった」にして、いままでどおりに企画させる
+          if ('topics' in props) return {} as T;
           planImages.push(input.images?.length ?? 0);
           return { items: [{ category: 'かお', name: 'わたしのかお', description: 'Big round brown eyes and a small smile.', colors: ['#663300'] }] } as T;
         },
@@ -1672,5 +1674,170 @@ describe('交換', () => {
     await deleteItem(deps, 'ub', 'my:x-0-1');
     expect(await files.get('users/ua/items/my_x-0-1/thumb.webp')).toBeNull();
     expect(await store.getItem('ub', 'my:x-0-1')).toBeNull();
+  });
+});
+
+describe('テーマの細かさで、幅を変える（v0.47.0）', () => {
+  // 測る AI の返事: 軸ごとの true（書かなければ false）と topics。'shape' = 形のこわれた返事、'throw' = 失敗、'hang' = 返ってこない
+  let measured: Record<string, unknown> | 'shape' | 'throw' | 'hang';
+  let planPrompts: string[]; // 企画（品目を考える）の頼みの文
+  const set3 = () => ({ dollId, theme: 'うみ', styleId: 'anime', target: { kind: 'set' as const, categoryIds: ['トップス', 'アクセサリー'] } });
+  const candidate = (over: Partial<CandidateDoc>): CandidateDoc => ({ index: 0, name: 'ふく', categoryId: 'トップス', description: 'A top.', colors: [], status: 'kept', notes: [], ...over });
+  const jobOf = (id: string, over: Partial<JobDoc>, candidates: CandidateDoc[]): JobDoc => ({ id, dollId: 'd1', theme: 'うみ', styleId: 'anime', done: true, tickets: 1, createdAt: 0, heartbeat: 0, v: 2, candidates, ...over });
+
+  beforeEach(() => {
+    measured = { topics: [] };
+    planPrompts = [];
+    deps.random = () => 0;
+    deps.ai = {
+      image: fakeImage,
+      text: {
+        async json<T>(input: { system: string; prompt: string; schema: Record<string, unknown> }): Promise<T> {
+          const props = (input.schema.properties ?? {}) as Record<string, unknown>;
+          if ('topics' in props) {
+            textCalls++;
+            if (measured === 'throw') throw new Error('boom');
+            if (measured === 'hang') return new Promise<T>(() => {});
+            if (measured === 'shape') return { items: [] } as T;
+            const axes = Object.keys(props).filter((key) => key !== 'topics');
+            return { ...Object.fromEntries(axes.map((key) => [key, false])), topics: [], ...measured } as T;
+          }
+          if (!('ok' in props)) planPrompts.push(input.prompt);
+          // 顔の企画（もとの偽物は、顔を返さない）
+          if (!('ok' in props) && /^- かお/m.test(input.prompt)) {
+            textCalls++;
+            return { items: [{ category: 'かお', name: 'にっこり', description: 'A smiling face.', colors: ['#553322'] }] } as T;
+          }
+          return fakeText.json(input);
+        },
+      },
+    };
+  });
+
+  it('ひろいテーマ: くじのヒントを足して企画し、仕事に width を残す', async () => {
+    await userWith('u1', 2);
+    measured = { topics: ['spring'] };
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).toMatch(/Design hints/);
+    const job = (await store.getJob('u1', jobId))!;
+    expect(job.width!.level).toBe('wide');
+    expect(job.width!.hints.length).toBeGreaterThanOrEqual(2);
+    expect(job.width!.hints.length).toBeLessThanOrEqual(3);
+    // 記録に残すのは、日本語の名前
+    for (const hint of job.width!.hints) expect(hint).toMatch(/[ぁ-んァ-ヶ一-龠]/);
+  });
+  it('細かいテーマ: くじなし。「そのとおりに」を足す。最近の服は添えない', async () => {
+    await userWith('u1', 3);
+    await startJob(deps, 'u1', oneTop()); // 1 着め（ひろい）
+    measured = { colour: true, decoration: true };
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).toMatch(/Follow it exactly/);
+    expect(planPrompts.at(-1)).not.toMatch(/Design hints|clearly different/);
+    expect((await store.getJob('u1', jobId))!.width).toEqual({ level: 'tight', hints: [] });
+  });
+  it('ふつうのテーマ（1 つだけ決まっている）: ヒントは 1〜2 個。決まっている軸からは引かない', async () => {
+    await userWith('u1', 2);
+    measured = { colour: true };
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    const job = (await store.getJob('u1', jobId))!;
+    expect(job.width!.level).toBe('normal');
+    expect(job.width!.hints.length).toBeGreaterThanOrEqual(1);
+    expect(job.width!.hints.length).toBeLessThanOrEqual(2);
+    expect(planPrompts.at(-1)).not.toMatch(/^- colour:/m);
+  });
+  it('2 着め: 同じドール・同じカテゴリの、前の服（順番待ちでも）の説明を添えて「違うものに」', async () => {
+    await userWith('u1', 3);
+    await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).not.toMatch(/clearly different/i);
+    await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).toContain('- A red トップス.');
+    expect(planPrompts.at(-1)).toMatch(/clearly different/i);
+  });
+  it('ほかの人の服・ほかのカテゴリの服は、添えない', async () => {
+    await userWith('u1', 3);
+    await userWith('u2', 3);
+    await startJob(deps, 'u2', oneTop());
+    await startJob(deps, 'u1', { ...oneTop(), target: { kind: 'category', categoryId: 'くつ' } });
+    await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).not.toMatch(/- A red|clearly different/);
+  });
+  it('セット: セット用の軸で測り、前のセットの「名前: 1 点めの説明」を添える', async () => {
+    await userWith('u1', 6);
+    await startJob(deps, 'u1', set3());
+    const { jobId } = await startJob(deps, 'u1', set3());
+    expect(planPrompts.at(-1)).toContain('- うみのセット: A red トップス.');
+    expect((await store.getJob('u1', jobId))!.width!.level).toBe('wide');
+  });
+  it('最近の服（1 点）: 5 件まで、新しい順。できなかった服・説明の無い古い仕事・ほかのドールは入れない。前のセットの中の、同じカテゴリも数える', () => {
+    const target = { kind: 'category' as const, categoryId: 'トップス' };
+    const jobs: JobDoc[] = [
+      jobOf('j9', {}, [candidate({ description: 'top 9', status: 'waiting' })]),
+      jobOf('j8', {}, [candidate({ description: 'top 8', status: 'failed' })]),
+      jobOf('j7', {}, [candidate({ description: '' })]),
+      jobOf('j6', { dollId: 'other' }, [candidate({ description: 'other doll' })]),
+      jobOf('j5', { set: { id: 'my:set-j5', name: 'せっと' } }, [candidate({ description: 'shoes in set', categoryId: 'くつ' }), candidate({ description: 'top in set', index: 1 })]),
+      ...[4, 3, 2, 1, 0].map((n) => jobOf(`j${n}`, {}, [candidate({ description: `top ${n}` })])),
+    ];
+    expect(recentDescriptions(jobs, 'd1', target)).toEqual(['top 9', 'top in set', 'top 4', 'top 3', 'top 2']);
+    expect(recentDescriptions([], 'd1', target)).toEqual([]);
+  });
+  it('最近の服（セット）: 同じドールの、前のセットごとに「名前: できなかった品目を飛ばした 1 点め」。1 点の仕事は数えない', () => {
+    const target = { kind: 'set' as const, categoryIds: ['トップス', 'くつ'] };
+    const jobs: JobDoc[] = [
+      jobOf('j3', { set: { id: 's3', name: 'ゆきのセット' } }, [candidate({ description: 'failed one', status: 'failed' }), candidate({ description: 'snow shoes', categoryId: 'くつ', index: 1 })]),
+      jobOf('j2', {}, [candidate({ description: 'single top' })]),
+      jobOf('j1', { set: { id: 's1', name: 'うみのセット' }, dollId: 'other' }, [candidate({ description: 'other doll' })]),
+      jobOf('j0', { set: { id: 's0', name: 'はなのセット' } }, [candidate({ description: 'flower top' })]),
+    ];
+    expect(recentDescriptions(jobs, 'd1', target)).toEqual(['ゆきのセット: snow shoes', 'はなのセット: flower top']);
+  });
+  it('測れなかった（こわれた返事・失敗・時間切れ）: いままでどおりの頼みで作る。width は none。チケットは 1 枚ずつしか減らない', async () => {
+    await userWith('u1', 5);
+    deps.measureTimeoutMs = 20;
+    const seen: string[] = [];
+    for (const broken of ['shape', 'throw', 'hang'] as const) {
+      measured = broken;
+      const { jobId } = await startJob(deps, 'u1', oneTop());
+      seen.push(planPrompts.at(-1)!);
+      expect((await store.getJob('u1', jobId))!.width).toEqual({ level: 'none', hints: [] });
+    }
+    expect(seen[1]).toBe(seen[0]);
+    expect(seen[2]).toBe(seen[0]);
+    expect(seen[0]).not.toMatch(/Design hints|Follow it exactly|clearly different/);
+    expect((await signIn(deps, 'u1')).tickets).toBe(2);
+  });
+  it('最近の服を読めなくても、作れる（ヒントだけで企画する）', async () => {
+    await userWith('u1', 2);
+    vi.spyOn(store, 'listJobs').mockRejectedValueOnce(new Error('store down'));
+    const { jobId } = await startJob(deps, 'u1', oneTop());
+    expect(planPrompts.at(-1)).toMatch(/Design hints/);
+    expect((await store.getJob('u1', jobId))!.width!.level).toBe('wide');
+  });
+  it('写真から顔を作るとき: 測らない（文の AI は、企画の 1 回だけ）。width は付かない', async () => {
+    await userWith('u1', 2);
+    const photo = await sharp({ create: { width: 1600, height: 1200, channels: 3, background: '#d0a080' } }).jpeg().toBuffer();
+    const before = textCalls;
+    const { jobId } = await startJob(deps, 'u1', { dollId, theme: '', styleId: 'anime', target: { kind: 'category', categoryId: 'かお' }, photo });
+    expect(textCalls - before).toBe(1);
+    expect((await store.getJob('u1', jobId))!.width).toBeUndefined();
+  });
+  it('チケットが足りないときは、測る AI も呼ばない', async () => {
+    await userWith('u1', 0);
+    const before = textCalls;
+    expect(code(await startJob(deps, 'u1', oneTop()).catch((e) => e))).toBe('no-tickets');
+    expect(textCalls).toBe(before);
+  });
+  it('おとこのこ のドールには、女の子向けに寄ったヒントを出さない', async () => {
+    const boy = (await new ContentStore(dir).addDoll({ name: 'おとこのこ', data: await dollPng() })).id;
+    await userWith('u1', 40);
+    const all: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      let seed = i * 7919 + 1;
+      deps.random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+      const { jobId } = await startJob(deps, 'u1', { dollId: boy, theme: 'はる', styleId: 'anime', target: { kind: 'category', categoryId: 'トップス' } });
+      all.push(...(await store.getJob('u1', jobId))!.width!.hints);
+    }
+    expect(all.length).toBeGreaterThanOrEqual(60);
+    expect(all.join(' ')).not.toMatch(/リボン|フリル|レース|パール|ピンク|チュール/);
   });
 });

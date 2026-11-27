@@ -113,6 +113,8 @@ export interface JobDoc {
   seen?: boolean; // 利用者が、結果（できた・できなかった）を見た
   queuedAt?: number; // 最後に列に入れた（入れようとした）時刻（入れ直しすぎないため）
   queueFailed?: boolean; // 列に入れられなかった、と分かっている（早めに入れ直す）
+  // テーマの細かさと、引いたくじ（日本語の名前）。none = 測れなかった（いままでどおりに企画した）。写真から作る仕事には無い。調べもの用で、利用者には見せない
+  width?: { level: 'tight' | 'normal' | 'wide' | 'none'; hints: string[] };
   candidates: CandidateDoc[];
 }
 // 自分の服。item の中の絵の名前（files/…）は、paths で置き場のパスに引ける
