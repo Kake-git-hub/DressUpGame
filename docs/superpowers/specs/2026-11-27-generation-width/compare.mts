@@ -91,8 +91,9 @@ if (MODE === 'text') {
     { doll: 'おんなのこ', categories: ['トップス', 'ボトムス'], theme: 'しろい ブラウスと あかい チェックの プリーツスカート', runs: 2 },
   ];
   const md: string[] = [];
+  // ONLY_DOLL=おとこのこ で、そのドールの分だけ
   const results = await Promise.all(
-    cases.map(async (c) => {
+    cases.filter((c) => !process.env.ONLY_DOLL || c.doll === process.env.ONLY_DOLL).map(async (c) => {
       const doll = dollNamed(c.doll);
       const recent: string[] = [];
       const lines: string[] = [`## ${c.doll}・${c.categories.join('＋')}・「${c.theme}」`, ''];
