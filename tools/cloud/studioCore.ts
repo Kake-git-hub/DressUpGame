@@ -16,6 +16,7 @@ import { encodeItemImages } from '../content/manifestEdit.ts';
 import type { AiClients } from '../studio/ai.ts';
 import type { DollAssets } from '../studio/dollAssets.ts';
 import { generateCandidate, planItems, planSet } from '../studio/generate.ts';
+import { RECENT_MAX } from '../studio/variety.ts';
 import type { Candidate, PlannedItem } from '../studio/generate.ts';
 import { isFaceCategory } from '../studio/processFace.ts';
 import { CloudError } from './store.ts';
@@ -127,6 +128,19 @@ async function dollOf(deps: CoreDeps, dollId: string): Promise<ManifestDoll> {
   return doll;
 }
 
+// 最近の仕事から、同じドール・同じカテゴリの服の説明を集める（カテゴリ ID → 新しい順、最大 RECENT_MAX）。できなかった品目は入れない
+export function recentDescriptions(jobs: JobDoc[], dollId: string, categoryIds: string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const sorted = [...jobs].sort((a, b) => b.createdAt - a.createdAt);
+  for (const id of categoryIds) {
+    out[id] = sorted
+      .filter((job) => job.dollId === dollId)
+      .flatMap((job) => job.candidates.filter((c) => c.categoryId === id && c.status !== 'failed' && c.description).map((c) => c.description))
+      .slice(0, RECENT_MAX);
+  }
+  return out;
+}
+
 /**
  * 生成を始める: 入力を確かめ、企画を作り、チケットを引いて、順番待ちの仕事を作る。絵は、まだ作らない（runJob）。
  */
@@ -154,15 +168,17 @@ export async function startJob(deps: CoreDeps, uid: string, input: { dollId: str
 
   // 企画（文章の AI）。ここで失敗しても、チケットは引いていない
   const style = findStyle(input.styleId);
+  // 似すぎを避ける: 同じドール・同じカテゴリで最近作った服の説明（新しい順。文の AI に添えるだけで、呼ぶ回数は増えない）
+  const recent = recentDescriptions(await deps.store.listJobs(uid), doll.id, wanted);
   let items: PlannedItem[];
   let setName: string | null = null;
   try {
     if (target.kind === 'set') {
-      const planned = await planSet(text, doll, { theme, categories: wanted, style: style.prompt });
+      const planned = await planSet(text, doll, { theme, categories: wanted, style: style.prompt, recent });
       items = planned.items;
       setName = planned.name;
     } else {
-      items = await planItems(text, doll, { theme: photo && !typed ? 'a face that looks like the person in the photo' : theme, count: 1, categories: wanted, style: style.prompt, ...(photo ? { photo } : {}) });
+      items = await planItems(text, doll, { theme: photo && !typed ? 'a face that looks like the person in the photo' : theme, count: 1, categories: wanted, style: style.prompt, recent, ...(photo ? { photo } : {}) });
     }
   } catch (error) {
     throw new CloudError('unknown', `企画を作れませんでした（${(error as Error).message}）`);

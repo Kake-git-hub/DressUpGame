@@ -10,7 +10,7 @@ import { AiError } from '../studio/ai.ts';
 import { DollAssets } from '../studio/dollAssets.ts';
 import { MemoryFiles, MemoryStore } from './memoryStore.ts';
 import { CloudError } from './store.ts';
-import { ackJob, adoptUser, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, TRADE_CODE_MS, TRADE_CLAIMED_MS, TRADE_JOINED_MS, TRADE_OPEN_MS, TRADE_PER_DAY, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, workJob } from './studioCore.ts';
+import { ackJob, adoptUser, recentDescriptions, deleteItem, drain, drainAdopted, EXPIRE_MS, QUEUE_WAIT_MS, REQUEUE_MS, listItems, normalizePhoto, offerHandoff, openJobs, orderItems, runJob, settleRefunds, signIn, startJob, sweep, tendJob, TRADE_CODE_MS, TRADE_CLAIMED_MS, TRADE_JOINED_MS, TRADE_OPEN_MS, TRADE_PER_DAY, tradeAccept, tradeCancel, tradeClaim, tradeCode, tradeJoin, tradeOpen, tradeView, updateItem, workJob } from './studioCore.ts';
 import type { CoreDeps } from './studioCore.ts';
 import type { CandidateDoc, ItemDoc, JobDoc } from './store.ts';
 
@@ -137,6 +137,21 @@ describe('生成を始める', () => {
     expect(job.candidates[0]).toMatchObject({ index: 0, categoryId: 'トップス', name: 'うみのトップス', status: 'waiting' });
     expect(imageCalls).toBe(0); // 始めるだけでは、絵は作らない
   });
+  it('似すぎを避ける: 同じドール・同じカテゴリで前に作った服の説明を、企画に添える（呼ぶ回数は増えない）', async () => {
+    await userWith('u1', 3);
+    const prompts: string[] = [];
+    deps.ai = { ...deps.ai, text: { json: (input) => (prompts.push(input.prompt), fakeText.json(input)) } };
+    await startJob(deps, 'u1', oneTop());
+    expect(prompts[0]).not.toMatch(/recently made/);
+    clock += 1000;
+    await startJob(deps, 'u1', oneTop());
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toMatch(/recently made these items[^]*- A red トップス\./);
+    // ほかのカテゴリには添えない
+    clock += 1000;
+    await startJob(deps, 'u1', { ...oneTop(), target: { kind: 'category', categoryId: 'くつ' } });
+    expect(prompts[2]).not.toMatch(/recently made/);
+  });
   it('チケットが足りないときは断り、何も引かない・作らない', async () => {
     await userWith('u1', 0);
     expect(code(await startJob(deps, 'u1', oneTop()).catch((e) => e))).toBe('no-tickets');
@@ -202,6 +217,20 @@ const twoParts = () => ({ dollId, theme: 'うみ', styleId: 'anime', target: { k
 const candidateOf = async (uid: string, jobId: string, index = 0): Promise<CandidateDoc> => (await store.getJob(uid, jobId))!.candidates[index];
 const setJob = (uid: string, jobId: string, change: (job: JobDoc) => JobDoc) => store.updateJob(uid, jobId, change);
 const refunds = () => store.ledger.filter((l) => l.reason.startsWith('refund'));
+
+describe('最近の服の説明（recentDescriptions）', () => {
+  const cand = (categoryId: string, description: string, status: CandidateDoc['status'] = 'done'): CandidateDoc => ({ index: 0, name: 'x', categoryId, description, colors: [], status, notes: [] });
+  const job = (createdAt: number, dollId: string, candidates: CandidateDoc[]) => ({ id: `j${createdAt}`, dollId, theme: 't', styleId: 's', done: true, tickets: 1, createdAt, heartbeat: createdAt, candidates }) as JobDoc;
+  it('新しい順・同じドールだけ・できなかった品目は外す・5 件まで', () => {
+    const jobs = [
+      job(1, 'd', [cand('トップス', 'old')]),
+      job(3, 'd', [cand('トップス', 'failed', 'failed'), cand('くつ', 'shoe')]),
+      job(2, 'other', [cand('トップス', 'other doll')]),
+      ...Array.from({ length: 6 }, (_, i) => job(10 + i, 'd', [cand('トップス', `t${i}`, 'kept')])),
+    ];
+    expect(recentDescriptions(jobs, 'd', ['トップス', 'くつ'])).toEqual({ トップス: ['t5', 't4', 't3', 't2', 't1'], くつ: ['shoe'] });
+  });
+});
 
 describe('生成を始める（列）', () => {
   it('チケットを引き、仕事を作り、列に入れる', async () => {

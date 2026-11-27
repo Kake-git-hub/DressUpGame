@@ -35,6 +35,8 @@ import { processHair } from './processHair.ts';
 import { processShoe } from './processShoe.ts';
 import { processSwap } from './processSwap.ts';
 import { alphaToPng, renderPreview, renderSilhouette, rgbaToPng } from './silhouette.ts';
+import { RECENT_MAX, VARIETY_PROPERTIES, VARIETY_REQUIRED, drawHints, hintLine, readVariety, recentRules, varietyKind, varietyRules } from './variety.ts';
+import type { VarietyInput, VarietyNote } from './variety.ts';
 
 // ドールごとの型紙（studio/templates.json に保存する）
 export interface TemplateData {
@@ -51,6 +53,7 @@ export interface PlannedItem {
   name: string; // 子ども向けのひらがな・カタカナの短い名前
   description: string; // 画像生成への指示（英語）
   colors: string[]; // 使う予定の色（#rrggbb）
+  variety?: VarietyNote; // 生成の幅（細かさ・渡したヒント・使ったヒント）。記録用で、絵には使わない
 }
 
 export interface Candidate {
@@ -90,6 +93,13 @@ const COLOR_NAMES: [Rgb, string][] = [
 ];
 const colorName = (c: Rgb) => COLOR_NAMES.find(([k]) => k.every((v, i) => v === c[i]))?.[1] ?? `rgb(${c.join(',')})`;
 
+const ITEM_PROPERTIES = {
+  category: { type: 'string' },
+  name: { type: 'string' },
+  description: { type: 'string' },
+  colors: { type: 'array', items: { type: 'string' } },
+};
+// 細かさの判定（decided・specificity・hints）を先に書かせてから、品目を書かせる
 const PLAN_SCHEMA = {
   type: 'object',
   properties: {
@@ -97,13 +107,8 @@ const PLAN_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        properties: {
-          category: { type: 'string' },
-          name: { type: 'string' },
-          description: { type: 'string' },
-          colors: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['category', 'name', 'description', 'colors'],
+        properties: { ...VARIETY_PROPERTIES, ...ITEM_PROPERTIES },
+        required: [...VARIETY_REQUIRED, 'category', 'name', 'description', 'colors'],
         additionalProperties: false,
       },
     },
@@ -132,11 +137,21 @@ const PHOTO_PLAN_RULES = [
   'Do not describe hair, glasses, accessories, clothing, the background, the head shape or the skin colour. Do not guess or mention their name, age, ethnicity or identity.',
 ];
 
-export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string; photo?: Buffer }): Promise<PlannedItem[]> {
+type PlannedReply = PlannedItem & { decided?: unknown; specificity?: unknown; hints?: unknown };
+
+export async function planItems(
+  text: TextAi,
+  doll: ManifestDoll,
+  input: { theme: string; count: number; categories?: string[]; style: string; photo?: Buffer } & VarietyInput,
+): Promise<PlannedItem[]> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、単独では作らない
   const categories = doll.categories.filter((c) => (!input.categories?.length || input.categories.includes(c.id)) && !isBackHairCategory(c.label));
   if (categories.length === 0) throw new AiError('カテゴリが選ばれていません', 400);
-  const result = await text.json<{ items: PlannedItem[] }>({
+  // 生成の幅: カテゴリごとにくじでヒントを引く。写真から顔を作るときは、写真に似せるので引かない
+  const rng = input.rng ?? Math.random;
+  const offered = new Map(categories.map((c) => [c.id, input.photo ? [] : drawHints(varietyKind(c.label), rng).map(hintLine)]));
+  const recent = input.photo ? [] : categories.flatMap((c) => input.recent?.[c.id] ?? []).slice(0, RECENT_MAX);
+  const result = await text.json<{ items: PlannedReply[] }>({
     system:
       'You plan clothing and accessory items for a paper-doll dress-up game played by young children in Japan. ' +
       'Each item is later drawn by an image model on a fixed mannequin and cut out automatically, so every item must be a single wearable piece that is clearly separable from the body. ' +
@@ -171,7 +186,11 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       'Special categories:',
       '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
       `- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. ${HAIR_LENGTH_RULE}`,
-      ...(input.photo ? ['', ...PHOTO_PLAN_RULES] : []),
+      '',
+      ...(input.photo
+        ? [...PHOTO_PLAN_RULES, 'Set "specificity" to "precise" and leave "decided" and "hints" empty.']
+        : varietyRules(['Hints (one list per category; for each item use only the list of its own category):', ...categories.map((c) => `- ${c.id}: ${offered.get(c.id)!.map((h, i) => `(${i + 1}) ${h}`).join('; ') || 'none'}`)])),
+      ...(recent.length ? ['', ...recentRules(recent)] : []),
     ].join('\n'),
     ...(input.photo ? { images: [input.photo] } : {}),
     schema: PLAN_SCHEMA,
@@ -180,7 +199,13 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
   const seen = new Set<string>();
   const items = (result.items ?? [])
     .filter((i) => valid.has(i.category) && typeof i.name === 'string' && i.name.trim() && typeof i.description === 'string')
-    .map((i) => ({ category: i.category, name: i.name.trim().replace(/[\\/]/g, '').slice(0, 40), description: i.description, colors: plannedColors(i.colors) }))
+    .map((i) => ({
+      category: i.category,
+      name: i.name.trim().replace(/[\\/]/g, '').slice(0, 40),
+      description: i.description,
+      colors: plannedColors(i.colors),
+      variety: readVariety(i, offered.get(i.category) ?? []),
+    }))
     .filter((i) => i.name && !seen.has(i.name) && seen.add(i.name))
     .slice(0, input.count);
   if (items.length === 0) throw new AiError('品目を作れませんでした。テーマを変えてやり直してください', 422);
@@ -189,8 +214,8 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
 
 const SET_SCHEMA = {
   type: 'object',
-  properties: { name: { type: 'string' }, items: PLAN_SCHEMA.properties.items },
-  required: ['name', 'items'],
+  properties: { ...VARIETY_PROPERTIES, name: { type: 'string' }, items: { type: 'array', items: { ...PLAN_SCHEMA.properties.items.items, properties: ITEM_PROPERTIES, required: ['category', 'name', 'description', 'colors'] } } },
+  required: [...VARIETY_REQUIRED, 'name', 'items'],
   additionalProperties: false,
 };
 
@@ -198,11 +223,18 @@ const SET_SCHEMA = {
  * セット（同じテーマでそろえた 1 組）を企画する。頼んだカテゴリごとに 1 点。
  * 返ってこなかったカテゴリは missing（ラベル）に入れて、あるものだけで進める。
  */
-export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: string; categories: string[]; style: string }): Promise<{ name: string; items: PlannedItem[]; missing: string[] }> {
+export async function planSet(
+  text: TextAi,
+  doll: ManifestDoll,
+  input: { theme: string; categories: string[]; style: string } & VarietyInput,
+): Promise<{ name: string; items: PlannedItem[]; missing: string[]; variety: VarietyNote }> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、頼めない。頼んだ順に並べる
   const categories = input.categories.flatMap((id) => doll.categories.filter((c) => c.id === id && !isBackHairCategory(c.label)));
   if (categories.length < 2) throw new AiError('セットに入れるカテゴリを 2 つ以上選んでください', 400);
-  const result = await text.json<{ name: string; items: PlannedItem[] }>({
+  // 生成の幅: セット全体の色・柄・飾り・モチーフを引く（形は品目ごとにちがうので引かない）
+  const offered = drawHints('garment', input.rng ?? Math.random, ['shape']).map(hintLine);
+  const recent = categories.flatMap((c) => input.recent?.[c.id] ?? []).slice(0, RECENT_MAX);
+  const result = await text.json<{ name: string; items: PlannedItem[]; decided?: unknown; specificity?: unknown; hints?: unknown }>({
     system:
       'You plan one coordinated outfit set for a paper-doll dress-up game played by young children in Japan. ' +
       'Each item is later drawn separately by an image model on a fixed mannequin and cut out automatically, so every item must be a single wearable piece that is clearly separable from the body. ' +
@@ -239,6 +271,9 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
       '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this set.',
       '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
       '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
+      '',
+      ...varietyRules(['The hints are for the whole set (its shared palette, motifs and decorations):', ...offered.map((h, i) => `(${i + 1}) ${h}`)]),
+      ...(recent.length ? ['', ...recentRules(recent)] : []),
     ].join('\n'),
     schema: SET_SCHEMA,
   });
@@ -258,7 +293,7 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
   if (items.length === 0) throw new AiError('セットを作れませんでした。テーマを変えてやり直してください', 422);
   const plain = (value: string, max: number) => value.replace(/[\\/]/g, '').trim().slice(0, max).trim();
   const setName = plain(typeof result.name === 'string' ? result.name : '', 24) || `${plain(input.theme, 16)}のセット`;
-  return { name: setName, items, missing };
+  return { name: setName, items, missing, variety: readVariety(result, offered) };
 }
 
 // 顔と髪型は別のカテゴリで着せ替えるので、それぞれ相手の部分を描かせない
