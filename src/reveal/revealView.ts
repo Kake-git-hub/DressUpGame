@@ -1,6 +1,7 @@
 /**
  * 届いた演出に、何を出すか（純粋関数）
  */
+import { BACKGROUND_CATEGORY, BACKGROUND_LABEL, isBackgroundItem } from '../cloud/backend';
 import type { MyItem, StudioJob } from '../cloud/backend';
 import type { ManifestCategory } from '../content/manifest';
 import type { DollData } from '../types';
@@ -13,6 +14,7 @@ export interface RevealView {
   missing: number; // できたのに、この端末の控えに無い服の数（端末に保存できなかった）
   doll: DollData | null; // 着せて見せるドール。いまの素材に無ければ null（服の絵だけを出す）
   title: string; // 1 点なら服の名前、セットならセットの名前
+  background: boolean; // 届いたのは、背景（ドールに着せずに、絵だけを見せる）
 }
 
 const NO_CATEGORIES: ManifestCategory[] = [];
@@ -25,7 +27,8 @@ export function revealView(job: StudioJob, library: MyItem[], dolls: DollData[],
   const items = kept
     .flatMap((c) => (c.itemId && byId.has(c.itemId) ? [byId.get(c.itemId)!] : []))
     .sort((a, b) => (categoryOf(a.item.category)?.layer ?? 0) - (categoryOf(b.item.category)?.layer ?? 0));
-  const failed = job.candidates.filter((c) => c.status === 'failed').map((c) => ({ label: categoryOf(c.categoryId)?.label ?? c.categoryId, note: c.notes.join(' ') }));
+  const labelOf = (id: string) => (id === BACKGROUND_CATEGORY ? BACKGROUND_LABEL : (categoryOf(id)?.label ?? id));
+  const failed = job.candidates.filter((c) => c.status === 'failed').map((c) => ({ label: labelOf(c.categoryId), note: c.notes.join(' ') }));
   return {
     kind: kept.length > 0 ? 'arrived' : 'failed-only',
     items,
@@ -34,5 +37,6 @@ export function revealView(job: StudioJob, library: MyItem[], dolls: DollData[],
     missing: kept.length - items.length,
     doll: dolls.find((doll) => doll.id === job.dollId) ?? null,
     title: job.set?.name ?? items[0]?.item.name ?? kept[0]?.name ?? '',
+    background: kept.length > 0 && kept.every((c) => c.categoryId === BACKGROUND_CATEGORY) && items.every(isBackgroundItem),
   };
 }

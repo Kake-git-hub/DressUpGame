@@ -5,7 +5,7 @@
  */
 import { mergeInfo } from './mergeInfo';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX } from '../cloud/backend';
+import { BackendError, HUE_MAX, HUE_MIN, NAME_MAX, isBackgroundItem } from '../cloud/backend';
 import type { MyItem, StudioBackend } from '../cloud/backend';
 import { useItemLayers } from '../cloud/itemLayers';
 import type { Library } from '../cloud/library';
@@ -43,6 +43,8 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
   const one = useMemo(() => [item], [item]);
   const layers = useItemLayers(one, hues);
   const [size] = useState(stageSize);
+  // 背景: 絵だけを見せる（ドールに着せない）。色・ならび・はじめの位置は、無い
+  const background = isBackgroundItem(item);
 
   // 失敗の扱い: 服がもう無ければ、知らせて閉じる。ほかは、理由を出す
   const failed = (e: unknown): boolean => {
@@ -157,7 +159,7 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
     <div className="closet-sheet-backdrop" data-testid="closet-item-sheet" onClick={onClose}>
       <div className="closet-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="closet-sheet-stage">
-          <Stage doll={doll} layers={layers} size={size} testId="closet-stage" fit={item.fit} />
+          <Stage doll={background ? null : doll} layers={layers} size={size} testId="closet-stage" fit={background ? undefined : item.fit} />
         </div>
         <div className="closet-sheet-form">
           {!online && (
@@ -180,38 +182,42 @@ export function ClosetItem({ item, doll, group, online, backend, library, onChan
               data-testid="closet-name"
             />
           </label>
-          <div className="closet-field">
-            <span>いろ</span>
-            <div className="closet-hue-row">
-              <input
-                type="range"
-                className="closet-hue"
-                min={HUE_MIN}
-                max={HUE_MAX}
-                step={1}
-                value={hue}
-                disabled={!online}
-                onChange={(e) => changeHue(Number(e.target.value))}
-                aria-label="いろ"
-                data-testid="closet-hue"
-              />
-              <button type="button" disabled={!online || hue === 0} onClick={() => changeHue(0)} data-testid="closet-hue-reset">
-                もとのいろ
-              </button>
-            </div>
-          </div>
-          <div className="closet-field">
-            <span>ならび</span>
-            <div className="closet-row">
-              <button type="button" disabled={locked || index <= 0} onClick={() => move(-1)} data-testid="closet-move-front">
-                ◀ まえへ
-              </button>
-              <button type="button" disabled={locked || index < 0 || index >= group.length - 1} onClick={() => move(1)} data-testid="closet-move-back">
-                うしろへ ▶
-              </button>
-            </div>
-          </div>
-          {onEditFit && doll && (
+          {!background && (
+            <>
+              <div className="closet-field">
+                <span>いろ</span>
+                <div className="closet-hue-row">
+                  <input
+                    type="range"
+                    className="closet-hue"
+                    min={HUE_MIN}
+                    max={HUE_MAX}
+                    step={1}
+                    value={hue}
+                    disabled={!online}
+                    onChange={(e) => changeHue(Number(e.target.value))}
+                    aria-label="いろ"
+                    data-testid="closet-hue"
+                  />
+                  <button type="button" disabled={!online || hue === 0} onClick={() => changeHue(0)} data-testid="closet-hue-reset">
+                    もとのいろ
+                  </button>
+                </div>
+              </div>
+              <div className="closet-field">
+                <span>ならび</span>
+                <div className="closet-row">
+                  <button type="button" disabled={locked || index <= 0} onClick={() => move(-1)} data-testid="closet-move-front">
+                    ◀ まえへ
+                  </button>
+                  <button type="button" disabled={locked || index < 0 || index >= group.length - 1} onClick={() => move(1)} data-testid="closet-move-back">
+                    うしろへ ▶
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+          {onEditFit && doll && !background && (
             <div className="closet-field">
               <span>はじめの いち</span>
               <div className="closet-row">

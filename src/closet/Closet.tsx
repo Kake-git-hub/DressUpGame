@@ -5,6 +5,7 @@
  * 見るだけなら、つながっていなくてもよい（端末の控えから出す）。直す・消すは、サーバーにつながっているときだけ。
  */
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { BACKGROUND_CATEGORY, BACKGROUND_LABEL } from '../cloud/backend';
 import type { MyItem } from '../cloud/backend';
 import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
@@ -71,7 +72,7 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
   const open = openId ? (items?.find((item) => item.id === openId) ?? null) : null;
   const openGroup = open ? (groups.find((group) => group.items.some((item) => item.id === open.id))?.items ?? [open]) : [];
   const online = state.status === 'ready';
-  const labelOf = (forDoll: string, id: string) => categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id;
+  const labelOf = (forDoll: string, id: string) => (id === BACKGROUND_CATEGORY ? BACKGROUND_LABEL : (categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id));
   // 作りかけの品目（どのドールの分も）
   const making = state.jobs.filter((job) => !job.done).flatMap((job) => job.candidates.filter((c) => c.status === 'waiting' || c.status === 'working').map((c) => ({ key: `${job.id}:${c.index}`, label: labelOf(job.dollId, c.categoryId) })));
 
@@ -162,7 +163,7 @@ export function Closet({ session, library, dolls, categoriesByDoll, currentDollI
           </p>
         ) : (
           groups.map((group) => (
-            <section key={group.categoryId || 'other'} className="closet-group" data-testid="closet-group">
+            <section key={group.categoryId || 'other'} className="closet-group" data-testid="closet-group" data-category={group.categoryId}>
               <h3>{group.label}</h3>
               <div className="closet-grid">
                 {group.items.map((item) => (

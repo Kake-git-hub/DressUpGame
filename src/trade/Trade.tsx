@@ -501,7 +501,7 @@ function Picker({ items, dolls, categoriesByDoll, onPick, hasMaking, disabled }:
         </div>
       )}
       {groups.map((group) => (
-        <section key={group.categoryId || 'other'}>
+        <section key={group.categoryId || 'other'} data-category={group.categoryId}>
           <h3>{group.label}</h3>
           <div className="trade-grid">
             {group.items.map((item) => (

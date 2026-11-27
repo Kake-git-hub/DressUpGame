@@ -9,14 +9,14 @@
  * 説明の文は置かない（絵とボタンだけで進める）。チケットの残りは、売っているときは、買う入口のリンクになる（v0.48.0）。
  */
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
+import { BACKGROUND_CATEGORY, BACKGROUND_LABEL, BackendError, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from '../cloud/backend';
 import type { StudioTarget } from '../cloud/backend';
 import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
 import type { ManifestCategory } from '../content/manifest';
 import { isBackHairCategory } from '../pipeline/hairSplit';
 import { DEFAULT_STYLE_ID, STYLE_PRESETS } from '../studio/stylePresets';
-import type { ClothingItemData, DollData } from '../types';
+import type { BackgroundData, ClothingItemData, DollData } from '../types';
 import { formatJstDate } from '../cloud/expiry';
 import { GiftTickets } from './GiftTickets';
 import { Account } from './Account';
@@ -35,6 +35,7 @@ interface Props {
   dolls: DollData[]; // ゲームに出ているドール
   categoriesByDoll: Record<string, ManifestCategory[]>;
   clothing?: ClothingItemData[]; // 服の一覧（カテゴリの絵に、先頭の服のサムネイルを使う）
+  backgrounds?: BackgroundData[]; // 背景の一覧（「はいけい」の絵に、そのドールの先頭の背景のサムネイルを使う）
   initialDollId: string; // 最初に選んでおくドール（最後に遊んだドール）
   onClose: () => void;
   demo?: boolean; // 確認用（偽物の裏側）。絵は色の四角で、チケットもにせもの
@@ -43,10 +44,12 @@ interface Props {
 }
 
 const SET = '__set';
+const BG = BACKGROUND_CATEGORY;
 // 注文の演出を出しておく、いちばん短い時間（返事が早くても、何が起きたかが分かるように）
 const ORDER_MIN_MS = 1500;
 const NO_CATEGORIES: ManifestCategory[] = [];
 const NO_CLOTHING: ClothingItemData[] = [];
+const NO_BACKGROUNDS: BackgroundData[] = [];
 const clock = () => Date.now();
 const isFaceLabel = (label: string) => /かお|顔|face|メイク|makeup/i.test(label);
 const messageOf = (e: unknown) => (e instanceof BackendError || e instanceof Error ? e.message : String(e));
@@ -82,7 +85,7 @@ const NOTICE = {
   crowded: 'こみあっています。できたら、クローゼットに入ります。',
 };
 
-export function AppStudio({ session, library, dolls, categoriesByDoll, clothing = NO_CLOTHING, initialDollId, onClose, demo = false, art, payReturn = null }: Props) {
+export function AppStudio({ session, library, dolls, categoriesByDoll, clothing = NO_CLOTHING, backgrounds = NO_BACKGROUNDS, initialDollId, onClose, demo = false, art, payReturn = null }: Props) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { user } = state;
   const [dollId, setDollId] = useState(() => (dolls.some((d) => d.id === initialDollId) ? initialDollId : (dolls[0]?.id ?? '')));
@@ -113,6 +116,27 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
     }
     return map;
   }, [clothing, targets, doll]);
+  // 背景を作れるか（サーバーが古い版なら、「はいけい」を出さない。つながったら聞く）
+  const [canBg, setCanBg] = useState(false);
+  const ready = state.status === 'ready';
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    session.backend.canMakeBackground().then(
+      (ok) => alive && setCanBg(ok),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [ready, session]);
+  // 「はいけい」の絵: そのドールで使える先頭の背景（公開の背景を先に）。無ければ、絵文字
+  const bgThumb = useMemo(() => {
+    const usable = backgrounds.filter((b) => !b.dollId || b.dollId === doll?.id);
+    const first = [...usable.filter((b) => !b.isCustom), ...usable.filter((b) => b.isCustom)][0];
+    return first ? first.thumbnailUrl || first.imageUrl : undefined;
+  }, [backgrounds, doll]);
+  const bgArt = bgThumb ? <img className="studio-thumb" src={bgThumb} alt="" draggable={false} /> : <span className="studio-tile-emoji" aria-hidden="true">🖼️</span>;
   const [phase, setPhase] = useState<OrderPhase | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   // 支払い: 買うボタン・戻りの確かめ・お知らせ。保護者の確認は、買うたびに毎回（通った時刻を、最終確認のあと checkout に渡す）
@@ -154,8 +178,9 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   };
 
   const isSet = target === SET;
+  const isBg = target === BG && canBg;
   const chosen = targets.filter((c) => setCats.includes(c.id)).map((c) => c.id);
-  const current: StudioTarget = isSet ? { kind: 'set', categoryIds: chosen } : { kind: 'category', categoryId: target };
+  const current: StudioTarget = isBg ? { kind: 'background' } : isSet ? { kind: 'set', categoryIds: chosen } : { kind: 'category', categoryId: target };
   const cost = ticketCost(current);
   const text = theme.trim();
   const problem =
@@ -163,7 +188,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   // 「作る」を押せない理由（押せるなら null）
   const blocked = !user
     ? '準備しています…'
-    : !doll || targets.length === 0
+    : !doll || (targets.length === 0 && !isBg)
       ? 'このドールには、作れるものがありません。'
       : !text
         ? 'テーマを入れてください。'
@@ -176,7 +201,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   // この段から先へ進めない理由（進めるなら null）
   const stepBlocked =
     step === 'what'
-      ? targets.length === 0
+      ? targets.length === 0 && !isBg
         ? 'このドールには、作れるものがありません。'
         : isSet && (chosen.length < SET_MIN || chosen.length > SET_MAX)
           ? `セットに入れるものを ${SET_MIN}〜${SET_MAX} 個選んでください（いま ${chosen.length} 個）。`
@@ -187,7 +212,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
   const goNext = () => setStep((now) => steps[Math.min(steps.length - 1, steps.indexOf(now) + 1)] ?? now);
   const goBack = () => setStep((now) => steps[Math.max(0, steps.indexOf(now) - 1)] ?? now);
 
-  const labelOf = (forDoll: string, id: string) => categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id;
+  const labelOf = (forDoll: string, id: string) => (id === BG ? BACKGROUND_LABEL : (categoriesByDoll[forDoll]?.find((c) => c.id === id)?.label ?? id));
   const make = async () => {
     if (blocked || phase || !doll) return;
     const style = STYLE_PRESETS.find((s) => s.id === styleId)?.label ?? '';
@@ -223,7 +248,7 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
     <div className="studio-screen" data-testid="app-studio">
       <div className="studio-panel" inert={phase !== null}>
         <header className="studio-header">
-          <h2>✨ 服を作る</h2>
+          <h2>✨ つくる</h2>
           {user &&
             (canBuy && !problem ? (
               <button type="button" className="studio-tickets studio-tickets-link" onClick={() => void startBuying()} data-testid="studio-tickets">
@@ -331,6 +356,12 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
                         <span>セット</span>
                       </button>
                     )}
+                    {canBg && (
+                      <button type="button" className="studio-tile studio-tile-bg" data-value={BG} aria-pressed={isBg} aria-label={BACKGROUND_LABEL} onClick={() => { setTarget(BG); goNext(); }} data-testid="studio-target-bg">
+                        {bgArt}
+                        <span>{BACKGROUND_LABEL}</span>
+                      </button>
+                    )}
                   </div>
                   {isSet && (
                     <div className="studio-set" data-testid="studio-set-categories">
@@ -388,9 +419,9 @@ export function AppStudio({ session, library, dolls, categoriesByDoll, clothing 
                   )}
                   <button type="button" className="studio-summary" onClick={() => setStep('what')}>
                     <span className="studio-summary-thumbs">
-                      {(isSet ? chosen : [target]).map((id) => (
-                        <Thumb key={id} src={thumbs[id]} label={labelOf(doll?.id ?? '', id)} />
-                      ))}
+                      {isBg
+                        ? bgArt
+                        : (isSet ? chosen : [target]).map((id) => <Thumb key={id} src={thumbs[id]} label={labelOf(doll?.id ?? '', id)} />)}
                     </span>
                     <span>{isSet ? `セット（${chosen.map((id) => labelOf(doll?.id ?? '', id)).join('・')}）` : labelOf(doll?.id ?? '', target)}</span>
                   </button>

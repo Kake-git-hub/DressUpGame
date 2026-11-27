@@ -1,7 +1,7 @@
 /**
  * クローゼットの並び（純粋関数）: どのドール・どのカテゴリ・どの順番で出すか
  */
-import { byClosetOrder } from '../cloud/backend';
+import { BACKGROUND_CATEGORY, BACKGROUND_LABEL, byClosetOrder, isBackgroundItem } from '../cloud/backend';
 import type { MyItem } from '../cloud/backend';
 import type { ManifestCategory } from '../content/manifest';
 import type { DollData } from '../types';
@@ -32,15 +32,18 @@ export function closetDolls(items: MyItem[], dolls: DollData[], currentDollId: s
   return [...usable.filter((doll) => doll.id === currentDollId), ...usable.filter((doll) => doll.id !== currentDollId), ...gone];
 }
 
-// そのドールの服を、カテゴリごとに。カテゴリは、メニューの順。組の中は、ゲームのメニューと同じ順番。素材に無いカテゴリの服は、最後に「そのほか」
+// そのドールの服を、カテゴリごとに。カテゴリは、メニューの順。組の中は、ゲームのメニューと同じ順番。素材に無いカテゴリの服は、最後に「そのほか」。
+// 自分の背景は、服のあとに「はいけい」の組（「そのほか」の前）
 export function closetGroups(items: MyItem[], dollId: string, categories: ManifestCategory[]): ClosetGroup[] {
   const mine = items.filter((item) => item.dollId === dollId).sort(byClosetOrder);
   const groups = [...categories]
     .sort((a, b) => a.menuOrder - b.menuOrder)
     .map((category): ClosetGroup => ({ categoryId: category.id, label: category.label, items: mine.filter((item) => item.item.category === category.id) }))
     .filter((group) => group.items.length > 0);
+  const backgrounds = mine.filter(isBackgroundItem);
+  if (backgrounds.length > 0) groups.push({ categoryId: BACKGROUND_CATEGORY, label: BACKGROUND_LABEL, items: backgrounds });
   const known = new Set(categories.map((category) => category.id));
-  const others = mine.filter((item) => !known.has(item.item.category));
+  const others = mine.filter((item) => !known.has(item.item.category) && !isBackgroundItem(item));
   return others.length > 0 ? [...groups, { categoryId: '', label: OTHER_LABEL, items: others }] : groups;
 }
 

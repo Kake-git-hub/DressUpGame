@@ -10,7 +10,7 @@ import { browserAccountEnv, createAccount } from './account';
 import type { AuthPort, StudioAccount } from './account';
 import { BackendError, normalizeUserCode, OLD_SERVER_MESSAGE } from './backend';
 import type { AdoptAnswer, GiftAnswer, MyItem, MyItemInfo, StudioBackend, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
-import { ADOPT_API, FIT_API, GIFT_API, MIN_API, PAY_API, TRADE_API } from './wire';
+import { ADOPT_API, BG_API, FIT_API, GIFT_API, MIN_API, PAY_API, TRADE_API } from './wire';
 import { normalizeFit } from '../engine/fit';
 import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireFiles, WireItem, WireJob, WireTrade, WireTradeItem, WireUser } from './wire';
 
@@ -196,8 +196,21 @@ export function createRemoteBackend(transport: StudioTransport, options: RemoteO
       return () => userListeners.delete(listener);
     },
     async startJob(input) {
+      // 古いサーバーは、背景を知らない。呼ばずに、断る
+      if (input.target.kind === 'background' && !(await backend.canMakeBackground())) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       const started = took(await transport.call<{ jobId: string; cost: number; user: WireUser }>({ op: 'startJob', dollId: input.dollId, theme: input.theme, styleId: input.styleId, target: input.target }));
       return { jobId: started.jobId, cost: started.cost };
+    },
+    async canMakeBackground() {
+      if (serverApi === null) {
+        try {
+          await backend.signIn();
+        } catch (error) {
+          if (error instanceof BackendError && error.code === 'old-server') return false;
+          throw error;
+        }
+      }
+      return (serverApi ?? 0) >= BG_API;
     },
     watchJob(jobId, listener) {
       const watch = watches.get(jobId) ?? { listeners: new Set(), timer: null, asking: false, over: false };

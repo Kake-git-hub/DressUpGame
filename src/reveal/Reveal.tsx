@@ -33,13 +33,14 @@ export function Reveal({ view, art, canTryOn, onTryOn, onOpenCloset, onClose }: 
         {arrived ? (
           <>
             <h2 className="reveal-title">
-              <span aria-hidden="true">✨</span> あたらしい ふくが とどいたよ！ <span aria-hidden="true">✨</span>
+              <span aria-hidden="true">✨</span> {view.background ? 'あたらしい はいけいが とどいたよ！' : 'あたらしい ふくが とどいたよ！'} <span aria-hidden="true">✨</span>
             </h2>
             <div className="reveal-scene">
               <div className="reveal-closet" style={{ width: size + 32 }}>
                 <div className="reveal-light" aria-hidden="true" />
                 <div className="reveal-inside">
-                  <Stage doll={view.doll} layers={layers} size={size} testId="reveal-stage" />
+                  {/* 背景は、ドールに着せずに、絵だけを見せる */}
+                  <Stage doll={view.background ? null : view.doll} layers={layers} size={size} testId="reveal-stage" />
                 </div>
                 <div className="reveal-door left" aria-hidden="true" />
                 <div className="reveal-door right" aria-hidden="true" />
@@ -83,7 +84,7 @@ export function Reveal({ view, art, canTryOn, onTryOn, onOpenCloset, onClose }: 
         <div className="reveal-buttons">
           {arrived && canTryOn && (
             <button type="button" className="primary" onClick={onTryOn} data-testid="reveal-try">
-              きせてみる
+              {view.background ? 'つかってみる' : 'きせてみる'}
             </button>
           )}
           {arrived && (

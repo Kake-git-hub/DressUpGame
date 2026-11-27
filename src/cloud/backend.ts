@@ -7,6 +7,7 @@
 import type { ItemFit } from '../engine/fit';
 import type { ManifestItem } from '../content/manifest';
 import type { StudioAccount } from './account';
+import { BACKGROUND_CATEGORY } from './wire';
 import type { PayRefusal, TradeRefusal, WirePurchase, WireShop, WireTrade } from './wire';
 
 export interface StudioUser {
@@ -17,8 +18,14 @@ export interface StudioUser {
   admin: boolean;
 }
 
-// 何を作るか: カテゴリを 1 つ選んで 1 点、または、カテゴリをいくつか選んでセット
-export type StudioTarget = { kind: 'category'; categoryId: string } | { kind: 'set'; categoryIds: string[] };
+// 何を作るか: カテゴリを 1 つ選んで 1 点、カテゴリをいくつか選んでセット、または、そのドール用の背景を 1 枚
+export type StudioTarget = { kind: 'category'; categoryId: string } | { kind: 'set'; categoryIds: string[] } | { kind: 'background' };
+
+// 背景の印（仕事の品目の categoryId・できた背景の item.category）と、画面に出す名前
+export { BACKGROUND_CATEGORY };
+export const BACKGROUND_LABEL = 'はいけい';
+// 自分の背景か（服と同じ形で届く。カテゴリが、背景の印）
+export const isBackgroundItem = (item: { item: { category: string } }): boolean => item.item.category === BACKGROUND_CATEGORY;
 
 export interface SetRef {
   id: string;
@@ -121,6 +128,8 @@ export interface StudioBackend {
   // 生成を始める。チケットは、ここで引かれる（できなかった品目の分は、あとで戻る）。
   // 返ってきたあとは、アプリを閉じても、サーバーが最後まで進める。できた服は、自動で自分の服になる
   startJob(input: { dollId: string; theme: string; styleId: string; target: StudioTarget }): Promise<{ jobId: string; cost: number }>;
+  // 背景を作れるか（つないだサーバーの版が BG_API 以上か）。作れないサーバーでは、「はいけい」を出さない
+  canMakeBackground(): Promise<boolean>;
   // 進み具合を知らせる。返り値を呼ぶと、知らせを止める
   watchJob(jobId: string, listener: (job: StudioJob) => void): () => void;
   // まだ見ていない仕事（作りかけ + 終わって、結果をまだ見ていないもの）。新しい順

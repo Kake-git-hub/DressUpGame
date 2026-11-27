@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { ManifestCategory } from '../content/manifest';
 import type { Library } from '../cloud/library';
 import type { CloudSession } from '../cloud/session';
-import type { ClothingItemData, DollData } from '../types';
+import type { BackgroundData, ClothingItemData, DollData } from '../types';
 import { AdultGate } from './AdultGate';
 import orderArt from '../assets/shop/order.webp';
 import shopArt from '../assets/shop/shop.webp';
@@ -21,6 +21,7 @@ export interface StudioRootProps {
   dolls: DollData[];
   categoriesByDoll: Record<string, ManifestCategory[]>;
   clothing: ClothingItemData[];
+  backgrounds?: BackgroundData[]; // 背景の一覧（「はいけい」の絵に使う）
   initialDollId: string;
   onClose: () => void;
   skipGate?: boolean; // 保護者の確認をしない（販売を始めるまで）
@@ -31,7 +32,7 @@ export interface StudioRootProps {
 // 注文の演出の絵（洋服屋の店員とお店。この画面と一緒に、開いたときに読み込む）
 const ART: ShopArt = { shop: shopArt, order: orderArt, ticket: ticketArt };
 
-export default function StudioRoot({ session, library, dolls, categoriesByDoll, clothing, initialDollId, onClose, skipGate = false, demo = false, payReturn = null }: StudioRootProps) {
+export default function StudioRoot({ session, library, dolls, categoriesByDoll, clothing, backgrounds, initialDollId, onClose, skipGate = false, demo = false, payReturn = null }: StudioRootProps) {
   // 保護者の確認は、開くたびに毎回たずねる（覚えない）
   const [confirmed, setConfirmed] = useState(skipGate);
   // 確認の間も、うしろは「つくる」の画面の色（ホームや遊ぶ画面は、うしろに無い）
@@ -43,5 +44,5 @@ export default function StudioRoot({ session, library, dolls, categoriesByDoll, 
       </>
     );
   }
-  return <AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} clothing={clothing} initialDollId={initialDollId} onClose={onClose} demo={demo} art={ART} payReturn={payReturn} />;
+  return <AppStudio session={session} library={library} dolls={dolls} categoriesByDoll={categoriesByDoll} clothing={clothing} backgrounds={backgrounds} initialDollId={initialDollId} onClose={onClose} demo={demo} art={ART} payReturn={payReturn} />;
 }

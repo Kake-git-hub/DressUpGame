@@ -31,14 +31,15 @@ beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 describe('つくる', () => {
-  it('最初は、ドールを選ぶ段（最後に遊んだドール）。次は、カテゴリを絵で選ぶ（メニューの順。セットは最後）', async () => {
+  it('最初は、ドールを選ぶ段（最後に遊んだドール）。次は、カテゴリを絵で選ぶ（メニューの順。そのあとにセット、はいけい）', async () => {
     open();
     await waitFor(() => expect(screen.getByTestId('studio-tickets').textContent).toContain('のこり 5 枚'));
     expect(stepOf()).toBe('doll');
     expect(pressed('studio-doll')).toEqual(['おんなのこ']);
     next();
     expect(stepOf()).toBe('what');
-    expect(tiles('studio-target')).toEqual(['トップス', 'ドレス', 'かお', 'セット']);
+    // 「はいけい」は、サーバーが作れると分かってから出る（v0.49.0。セットのあと）
+    await waitFor(() => expect(tiles('studio-target')).toEqual(['トップス', 'ドレス', 'かお', 'セット', 'はいけい']));
     expect(pressed('studio-target')).toEqual(['トップス']);
     expect(screen.queryByTestId('studio-photo-button')).toBeNull();
   });
@@ -76,7 +77,7 @@ describe('つくる', () => {
     await waitFor(() => expect(screen.getByTestId('studio-tickets')).toBeTruthy());
     tap('studio-doll', 'おとこのこ');
     expect(stepOf()).toBe('what');
-    expect(tiles('studio-target')).toEqual(['ズボン', 'くつ', 'セット']);
+    await waitFor(() => expect(tiles('studio-target')).toEqual(['ズボン', 'くつ', 'セット', 'はいけい']));
     expect(pressed('studio-target')).toEqual(['ズボン']);
     tap('studio-target', 'セット');
     expect(stepOf()).toBe('what'); // セットは、入れるものを選んでから進む

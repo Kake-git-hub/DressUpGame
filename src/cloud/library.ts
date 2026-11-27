@@ -11,8 +11,8 @@ import { itemToClothing } from '../content/loadContent';
 import type { LoadedContent } from '../content/loadContent';
 import type { ManifestImage } from '../content/manifest';
 import { isDarkImage, recolor } from '../pipeline/recolor';
-import type { ClothingItemData } from '../types';
-import { byClosetOrder } from './backend';
+import type { BackgroundData, ClothingItemData } from '../types';
+import { byClosetOrder, isBackgroundItem } from './backend';
 import type { MyItem } from './backend';
 
 const DATABASE = 'dressup-library';
@@ -146,6 +146,7 @@ const tintWithCanvas: TintThumb = async ({ thumb, hue, pictures }) => {
  * 既定の色（hue）のある服は、着せたときの色（colorHue）と戻す先（defaultHue）を持ち、サムネイルは色を付けた絵にする。
  * 自分のセットは、公開のセットより先に並ぶ（負の order。新しいセットほど先）。
  * 公開の素材に無いドール・カテゴリの服、絵が欠けている服は、足さない（控えからは消さない）。
+ * 自分の背景（カテゴリが、背景の印）は、そのドールの背景として、**公開の背景の前**に並ぶ（同じく、クローゼットの順番）。
  */
 export async function mergeMyItems(content: LoadedContent, items: MyItem[], tint: TintThumb = tintWithCanvas): Promise<LoadedContent> {
   if (items.length === 0) {
@@ -166,10 +167,27 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[], tint
     }
   });
   const clothing: ClothingItemData[] = [];
+  const backgrounds: BackgroundData[] = [];
   const used = new Set<string>();
   for (const mine of ordered) {
     // 控えが 1 件壊れていても（中身が欠けているなど）、ほかの服は出す
     try {
+      if (isBackgroundItem(mine)) {
+        // 自分の背景: そのドールがゲームに出ていて、絵がそろっているときだけ
+        const names = [mine.item.image.file, mine.item.thumb];
+        if (!content.dolls.some((d) => d.id === mine.dollId) || names.some((name) => !(mine.files[name] instanceof Blob))) continue;
+        const [imageUrl, thumbnailUrl] = await Promise.all(
+          names.map(async (name) => {
+            const key = `${mine.id}\n${name}\n${mine.files[name].size}`;
+            const url = dataUrls.get(key) ?? (await toDataUrl(mine.files[name]));
+            dataUrls.set(key, url);
+            used.add(key);
+            return url;
+          }),
+        );
+        backgrounds.push({ id: mine.id, name: mine.item.name, imageUrl, thumbnailUrl, dollId: mine.dollId, isCustom: true });
+        continue;
+      }
       const category = content.categories?.[mine.dollId]?.find((c) => c.id === mine.item.category);
       if (!category || !content.dolls.some((d) => d.id === mine.dollId)) continue;
       // 使う絵を、全部 data: の URL にする
@@ -223,5 +241,5 @@ export async function mergeMyItems(content: LoadedContent, items: MyItem[], tint
   }
   // 消えた服の分は、忘れる
   for (const key of [...dataUrls.keys()]) if (!used.has(key)) dataUrls.delete(key);
-  return { ...content, clothing: [...clothing, ...content.clothing] };
+  return { ...content, clothing: [...clothing, ...content.clothing], backgrounds: [...backgrounds, ...content.backgrounds] };
 }

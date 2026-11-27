@@ -9,7 +9,7 @@
 import { isPlainFit, normalizeFit, sameFit } from '../engine/fit';
 import type { ItemFit } from '../engine/fit';
 import { browserAccountEnv, createAccount } from './account';
-import { BackendError, HUE_MAX, HUE_MIN, GIFT_MAX, NAME_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
+import { BACKGROUND_CATEGORY, BACKGROUND_LABEL, BackendError, HUE_MAX, HUE_MIN, GIFT_MAX, NAME_MAX, normalizeUserCode, OLD_SERVER_MESSAGE, SET_MAX, SET_MIN, THEME_MAX, ticketCost } from './backend';
 import { createFakeAuthPort, fakeGoTo } from './fakeAuth';
 import type { FakeWorld } from './fakeAuth';
 import type { AdoptAnswer, MyItem, MyItemInfo, SetRef, StudioBackend, StudioCandidate, StudioJob, StudioUser, TradeItem, TradeState } from './backend';
@@ -32,6 +32,7 @@ export interface FakeOptions {
   silentFail?: boolean; // 画面なしの行き来（prompt=none）を、Google が interaction_required で断ったことにする
   noTrade?: boolean; // 交換が、サーバーが古い版のときの動き（old-server）
   noFit?: boolean; // はじめの位置が、サーバーが古い版のときの動き（old-server）
+  noBackground?: boolean; // 背景を作れない、古い版のサーバーのときの動き（「はいけい」を出さない。作ろうとすると old-server）
   // 交換の「にせの あいて」
   partner?: {
     claimAfterMs?: number; // こちらが始めてから、あいてが読んで服を出すまで（既定 1500）
@@ -47,7 +48,7 @@ export interface FakeOptions {
   welcome?: number; // 最初のログインで、ようこその枚数を知らせる（1 回だけ。この端末の利用者ごと）
   anonymous?: boolean; // ログインしていない扱い（買うのは pay:login で断る）
   fakeLots?: { count: number; daysLeft: number }[]; // 最初から持っている、買った分（あと何日で切れるか）。保存されている利用者がいれば、そちらが優先
-  // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角）。テストでは差し替える
+  // 絵を作る（既定は、ブラウザのキャンバスで色の付いた四角。背景は、空と地面の絵）。テストでは差し替える
   image?: (color: string) => Promise<Blob>;
 }
 
@@ -159,6 +160,23 @@ async function defaultImage(color: string): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('絵を作れませんでした'))), 'image/png'));
 }
 
+// にせの背景: 空（色のぼかし）と、地面
+const BACKGROUND_SIDE = 512;
+async function defaultBackground(color: string): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = BACKGROUND_SIDE;
+  canvas.height = BACKGROUND_SIDE;
+  const ctx = canvas.getContext('2d')!;
+  const sky = ctx.createLinearGradient(0, 0, 0, BACKGROUND_SIDE);
+  sky.addColorStop(0, color);
+  sky.addColorStop(0.75, '#ffffff');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, BACKGROUND_SIDE, BACKGROUND_SIDE);
+  ctx.fillStyle = '#9ad08a';
+  ctx.fillRect(0, BACKGROUND_SIDE * 0.75, BACKGROUND_SIDE, BACKGROUND_SIDE * 0.25);
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('絵を作れませんでした'))), 'image/png'));
+}
+
 // 進み具合は、ただのデータ（古い端末には structuredClone が無い）
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const colorOf = (index: number) => COLORS[index % COLORS.length];
@@ -176,6 +194,9 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const delay = options.delayMs ?? 1500;
   const planMs = options.planMs ?? 800;
   const makeImage = options.image ?? defaultImage;
+  const makeBackground = options.image ?? defaultBackground;
+  const isBg = (saved: { categoryId: string }) => saved.categoryId === BACKGROUND_CATEGORY;
+  const noBackground = () => options.noBackground === true || options.oldServer === true;
   const fail = new Set(options.failCategories ?? []);
   const userListeners = new Set<(user: StudioUser) => void>();
   const welcomeListeners = new Set<(tickets: number) => void>();
@@ -382,7 +403,8 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
   const toInfo = (saved: SavedItem): MyItemInfo => ({
     id: saved.id,
     dollId: saved.dollId,
-    item: { id: saved.id, name: saved.name, category: saved.categoryId, image: { file: 'image', canvasW: CANVAS, canvasH: CANVAS, box: boxOf(saved.index) }, thumb: 'thumb' },
+    // 背景の絵は、キャンバス全体
+    item: { id: saved.id, name: saved.name, category: saved.categoryId, image: { file: 'image', canvasW: CANVAS, canvasH: CANVAS, box: isBg(saved) ? { x: 0, y: 0, w: CANVAS, h: CANVAS } : boxOf(saved.index) }, thumb: 'thumb' },
     ...(saved.set ? { set: saved.set } : {}),
     createdAt: saved.createdAt,
     hue: saved.hue,
@@ -392,7 +414,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     ...(saved.fit ? { fit: saved.fit } : {}),
   });
   const toMyItem = async (saved: SavedItem): Promise<MyItem> => {
-    const blob = await makeImage(colorOf(saved.index));
+    const blob = await (isBg(saved) ? makeBackground : makeImage)(colorOf(saved.index));
     return { ...toInfo(saved), files: { image: blob, thumb: blob }, owner: state.user.userCode };
   };
   const itemOf = (id: string): SavedItem => {
@@ -416,7 +438,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     return {
       id,
       dollId,
-      name: 'にせの ふく',
+      name: categoryId === BACKGROUND_CATEGORY ? 'にせの はいけい' : 'にせの ふく',
       categoryId,
       index: FAKE_INDEX,
       createdAt: Date.now(),
@@ -451,7 +473,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
     name: saved.name,
     categoryId: saved.categoryId,
     hue: saved.hue,
-    thumb: await makeImage(colorOf(saved.index)),
+    thumb: await (isBg(saved) ? makeBackground : makeImage)(colorOf(saved.index)),
   });
   const tradeView = async (trade: FakeTrade): Promise<TradeState> => {
     advanceTrade(trade);
@@ -520,14 +542,17 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       if (target.kind === 'set' && (target.categoryIds.length < SET_MIN || target.categoryIds.length > SET_MAX)) {
         throw new BackendError('refused', `セットに入れるものは ${SET_MIN}〜${SET_MAX} 個にしてください`);
       }
+      // 古い版のサーバーは、背景を知らない
+      if (target.kind === 'background' && noBackground()) throw new BackendError('old-server', OLD_SERVER_MESSAGE);
       const cost = ticketCost(target);
       if (!state.user.admin && state.user.tickets < cost) throw new BackendError('no-tickets', `チケットが足りません（のこり ${state.user.tickets} 枚、必要 ${cost} 枚）`);
       // 企画を作る時間のまね（この間は、まだ引いていない）
       if (planMs > 0) await new Promise((resolve) => setTimeout(resolve, planMs));
       if (!state.user.admin && state.user.tickets < cost) throw new BackendError('no-tickets', `チケットが足りません（のこり ${state.user.tickets} 枚、必要 ${cost} 枚）`);
       const id = `fake-${++state.counter}`;
-      const categories = target.kind === 'set' ? target.categoryIds : [target.categoryId];
-      const candidates = categories.map((categoryId, index): StudioCandidate => ({ index, name: `${text}の${categoryId}`.slice(0, NAME_MAX), categoryId, status: index === 0 ? 'working' : 'waiting', notes: [] }));
+      const categories = target.kind === 'set' ? target.categoryIds : [target.kind === 'background' ? BACKGROUND_CATEGORY : target.categoryId];
+      const nameOf = (categoryId: string) => `${text}の${categoryId === BACKGROUND_CATEGORY ? BACKGROUND_LABEL : categoryId}`.slice(0, NAME_MAX);
+      const candidates = categories.map((categoryId, index): StudioCandidate => ({ index, name: nameOf(categoryId), categoryId, status: index === 0 ? 'working' : 'waiting', notes: [] }));
       const now = Date.now();
       const job: FakeJob = {
         id,
@@ -544,6 +569,10 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       save();
       schedule(id);
       return { jobId: id, cost };
+    },
+    async canMakeBackground() {
+      online();
+      return !noBackground();
     },
     watchJob(jobId, listener) {
       const set = jobListeners.get(jobId) ?? new Set();
@@ -576,6 +605,14 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       online();
       const saved = itemOf(id);
       const name = typeof change.name === 'string' ? change.name.trim().slice(0, NAME_MAX).trim() || saved.name : saved.name;
+      // 背景には、色・はじめの位置を付けない（本物と同じく、頼まれても変えずに返す。名前は変えられる）
+      if (isBg(saved)) {
+        if (name !== saved.name) {
+          Object.assign(saved, { name, updatedAt: Date.now() });
+          save();
+        }
+        return toInfo(saved);
+      }
       const hue = typeof change.hue === 'number' && Number.isFinite(change.hue) ? Math.max(HUE_MIN, Math.min(HUE_MAX, Math.round(change.hue))) : saved.hue;
       let fit = saved.fit;
       if (change.fit !== undefined) {
@@ -710,6 +747,7 @@ export function createFakeBackend(options: FakeOptions = {}): FakeBackend {
       Object.assign(trade, { status: 'joined', mine, joinedAt: Date.now() });
       trade.theirs.dollId = mine.dollId;
       trade.theirs.categoryId = mine.categoryId;
+      if (isBg(mine)) trade.theirs.name = 'にせの はいけい';
     },
     async trade(tradeId) {
       online();

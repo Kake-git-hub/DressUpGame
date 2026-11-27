@@ -338,7 +338,10 @@ function App() {
   const refreshMyItems = useCallback(async () => {
     const base = publicContentRef.current;
     if (!base) return;
-    setAllClothing((await mergeMyItems(base, await library.all())).clothing);
+    const merged = await mergeMyItems(base, await library.all());
+    setAllClothing(merged.clothing);
+    // 自分の背景も、重ね直す（消した・交換で渡した背景を選んでいたら、背景なしで描く。下の currentBackground）
+    setAllBackgrounds(merged.backgrounds);
   }, []);
 
   // Google から戻って来たあとの知らせの文（下の起動の中で、戻りを仕上げたら入る）
@@ -863,6 +866,8 @@ function App() {
         .sort((a, b) => (a.layerOrder ?? a.baseZIndex ?? 0) - (b.layerOrder ?? b.baseZIndex ?? 0)),
     [allClothing],
   );
+  // 届いた背景（そのドールの、自分の背景。1 枚）
+  const arrivedBackground = (dollId: string, itemIds: string[]) => (itemIds.length === 1 ? allBackgrounds.find((bg) => bg.id === itemIds[0] && bg.dollId === dollId) : undefined);
   const closeReveal = () => {
     if (revealJob && session) void session.ack(revealJob.id);
   };
@@ -875,10 +880,20 @@ function App() {
         dolls={allDolls}
         categoriesByDoll={categoriesByDoll}
         // 素材の読み込みが終わっていて、そのドールがゲームに出ていて、服がメニューに入っているときだけ
-        canTryOn={(dollId, itemIds) => loadState === 'ready' && allDolls.some((doll) => doll.id === dollId) && arrivedParts(dollId, itemIds).length === itemIds.length}
+        canTryOn={(dollId, itemIds) => loadState === 'ready' && allDolls.some((doll) => doll.id === dollId) && (arrivedParts(dollId, itemIds).length === itemIds.length || arrivedBackground(dollId, itemIds) !== undefined)}
         onTryOn={(dollId, itemIds) => {
           const parts = arrivedParts(dollId, itemIds);
+          const background = arrivedBackground(dollId, itemIds);
           closeReveal();
+          if (background) {
+            // 届いた背景を使う: ドールを替える → 背景を選ぶ → ゲームの画面へ
+            if (currentDoll?.id !== dollId) handleDollChange(dollId);
+            handleBackgroundChange(background.id);
+            setStudioOpen(false);
+            setClosetOpen(false);
+            setOnHome(false);
+            return;
+          }
           if (parts.length === 0) return;
           // ドールを替える（着ていた服は脱げる）→ 届いた服を着せる（セットは、全部）→ ゲームの画面へ
           if (currentDoll?.id !== dollId) handleDollChange(dollId);
@@ -934,6 +949,7 @@ function App() {
             dolls={allDolls}
             categoriesByDoll={categoriesByDoll}
             clothing={allClothing}
+            backgrounds={allBackgrounds}
             initialDollId={currentDoll.id}
             onClose={closeStudio}
             payReturn={payReturn}

@@ -21,7 +21,7 @@ const item = (id: string): MyItem => ({
   updatedAt: 1,
   notes: [],
 });
-const view = (change: Partial<RevealView> = {}): RevealView => ({ kind: 'arrived', items: [item('my:a')], failed: [], warnings: [], missing: 0, doll, title: 'なみのふく', ...change });
+const view = (change: Partial<RevealView> = {}): RevealView => ({ kind: 'arrived', items: [item('my:a')], failed: [], warnings: [], missing: 0, doll, title: 'なみのふく', background: false, ...change });
 function open(v: RevealView, props: { canTryOn?: boolean } = {}) {
   const handlers = { onTryOn: vi.fn(), onOpenCloset: vi.fn(), onClose: vi.fn() };
   render(<Reveal view={v} canTryOn={props.canTryOn ?? true} {...handlers} />);
