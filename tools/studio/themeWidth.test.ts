@@ -2,7 +2,8 @@
  * テーマの細かさで、生成の幅を変える（v0.47.0）: くじの表・細かさ・くじ・頼みに足す行・テーマを測る
  */
 import { describe, expect, it } from 'vitest';
-import { axesFor, drawHints, levelOf, widthKind, widthLines } from './themeWidth.ts';
+import type { TextAi } from './ai.ts';
+import { axesFor, drawHints, levelOf, measureTheme, widthKind, widthLines } from './themeWidth.ts';
 import type { WidthKind } from './themeWidth.ts';
 
 const seq = (...values: number[]) => { let i = 0; return () => values[i++ % values.length]; };
@@ -100,5 +101,51 @@ describe('頼みに足す行', () => {
   });
   it('ヒントも最近の服も無ければ、何も足さない', () => {
     expect(widthLines('wide', [], [])).toEqual([]);
+  });
+});
+
+describe('テーマを測る', () => {
+  const axes = axesFor('dress', 'おんなのこ');
+  const answer = (over: Record<string, unknown>) => ({ ...Object.fromEntries(axes.map((a) => [a.id, false])), topics: [], ...over });
+  const ai = (reply: unknown, seen?: { prompt?: string; schema?: Record<string, unknown> }): TextAi => ({
+    json: async <T>(input: { prompt: string; schema: Record<string, unknown> }) => { if (seen) Object.assign(seen, input); return reply as T; },
+  });
+  const input = { theme: 'あかい リボンの ついた しろい ワンピース', categoryLabels: ['ドレス'], axes };
+
+  it('テーマ・カテゴリ・軸を渡し、true の軸と話題の言葉を返す', async () => {
+    const seen: { prompt?: string; schema?: Record<string, unknown> } = {};
+    expect(await measureTheme(ai(answer({ colour: true, decoration: true, topics: ['x'] }), seen), input)).toEqual({ fixed: ['colour', 'decoration'], topics: ['x'] });
+    expect(seen.prompt).toContain('Theme: あかい リボンの ついた しろい ワンピース');
+    expect(seen.prompt).toContain('ドレス');
+    for (const axis of axes) expect(Object.keys((seen.schema!.properties ?? {}) as object)).toContain(axis.id);
+  });
+  it('全部 true でも、そのまま読む（きっちりになる）', async () => {
+    const all = await measureTheme(ai(answer(Object.fromEntries(axes.map((a) => [a.id, true])))), input);
+    expect(all!.fixed).toHaveLength(axes.length);
+  });
+  it('軸が 1 つでも欠けている・true/false でない・品目の一覧が返ってきた → 測れなかった（null）', async () => {
+    const missing = answer({}); delete (missing as Record<string, unknown>)[axes[0].id];
+    expect(await measureTheme(ai(missing), input)).toBeNull();
+    expect(await measureTheme(ai(answer({ [axes[0].id]: 'yes' })), input)).toBeNull();
+    expect(await measureTheme(ai({ items: [] }), input)).toBeNull();
+    expect(await measureTheme(ai(null), input)).toBeNull();
+  });
+  it('話題の一覧が欠けているだけなら、空として読む。文字でないものは捨てる', async () => {
+    const noTopics = answer({}); delete (noTopics as Record<string, unknown>).topics;
+    expect(await measureTheme(ai(noTopics), input)).toEqual({ fixed: [], topics: [] });
+    expect((await measureTheme(ai(answer({ topics: ['sea', 3, null, 'princess'] })), input))!.topics).toEqual(['sea', 'princess']);
+  });
+  it('AI が失敗しても、投げずに null', async () => {
+    expect(await measureTheme({ json: async () => { throw new Error('boom'); } }, input)).toBeNull();
+  });
+  it('時間切れなら null（待ち続けない）', async () => {
+    const never: TextAi = { json: () => new Promise(() => {}) };
+    expect(await measureTheme(never, input, 20)).toBeNull();
+  });
+  it('長いテーマ（60 文字・絵文字・改行）でも落ちない', async () => {
+    const theme = `${'あ'.repeat(50)}🌸\nうみ`;
+    const seen: { prompt?: string } = {};
+    expect(await measureTheme(ai(answer({}), seen), { ...input, theme })).toEqual({ fixed: [], topics: [] });
+    expect(seen.prompt).toContain('🌸');
   });
 });

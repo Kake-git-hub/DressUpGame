@@ -10,6 +10,7 @@
  * 表には、子ども向けの服として、どれが出ても困らない候補だけを入れる（季節を選ぶ素材・はだ色のくつ・ひざまでの髪は入れない）。
  * 設計: docs/superpowers/specs/2026-11-27-v0.47.0-generation-width-design.md
  */
+import type { TextAi } from './ai.ts';
 import { categoryKind } from './generate.ts';
 
 export type WidthKind = 'dress' | 'tops' | 'bottoms' | 'shoes' | 'hat' | 'hair' | 'face' | 'other' | 'set';
@@ -416,4 +417,53 @@ export function widthLines(level: WidthLevel, hints: WidthHint[], recent: string
     );
   }
   return lines;
+}
+
+// 測るのを待つ上限（これを超えたら、測れなかったことにして、いままでどおりに作る）
+export const MEASURE_TIMEOUT_MS = 8000;
+
+/**
+ * テーマを測る: テーマの言葉が、どの軸を言っているか（fixed）と、軸に当たらない話題の言葉（topics）。
+ * 測れなかったら null（AI の失敗・時間切れ・形のこわれた返事）。投げない。
+ * 軸が 1 つでも欠けている返事は「測れなかった」と読む（「何も言っていない」と読むと、細かいテーマに飾りを足してしまう）。
+ */
+export async function measureTheme(
+  text: TextAi,
+  input: { theme: string; categoryLabels: string[]; axes: WidthAxis[] },
+  timeoutMs: number = MEASURE_TIMEOUT_MS,
+): Promise<{ fixed: string[]; topics: string[] } | null> {
+  const ids = input.axes.map((a) => a.id);
+  const schema = {
+    type: 'object',
+    properties: { ...Object.fromEntries(ids.map((id) => [id, { type: 'boolean' }])), topics: { type: 'array', items: { type: 'string' } } },
+    required: [...ids, 'topics'],
+    additionalProperties: false,
+  };
+  const prompt = [
+    `Theme: ${input.theme}`,
+    `Item category: ${input.categoryLabels.join(', ')}`,
+    'For each design aspect below, answer true only if the words of the theme themselves state it.',
+    'A topic, a season, a place, a character type or a mood (for example spring, dream, sea, princess) does not state any aspect: answer false for every aspect it does not literally name.',
+    'The category word itself (for example dress, one-piece, shoes, hair) states nothing.',
+    'Aspects:',
+    ...input.axes.map((a) => `- ${a.id}: ${a.ask}`),
+    'topics: the separate topic words in the theme that are not one of the aspects above (for example ["sea", "princess"]); an empty list if there are none.',
+  ].join('\n');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const reply = await Promise.race([
+      text.json<Record<string, unknown> | null>({ system: 'You analyse a short theme that a child typed to order one item in a dress-up game. Reply with JSON only.', prompt, schema }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+    if (typeof reply !== 'object' || reply === null) return null;
+    if (!ids.every((id) => typeof reply[id] === 'boolean')) return null;
+    const topics = Array.isArray(reply.topics) ? reply.topics.filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [];
+    return { fixed: ids.filter((id) => reply[id] === true), topics };
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
