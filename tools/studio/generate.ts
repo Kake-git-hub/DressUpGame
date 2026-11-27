@@ -132,7 +132,14 @@ const PHOTO_PLAN_RULES = [
   'Do not describe hair, glasses, accessories, clothing, the background, the head shape or the skin colour. Do not guess or mention their name, age, ethnicity or identity.',
 ];
 
-export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme: string; count: number; categories?: string[]; style: string; photo?: Buffer }): Promise<PlannedItem[]> {
+// extra: 頼みの文の最後に足す行（アプリの「つくる」が、テーマの細かさに合わせたヒントを渡す。themeWidth.ts）。無ければ、頼みの文は変わらない
+const withExtra = (lines: string[], extra: string[] | undefined): string => (extra?.length ? [...lines, '', ...extra] : lines).join('\n');
+
+export async function planItems(
+  text: TextAi,
+  doll: ManifestDoll,
+  input: { theme: string; count: number; categories?: string[]; style: string; photo?: Buffer; extra?: string[] },
+): Promise<PlannedItem[]> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、単独では作らない
   const categories = doll.categories.filter((c) => (!input.categories?.length || input.categories.includes(c.id)) && !isBackHairCategory(c.label));
   if (categories.length === 0) throw new AiError('カテゴリが選ばれていません', 400);
@@ -141,7 +148,7 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       'You plan clothing and accessory items for a paper-doll dress-up game played by young children in Japan. ' +
       'Each item is later drawn by an image model on a fixed mannequin and cut out automatically, so every item must be a single wearable piece that is clearly separable from the body. ' +
       'Reply with JSON only.',
-    prompt: [
+    prompt: withExtra([
       `Theme: ${input.theme}`,
       `Number of items to plan: ${input.count}`,
       `Art style: ${input.style || 'not specified'}`,
@@ -172,7 +179,7 @@ export async function planItems(text: TextAi, doll: ManifestDoll, input: { theme
       '- A face category (かお, メイク): the item is only the facial features painted on the doll\'s blank head: eyes, eyebrows, nose, mouth, cheeks, make-up. Describe those only. No hair, no hat, no accessories, no head shape, no skin colour.',
       `- A hair category (かみ, ヘア): the item is only the hairstyle, like a wig, optionally with a small hair ornament. No face. ${HAIR_LENGTH_RULE}`,
       ...(input.photo ? ['', ...PHOTO_PLAN_RULES] : []),
-    ].join('\n'),
+    ], input.extra),
     ...(input.photo ? { images: [input.photo] } : {}),
     schema: PLAN_SCHEMA,
   });
@@ -198,7 +205,11 @@ const SET_SCHEMA = {
  * セット（同じテーマでそろえた 1 組）を企画する。頼んだカテゴリごとに 1 点。
  * 返ってこなかったカテゴリは missing（ラベル）に入れて、あるものだけで進める。
  */
-export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: string; categories: string[]; style: string }): Promise<{ name: string; items: PlannedItem[]; missing: string[] }> {
+export async function planSet(
+  text: TextAi,
+  doll: ManifestDoll,
+  input: { theme: string; categories: string[]; style: string; extra?: string[] },
+): Promise<{ name: string; items: PlannedItem[]; missing: string[] }> {
   // うしろがみは、髪型の 1 枚から一緒にできるので、頼めない。頼んだ順に並べる
   const categories = input.categories.flatMap((id) => doll.categories.filter((c) => c.id === id && !isBackHairCategory(c.label)));
   if (categories.length < 2) throw new AiError('セットに入れるカテゴリを 2 つ以上選んでください', 400);
@@ -207,7 +218,7 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
       'You plan one coordinated outfit set for a paper-doll dress-up game played by young children in Japan. ' +
       'Each item is later drawn separately by an image model on a fixed mannequin and cut out automatically, so every item must be a single wearable piece that is clearly separable from the body. ' +
       'Reply with JSON only.',
-    prompt: [
+    prompt: withExtra([
       `Theme: ${input.theme}`,
       `Art style: ${input.style || 'not specified'}`,
       'Plan exactly one item for each of these categories (use the id exactly as written, one item per id, no other categories):',
@@ -239,7 +250,7 @@ export async function planSet(text: TextAi, doll: ManifestDoll, input: { theme: 
       '- name: a short, friendly Japanese name in hiragana/katakana only (no kanji), at most 12 characters, unique within this set.',
       '- description: one or two English sentences for the image model describing only this item: shape, material, colours, decorations. Do not mention the doll, the body, the background or other items.',
       '- colors: 2 to 4 hex colours (#rrggbb) that the item will mainly use, including dark shadow tones if the item is dark.',
-    ].join('\n'),
+    ], input.extra),
     schema: SET_SCHEMA,
   });
   const items: PlannedItem[] = [];

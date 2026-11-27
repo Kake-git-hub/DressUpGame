@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { categoryKind, categoryRules, hairPrompt, isLongHair } from './generate.ts';
+import type { ManifestDoll } from '../../src/content/manifest.ts';
+import type { TextAi } from './ai.ts';
+import { categoryKind, categoryRules, hairPrompt, isLongHair, planItems, planSet } from './generate.ts';
 
 describe('categoryKind / categoryRules', () => {
   it('顔のカテゴリは髪を描かせない', () => {
@@ -47,5 +49,28 @@ describe('ロングヘア', () => {
     const short = hairPrompt({ category: 'ヘア', name: 'ボブ', description: 'A black bob.', colors: [] }, 'ヘアスタイル', '', [0, 255, 0], null);
     expect(short).toMatch(/head to hips/);
     expect(short).not.toMatch(/knees/);
+  });
+});
+
+describe('企画に足す行（extra）', () => {
+  const doll = { id: 'd', name: 'おんなのこ', categories: [{ id: 'ドレス', label: 'ドレス' }, { id: 'くつ', label: 'くつ' }] } as unknown as ManifestDoll;
+  const capture = () => {
+    const prompts: string[] = [];
+    const text: TextAi = { json: async <T>(input: { prompt: string }) => { prompts.push(input.prompt); return { name: 'せっと', items: [{ category: 'ドレス', name: 'どれす', description: 'A dress.', colors: ['#ff0000'] }, { category: 'くつ', name: 'くつ', description: 'Shoes.', colors: ['#0000ff'] }] } as T; } };
+    return { text, prompts };
+  };
+  it('planItems: extra が無ければ、頼みの文は変わらない。あれば、最後に足す', async () => {
+    const { text, prompts } = capture();
+    await planItems(text, doll, { theme: 'はる', count: 1, categories: ['ドレス'], style: 'anime' });
+    await planItems(text, doll, { theme: 'はる', count: 1, categories: ['ドレス'], style: 'anime', extra: [] });
+    await planItems(text, doll, { theme: 'はる', count: 1, categories: ['ドレス'], style: 'anime', extra: ['Design hints:', '- pattern: polka dots'] });
+    expect(prompts[1]).toBe(prompts[0]);
+    expect(prompts[2]).toBe(`${prompts[0]}\n\nDesign hints:\n- pattern: polka dots`);
+  });
+  it('planSet も同じ', async () => {
+    const { text, prompts } = capture();
+    await planSet(text, doll, { theme: 'はる', categories: ['ドレス', 'くつ'], style: 'anime' });
+    await planSet(text, doll, { theme: 'はる', categories: ['ドレス', 'くつ'], style: 'anime', extra: ['X'] });
+    expect(prompts[1]).toBe(`${prompts[0]}\n\nX`);
   });
 });
