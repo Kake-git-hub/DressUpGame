@@ -1,0 +1,32 @@
+{
+  "images": 3,
+  "record": [
+    {
+      "theme": "うみ",
+      "name": "きらきらすなはま",
+      "description": "A sunny beach with gentle pastel turquoise waves lapping against soft golden sand under a bright sky with fluffy white clouds. The center of the shore is open and clear, gently framed on the sides by colorful seashells and a cheerful beach umbrella.",
+      "status": "passed",
+      "notes": [],
+      "attempts": 1,
+      "seconds": 16
+    },
+    {
+      "theme": "おひめさまの おしろ",
+      "name": "おしろのひろま",
+      "description": "A grand palace ballroom with pastel pink marble pillars, sparkling crystal chandeliers hanging from high ceilings, and tall arched windows. The polished floor in the center remains completely open and clear, framed softly by draped velvet curtains on both sides.",
+      "status": "passed",
+      "notes": [],
+      "attempts": 1,
+      "seconds": 12
+    },
+    {
+      "theme": "ゆきの もり",
+      "name": "きらきらのもり",
+      "description": "A quiet winter clearing surrounded by soft pine trees covered in fluffy white snow under a pastel twilight sky. The center ground features a smooth, untouched snow blanket with gentle twinkling snowflakes drifting at the sides.",
+      "status": "passed",
+      "notes": [],
+      "attempts": 1,
+      "seconds": 14
+    }
+  ]
+}
