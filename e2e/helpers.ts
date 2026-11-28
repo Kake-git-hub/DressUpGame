@@ -1,5 +1,5 @@
 /**
- * E2E の共通の道具: 「つくる」を教えた端末（偽物の裏側 ?studio=fake）で開く・注文する・画素を読む
+ * E2E の共通の道具: 確認用の裏側（偽物 ?studio=fake）で開く・注文する・画素を読む
  */
 import { expect, type Page } from '@playwright/test';
 

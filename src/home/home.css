@@ -1,4 +1,4 @@
-/* ホーム画面（シンプルに: 大きな 2 つのボタンと、小さめの「ともだちにおしえる」） */
+/* ホーム画面（シンプルに: 大きなボタンと、小さめの「ともだちにおしえる」） */
 .home-screen {
   position: fixed;
   inset: 0;
@@ -77,6 +77,27 @@
   }
   .home-screen .home-main-buttons.many {
     gap: clamp(10px, 3vmin, 24px);
+  }
+}
+/* ボタンが 3 つのとき、横では、1 列に並べる（せまい画面では、幅を 3 等分まで細くする） */
+@media (orientation: landscape) {
+  .home-screen .home-main-buttons.many {
+    flex-wrap: nowrap;
+  }
+  .home-screen .home-main-buttons.many .home-button {
+    width: min(clamp(200px, 36vmin, 300px), calc((100vw - 32px - 2 * clamp(16px, 4vmin, 32px)) / 3));
+    padding: 0 4px;
+  }
+  .home-screen .home-main-buttons.many .home-closet {
+    font-size: min(clamp(24px, 6vmin, 44px), calc((100vw - 64px) / 20));
+  }
+}
+/* 背の低い横の画面（小さいスマホの横）では、すきまを詰めて 1 画面に収める */
+@media (orientation: landscape) and (max-height: 340px) {
+  .home-screen {
+    gap: 10px;
+    padding-top: calc(var(--top-inset, 0px) + 12px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   }
 }
 .home-share-button {

@@ -85,7 +85,9 @@ test('サーバーが「ログインが要る」と断ったときも、案内�
   await expect(page.getByTestId('shop')).toHaveCount(0);
 });
 
-test('「つくる」を出していない端末に戻ったときは、小さな知らせだけ。つくるは開かず、URL は消える', async ({ page }) => {
+test('「つくる」を隠した端末（?studio=0）に戻ったときは、小さな知らせだけ。つくるは開かず、URL は消える', async ({ page }) => {
+  await page.goto('/DressUpGame/?content=e2e-content/&studio=0');
+  await expect(page.getByTestId('home-play')).toBeVisible();
   await page.goto('/DressUpGame/?content=e2e-content/&pay=done&session=cs_test_1');
   await expect(page.getByTestId('pay-notice-plain')).toContainText('ホーム画面の アプリで 「つくる」を ひらくと、チケットが ふえています');
   await expect(page.getByTestId('app-studio')).toHaveCount(0);

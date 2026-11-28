@@ -278,11 +278,11 @@ test('端末の保存領域（IndexedDB）が応答しなくても、ゲーム�
   await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 12_000 });
 });
 
-test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あいことばを入れると、ホームに「つくる」「クローゼット」が出る', async ({ page }) => {
+test('ホーム画面のアプリでも変えられる: 版数を 5 回押して、あいことば off で「つくる」「クローゼット」を隠し、fake でもどす', async ({ page }) => {
   await page.goto(APP);
   await expect(page.getByTestId('home-screen')).toBeVisible();
-  await expect(page.getByTestId('home-create')).toHaveCount(0);
-  const answers = ['まちがい', 'home', 'fake'];
+  await expect(page.getByTestId('home-create')).toBeVisible();
+  const answers = ['まちがい', 'home', 'off', 'fake'];
   page.on('dialog', (d) => void d.accept(answers.shift() ?? ''));
   const badge = page.locator('.version-badge');
   // 4 回では何も起きない
@@ -293,11 +293,21 @@ test('ホーム画面のアプリでも出せる: 版数を 5 回押して、あ
   await page.waitForTimeout(500);
   for (let i = 0; i < 5; i++) await badge.click();
   await page.waitForTimeout(500);
+  await expect(page.getByTestId('home-create')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('dressup_studio'))).toBeNull();
+  // off: 隠す。次に開いても、隠れたまま
+  for (let i = 0; i < 5; i++) await badge.click();
+  await expect(page.getByTestId('home-create')).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.getByTestId('home-play')).toBeVisible();
+  await page.goto(APP);
+  await expect(page.getByTestId('home-play')).toBeVisible();
   await expect(page.getByTestId('home-create')).toHaveCount(0);
-  // 正しいあいことば
+  await expect(page.getByTestId('home-closet')).toHaveCount(0);
+  // fake: もどす（確認用の裏側）
   for (let i = 0; i < 5; i++) await badge.click();
   await expect(page.getByTestId('home-create')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('home-closet')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('dressup_studio'))).toBe('fake');
 });
 
 test.describe('スタジオの画面を読み込めないとき', () => {

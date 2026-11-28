@@ -377,7 +377,7 @@ test.describe('よその #', () => {
     expect((await page.evaluate(() => localStorage.getItem('dressup_fake_account'))) ?? '').not.toContain('true');
   });
 
-  test('「つくる」を教えていない端末: にせの戻り（#state=…&id_token=…）の # は消え、証明は session にも残らない', async ({ page }) => {
+  test('「つくる」を隠した端末（?studio=0）: にせの戻り（#state=…&id_token=…）の # は消え、証明は session にも残らない', async ({ page }) => {
     await page.goto(`${APP}&studio=0&home=0#state=zzz&id_token=x.y.z`);
     await page.waitForSelector('.app');
     await page.waitForTimeout(500);

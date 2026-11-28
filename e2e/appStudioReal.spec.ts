@@ -11,6 +11,7 @@ import { GOOGLE_CLIENT_ID } from '../src/cloud/firebaseConfig';
 import { chooseTarget, themeAndCheck } from './helpers';
 
 const REAL = '/DressUpGame/?content=e2e-content/&studio=1';
+const PLAIN = '/DressUpGame/?content=e2e-content/';
 const FUNCTIONS = 'https://asia-northeast1-dressup-game-89f6e.cloudfunctions.net';
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
 const COLOR = { r: 224, g: 64, b: 160 };
@@ -170,6 +171,52 @@ test.describe('アプリの中のスタジオ（本物の裏側。Firebase は�
     await page.getByTestId('home-play').click();
     await page.locator('.palette-section button', { hasText: 'トップス' }).first().click();
     await expect(page.locator('img[alt="うみのトップス"]').first()).toBeVisible();
+  });
+
+  test('はじめての端末（URL に何も付けない）: あそぶだけなら、利用者を作らず、関数も呼ばない。「つくる」を開くと、そのとき匿名のログインをする。次に開いたときは、起動のあと、裏でつなぐ', async ({ page }) => {
+    const fake = await fakeFirebase(page);
+    await page.goto(PLAIN);
+    await expect(page.getByTestId('home-create')).toBeVisible({ timeout: 60_000 });
+    await page.getByTestId('home-play').click();
+    await expect(page.locator('.palette-section button', { hasText: 'トップス' })).toBeVisible({ timeout: 60_000 });
+    await page.waitForTimeout(1500);
+    expect(fake.signUps).toBe(0);
+    expect(fake.calls).toEqual([]);
+    // 「つくる」を開く
+    await page.getByTestId('home-back-button').click();
+    await page.getByTestId('home-create').click();
+    await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('studio-tickets')).toContainText('のこり 2 枚');
+    await expect(page.getByTestId('studio-demo')).toHaveCount(0);
+    expect(fake.signUps).toBe(1);
+    expect(fake.calls[0]).toMatchObject({ op: 'signIn' });
+    // 次に開いたとき: 何も押さなくても、裏でつなぐ（届いた知らせのため）。ログインは、やり直さない
+    const before = fake.calls.length;
+    await page.goto(PLAIN);
+    await expect(page.getByTestId('home-create')).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => fake.calls.slice(before).map((c) => c.op), { timeout: 30_000 }).toEqual(expect.arrayContaining(['signIn', 'jobs']));
+    expect(fake.signUps).toBe(1);
+  });
+
+  test('はじめての端末で「クローゼット」を開いても、そのとき匿名のログインをする', async ({ page }) => {
+    const fake = await fakeFirebase(page);
+    await page.goto(PLAIN);
+    await expect(page.getByTestId('home-closet')).toBeVisible({ timeout: 60_000 });
+    await page.waitForTimeout(1000);
+    expect(fake.signUps).toBe(0);
+    await page.getByTestId('home-closet').click();
+    await expect(page.getByTestId('closet')).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => fake.calls.map((c) => c.op), { timeout: 30_000 }).toEqual(expect.arrayContaining(['signIn', 'items']));
+    expect(fake.signUps).toBe(1);
+  });
+
+  test('はじめての端末に、支払いのページから戻って来た（?pay=done）: 「つくる」が開き、そのとき、つなぐ', async ({ page }) => {
+    const fake = await fakeFirebase(page);
+    await page.goto(`${PLAIN}&pay=done&session=cs_test_1`);
+    await expect(page.getByTestId('app-studio')).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => fake.calls.map((c) => c.op), { timeout: 30_000 }).toContain('signIn');
+    expect(fake.signUps).toBe(1);
+    expect(page.url()).not.toMatch(/pay=|session=/);
   });
 
   test('前の版のサーバー（列で進めない）につないだときは、「サーバーが古い版です」と出て、作る欄は出ない', async ({ page }) => {

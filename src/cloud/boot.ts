@@ -1,5 +1,5 @@
 /**
- * つなぎ役（session.ts）を用意する。「つくる」を出す端末でだけ、読み込む（ふだん遊ぶ人の読み込みには入れない）。
+ * つなぎ役（session.ts）を用意する。「つくる」「クローゼット」を開いた端末でだけ、読み込む（遊ぶだけの人の読み込みには入れない）。
  */
 import type { StudioMode } from '../appStudio/unlock';
 import { createBackend } from './createBackend';
@@ -23,6 +23,6 @@ export function usedBefore(): boolean {
   }
 }
 
-// 戻りの仕上げ（App.tsx が使う）。account.ts は、「つくる」を教えた端末の、この読み込みにだけ入れる
+// 戻りの仕上げ（App.tsx が使う）。account.ts は、「つくる」を開いた端末の、この読み込みにだけ入れる
 export { browserSettleDeps, completeRedirect, resumeAdopt } from './account';
 export { hasReturn } from './googleRedirect';

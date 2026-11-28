@@ -20,11 +20,11 @@ import type { GuideStep } from './guide/Guide';
 import { resetGuides, shouldShowGuide } from './guide/guideStore';
 import type { GuideName } from './guide/guideStore';
 import { mergeMyItems, openLibrary } from './cloud/library';
-import { readStudioMode, unlockByWord } from './appStudio/unlock';
+import { bootsAtStart, markStudioUsed, readStudioMode, unlockByWord } from './appStudio/unlock';
 import { clearPayReturn, readPayReturn } from './appStudio/payReturn';
 import type { PayReturn } from './appStudio/payReturn';
 import { PayNotice } from './appStudio/PayNotice';
-import { clearReturn } from './cloud/googleRedirect';
+import { clearReturn, hasReturn } from './cloud/googleRedirect';
 import type { CloudSession, SessionState } from './cloud/session';
 import { startsOnHome } from './home/homeMode';
 import { isStandalone as standaloneOf } from './home/installHint';
@@ -78,15 +78,15 @@ function readViewport(): Viewport {
 // 旧方式（アプリ内取り込み）のデータを、状態を読む前に片付ける
 cleanupLegacyData();
 
-// アプリの中のスタジオ（服を作る画面）と、クローゼット。作者が教えた URL（?studio=1）を開いた端末にだけ、ホームにボタンを出す。
+// アプリの中のスタジオ（服を作る画面）と、クローゼット。だれにでも、ホームにボタンを出す（?studio=0 で隠した端末を除く）。
 // 画面そのものは、ボタンを押したときに読み込む（ゲームの最初の読み込みを重くしない）
-// 支払いのページから戻ってきた（?pay=…）。「つくる」を教えた端末では、「つくる」を開いて知らせる。
-// 教えていない端末（「つくる」は出さない）では、小さな知らせを出すだけ（PayNotice。裏側にはつながない）
+// 支払いのページから戻ってきた（?pay=…）。「つくる」を出す端末では、「つくる」を開いて知らせる。
+// 隠した端末（「つくる」は出さない）では、小さな知らせを出すだけ（PayNotice。裏側にはつながない）
 const PAY_RETURN = readPayReturn(window.location.search);
 const STUDIO_MODE = readStudioMode(window.location.search);
 // にせの支払いページ（偽物の裏側のときだけ）
 const FakePayPage = lazy(() => import('./appStudio/FakePayPage').then((m) => ({ default: m.FakePayPage })));
-// 「つくる」を教えていない端末は、Google の戻りを受け取らない。main.tsx が取り込んだ証明が、session に残らないように捨てる。
+// 「つくる」を隠した端末は、Google の戻りを受け取らない。main.tsx が取り込んだ証明が、session に残らないように捨てる。
 // main.tsx の取り込みは、この module を読み込んだあとに走るので、モジュールの中ではなく、最初の描画のあと（useEffect）に呼ぶ
 const dropReturnWithoutStudio = (): void => {
   if (STUDIO_MODE) return;
@@ -98,6 +98,19 @@ const dropReturnWithoutStudio = (): void => {
     }
   };
   clearReturn({ session: pick(() => window.sessionStorage), local: pick(() => window.localStorage) });
+};
+// つなぎ役（サーバーとのやり取り）を、起動のときに用意するか。遊ぶだけの人には、つなぎ役も Firebase も読み込ませない:
+// 用意するのは、前に「つくる」「クローゼット」を開いた端末・前の版で教えた端末・偽物の裏側・Google から戻って来たとき。
+// ほかは、「つくる」「クローゼット」を開いたとき（支払いから戻ったときも）に用意する。
+// main.tsx が戻りを取り込むのは、この module を読み込んだあとなので、モジュールの中ではなく、最初の描画のときに呼ぶ
+const sessionAtStart = (): boolean => {
+  if (!STUDIO_MODE) return false;
+  if (bootsAtStart(STUDIO_MODE)) return true;
+  try {
+    return hasReturn(window.sessionStorage);
+  } catch {
+    return false;
+  }
 };
 const StudioRoot = lazy(() => import('./appStudio'));
 const ClosetRoot = lazy(() => import('./closet'));
@@ -347,7 +360,8 @@ function App() {
   // Google から戻って来たあとの知らせの文（下の起動の中で、戻りを仕上げたら入る）
   const [loginNotice, setLoginNotice] = useState<string | null>(STARTUP_NOTICE);
   useEffect(dropReturnWithoutStudio, []);
-  // つなぎ役（サーバーとのやり取り）。「つくる」を出す端末でだけ、読み込む。
+  // つなぎ役（サーバーとのやり取り）。前に「つくる」「クローゼット」を開いた端末では、起動のときに読み込む。
+  // はじめての端末では、「つくる」「クローゼット」を開いたときに読み込む（それまでは、Firebase も読み込まない）。
   // Google から戻って来ていたら、つなぎ役を画面に出す（= 裏でつなぎ始める）前に、戻りを受け取って仕上げる。
   // そのあと（戻りが無いときも）、合わせの途中の覚えがあれば、もう一度 adopt する
   // （古い利用者のまま始まった合わせが、入ったあとの利用者の服を、古い利用者コードで控えに入れないように）。
@@ -355,8 +369,15 @@ function App() {
   // 開発用の設定（StrictMode）で 2 回走っても、証明を使うのは 1 回（completeRedirect と finishRedirect の守り）。
   // 1 回めが取り消されても、知らせの文は失わない（2 回めは、同じ受け取りの結果を受ける。取り消しに関わらず、文は入れる）
   const [session, setSession] = useState<CloudSession | null>(null);
+  // 開いたことを覚える（次からは、起動のときに用意する。届いた知らせが、開かなくても出るように）
   useEffect(() => {
-    if (!STUDIO_MODE) return;
+    if (STUDIO_MODE && (studioOpen || closetOpen)) markStudioUsed();
+  }, [studioOpen, closetOpen]);
+  // 1 回用意すると決めたら、閉じても、そのまま
+  const [sessionAsked, setSessionAsked] = useState(sessionAtStart);
+  if (!sessionAsked && (studioOpen || closetOpen)) setSessionAsked(true);
+  useEffect(() => {
+    if (!STUDIO_MODE || !sessionAsked) return;
     let cancelled = false;
     void import('./cloud/boot')
       .then(async (boot) => {
@@ -390,7 +411,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshMyItems]);
+  }, [refreshMyItems, sessionAsked]);
   // ログインしている Google のアカウントの名前（右上に薄く出す。メールアドレスは出さない）。
   // 「つくる」を閉じたときにも聞き直す（中でログイン・ログアウトしたかもしれない）
   const [accountName, setAccountName] = useState<string | null>(null);
@@ -983,7 +1004,7 @@ function App() {
           <Suspense fallback={null}>
             <HomeScreen
               onPlay={() => setOnHome(false)}
-              // 「つくる」「クローゼット」は、「つくる」を教えた端末にだけ出す。
+              // 「つくる」「クローゼット」は、だれにでも出す（?studio=0 で隠した端末を除く）。
               // 「つくる」は、ホームの側の、ひとつの画面として開く（遊ぶ画面には入らない。閉じると、ホーム）
               onCreate={STUDIO_MODE ? () => setStudioOpen(true) : undefined}
               onCloset={STUDIO_MODE ? () => setClosetOpen(true) : undefined}
@@ -1242,6 +1263,7 @@ function AppRoot() {
   return (
     <>
       <App />
+      {/* 「つくる」を隠した端末に、支払いから戻ったとき */}
       {!STUDIO_MODE && (PAY_RETURN?.kind === 'done' || PAY_RETURN?.kind === 'cancel') && <PayNotice kind={PAY_RETURN.kind} />}
     </>
   );
