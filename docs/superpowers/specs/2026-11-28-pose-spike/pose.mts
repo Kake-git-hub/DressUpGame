@@ -11,26 +11,29 @@ import sharp from 'sharp';
 import { createGemini, GEMINI_IMAGE_MODEL } from '../../../../tools/studio/ai.ts';
 
 const HERE = import.meta.dirname;
-const OUT = path.join(HERE, 'out');
+const OUT = path.join(HERE, process.env.ROUND ? `out-${process.env.ROUND}` : 'out'); // ROUND=2 で、2 回めの絵を out-2 に分ける
 const LIMIT = Number(process.argv[2]);
 if (!Number.isInteger(LIMIT) || LIMIT < 1) throw new Error('上限の枚数を、最初に渡す');
 const LOOKS = (process.argv[3] ?? 'cinderella,idol,cheer').split(',');
+// 2 回め（作者の言葉「正面向きにこだわる必要はない。もっと自然なポーズを優先して」）: 体の向き・見る角度は、AI にまかせる。
+// 1 回めの頼み（正面・立ったまま寄り）は、git の履歴（7（ポーズ）の試し 1 回め）に有る。
 export const POSES: Record<string, string> = {
-  peace: 'making a cheerful peace sign (V sign) with one hand raised next to her face, the other hand relaxed, standing',
-  wave: 'waving hello with one hand raised high, smiling, standing',
-  jump: 'jumping joyfully in the air with both arms raised and knees bent, feet off the ground',
-  sit: 'sitting on the floor with her legs tucked to one side, hands resting on her lap',
-  bow: 'doing a graceful curtsy: one foot behind the other, knees slightly bent, holding the sides of her skirt, head slightly tilted',
+  peace: 'leaning forward a little with a playful wink, making a peace sign near her cheek, her other hand on her hip, weight on one leg',
+  wave: 'walking by and turning to wave at the viewer with a big smile, body in three-quarter view, mid-step',
+  jump: 'leaping joyfully in the air, body twisted slightly, one arm thrown up, one knee bent high, hair and skirt flying',
+  sit: 'sitting on the floor hugging her knees, seen from a three-quarter angle, head tilted, smiling at the viewer',
+  bow: 'spinning around in a twirl and looking back over her shoulder at the viewer, seen from behind in three-quarter back view, skirt and hair swirling',
 };
 const POSE_IDS = (process.argv[4] ?? Object.keys(POSES).join(',')).split(',');
 
 export const posePrompt = (pose: string) =>
   [
-    'The attached picture shows a dress-up doll character in a neutral standing pose.',
-    `Redraw the SAME character in a new pose: ${pose}.`,
-    'Keep everything else exactly the same: the same face, eyes, hairstyle and hair color, the same outfit with every detail, pattern, color, accessory and shoe, and the same art style and line quality.',
-    'Do not add, remove or change any clothing or accessory. If the character holds an item in the picture, she still holds it.',
-    'Show the whole body from head to toe, centered, on a plain white background. One character only. No text, no frame, no shadow on the wall.',
+    'The attached picture shows a dress-up doll character in a stiff, neutral front-facing pose.',
+    `Draw the SAME character as a lively illustration in a natural pose: ${pose}.`,
+    'A natural, expressive pose matters most. The character does NOT have to face the front: turn the body, tilt the head, shift the weight, and choose the viewing angle that makes the pose look natural. Hair, skirt and ribbons may move with the motion. The facial expression may change to fit the pose.',
+    'It must still clearly be the same character: the same face design, eye color, hairstyle and hair color, and the same outfit with its details, patterns, colors, accessories and shoes, in the same art style and line quality. Parts that would be seen from another angle should be drawn consistently with the design.',
+    'Do not add or remove any clothing or accessory. If the character holds an item in the picture, she still has it.',
+    'Show the whole body, on a plain white background. One character only. No text, no frame.',
     'The picture is for young children: cute, cheerful and modest.',
   ].join('\n');
 
